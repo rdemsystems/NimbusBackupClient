@@ -1,12 +1,20 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
+	"hash"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
+	"github.com/cornelk/hashmap"
 	"pbscommon"
+	"snapshot"
 )
 
 // BackupOptions contains all parameters for a backup operation
@@ -23,6 +31,114 @@ type BackupOptions struct {
 	UseVSS          bool
 	OnProgress      func(percent float64, message string)
 	OnComplete      func(success bool, message string)
+}
+
+var didxMagic = []byte{28, 145, 78, 165, 25, 186, 179, 205}
+
+type ChunkState struct {
+	assignments        []string
+	assignments_offset []uint64
+	pos                uint64
+	wrid               uint64
+	chunkcount         uint64
+	chunkdigests       hash.Hash
+	current_chunk      []byte
+	C                  pbscommon.Chunker
+	newchunk           *atomic.Uint64
+	reusechunk         *atomic.Uint64
+	knownChunks        *hashmap.Map[string, bool]
+}
+
+type DidxEntry struct {
+	offset uint64
+	digest []byte
+}
+
+func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, knownChunks *hashmap.Map[string, bool]) {
+	c.assignments = make([]string, 0)
+	c.assignments_offset = make([]uint64, 0)
+	c.pos = 0
+	c.chunkcount = 0
+	c.chunkdigests = sha256.New()
+	c.current_chunk = make([]byte, 0)
+	c.C = pbscommon.Chunker{}
+	c.C.New(1024 * 1024 * 4)
+	c.reusechunk = reusechunk
+	c.newchunk = newchunk
+	c.knownChunks = knownChunks
+}
+
+func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) {
+	chunkpos := c.C.Scan(b)
+
+	if chunkpos == 0 {
+		c.current_chunk = append(c.current_chunk, b...)
+	} else {
+		for chunkpos > 0 {
+			c.current_chunk = append(c.current_chunk, b[:chunkpos]...)
+
+			h := sha256.New()
+			_ = h.Write(c.current_chunk)
+			bindigest := h.Sum(nil)
+			shahash := hex.EncodeToString(bindigest)
+
+			if _, ok := c.knownChunks.GetOrInsert(shahash, true); !ok {
+				writeDebugLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.current_chunk)))
+				c.newchunk.Add(1)
+				_ = client.UploadDynamicCompressedChunk(c.wrid, shahash, c.current_chunk)
+			} else {
+				writeDebugLog(fmt.Sprintf("Reuse chunk[%s] %d bytes", shahash, len(c.current_chunk)))
+				c.reusechunk.Add(1)
+			}
+
+			_ = binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.current_chunk))))
+			_ = c.chunkdigests.Write(h.Sum(nil))
+
+			c.assignments_offset = append(c.assignments_offset, c.pos)
+			c.assignments = append(c.assignments, shahash)
+			c.pos += uint64(len(c.current_chunk))
+			c.chunkcount += 1
+
+			c.current_chunk = make([]byte, 0)
+			b = b[chunkpos:]
+			chunkpos = c.C.Scan(b)
+		}
+		c.current_chunk = append(c.current_chunk, b...)
+	}
+}
+
+func (c *ChunkState) Eof(client *pbscommon.PBSClient) {
+	if len(c.current_chunk) > 0 {
+		h := sha256.New()
+		_ = h.Write(c.current_chunk)
+
+		shahash := hex.EncodeToString(h.Sum(nil))
+		_ = binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.current_chunk))))
+		_ = c.chunkdigests.Write(h.Sum(nil))
+
+		if _, ok := c.knownChunks.GetOrInsert(shahash, true); !ok {
+			writeDebugLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.current_chunk)))
+			_ = client.UploadDynamicCompressedChunk(c.wrid, shahash, c.current_chunk)
+			c.newchunk.Add(1)
+		} else {
+			writeDebugLog(fmt.Sprintf("Reuse chunk[%s] %d bytes", shahash, len(c.current_chunk)))
+			c.reusechunk.Add(1)
+		}
+		c.assignments_offset = append(c.assignments_offset, c.pos)
+		c.assignments = append(c.assignments, shahash)
+		c.pos += uint64(len(c.current_chunk))
+		c.chunkcount += 1
+	}
+
+	for k := 0; k < len(c.assignments); k += 128 {
+		k2 := k + 128
+		if k2 > len(c.assignments) {
+			k2 = len(c.assignments)
+		}
+		_ = client.AssignDynamicChunks(c.wrid, c.assignments[k:k2], c.assignments_offset[k:k2])
+	}
+
+	_ = client.CloseDynamicIndex(c.wrid, hex.EncodeToString(c.chunkdigests.Sum(nil)), c.pos, c.chunkcount)
 }
 
 // RunBackupInline performs a backup without external binaries
@@ -61,34 +177,6 @@ func RunBackupInline(opts BackupOptions) error {
 		}
 	}
 
-	// Create PBS client
-	progress(0.05, "Connecting to PBS...")
-	client := &pbscommon.PBSClient{
-		BaseURL:         opts.BaseURL,
-		CertFingerPrint: opts.CertFingerprint,
-		AuthID:          opts.AuthID,
-		Secret:          opts.Secret,
-		Datastore:       opts.Datastore,
-		Namespace:       opts.Namespace,
-		Insecure:        opts.CertFingerprint == "",
-	}
-
-	progress(0.10, "Connected to PBS")
-
-	// Create backup snapshot
-	progress(0.15, "Creating snapshot...")
-	backupTime := time.Now().Format("2006-01-02T15:04:05Z")
-
-	// Start backup session
-	writeDebugLog(fmt.Sprintf("Starting backup for %s/%s/%s", opts.BackupType, opts.BackupID, backupTime))
-
-	// For directory backups, we need to:
-	// 1. Create a PXAR archive
-	// 2. Chunk it and upload to PBS
-	// 3. Create the manifest
-
-	progress(0.20, "Scanning files...")
-
 	// Check if all backup directories exist
 	for _, dir := range opts.BackupDirs {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -101,54 +189,138 @@ func RunBackupInline(opts BackupOptions) error {
 		}
 	}
 
-	// Calculate total size for progress tracking across all directories
-	progress(0.25, "Calculating backup size...")
-	var totalSize int64
-	var err error
-	for _, dir := range opts.BackupDirs {
-		err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil // Skip errors
-			}
-			if !info.IsDir() {
-				totalSize += info.Size()
-			}
-			return nil
-		})
+	progress(0.05, "Connecting to PBS...")
+
+	// Create PBS client
+	client := &pbscommon.PBSClient{
+		BaseURL:         opts.BaseURL,
+		CertFingerPrint: opts.CertFingerprint,
+		AuthID:          opts.AuthID,
+		Secret:          opts.Secret,
+		Datastore:       opts.Datastore,
+		Namespace:       opts.Namespace,
+		Insecure:        opts.CertFingerprint == "",
+		Manifest: pbscommon.BackupManifest{
+			BackupID: opts.BackupID,
+		},
+	}
+
+	// Backup each directory
+	var newchunk atomic.Uint64
+	var reusechunk atomic.Uint64
+
+	for idx, dir := range opts.BackupDirs {
+		dirProgress := float64(idx) / float64(len(opts.BackupDirs))
+		progress(0.1+dirProgress*0.8, fmt.Sprintf("Backing up %s...", dir))
+
+		err := backupDirectory(client, &newchunk, &reusechunk, dir, opts.UseVSS, progress)
 		if err != nil {
-			writeDebugLog(fmt.Sprintf("Warning: failed to calculate size for %s: %v", dir, err))
+			errMsg := fmt.Sprintf("Backup failed for %s: %v", dir, err)
+			writeDebugLog(errMsg)
+			if opts.OnComplete != nil {
+				opts.OnComplete(false, errMsg)
+			}
+			return fmt.Errorf(errMsg)
 		}
 	}
 
-	writeDebugLog(fmt.Sprintf("Total backup size: %d bytes", totalSize))
-	progress(0.30, fmt.Sprintf("Backing up %d bytes", totalSize))
+	progress(0.95, "Finalizing backup...")
 
-	// For now, return a message that the backup is starting
-	// The full implementation would:
-	// 1. Use clientcommon.CreatePXARArchive() to create the archive
-	// 2. Chunk the data using pbscommon.Chunker
-	// 3. Upload chunks with deduplication
-	// 4. Create and upload the manifest
-
-	// This is a simplified implementation that shows the structure
-	// The full logic from directorybackup/main.go needs to be integrated here
-
-	progress(0.50, "Uploading data to PBS...")
-
-	// TODO: Full implementation requires:
-	// - PXAR archive creation
-	// - Chunking and deduplication (using pbscommon.Chunker)
-	// - Dynamic chunk upload (client.UploadDynamicCompressedChunk)
-	// - Index creation and management
-	// - Manifest upload
-	// - Proper error handling throughout
-
-	_ = client // Will be used in full implementation
-
-	errMsg := "Fonctionnalité de backup non encore implémentée. L'implémentation complète nécessite l'intégration du code PXAR et de l'upload vers PBS."
-	writeDebugLog(errMsg)
-	if opts.OnComplete != nil {
-		opts.OnComplete(false, errMsg)
+	err := client.Finish()
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to finalize backup: %v", err)
+		writeDebugLog(errMsg)
+		if opts.OnComplete != nil {
+			opts.OnComplete(false, errMsg)
+		}
+		return fmt.Errorf(errMsg)
 	}
-	return fmt.Errorf(errMsg)
+
+	progress(1.0, "Backup completed")
+	writeDebugLog(fmt.Sprintf("Backup completed: New %d chunks, Reused %d chunks", newchunk.Load(), reusechunk.Load()))
+
+	if opts.OnComplete != nil {
+		opts.OnComplete(true, fmt.Sprintf("Backup completed: %d new, %d reused chunks", newchunk.Load(), reusechunk.Load()))
+	}
+
+	return nil
+}
+
+func backupDirectory(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, backupdir string, usevss bool, progress func(float64, string)) error {
+	writeDebugLog(fmt.Sprintf("Starting backup of %s", backupdir))
+
+	if usevss {
+		return snapshot.CreateVSSSnapshot([]string{backupdir}, func(snaps map[string]snapshot.SnapShot) error {
+			for _, snap := range snaps {
+				backupdir = snap.FullPath
+				break
+			}
+			return backupReal(client, newchunk, reusechunk, backupdir, progress)
+		})
+	}
+
+	return backupReal(client, newchunk, reusechunk, backupdir, progress)
+}
+
+func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, backupdir string, progress func(float64, string)) error {
+	client.Connect(false, "host")
+	knownChunks := hashmap.New[string, bool]()
+
+	archive := &pbscommon.PXARArchive{}
+	archive.ArchiveName = "backup.pxar.didx"
+
+	previousDidx, err := client.DownloadPreviousToBytes(archive.ArchiveName)
+	if err != nil {
+		return err
+	}
+
+	writeDebugLog(fmt.Sprintf("Downloaded previous DIDX: %d bytes", len(previousDidx)))
+
+	if bytes.HasPrefix(previousDidx, didxMagic) {
+		previousDidx = previousDidx[4096:]
+		for i := 0; i*40 < len(previousDidx); i += 1 {
+			e := DidxEntry{}
+			e.offset = binary.LittleEndian.Uint64(previousDidx[i*40 : i*40+8])
+			e.digest = previousDidx[i*40+8 : i*40+40]
+			shahash := hex.EncodeToString(e.digest)
+			knownChunks.Set(shahash, true)
+		}
+	}
+
+	writeDebugLog(fmt.Sprintf("Known chunks: %d", knownChunks.Len()))
+
+	pxarChunk := ChunkState{}
+	pxarChunk.Init(newchunk, reusechunk, knownChunks)
+
+	pcat1Chunk := ChunkState{}
+	pcat1Chunk.Init(newchunk, reusechunk, knownChunks)
+
+	pxarChunk.wrid, err = client.CreateDynamicIndex(archive.ArchiveName)
+	if err != nil {
+		return err
+	}
+	pcat1Chunk.wrid, err = client.CreateDynamicIndex("catalog.pcat1.didx")
+	if err != nil {
+		return err
+	}
+
+	archive.WriteCB = func(b []byte) {
+		pxarChunk.HandleData(b, client)
+	}
+
+	archive.CatalogWriteCB = func(b []byte) {
+		pcat1Chunk.HandleData(b, client)
+	}
+
+	archive.WriteDir(backupdir, "", true)
+
+	pxarChunk.Eof(client)
+	pcat1Chunk.Eof(client)
+
+	err = client.UploadManifest()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
