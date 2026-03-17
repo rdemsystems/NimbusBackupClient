@@ -331,7 +331,15 @@ func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters [
 		if len(driveLetters) == 0 {
 			return fmt.Errorf("Au moins une lettre de lecteur requise")
 		}
-		targetDirs = driveLetters
+		// Ensure drive letters have trailing backslash for root access
+		targetDirs = make([]string, len(driveLetters))
+		for i, drive := range driveLetters {
+			if len(drive) == 2 && drive[1] == ':' {
+				targetDirs[i] = drive + "\\"
+			} else {
+				targetDirs[i] = drive
+			}
+		}
 	}
 
 	// Prepare backup options
