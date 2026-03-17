@@ -36,9 +36,16 @@ func init() {
 	exeDir := filepath.Dir(exePath)
 	crashReportPath = filepath.Join(exeDir, "crash_report.txt")
 
-	// Setup debug log file in user home
-	homeDir, _ := os.UserHomeDir()
-	logDir := filepath.Join(homeDir, ".nimbus-backup")
+	// Setup debug log file in AppData (Windows) or user home (others)
+	var logDir string
+	if appData := os.Getenv("APPDATA"); appData != "" {
+		// Windows: use %APPDATA%\NimbusBackup
+		logDir = filepath.Join(appData, "NimbusBackup")
+	} else {
+		// Unix-like: use ~/.nimbus-backup
+		homeDir, _ := os.UserHomeDir()
+		logDir = filepath.Join(homeDir, ".nimbus-backup")
+	}
 	_ = os.MkdirAll(logDir, 0700)
 	debugLogPath = filepath.Join(logDir, "debug.log")
 
