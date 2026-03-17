@@ -29,8 +29,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: gui/frontend/package-lock.json
 
       - name: Install Wails CLI
         run: npm install -g @wailsapp/cli
