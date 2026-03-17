@@ -98,7 +98,20 @@ function App() {
     }
 
     try {
-      await SaveConfig(config)
+      // Trim all string values to remove whitespace
+      const trimmedConfig = {
+        baseurl: config.baseurl.trim(),
+        certfingerprint: config.certfingerprint.trim(),
+        authid: config.authid.trim(),
+        secret: config.secret.trim(),
+        datastore: config.datastore.trim(),
+        namespace: config.namespace.trim(),
+        backupdir: config.backupdir.trim(),
+        'backup-id': config['backup-id'].trim(),
+        usevss: config.usevss
+      }
+      await SaveConfig(trimmedConfig)
+      setConfig(trimmedConfig)
       showStatus('✅ Configuration enregistrée', 'success')
     } catch (err) {
       showStatus(`❌ Erreur : ${err}`, 'error')

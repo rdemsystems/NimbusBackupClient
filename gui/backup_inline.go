@@ -189,6 +189,14 @@ func RunBackupInline(opts BackupOptions) error {
 
 	progress(0.05, "Connecting to PBS...")
 
+	// Debug: log connection parameters (mask secret)
+	maskedSecret := "***"
+	if len(opts.Secret) > 4 {
+		maskedSecret = opts.Secret[:4] + "..." + opts.Secret[len(opts.Secret)-4:]
+	}
+	writeDebugLog(fmt.Sprintf("PBS Connection: URL=%s, AuthID=%s, Secret=%s, Datastore=%s, BackupID=%s",
+		opts.BaseURL, opts.AuthID, maskedSecret, opts.Datastore, opts.BackupID))
+
 	// Create PBS client
 	client := &pbscommon.PBSClient{
 		BaseURL:         opts.BaseURL,
@@ -197,7 +205,7 @@ func RunBackupInline(opts BackupOptions) error {
 		Secret:          opts.Secret,
 		Datastore:       opts.Datastore,
 		Namespace:       opts.Namespace,
-		Insecure:        opts.CertFingerprint == "",
+		Insecure:        opts.CertFingerprint != "",
 		Manifest: pbscommon.BackupManifest{
 			BackupID: opts.BackupID,
 		},

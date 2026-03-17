@@ -295,10 +295,43 @@ func (a *App) SaveConfig(config *Config) error {
 // TestConnection tests the PBS connection
 func (a *App) TestConnection() error {
 	writeDebugLog("TestConnection() called")
-	// TODO: Implement actual PBS connection test
-	if a.config.BaseURL == "" {
-		return fmt.Errorf("URL du serveur PBS requis")
+
+	// Validate config first
+	if err := a.config.Validate(); err != nil {
+		return err
 	}
+
+	// Create PBS client
+	client := &pbscommon.PBSClient{
+		BaseURL:         a.config.BaseURL,
+		CertFingerPrint: a.config.CertFingerprint,
+		AuthID:          a.config.AuthID,
+		Secret:          a.config.Secret,
+		Datastore:       a.config.Datastore,
+		Namespace:       a.config.Namespace,
+		Insecure:        a.config.CertFingerprint != "",
+		Manifest: pbscommon.BackupManifest{
+			BackupID: a.config.BackupID,
+		},
+	}
+
+	// Debug log (mask secret)
+	maskedSecret := "***"
+	if len(a.config.Secret) > 4 {
+		maskedSecret = a.config.Secret[:4] + "..." + a.config.Secret[len(a.config.Secret)-4:]
+	}
+	writeDebugLog(fmt.Sprintf("Testing connection: URL=%s, AuthID=%s, Secret=%s, Datastore=%s",
+		a.config.BaseURL, a.config.AuthID, maskedSecret, a.config.Datastore))
+
+	// Try to list snapshots as a connection test
+	client.Connect(true, "host")
+	_, err := client.ListSnapshots()
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("Connection test failed: %v", err))
+		return fmt.Errorf("Échec de connexion : %v", err)
+	}
+
+	writeDebugLog("Connection test successful")
 	return nil
 }
 
