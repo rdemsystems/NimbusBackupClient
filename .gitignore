@@ -1,5 +1,6 @@
 # Build artifacts
 dist/
+!gui/frontend/dist/
 build/
 
 # Binaries
