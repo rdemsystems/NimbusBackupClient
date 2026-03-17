@@ -44,11 +44,15 @@ func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFing
 		Secret:          secret,
 		Datastore:       datastore,
 		Namespace:       namespace,
-		Insecure:        certFingerprint == "",
+		Insecure:        certFingerprint != "",
+		Manifest: pbscommon.BackupManifest{
+			BackupID: backupID,
+		},
 	}
 
 	// List snapshots via PBS API
-	client.Connect(true, "host")
+	// Note: ListSnapshots() doesn't actually need Connect() for the API call
+	// It uses direct HTTP GET request
 	manifests, err := client.ListSnapshots()
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("Failed to list snapshots: %v", err))
@@ -118,7 +122,7 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		Secret:          opts.Secret,
 		Datastore:       opts.Datastore,
 		Namespace:       opts.Namespace,
-		Insecure:        opts.CertFingerprint == "",
+		Insecure:        opts.CertFingerprint != "",
 		Manifest: pbscommon.BackupManifest{
 			BackupID:   opts.BackupID,
 			BackupTime: opts.SnapshotTime.Unix(),
