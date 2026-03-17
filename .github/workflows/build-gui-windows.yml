@@ -1,0 +1,66 @@
+name: Build GUI Windows
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-windows:
+    name: Build Windows GUI
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install Fyne dependencies
+        run: |
+          go install fyne.io/fyne/v2/cmd/fyne@latest
+
+      - name: Build Windows GUI
+        working-directory: gui
+        run: |
+          go mod tidy
+          go build -ldflags="-s -w -H windowsgui" -o ../proxmox-backup-gui-windows-amd64.exe .
+
+      - name: Test binary exists
+        run: |
+          if (Test-Path proxmox-backup-gui-windows-amd64.exe) {
+            Write-Output "✅ Binary created successfully"
+            Get-Item proxmox-backup-gui-windows-amd64.exe | Format-List
+          } else {
+            Write-Error "❌ Binary not found"
+            exit 1
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxmox-backup-gui-windows-amd64
+          path: proxmox-backup-gui-windows-amd64.exe
+          retention-days: 30
+
+      - name: Create ZIP package
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir dist
+          Copy-Item proxmox-backup-gui-windows-amd64.exe dist/
+          Copy-Item GUI_README.md dist/README.md -ErrorAction SilentlyContinue
+          Copy-Item CONFIG_FORMAT_SPEC.md dist/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path dist/* -DestinationPath proxmox-backup-gui-windows-amd64.zip
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: proxmox-backup-gui-windows-amd64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
