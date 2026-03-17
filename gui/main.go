@@ -16,7 +16,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	wailswin "github.com/wailsapp/wails/v2/pkg/options/windows"
-	"golang.org/x/sys/windows"
+	"pbscommon"
 )
 
 //go:embed all:frontend/dist
@@ -150,34 +150,6 @@ func writeDebugLog(message string) {
 
 	// Also write to stderr for console visibility
 	fmt.Fprint(os.Stderr, logLine)
-}
-
-func isAdmin() bool {
-	if runtime.GOOS != "windows" {
-		// On non-Windows systems, assume we have necessary privileges
-		return true
-	}
-
-	var sid *windows.SID
-	err := windows.AllocateAndInitializeSid(
-		&windows.SECURITY_NT_AUTHORITY,
-		2,
-		windows.SECURITY_BUILTIN_DOMAIN_RID,
-		windows.DOMAIN_ALIAS_RID_ADMINS,
-		0, 0, 0, 0, 0, 0,
-		&sid)
-	if err != nil {
-		return false
-	}
-	defer windows.FreeSid(sid)
-
-	token := windows.Token(0)
-	member, err := token.IsMember(sid)
-	if err != nil {
-		return false
-	}
-
-	return member
 }
 
 func writeCrashReport(message string) {
