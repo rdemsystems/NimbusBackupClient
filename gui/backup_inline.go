@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"hash"
 	"os"
-	"path/filepath"
 	"sync/atomic"
-	"time"
 
 	"github.com/cornelk/hashmap"
 	"pbscommon"
@@ -78,7 +76,7 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) {
 			c.current_chunk = append(c.current_chunk, b[:chunkpos]...)
 
 			h := sha256.New()
-			_ = h.Write(c.current_chunk)
+			_, _ = h.Write(c.current_chunk)
 			bindigest := h.Sum(nil)
 			shahash := hex.EncodeToString(bindigest)
 
@@ -92,7 +90,7 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) {
 			}
 
 			_ = binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.current_chunk))))
-			_ = c.chunkdigests.Write(h.Sum(nil))
+			_, _ = c.chunkdigests.Write(h.Sum(nil))
 
 			c.assignments_offset = append(c.assignments_offset, c.pos)
 			c.assignments = append(c.assignments, shahash)
@@ -110,11 +108,11 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) {
 func (c *ChunkState) Eof(client *pbscommon.PBSClient) {
 	if len(c.current_chunk) > 0 {
 		h := sha256.New()
-		_ = h.Write(c.current_chunk)
+		_, _ = h.Write(c.current_chunk)
 
 		shahash := hex.EncodeToString(h.Sum(nil))
 		_ = binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.current_chunk))))
-		_ = c.chunkdigests.Write(h.Sum(nil))
+		_, _ = c.chunkdigests.Write(h.Sum(nil))
 
 		if _, ok := c.knownChunks.GetOrInsert(shahash, true); !ok {
 			writeDebugLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.current_chunk)))

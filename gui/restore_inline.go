@@ -65,7 +65,7 @@ func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFing
 		info := SnapshotInfo{
 			BackupType: m.BackupType,
 			BackupID:   m.BackupID,
-			BackupTime: m.BackupTime,
+			BackupTime: time.Unix(m.BackupTime, 0),
 			Size:       0, // Size not directly available from manifest
 			Files:      make([]string, 0),
 		}
@@ -121,7 +121,7 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		Insecure:        opts.CertFingerprint == "",
 		Manifest: pbscommon.BackupManifest{
 			BackupID:   opts.BackupID,
-			BackupTime: opts.SnapshotTime,
+			BackupTime: opts.SnapshotTime.Unix(),
 		},
 	}
 
