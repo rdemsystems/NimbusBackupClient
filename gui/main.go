@@ -8,13 +8,15 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"time"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	wailswin "github.com/wailsapp/wails/v2/pkg/options/windows"
+	"golang.org/x/sys/windows"
 )
 
 //go:embed all:frontend/dist
@@ -106,7 +108,7 @@ func main() {
 		Bind: []interface{}{
 			app,
 		},
-		Windows: &windows.Options{
+		Windows: &wailswin.Options{
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 			DisableWindowIcon:    false,
@@ -148,6 +150,34 @@ func writeDebugLog(message string) {
 
 	// Also write to stderr for console visibility
 	fmt.Fprint(os.Stderr, logLine)
+}
+
+func isAdmin() bool {
+	if runtime.GOOS != "windows" {
+		// On non-Windows systems, assume we have necessary privileges
+		return true
+	}
+
+	var sid *windows.SID
+	err := windows.AllocateAndInitializeSid(
+		&windows.SECURITY_NT_AUTHORITY,
+		2,
+		windows.SECURITY_BUILTIN_DOMAIN_RID,
+		windows.DOMAIN_ALIAS_RID_ADMINS,
+		0, 0, 0, 0, 0, 0,
+		&sid)
+	if err != nil {
+		return false
+	}
+	defer windows.FreeSid(sid)
+
+	token := windows.Token(0)
+	member, err := token.IsMember(sid)
+	if err != nil {
+		return false
+	}
+
+	return member
 }
 
 func writeCrashReport(message string) {
@@ -276,6 +306,11 @@ func (a *App) TestConnection() error {
 func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool) error {
 	writeDebugLog(fmt.Sprintf("StartBackup() called: type=%s, dirs=%v, drives=%v, id=%s, vss=%v",
 		backupType, backupDirs, driveLetters, backupID, useVSS))
+
+	// Check admin privileges if VSS is requested
+	if useVSS && !isAdmin() {
+		return fmt.Errorf("VSS (Shadow Copy) nécessite les privilèges administrateur. Veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS.")
+	}
 
 	// Validate PBS config
 	if err := a.config.Validate(); err != nil {
