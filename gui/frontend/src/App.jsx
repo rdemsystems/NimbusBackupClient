@@ -1,17 +1,16 @@
 import { useState, useEffect } from 'react'
 
 // Wails runtime imports (will be available when built with Wails)
-let GetConfig, SaveConfig, TestConnection, StartBackup, ListSnapshots, RestoreSnapshot, GetHostname
+let GetConfigWithHostname, SaveConfig, TestConnection, StartBackup, ListSnapshots, RestoreSnapshot
 
 // Check if we're running in Wails
 if (window.go) {
-  GetConfig = window.go.main.App.GetConfig
+  GetConfigWithHostname = window.go.main.App.GetConfigWithHostname
   SaveConfig = window.go.main.App.SaveConfig
   TestConnection = window.go.main.App.TestConnection
   StartBackup = window.go.main.App.StartBackup
   ListSnapshots = window.go.main.App.ListSnapshots
   RestoreSnapshot = window.go.main.App.RestoreSnapshot
-  GetHostname = window.go.main.App.GetHostname
 }
 
 function App() {
@@ -39,25 +38,29 @@ function App() {
   const [restoreBackupId, setRestoreBackupId] = useState('')
   const [showSnapshots, setShowSnapshots] = useState(false)
 
-  // Load config and hostname on mount
+  // Load config with hostname on mount
   useEffect(() => {
     const loadData = async () => {
       try {
-        // Get hostname first
-        if (GetHostname) {
-          const hn = await GetHostname()
-          setHostname(hn)
+        if (GetConfigWithHostname) {
+          const data = await GetConfigWithHostname()
+          if (data) {
+            // Extract hostname
+            const hn = data.hostname || ''
+            setHostname(hn)
 
-          // Then load config
-          if (GetConfig) {
-            const cfg = await GetConfig()
-            if (cfg) {
-              // Use hostname as default if backup-id is empty
-              if (!cfg['backup-id'] && hn) {
-                cfg['backup-id'] = hn
-              }
-              setConfig(cfg)
-            }
+            // Set config (hostname is already in backup-id if needed)
+            setConfig({
+              baseurl: data.baseurl || '',
+              certfingerprint: data.certfingerprint || '',
+              authid: data.authid || '',
+              secret: data.secret || '',
+              datastore: data.datastore || '',
+              namespace: data.namespace || '',
+              backupdir: data.backupdir || '',
+              'backup-id': data['backup-id'] || hn,
+              usevss: data.usevss !== undefined ? data.usevss : true
+            })
           }
         }
       } catch (err) {

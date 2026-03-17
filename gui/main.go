@@ -215,10 +215,37 @@ func (a *App) GetHostname() string {
 	hostname, err := os.Hostname()
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("GetHostname() error: %v", err))
-		return ""
+		return "unknown"
 	}
 	writeDebugLog(fmt.Sprintf("GetHostname() returned: %s", hostname))
 	return hostname
+}
+
+// GetConfigWithHostname returns config with hostname pre-filled
+func (a *App) GetConfigWithHostname() map[string]interface{} {
+	hostname := a.GetHostname()
+	cfg := a.GetConfig()
+
+	// Return config as map with hostname
+	result := map[string]interface{}{
+		"baseurl":         cfg.BaseURL,
+		"certfingerprint": cfg.CertFingerprint,
+		"authid":          cfg.AuthID,
+		"secret":          cfg.Secret,
+		"datastore":       cfg.Datastore,
+		"namespace":       cfg.Namespace,
+		"backupdir":       cfg.BackupDir,
+		"backup-id":       cfg.BackupID,
+		"usevss":          cfg.UseVSS,
+		"hostname":        hostname,
+	}
+
+	// Pre-fill backup-id with hostname if empty
+	if cfg.BackupID == "" {
+		result["backup-id"] = hostname
+	}
+
+	return result
 }
 
 // SaveConfig saves the configuration
@@ -256,45 +283,36 @@ func (a *App) StartBackup(backupType, backupDir, driveLetter string, excludeList
 		return fmt.Errorf("Lettre de lecteur requise")
 	}
 
-	// Create backup config
-	backupConfig := &Config{
-		BaseURL:         a.config.BaseURL,
-		CertFingerprint: a.config.CertFingerprint,
-		AuthID:          a.config.AuthID,
-		Secret:          a.config.Secret,
-		Datastore:       a.config.Datastore,
-		Namespace:       a.config.Namespace,
-		BackupDir:       backupDir,
-		BackupID:        backupID,
-		UseVSS:          useVSS,
-	}
+	// TODO: Implement inline backup without external binaries
+	// This requires:
+	// 1. Import ../clientcommon and ../pbscommon packages
+	// 2. Recreate the backup flow from directorybackup/main.go
+	// 3. Use pbscommon.PBSClient to connect and upload
+	// 4. Use chunking and deduplication logic
+	//
+	// For now, return a clear error message
 
-	// For machine backup, set the drive letter as backup dir
-	if backupType == "machine" {
-		backupConfig.BackupDir = driveLetter
-	}
+	writeDebugLog("Backup functionality requires refactoring to work without external binaries")
 
-	// Create and start backup runner
-	runner := NewBackupRunner(backupConfig)
+	return fmt.Errorf(`Fonctionnalité de backup en cours d'implémentation.
 
-	// Set callbacks for progress updates (future: emit to frontend via runtime events)
-	runner.SetProgressCallback(func(progress float64, status string) {
-		writeDebugLog(fmt.Sprintf("Backup progress: %.2f%% - %s", progress*100, status))
-		// TODO: Emit progress to frontend via Wails runtime events
-	})
+La sauvegarde nécessite l'intégration directe du code de backup (clientcommon, pbscommon)
+au lieu d'appeler des binaires externes.
 
-	runner.SetCompleteCallback(func(success bool, message string) {
-		writeDebugLog(fmt.Sprintf("Backup complete: success=%v, message=%s", success, message))
-		// TODO: Emit completion to frontend via Wails runtime events
-	})
+Configuration validée:
+- Type: %s
+- Cible: %s
+- PBS: %s
+- Datastore: %s
 
-	// Start backup
-	if err := runner.Start(); err != nil {
-		writeDebugLog(fmt.Sprintf("Failed to start backup: %v", err))
-		return fmt.Errorf("Échec du démarrage de la sauvegarde: %v", err)
-	}
-
-	return nil
+Prochaines étapes:
+1. Importer les packages clientcommon et pbscommon
+2. Implémenter le flux de backup inline
+3. Gérer le chunking et la déduplication`,
+		backupType,
+		map[bool]string{true: backupDir, false: driveLetter}[backupType == "directory"],
+		a.config.BaseURL,
+		a.config.Datastore)
 }
 
 // ListSnapshots lists available snapshots
