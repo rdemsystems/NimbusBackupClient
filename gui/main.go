@@ -243,33 +243,142 @@ func (a *App) StartBackup(backupType, backupDir, driveLetter string, excludeList
 	writeDebugLog(fmt.Sprintf("StartBackup() called: type=%s, dir=%s, drive=%s, id=%s, vss=%v",
 		backupType, backupDir, driveLetter, backupID, useVSS))
 
-	// TODO: Implement actual backup logic
+	// Validate PBS config
 	if err := a.config.Validate(); err != nil {
 		return err
 	}
 
-	return fmt.Errorf("Fonctionnalité de backup à implémenter")
+	// Validate backup parameters
+	if backupType == "directory" && backupDir == "" {
+		return fmt.Errorf("Répertoire de sauvegarde requis")
+	}
+	if backupType == "machine" && driveLetter == "" {
+		return fmt.Errorf("Lettre de lecteur requise")
+	}
+
+	// Create backup config
+	backupConfig := &Config{
+		BaseURL:         a.config.BaseURL,
+		CertFingerprint: a.config.CertFingerprint,
+		AuthID:          a.config.AuthID,
+		Secret:          a.config.Secret,
+		Datastore:       a.config.Datastore,
+		Namespace:       a.config.Namespace,
+		BackupDir:       backupDir,
+		BackupID:        backupID,
+		UseVSS:          useVSS,
+	}
+
+	// For machine backup, set the drive letter as backup dir
+	if backupType == "machine" {
+		backupConfig.BackupDir = driveLetter
+	}
+
+	// Create and start backup runner
+	runner := NewBackupRunner(backupConfig)
+
+	// Set callbacks for progress updates (future: emit to frontend via runtime events)
+	runner.SetProgressCallback(func(progress float64, status string) {
+		writeDebugLog(fmt.Sprintf("Backup progress: %.2f%% - %s", progress*100, status))
+		// TODO: Emit progress to frontend via Wails runtime events
+	})
+
+	runner.SetCompleteCallback(func(success bool, message string) {
+		writeDebugLog(fmt.Sprintf("Backup complete: success=%v, message=%s", success, message))
+		// TODO: Emit completion to frontend via Wails runtime events
+	})
+
+	// Start backup
+	if err := runner.Start(); err != nil {
+		writeDebugLog(fmt.Sprintf("Failed to start backup: %v", err))
+		return fmt.Errorf("Échec du démarrage de la sauvegarde: %v", err)
+	}
+
+	return nil
 }
 
 // ListSnapshots lists available snapshots
 func (a *App) ListSnapshots(backupID string) ([]map[string]string, error) {
 	writeDebugLog(fmt.Sprintf("ListSnapshots() called: backupID=%s", backupID))
 
-	// TODO: Implement actual snapshot listing
-	// Mock response for now
-	return []map[string]string{
-		{
-			"id":   "2024-03-17T10:30:00Z",
-			"time": "2024-03-17 10:30:00",
-			"type": "machine",
-		},
-	}, nil
+	// Validate config
+	if err := a.config.Validate(); err != nil {
+		return nil, err
+	}
+
+	// Create restore manager
+	rm := NewRestoreManager(a.config)
+
+	// List snapshots
+	snapshots, err := rm.ListSnapshots()
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("Failed to list snapshots: %v", err))
+		return nil, fmt.Errorf("Échec de la liste des snapshots: %v", err)
+	}
+
+	// Convert to map format for frontend
+	result := make([]map[string]string, 0, len(snapshots))
+	for _, snap := range snapshots {
+		// Filter by backup ID if specified
+		if backupID != "" && snap.ID != backupID {
+			continue
+		}
+
+		result = append(result, map[string]string{
+			"id":   snap.Timestamp.Format("2006-01-02T15:04:05Z"),
+			"time": snap.Timestamp.Format("2006-01-02 15:04:05"),
+			"type": snap.Type,
+		})
+	}
+
+	writeDebugLog(fmt.Sprintf("Found %d snapshots", len(result)))
+	return result, nil
 }
 
 // RestoreSnapshot restores a snapshot
 func (a *App) RestoreSnapshot(snapshotID, destPath string) error {
 	writeDebugLog(fmt.Sprintf("RestoreSnapshot() called: snapshot=%s, dest=%s", snapshotID, destPath))
 
-	// TODO: Implement actual restore logic
-	return fmt.Errorf("Fonctionnalité de restore à implémenter")
+	// Validate config
+	if err := a.config.Validate(); err != nil {
+		return err
+	}
+
+	if snapshotID == "" {
+		return fmt.Errorf("ID du snapshot requis")
+	}
+
+	if destPath == "" {
+		return fmt.Errorf("Chemin de destination requis")
+	}
+
+	// Create restore manager
+	rm := NewRestoreManager(a.config)
+
+	// Parse timestamp from snapshotID
+	timestamp, err := time.Parse("2006-01-02T15:04:05Z", snapshotID)
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("Failed to parse snapshot ID: %v", err))
+		return fmt.Errorf("ID de snapshot invalide: %v", err)
+	}
+
+	// Create snapshot object
+	snapshot := BackupSnapshot{
+		Type:      "host",
+		ID:        a.config.BackupID,
+		Timestamp: timestamp,
+		Files: []BackupFile{
+			{Name: "root.pxar.didx", Type: "pxar"},
+		},
+	}
+
+	// Restore the snapshot
+	err = rm.RestoreFile(snapshot, snapshot.Files[0], destPath)
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("Failed to restore: %v", err))
+		return fmt.Errorf("Échec de la restauration: %v", err)
+	}
+
+	writeDebugLog("Restore completed successfully")
+	return nil
 }

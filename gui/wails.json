@@ -26,6 +26,7 @@
     "manifest": {
       "level": "requireAdministrator",
       "uiAccess": false
-    }
+    },
+    "icon": "build/windows/icon.ico"
   }
 }

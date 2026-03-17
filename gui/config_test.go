@@ -59,17 +59,6 @@ func TestConfigValidation(t *testing.T) {
 				BaseURL:   "https://pbs.example.com:8007",
 				AuthID:    "test@pbs!token",
 				Secret:    "secret123",
-				BackupDir: "/tmp/backup",
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing backupdir",
-			config: Config{
-				BaseURL:   "https://pbs.example.com:8007",
-				AuthID:    "test@pbs!token",
-				Secret:    "secret123",
-				Datastore: "backup",
 			},
 			wantErr: true,
 		},

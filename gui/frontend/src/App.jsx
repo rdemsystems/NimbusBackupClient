@@ -16,6 +16,7 @@ if (window.go) {
 
 function App() {
   const [activeTab, setActiveTab] = useState('config')
+  const [hostname, setHostname] = useState('')
   const [config, setConfig] = useState({
     baseurl: '',
     certfingerprint: '',
@@ -38,25 +39,33 @@ function App() {
   const [restoreBackupId, setRestoreBackupId] = useState('')
   const [showSnapshots, setShowSnapshots] = useState(false)
 
-  // Load config on mount
+  // Load config and hostname on mount
   useEffect(() => {
-    if (GetConfig) {
-      GetConfig().then(cfg => {
-        if (cfg) {
-          setConfig(cfg)
-          // Pre-fill backup-id with hostname if empty
-          if (!cfg['backup-id'] && GetHostname) {
-            GetHostname().then(hostname => {
-              if (hostname) {
-                setConfig(c => ({ ...c, 'backup-id': hostname }))
+    const loadData = async () => {
+      try {
+        // Get hostname first
+        if (GetHostname) {
+          const hn = await GetHostname()
+          setHostname(hn)
+
+          // Then load config
+          if (GetConfig) {
+            const cfg = await GetConfig()
+            if (cfg) {
+              // Use hostname as default if backup-id is empty
+              if (!cfg['backup-id'] && hn) {
+                cfg['backup-id'] = hn
               }
-            })
+              setConfig(cfg)
+            }
           }
         }
-      }).catch(err => {
+      } catch (err) {
         console.error('Failed to load config:', err)
-      })
+      }
     }
+
+    loadData()
   }, [])
 
   const showStatus = (message, type) => {
@@ -385,9 +394,9 @@ function App() {
             <label>Backup ID à restaurer</label>
             <input
               type="text"
-              value={restoreBackupId}
+              value={restoreBackupId || hostname}
               onChange={(e) => setRestoreBackupId(e.target.value)}
-              placeholder="hostname ou ID personnalisé"
+              placeholder={hostname || "hostname ou ID personnalisé"}
             />
           </div>
 
