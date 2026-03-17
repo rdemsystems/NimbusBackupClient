@@ -103,42 +103,7 @@ jobs:
           # Copy files
           Copy-Item NimbusBackup.exe dist/
           Copy-Item GUI_README.md dist/README.md -ErrorAction SilentlyContinue
-          Copy-Item CONFIG_FORMAT_SPEC.md dist/ -ErrorAction SilentlyContinue
-
-          # Create README for release
-          @"
-# Nimbus Backup v0.4.0
-
-Client de sauvegarde pour Proxmox Backup Server
-
-## Installation
-
-1. Téléchargez `NimbusBackup.exe`
-2. Lancez l'application (droits admin requis)
-3. Configurez votre serveur PBS
-4. Lancez vos sauvegardes !
-
-## Fonctionnalités
-
-- ✅ Sauvegarde de répertoires
-- ✅ Sauvegarde machine complète (disques)
-- ✅ Restauration de snapshots
-- ✅ Support VSS (Windows Shadow Copy)
-- ✅ Interface moderne avec Wails + React
-
-## Prérequis
-
-- Windows 10/11 (64-bit)
-- Droits administrateur (pour VSS)
-
-## Support
-
-Site web: https://backup.rdem-systems.com
-Contact: RDEM Systems
-
----
-© 2024-2026 RDEM Systems
-"@ | Out-File -FilePath dist/README.txt -Encoding UTF8
+          Copy-Item CONFIG_FORMAT_SPEC.md dist/README.txt -ErrorAction SilentlyContinue
 
           # Create ZIP
           Compress-Archive -Path dist/* -DestinationPath NimbusBackup-Windows.zip -Force
