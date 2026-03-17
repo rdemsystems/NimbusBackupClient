@@ -45,6 +45,8 @@ type ChunkState struct {
 	newchunk           *atomic.Uint64
 	reusechunk         *atomic.Uint64
 	knownChunks        *hashmap.Map[string, bool]
+	onProgress         func(float64, string)
+	lastProgressReport uint64
 }
 
 type DidxEntry struct {
@@ -52,7 +54,7 @@ type DidxEntry struct {
 	digest []byte
 }
 
-func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, knownChunks *hashmap.Map[string, bool]) {
+func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, knownChunks *hashmap.Map[string, bool], onProgress func(float64, string)) {
 	c.assignments = make([]string, 0)
 	c.assignments_offset = make([]uint64, 0)
 	c.pos = 0
@@ -64,6 +66,8 @@ func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, kn
 	c.reusechunk = reusechunk
 	c.newchunk = newchunk
 	c.knownChunks = knownChunks
+	c.onProgress = onProgress
+	c.lastProgressReport = 0
 }
 
 func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) {
@@ -96,6 +100,19 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) {
 			c.assignments = append(c.assignments, shahash)
 			c.pos += uint64(len(c.current_chunk))
 			c.chunkcount += 1
+
+			// Report progress every 10 MB
+			if c.onProgress != nil && c.pos-c.lastProgressReport > 10*1024*1024 {
+				c.lastProgressReport = c.pos
+				msg := fmt.Sprintf("Processed %d MB (New: %d, Reused: %d chunks)",
+					c.pos/(1024*1024), c.newchunk.Load(), c.reusechunk.Load())
+				// Progress is 10% to 90% during backup
+				progress := 0.1 + (float64(c.pos)/float64(100*1024*1024))*0.8
+				if progress > 0.9 {
+					progress = 0.9
+				}
+				c.onProgress(progress, msg)
+			}
 
 			c.current_chunk = make([]byte, 0)
 			b = b[chunkpos:]
@@ -298,10 +315,10 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64
 	writeDebugLog(fmt.Sprintf("Known chunks: %d", knownChunks.Len()))
 
 	pxarChunk := ChunkState{}
-	pxarChunk.Init(newchunk, reusechunk, knownChunks)
+	pxarChunk.Init(newchunk, reusechunk, knownChunks, progress)
 
 	pcat1Chunk := ChunkState{}
-	pcat1Chunk.Init(newchunk, reusechunk, knownChunks)
+	pcat1Chunk.Init(newchunk, reusechunk, knownChunks, nil)
 
 	pxarChunk.wrid, err = client.CreateDynamicIndex(archive.ArchiveName)
 	if err != nil {

@@ -40,6 +40,13 @@ function App() {
   const [physicalDisks, setPhysicalDisks] = useState([])
   const [excludeList, setExcludeList] = useState('')
   const [progress, setProgress] = useState(0)
+  const [backupStats, setBackupStats] = useState({
+    startTime: null,
+    lastUpdate: null,
+    lastPercent: 0,
+    speed: 0,
+    eta: null
+  })
   const [status, setStatus] = useState({ message: '', type: '', visible: false })
 
   const [snapshots, setSnapshots] = useState([])
@@ -75,12 +82,44 @@ function App() {
     if (!EventsOn) return
 
     const unsubProgress = EventsOn('backup:progress', (data) => {
-      setProgress(Math.round(data.percent))
+      const now = Date.now()
+      const percent = Math.round(data.percent)
+      setProgress(percent)
       showStatus(`🔄 ${data.message}`, 'info')
+
+      // Calculate speed and ETA
+      setBackupStats(prev => {
+        const startTime = prev.startTime || now
+        const lastUpdate = prev.lastUpdate || now
+        const timeDiff = (now - lastUpdate) / 1000 // seconds
+        const percentDiff = percent - prev.lastPercent
+
+        // Calculate speed (percent per second)
+        let speed = prev.speed
+        if (timeDiff > 0 && percentDiff > 0) {
+          speed = percentDiff / timeDiff
+        }
+
+        // Calculate ETA (seconds remaining)
+        let eta = null
+        if (speed > 0 && percent < 100) {
+          const remainingPercent = 100 - percent
+          eta = Math.round(remainingPercent / speed)
+        }
+
+        return {
+          startTime,
+          lastUpdate: now,
+          lastPercent: percent,
+          speed,
+          eta
+        }
+      })
     })
 
     const unsubComplete = EventsOn('backup:complete', (data) => {
       setProgress(data.success ? 100 : 0)
+      setBackupStats({ startTime: null, lastUpdate: null, lastPercent: 0, speed: 0, eta: null })
       showStatus(data.success ? '✅ ' + data.message : '❌ ' + data.message, data.success ? 'success' : 'error')
     })
 
