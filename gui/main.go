@@ -22,7 +22,7 @@ var assets embed.FS
 
 const (
 	appName    = "Nimbus Backup"
-	appVersion = "0.0.7"
+	appVersion = "0.0.16"
 )
 
 var (

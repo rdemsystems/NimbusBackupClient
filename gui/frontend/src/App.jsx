@@ -39,6 +39,13 @@ function App() {
   const [restoreBackupId, setRestoreBackupId] = useState('')
   const [showSnapshots, setShowSnapshots] = useState(false)
 
+  // Update restoreBackupId when config or hostname changes
+  useEffect(() => {
+    if (!restoreBackupId && (config['backup-id'] || hostname)) {
+      setRestoreBackupId(config['backup-id'] || hostname)
+    }
+  }, [config['backup-id'], hostname])
+
   // Load config with hostname on mount
   useEffect(() => {
     const loadData = async () => {
@@ -304,6 +311,19 @@ function App() {
           </div>
 
           <div className="form-group">
+            <label>Backup ID (identifiant de sauvegarde)</label>
+            <input
+              type="text"
+              value={config['backup-id']}
+              onChange={(e) => setConfig({...config, 'backup-id': e.target.value})}
+              placeholder={hostname || "Nom de la machine"}
+            />
+            <small style={{color: '#718096', fontSize: '12px'}}>
+              Laissez vide pour utiliser le nom de machine détecté : {hostname}
+            </small>
+          </div>
+
+          <div className="form-group">
             <label>Charger une configuration existante</label>
             <input
               type="file"
@@ -493,7 +513,7 @@ function App() {
 
           <div style={{textAlign: 'center', marginTop: '30px'}}>
             <h3>Nimbus Backup</h3>
-            <p style={{color: '#718096', margin: '10px 0'}}>Version 0.0.7</p>
+            <p style={{color: '#718096', margin: '10px 0'}}>Version 0.0.16</p>
 
             <div className="grid" style={{marginTop: '30px', textAlign: 'left'}}>
               <div className="card">
