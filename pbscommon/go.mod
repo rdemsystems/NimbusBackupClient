@@ -3,11 +3,11 @@ module pbscommon
 go 1.21
 
 require (
-	github.com/klauspost/compress v1.18.0
-	golang.org/x/net v0.46.0
+	github.com/klauspost/compress v1.17.9
+	golang.org/x/net v0.23.0
 )
 
 require (
 	github.com/dchest/siphash v1.2.3
-	golang.org/x/text v0.30.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 )

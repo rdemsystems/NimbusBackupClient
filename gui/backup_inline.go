@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"pbscommon"
 )
@@ -76,6 +77,7 @@ func RunBackupInline(opts BackupOptions) error {
 
 	// Create backup snapshot
 	progress(0.15, "Creating snapshot...")
+	backupTime := time.Now().Format("2006-01-02T15:04:05Z")
 
 	// Start backup session
 	writeDebugLog(fmt.Sprintf("Starting backup for %s/%s/%s", opts.BackupType, opts.BackupID, backupTime))
@@ -102,6 +104,7 @@ func RunBackupInline(opts BackupOptions) error {
 	// Calculate total size for progress tracking across all directories
 	progress(0.25, "Calculating backup size...")
 	var totalSize int64
+	var err error
 	for _, dir := range opts.BackupDirs {
 		err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
