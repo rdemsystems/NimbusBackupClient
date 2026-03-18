@@ -1,20 +1,52 @@
-This software implements a proxmox backup client software for windows, backup only as of now
-Works on linux too especially for development
+# Nimbus Backup - Proxmox Backup Server Client
 
-The software is still alpha quality and i take no responsability for any kind of damage or data loss even of source files.
+Modern Windows backup client for Proxmox Backup Server with GUI and CLI interfaces.
 
-Contributions are welcome especially 
+## 🌐 Links
 
-1. GUI with tray icon to show backup progress and backup taking place
-2. Encryption support
-3. A GUI way of configuring it and maybe create a json job file similiar freefilesync does
-4. Async upload / compress and multicore upload + compression of chunks
-5. Proxmox side patch to add another kind of entry to pxar format with Windows security descriptors in it
-6. Support for windows symlinks
-7. Anything interesting you can come up with :)
+- **RDEM Systems**: https://www.rdem-systems.com/
+- **Nimbus Backup - Fully managed Proxmox Backup Servers Datastore**: https://nimbus.rdem-systems.com/
 
-Usage - Directory Backup
-=====
+## 📦 Two Modes Available
+
+### 🖥️ GUI Mode (Recommended)
+Modern Wails v2 interface with real-time progress, VSS support, and snapshot management.
+
+👉 **[Download Latest Release](https://github.com/tizbac/proxmoxbackupclient_go/releases)**
+
+Features:
+- User-friendly configuration interface
+- Real-time backup progress with ETA
+- VSS (Volume Shadow Copy) support
+- Snapshot browsing and restore
+- Multi-folder backup support
+- Automatic hostname detection
+
+### ⌨️ CLI Mode (Advanced)
+Command-line interface for automation and scripting.
+
+See [CLI Documentation](#cli-usage) below.
+
+## ⚠️ Disclaimer
+
+This software is provided as-is. While we strive for reliability, we take no responsibility for any data loss or damage.
+Always test your backups and verify restoration before relying on them in production.
+
+## 🤝 Contributions Welcome
+
+Priority features:
+1. ✅ ~~GUI with progress display~~ (Implemented in v0.1.0)
+2. System tray icon and background service
+3. Automatic scheduling
+4. Encryption support
+5. Windows symlinks support
+6. Multi-core compression and async upload
+
+---
+
+## CLI Usage
+
+### Directory Backup
 
 A typical command would look like:
 
