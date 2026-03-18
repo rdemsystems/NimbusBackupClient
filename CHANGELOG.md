@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-03-18
+
+### Fixed
+- **Critical bug in PBS error handling** - Fixed nil error return in CreateDynamicIndex
+  - When PBS returns HTTP error, the function was returning `nil` instead of actual error
+  - Bug existed since original code but was silently masking PBS authentication errors
+  - Now returns: `fmt.Errorf("PBS returned HTTP %d: %s", statusCode, responseBody)`
+  - Added `defer resp2.Body.Close()` to prevent resource leak
+  - Will now show exact HTTP status code and PBS error message
+
+### Changed
+- **Improved error messages** - SA1006 compliance with better error context
+  - Changed `errors.New(errMsg)` to `fmt.Errorf("%s", errMsg)`
+  - Maintains format safety while providing better stack traces
+
+### Debugging
+- This version will reveal the **real PBS error** that was previously hidden
+- Check logs for actual HTTP status code (401/403/500)
+- Will help identify if issue is credentials, permissions, or server-side
+
 ## [0.1.17] - 2026-03-18
 
 ### Fixed
