@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-03-18
+
+### Fixed
+- **Version display hardcoded in frontend**
+  - Version was hardcoded as "0.0.16" in App.jsx line 670
+  - Added GetVersion() backend function to read from wails.json
+  - Frontend now dynamically loads and displays correct version
+  - About screen will now show actual version (0.1.23)
+
+### Technical
+- Added App.GetVersion() method in main.go
+- Frontend calls GetVersion() on mount
+- Version state stored in React component
+
 ## [0.1.22] - 2026-03-18
 
 ### Added

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 
 // Wails runtime imports (will be available when built with Wails)
-let GetConfigWithHostname, SaveConfig, TestConnection, StartBackup, ListSnapshots, RestoreSnapshot, ListPhysicalDisks, EventsOn
+let GetConfigWithHostname, SaveConfig, TestConnection, StartBackup, ListSnapshots, RestoreSnapshot, ListPhysicalDisks, GetVersion, EventsOn
 
 // Check if we're running in Wails
 if (window.go) {
@@ -12,6 +12,7 @@ if (window.go) {
   ListSnapshots = window.go.main.App.ListSnapshots
   RestoreSnapshot = window.go.main.App.RestoreSnapshot
   ListPhysicalDisks = window.go.main.App.ListPhysicalDisks
+  GetVersion = window.go.main.App.GetVersion
 }
 
 // Wails events
@@ -22,6 +23,7 @@ if (window.runtime) {
 function App() {
   const [activeTab, setActiveTab] = useState('config')
   const [hostname, setHostname] = useState('')
+  const [appVersion, setAppVersion] = useState('dev')
   const [config, setConfig] = useState({
     baseurl: '',
     certfingerprint: '',
@@ -133,6 +135,12 @@ function App() {
   useEffect(() => {
     const loadData = async () => {
       try {
+        // Load version
+        if (GetVersion) {
+          const version = await GetVersion()
+          setAppVersion(version || 'dev')
+        }
+
         if (GetConfigWithHostname) {
           const data = await GetConfigWithHostname()
           if (data) {
@@ -667,7 +675,7 @@ function App() {
 
           <div style={{textAlign: 'center', marginTop: '30px'}}>
             <h3>Nimbus Backup</h3>
-            <p style={{color: '#718096', margin: '10px 0'}}>Version 0.0.16</p>
+            <p style={{color: '#718096', margin: '10px 0'}}>Version {appVersion}</p>
 
             <div className="grid" style={{marginTop: '30px', textAlign: 'left'}}>
               <div className="card">

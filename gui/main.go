@@ -264,6 +264,11 @@ func (a *App) GetHostname() string {
 	return hostname
 }
 
+func (a *App) GetVersion() string {
+	writeDebugLog(fmt.Sprintf("GetVersion() returned: %s", appVersion))
+	return appVersion
+}
+
 // ListPhysicalDisks returns a list of available physical disks (DISABLED - feature postponed)
 /*
 func (a *App) ListPhysicalDisks() ([]PhysicalDiskInfo, error) {
