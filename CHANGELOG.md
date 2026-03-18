@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Refactoring (Phase 1 - Completed)
+- **Comprehensive error handling** throughout codebase
+  - PXAR callbacks now return and propagate errors
+  - HandleData() and Eof() with complete error checking
+  - Replaced all panic() calls with graceful error handling
+  - All errors wrapped with context using fmt.Errorf
+- **Structured logging package** (pkg/logger)
+  - JSON-formatted logs with slog
+  - Multiple log levels (Debug, Info, Warn, Error)
+  - Comprehensive test coverage
+- **Retry logic with exponential backoff** (pkg/retry)
+  - Configurable retry attempts and delays
+  - Jitter support to prevent thundering herd
+  - Context-aware cancellation
+  - Comprehensive test coverage
+- **Security package** (pkg/security)
+  - Input validation (URL, BackupID, Datastore, AuthID, Fingerprint, Path)
+  - Credential sanitization for safe logging
+  - Constant-time string comparison for secrets
+  - Path traversal prevention
+
 ### Planned
 - **Client-side encryption** - PBS supports encryption, add key management in config
   - Generate/import encryption keys
