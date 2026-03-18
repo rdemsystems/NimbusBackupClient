@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tizbac/proxmoxbackupclient_go/pkg/logger"
+	"logger"
 )
 
 func TestLogger_Init(t *testing.T) {

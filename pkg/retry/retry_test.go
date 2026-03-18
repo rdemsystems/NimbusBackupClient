@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tizbac/proxmoxbackupclient_go/pkg/retry"
+	"retry"
 )
 
 func TestRetry_Success(t *testing.T) {
