@@ -543,26 +543,47 @@ function App() {
           </div>
 
           {progress > 0 && progress < 100 && (
-            <div style={{marginTop: '20px', marginBottom: '20px'}}>
-              <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '5px'}}>
-                <strong>Progression du backup</strong>
-                <span>{progress}%</span>
+            <div style={{marginTop: '20px', marginBottom: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #dee2e6'}}>
+              <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '10px'}}>
+                <strong style={{fontSize: '15px'}}>📊 Progression du backup</strong>
+                <span style={{fontSize: '18px', fontWeight: 'bold', color: '#0066cc'}}>{progress}%</span>
               </div>
-              <div className="progress" style={{height: '30px'}}>
+
+              <div className="progress" style={{height: '30px', marginBottom: '12px'}}>
                 <div
                   className="progress-bar"
                   style={{
                     width: `${progress}%`,
                     fontSize: '14px',
                     lineHeight: '30px',
-                    transition: 'width 0.3s ease'
+                    transition: 'width 0.3s ease',
+                    fontWeight: 'bold'
                   }}
                 >
                   {progress}%
                 </div>
               </div>
+
+              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px'}}>
+                {backupStats.eta !== null && (
+                  <div style={{fontSize: '13px', color: '#495057'}}>
+                    ⏱️ <strong>Temps restant:</strong> {Math.floor(backupStats.eta / 60)}m {backupStats.eta % 60}s
+                  </div>
+                )}
+                {backupStats.speed > 0 && (
+                  <div style={{fontSize: '13px', color: '#495057'}}>
+                    ⚡ <strong>Vitesse:</strong> {backupStats.speed.toFixed(1)}%/s
+                  </div>
+                )}
+                {backupStats.startTime && (
+                  <div style={{fontSize: '13px', color: '#495057'}}>
+                    ⏰ <strong>Temps écoulé:</strong> {Math.floor((Date.now() - backupStats.startTime) / 1000)}s
+                  </div>
+                )}
+              </div>
+
               {status.message && status.type === 'info' && (
-                <div style={{marginTop: '8px', fontSize: '13px', color: '#666'}}>
+                <div style={{marginTop: '10px', padding: '8px', backgroundColor: '#fff', borderRadius: '4px', fontSize: '13px', color: '#666', border: '1px solid #e9ecef'}}>
                   {status.message}
                 </div>
               )}
