@@ -81,7 +81,7 @@
 ## 🔧 Améliorations techniques
 
 - [ ] Replace Printf par structured logger partout
-- [ ] Retry logic sur toutes les opérations réseau
+- [x] Retry logic sur toutes les opérations réseau (v0.1.1)
 - [ ] Améliorer progress calculation (plus granulaire?)
 - [ ] Compression settings configurables
 - [ ] Chunk size configurable

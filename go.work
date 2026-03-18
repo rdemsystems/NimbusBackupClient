@@ -11,3 +11,5 @@ use ./snapshot
 use ./machinebackup
 
 use ./nbd
+
+use ./gui

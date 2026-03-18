@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -10,9 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	"github.com/cornelk/hashmap"
 	"pbscommon"
+	"pkg/retry"
 	"snapshot"
 )
 
@@ -109,8 +112,19 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 			if _, ok := c.knownChunks.GetOrInsert(shahash, true); !ok {
 				writeDebugLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.current_chunk)))
 				c.newchunk.Add(1)
-				if err := client.UploadDynamicCompressedChunk(c.wrid, shahash, c.current_chunk); err != nil {
-					return fmt.Errorf("failed to upload chunk %s: %w", shahash, err)
+
+				// Retry chunk upload with exponential backoff
+				chunkData := c.current_chunk // Capture for closure
+				retryConfig := retry.DefaultConfig()
+				retryConfig.MaxAttempts = 5 // More retries for chunk uploads
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+
+				err := retry.DoWithJitter(ctx, retryConfig, retry.DefaultRetryable, func() error {
+					return client.UploadDynamicCompressedChunk(c.wrid, shahash, chunkData)
+				})
+				if err != nil {
+					return fmt.Errorf("failed to upload chunk %s after retries: %w", shahash, err)
 				}
 			} else {
 				writeDebugLog(fmt.Sprintf("Reuse chunk[%s] %d bytes", shahash, len(c.current_chunk)))
@@ -183,8 +197,19 @@ func (c *ChunkState) Eof(client *pbscommon.PBSClient) error {
 
 		if _, ok := c.knownChunks.GetOrInsert(shahash, true); !ok {
 			writeDebugLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.current_chunk)))
-			if err := client.UploadDynamicCompressedChunk(c.wrid, shahash, c.current_chunk); err != nil {
-				return fmt.Errorf("failed to upload final chunk %s: %w", shahash, err)
+
+			// Retry final chunk upload with exponential backoff
+			chunkData := c.current_chunk
+			retryConfig := retry.DefaultConfig()
+			retryConfig.MaxAttempts = 5
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+
+			err := retry.DoWithJitter(ctx, retryConfig, retry.DefaultRetryable, func() error {
+				return client.UploadDynamicCompressedChunk(c.wrid, shahash, chunkData)
+			})
+			if err != nil {
+				return fmt.Errorf("failed to upload final chunk %s after retries: %w", shahash, err)
 			}
 			c.newchunk.Add(1)
 		} else {
@@ -197,18 +222,38 @@ func (c *ChunkState) Eof(client *pbscommon.PBSClient) error {
 		c.chunkcount += 1
 	}
 
+	// Assign chunks in batches with retry
+	retryConfig := retry.DefaultConfig()
+	retryConfig.MaxAttempts = 5
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
 	for k := 0; k < len(c.assignments); k += 128 {
 		k2 := k + 128
 		if k2 > len(c.assignments) {
 			k2 = len(c.assignments)
 		}
-		if err := client.AssignDynamicChunks(c.wrid, c.assignments[k:k2], c.assignments_offset[k:k2]); err != nil {
-			return fmt.Errorf("failed to assign chunks (batch %d-%d): %w", k, k2, err)
+
+		// Capture loop variables for closure
+		batchStart, batchEnd := k, k2
+		assignments := c.assignments[batchStart:batchEnd]
+		offsets := c.assignments_offset[batchStart:batchEnd]
+
+		err := retry.DoWithJitter(ctx, retryConfig, retry.DefaultRetryable, func() error {
+			return client.AssignDynamicChunks(c.wrid, assignments, offsets)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to assign chunks (batch %d-%d) after retries: %w", batchStart, batchEnd, err)
 		}
 	}
 
-	if err := client.CloseDynamicIndex(c.wrid, hex.EncodeToString(c.chunkdigests.Sum(nil)), c.pos, c.chunkcount); err != nil {
-		return fmt.Errorf("failed to close dynamic index: %w", err)
+	// Close index with retry
+	digest := hex.EncodeToString(c.chunkdigests.Sum(nil))
+	err := retry.DoWithJitter(ctx, retryConfig, retry.DefaultRetryable, func() error {
+		return client.CloseDynamicIndex(c.wrid, digest, c.pos, c.chunkcount)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to close dynamic index after retries: %w", err)
 	}
 	return nil
 }
@@ -306,9 +351,17 @@ func RunBackupInline(opts BackupOptions) error {
 
 	progress(0.95, "Finalizing backup...")
 
-	err := client.Finish()
+	// Finalize backup with retry
+	retryConfig := retry.DefaultConfig()
+	retryConfig.MaxAttempts = 5
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	err := retry.DoWithJitter(ctx, retryConfig, retry.DefaultRetryable, func() error {
+		return client.Finish()
+	})
 	if err != nil {
-		errMsg := fmt.Sprintf("Failed to finalize backup: %v", err)
+		errMsg := fmt.Sprintf("Failed to finalize backup after retries: %v", err)
 		writeDebugLog(errMsg)
 		if opts.OnComplete != nil {
 			opts.OnComplete(false, errMsg)
@@ -414,9 +467,17 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64
 		return err
 	}
 
-	err = client.UploadManifest()
+	// Upload manifest with retry
+	retryConfig := retry.DefaultConfig()
+	retryConfig.MaxAttempts = 5
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	err = retry.DoWithJitter(ctx, retryConfig, retry.DefaultRetryable, func() error {
+		return client.UploadManifest()
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to upload manifest after retries: %w", err)
 	}
 
 	return nil

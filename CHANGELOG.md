@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-03-18
+
+### Fixed
+- **GitHub Actions CI/CD** - Fixed go.work compatibility issues
+  - Added `gui` module to go.work workspace
+  - Set `GOWORK: off` environment variable in all workflow jobs
+  - Fixed test and lint jobs to run in correct directories
+  - Added missing frontend dependency installation steps
+
+### Improved
+- **Network resilience** - Added retry logic with exponential backoff
+  - Chunk uploads retry up to 5 times with jitter
+  - Chunk assignment retries with 5-minute timeout
+  - Index finalization retries with backoff
+  - Manifest upload retries with configurable delays
+  - Context-aware cancellation for all retries
+- **Error messages** - More detailed error context after retry exhaustion
+
+## [0.1.0] - 2026-03-18 (First Public Release)
+
 ### Refactoring (Phase 1 - Completed)
 - **Comprehensive error handling** throughout codebase
   - PXAR callbacks now return and propagate errors
