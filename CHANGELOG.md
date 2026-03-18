@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-03-18
+
+### Fixed
+- **Lint error reporting** - Added golangci-lint configuration for better diagnostics
+  - Created gui/.golangci.yml with line-number output format
+  - Enabled print-issued-lines and sort-results
+  - Replaced deprecated github-actions format
+  - Will now show exact file:line for SA1006 errors
+
+### CI/CD
+- Updated GitHub Actions workflow with max-issues flags
+- Better error visibility for debugging lint issues
+
 ## [0.1.13] - 2026-03-18
 
 ### Fixed
