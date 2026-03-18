@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"os"
@@ -303,7 +304,7 @@ func RunBackupInline(opts BackupOptions) error {
 			if opts.OnComplete != nil {
 				opts.OnComplete(false, errMsg)
 			}
-			return fmt.Errorf(errMsg)
+			return errors.New(errMsg)
 		}
 	}
 
@@ -346,7 +347,7 @@ func RunBackupInline(opts BackupOptions) error {
 			if opts.OnComplete != nil {
 				opts.OnComplete(false, errMsg)
 			}
-			return fmt.Errorf(errMsg)
+			return errors.New(errMsg)
 		}
 	}
 
@@ -367,7 +368,7 @@ func RunBackupInline(opts BackupOptions) error {
 		if opts.OnComplete != nil {
 			opts.OnComplete(false, errMsg)
 		}
-		return fmt.Errorf(errMsg)
+		return errors.New(errMsg)
 	}
 
 	progress(1.0, "Backup completed")
