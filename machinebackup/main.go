@@ -124,7 +124,10 @@ func uploadWorker(client *pbscommon.PBSClient, filename string, total_size uint6
 	workerfn := func() {
 		for seg := range ch2 {
 			h := sha256.New()
-			_, err = h.Write(seg.Data)
+			if _, err := h.Write(seg.Data); err != nil {
+				errch <- fmt.Errorf("failed to hash chunk at position %d: %w", seg.Pos, err)
+				break
+			}
 
 			shahash := hex.EncodeToString(h.Sum(nil))
 			//binary.Write(CS.chunkdigests, binary.LittleEndian, (CS.pos + uint64(nread)))
@@ -141,7 +144,7 @@ func uploadWorker(client *pbscommon.PBSClient, filename string, total_size uint6
 			} else {
 				err = client.UploadFixedCompressedChunk(wrid, shahash, seg.Data)
 				if err != nil {
-					errch <- err
+					errch <- fmt.Errorf("failed to upload chunk %s: %w", shahash, err)
 					break
 				}
 
@@ -203,7 +206,9 @@ func uploadWorker(client *pbscommon.PBSClient, filename string, total_size uint6
 	positions := slices.Collect(maps.Keys(CS.index_hash_data))
 	slices.Sort(positions)
 	for _, P := range positions {
-		chunkdigests.Write(CS.index_hash_data[P])
+		if _, err := chunkdigests.Write(CS.index_hash_data[P]); err != nil {
+			return fmt.Errorf("failed to write chunk digest for position %d: %w", P, err)
+		}
 	}
 
 	err = client.CloseFixedIndex(wrid, hex.EncodeToString(chunkdigests.Sum(nil)), CS.processed_size, CS.chunkcount)
@@ -244,28 +249,44 @@ func backupFileDevice(client *pbscommon.PBSClient, filename string) error {
 		return err
 	}
 	ch := make(chan []byte)
+	errCh := make(chan error, 1)
 	go func() {
-		f.Seek(0, io.SeekStart)
+		defer close(ch)
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			errCh <- fmt.Errorf("failed to seek to start: %w", err)
+			return
+		}
 		for {
 			block := make([]byte, pbscommon.PBS_FIXED_CHUNK_SIZE) //PBS block size is fixed 4MB
 			nread, err := f.Read(block)
 			if err == io.EOF {
 				break
 			} else if err != nil {
-				panic(err)
+				errCh <- fmt.Errorf("failed to read block: %w", err)
+				return
 			}
 
 			ch <- block[:nread]
 		}
-		close(ch)
+		errCh <- nil
 	}()
 
-	return uploadWorker(client, slug+".fidx", uint64(size), ch)
+	uploadErr := uploadWorker(client, slug+".fidx", uint64(size), ch)
+	readErr := <-errCh
+	if readErr != nil {
+		return readErr
+	}
+	return uploadErr
 }
 
 type BackupDisk struct {
 	Index int
 	Size  int64
+}
+
+func fatalError(msg string, err error) {
+	fmt.Fprintf(os.Stderr, "Fatal error: %s: %v\n", msg, err)
+	os.Exit(1)
 }
 
 func main() {
@@ -327,7 +348,7 @@ func main() {
 			idx, _ := strconv.ParseInt(matches[1], 10, 32)
 			size, err := backupWindowsDisk(client, int(idx))
 			if err != nil {
-				panic(err)
+				fatalError(fmt.Sprintf("backup disk %s", dev), err)
 			}
 			disks = append(disks, BackupDisk{
 				Index: int(idx),
@@ -336,7 +357,7 @@ func main() {
 		} else {
 			err := backupFileDevice(client, dev)
 			if err != nil {
-				panic(err)
+				fatalError(fmt.Sprintf("backup device %s", dev), err)
 			}
 		}
 	}
@@ -368,15 +389,15 @@ sata{{.Index}}: local:{{.VMID}}/vm-{{.VMID}}-disk-{{.Index}}.raw,cache=writeback
 vmgenid: {{.VMGenId}}
 		`)
 		if err != nil {
-			panic(err)
+			fatalError("parse VM config template", err)
 		}
 		vmid, err := strconv.ParseInt(cfg.BackupID, 10, 32)
 		if err != nil {
-			panic(err)
+			fatalError("parse VM ID", err)
 		}
 		hostname, err := os.Hostname()
 		if err != nil {
-			panic(err)
+			fatalError("get hostname", err)
 		}
 		wr := bytes.Buffer{}
 		cfgt := ConfigTemplate{
@@ -391,15 +412,20 @@ vmgenid: {{.VMGenId}}
 		} else {
 			cfgt.OS = "l26"
 		}
-		tmpl.Execute(&wr, cfgt)
-		client.UploadBlob("qemu-server.conf.blob", wr.Bytes())
+		if err := tmpl.Execute(&wr, cfgt); err != nil {
+			fatalError("execute VM config template", err)
+		}
+		if err := client.UploadBlob("qemu-server.conf.blob", wr.Bytes()); err != nil {
+			fatalError("upload VM config blob", err)
+		}
 	}
 
-	err := client.UploadManifest()
-	if err != nil {
-		panic(err)
+	if err := client.UploadManifest(); err != nil {
+		fatalError("upload manifest", err)
 	}
-	client.Finish()
+	if err := client.Finish(); err != nil {
+		fatalError("finish backup", err)
+	}
 
 	/*partitions, err := disk.Partitions(false) // false means don't include virtual partitions
 	if err != nil {
