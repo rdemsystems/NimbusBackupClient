@@ -73,6 +73,13 @@ func init() {
 		homeDir, _ := os.UserHomeDir()
 		logDir = filepath.Join(homeDir, ".nimbus-backup")
 	}
+
+	// Validate path for security (prevent path traversal)
+	if err := security.ValidatePath(logDir); err != nil {
+		// Fallback to current directory if path is invalid
+		logDir = "."
+	}
+
 	_ = os.MkdirAll(logDir, 0700)
 	debugLogPath = filepath.Join(logDir, "debug.log")
 
