@@ -403,12 +403,11 @@ func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters [
 
 	// Run backup inline (in background goroutine to not block UI)
 	go func() {
-		var err error
 		// Machine backup disabled for now - Windows Defender flags it
 		// if backupType == "machine" {
 		// 	err = RunMachineBackup(opts)
 		// } else {
-		err = RunBackupInline(opts)
+		err := RunBackupInline(opts)
 		// }
 		if err != nil {
 			writeDebugLog(fmt.Sprintf("Backup error: %v", err))

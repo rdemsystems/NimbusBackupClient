@@ -38,7 +38,7 @@ var didxMagic = []byte{28, 145, 78, 165, 25, 186, 179, 205}
 func calculateDirSize(path string) uint64 {
 	var totalSize uint64
 
-	filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
