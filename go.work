@@ -1,4 +1,4 @@
-go 1.24.4
+go 1.22
 
 use ./clientcommon
 
@@ -13,3 +13,7 @@ use ./machinebackup
 use ./nbd
 
 use ./gui
+
+use ./pkg/retry
+
+use ./pkg/security
