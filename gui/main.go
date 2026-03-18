@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -23,9 +24,35 @@ import (
 var assets embed.FS
 
 const (
-	appName    = "Nimbus Backup"
-	appVersion = "0.1.0"
+	appName = "Nimbus Backup"
 )
+
+var appVersion string // Loaded from wails.json
+
+type WailsConfig struct {
+	Info struct {
+		ProductVersion string `json:"productVersion"`
+	} `json:"info"`
+}
+
+func init() {
+	// Load version from wails.json
+	data, err := os.ReadFile("wails.json")
+	if err != nil {
+		appVersion = "dev" // Fallback for development
+		return
+	}
+
+	var config WailsConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		appVersion = "dev"
+		return
+	}
+
+	appVersion = config.Info.ProductVersion
+	if appVersion == "" {
+		appVersion = "dev"
+	}
 
 var (
 	debugLogPath    string
