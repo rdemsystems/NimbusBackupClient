@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-03-18
+
+### Fixed
+- **Go version consistency** - Fixed remaining Go 1.24.4 references
+  - directorybackup/go.mod: 1.24.4 → 1.22
+  - machinebackup/go.mod: 1.24.4 → 1.22
+  - nbd/go.mod: 1.24.4 → 1.22
+  - All workspace modules now use Go 1.22 consistently
+
+### CI/CD
+- GitHub Actions and GitLab CI fully operational
+- No more "go version mismatch" errors
+- All builds pass successfully
+
 ## [0.1.4] - 2026-03-18
 
 ### Fixed
