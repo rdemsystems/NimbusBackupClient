@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-03-18
+
+### Fixed
+- **Build CLI complet** - Fix tous les modules CLI (directorybackup, machinebackup, nbd)
+  - Retiré tous les usages de slices.Collect (Go 1.23+)
+  - machinebackup: Collect keys manuellement avec make() + append()
+  - nbd: Iterate directement sur map avec for range
+  - Compatible Go 1.22 sur toutes plateformes (Linux, Windows, macOS)
+
 ## [0.1.29] - 2026-03-18
 
 ### Fixed
