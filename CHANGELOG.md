@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-03-18
+
+### Fixed
+- **Linting errors** - Fixed remaining fmt.Fprintf SA1006 warnings
+  - gui/main.go:105: fmt.Fprintf → fmt.Fprint (crash message)
+  - gui/main.go:163: fmt.Fprintf → fmt.Fprint (startup failure message)
+  - Functions without format verbs should use print-style
+
+### CI/CD
+- **GitLab CI alignment** - Synchronized with GitHub Actions
+  - Updated golangci-lint from v1.55 to v1.64
+  - Changed allow_failure from true to false (lint errors now block)
+  - Added verbose output and line numbers
+  - Both pipelines now enforce same quality standards
+
 ## [0.1.12] - 2026-03-18
 
 ### Fixed
