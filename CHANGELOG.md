@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
+- **Client-side encryption** - PBS supports encryption, add key management in config
+  - Generate/import encryption keys
+  - Store key securely in config (warn user to backup key!)
+  - Encrypt chunks before upload to PBS
+  - Key recovery mechanism
+- **Code signing** for Windows binaries (Authenticode certificate)
+- **Auto-update system** - Check for latest version and prompt for updates
 - System tray icon and background service
 - Automatic scheduling (daily, weekly, custom cron)
 - Windows service installation

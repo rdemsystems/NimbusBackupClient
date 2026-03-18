@@ -32,15 +32,79 @@ See [CLI Documentation](#cli-usage) below.
 This software is provided as-is. While we strive for reliability, we take no responsibility for any data loss or damage.
 Always test your backups and verify restoration before relying on them in production.
 
+## 🔮 Planned Features
+
+### High Priority
+- **Client-side encryption** - Generate/import encryption keys, encrypt before upload to PBS (PBS native support)
+  - ⚠️ **Important**: Users must backup encryption keys in a safe location!
+- **Code signing** - Sign Windows binaries with Authenticode certificate to prevent false positives
+- **Auto-update system** - Check for latest version from official releases and prompt user to update
+- **System tray icon** - Run in background with tray menu for quick access
+- **Scheduled backups** - Configure automatic backups (daily, weekly, custom cron)
+- **Windows service mode** - Run as a Windows service for always-on backups
+
+### Future
+- **Full disk backup** - Physical drive backup (PhysicalDrive0, etc.) - requires code signing
+- **Bandwidth limiting** - Control upload speed to avoid network saturation
+- **Multi-core compression** - Parallel compression for faster backups
+- **Windows symlinks support** - Handle Windows symlinks properly
+- **Notification system** - Windows toast notifications for backup events
+
 ## 🤝 Contributions Welcome
 
-Priority features:
+Priority areas:
 1. ✅ ~~GUI with progress display~~ (Implemented in v0.1.0)
-2. System tray icon and background service
-3. Automatic scheduling
-4. Encryption support
-5. Windows symlinks support
-6. Multi-core compression and async upload
+2. 🔐 Client-side encryption support
+3. 🔄 Auto-update mechanism
+4. 📅 Scheduled backups
+5. 🔒 Security hardening and code signing
+
+---
+
+## 🔨 Building from Source
+
+### Prerequisites
+- Go 1.22 or later
+- Node.js 20 or later (for GUI)
+- Make
+- Wails CLI (for GUI): `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+
+### Quick Build
+```bash
+# Build everything (CLI + GUI)
+make all
+
+# Build only CLI tools
+make cli
+
+# Build only GUI
+make gui
+
+# Build for all platforms
+make cross-compile
+
+# Run tests with security checks
+make test security-check lint
+```
+
+### Build Output
+All binaries are placed in the `dist/` directory:
+- `dist/proxmoxbackup-directory` - Directory backup CLI
+- `dist/proxmoxbackup-machine` - Machine backup CLI
+- `dist/proxmoxbackup-nbd` - NBD server CLI
+- `dist/NimbusBackup.exe` - GUI application (Windows)
+
+### Development
+```bash
+# Setup development environment
+make dev-setup
+
+# Run GUI in dev mode (hot reload)
+make gui-dev
+
+# Run tests with coverage
+make test test-coverage
+```
 
 ---
 
