@@ -1,6 +1,6 @@
 module pbsnbd
 
-go 1.24.4
+go 1.22
 
 require (
 	github.com/gdamore/encoding v1.0.1 // indirect

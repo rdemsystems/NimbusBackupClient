@@ -1,6 +1,6 @@
 module machinebackup
 
-go 1.24.4
+go 1.22
 
 require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
