@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-03-18
+
+### Fixed
+- **GitHub Actions workflow** - Automated dependency management
+  - Added `go mod tidy` step before tests and linting
+  - Automatic generation of go.sum in CI/CD
+  - No more "updates to go.mod needed" errors
+  - Consistent with GitLab CI behavior
+
+### CI/CD
+- Both pipelines now fully autonomous (no manual go mod tidy required)
+- Clean separation of concerns in workflow steps
+
 ## [0.1.5] - 2026-03-18
 
 ### Fixed
