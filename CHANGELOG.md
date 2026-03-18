@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-03-18
+
+### Fixed
+- **Final linting issue** - Fixed last SA1006 staticcheck warning
+  - snapshot/nop_snapshot.go: log.Printf → log.Print
+  - All 3 Printf formatting issues now resolved
+  - 100% golangci-lint compliance
+
+### Code Quality
+- Zero linting warnings
+- All staticcheck issues resolved
+- Production-grade code quality
+
 ## [0.1.9] - 2026-03-18
 
 ### Fixed
