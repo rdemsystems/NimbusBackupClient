@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-03-18
+
+### Fixed
+- **Build error** - Removed unused encoding/json import
+- **HTTP/2 connection cleanup** - Close idle connections before reconnecting
+  - Prevents reusing stale/broken connections from failed backups
+  - Calls CloseIdleConnections() in Connect() before creating new client
+  - Fixes intermittent backup failures when retrying after errors
+
+### Technical
+- Added connection cleanup to prevent state pollution between backup attempts
+- Ensures each Connect() call starts with fresh HTTP/2 connection
+- Addresses issue where first backup might work but subsequent fail
+
 ## [0.1.26] - 2026-03-18
 
 ### Fixed

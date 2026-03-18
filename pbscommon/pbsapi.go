@@ -546,6 +546,13 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 		hostname, _ := os.Hostname()
 		pbs.Manifest.BackupID = hostname
 	}
+
+	// Close any existing HTTP/2 connections from previous failed backups
+	// This prevents reusing stale/broken connections
+	if pbs.Client.Transport != nil {
+		pbs.Client.CloseIdleConnections()
+	}
+
 	pbs.Client = http.Client{
 		Transport: &http2.Transport{
 
