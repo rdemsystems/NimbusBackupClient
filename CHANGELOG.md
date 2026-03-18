@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-03-18
+
+### Fixed
+- **HTTP/1.1 Host header missing** - PBS returned 400 Bad Request
+  - Added required Host header to upgrade request (line 565)
+  - HTTP/1.1 spec requires Host header, PBS enforces it strictly
+  - This was the root cause of authentication failures in v0.1.x
+  - Request was malformed, not an authentication issue
+
+### Root Cause Analysis
+- v0.1.20 revealed actual error: "400 Bad Request Content Type application/json"
+- Manual HTTP/1.1 upgrade request was missing Host header
+- PBS rejected the malformed request before authentication
+- Now sends: `Host: [hostname]:[port]` before Authorization header
+
 ## [0.1.20] - 2026-03-18
 
 ### Fixed

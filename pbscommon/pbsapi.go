@@ -561,6 +561,7 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 					conn.Write([]byte("GET /api2/json/reader?" + q.Encode() + " HTTP/1.1\r\n"))
 				}
 
+				conn.Write([]byte("Host: " + addr + "\r\n"))
 				conn.Write([]byte("Authorization: " + fmt.Sprintf("PBSAPIToken=%s:%s", pbs.AuthID, pbs.Secret) + "\r\n"))
 				if !reader {
 					conn.Write([]byte("Upgrade: proxmox-backup-protocol-v1\r\n"))
