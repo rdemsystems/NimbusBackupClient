@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-03-18
+
+### Fixed
+- **Linting issues** - Fixed staticcheck SA1006 warnings
+  - Changed Printf to Print for non-format strings
+  - pbscommon/pbsapi.go: Printf → Print
+  - snapshot/win_snapshot.go: Printf → Print
+  - Cleaner code following Go best practices
+
+### Code Quality
+- All golangci-lint checks passing
+- Improved code formatting standards
+
 ## [0.1.8] - 2026-03-18
 
 ### Security
