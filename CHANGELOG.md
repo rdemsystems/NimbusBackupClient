@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-03-18
+
+### Fixed
+- **Progression qui recule** - Fix calcul de progression pendant backup
+  - Cause: totalSize mis à jour en arrière-plan par scan de fichiers
+  - Solution: lastProgressPercent pour garantir progression monotone
+  - Progression ne recule plus même si totalSize augmente
+  - Example: 860MB=19.6% puis 917MB=11.7% → fixé
+
+- **Clignotement affichage GUI** - Console stable pendant backup
+  - Cause: Printf dans pxar.go affichait/supprimait lignes en continu
+  - Solution: Retiré tous les Printf de pbscommon/pxar.go
+  - Fichiers skippés toujours trackés dans SkippedFiles + debug.log
+  - Affichage GUI stable, logs détaillés dans debug.log uniquement
+
+- **Build CLI échoue sur GitHub Actions** - Compatibilité Go 1.22
+  - Cause: slices.Collect nécessite Go 1.23+, workflow utilise Go 1.22
+  - Solution: Remplacé maps.Keys + slices.Collect par simple boucle for
+  - Retiré imports maps et slices inutilisés
+  - Build CLI compatible Go 1.22+ sur toutes plateformes
+
+### Added
+- **Sauvegarde des derniers chemins de backup**
+  - Config.LastBackupDirs stocke les répertoires utilisés
+  - Auto-save après backup réussi
+  - GetLastBackupDirs() pour pré-remplir la GUI
+  - Évite de re-taper C:\Users, C:\Documents, etc. à chaque fois
+
+### Technical Details
+- ChunkState.lastProgressPercent garantit progression monotone
+- Printf retiré de WriteDir/WriteFile, gardé tracking SkippedFiles
+- directorybackup/main.go: simple boucle for range au lieu de slices.Collect
+- GUI OnComplete callback sauvegarde LastBackupDirs sur succès
+
 ## [0.1.28] - 2026-03-18
 
 ### Fixed
