@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"flag"
 	"io"
-	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -203,7 +202,11 @@ func uploadWorker(client *pbscommon.PBSClient, filename string, total_size uint6
 	}
 
 	chunkdigests := sha256.New()
-	positions := slices.Collect(maps.Keys(CS.index_hash_data))
+	// Collect map keys (Go 1.22 compatible)
+	positions := make([]uint64, 0, len(CS.index_hash_data))
+	for pos := range CS.index_hash_data {
+		positions = append(positions, pos)
+	}
 	slices.Sort(positions)
 	for _, P := range positions {
 		if _, err := chunkdigests.Write(CS.index_hash_data[P]); err != nil {
