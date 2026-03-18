@@ -64,7 +64,7 @@ func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, kn
 	c.knownChunks = knownChunks
 }
 
-func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) {
+func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 	chunkpos := c.C.Scan(b)
 
 	if chunkpos == 0 {
@@ -77,8 +77,9 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) {
 			c.current_chunk = append(c.current_chunk, b[:chunkpos]...)
 
 			h := sha256.New()
-			// TODO: error handling inside callback
-			h.Write(c.current_chunk)
+			if _, err := h.Write(c.current_chunk); err != nil {
+				return fmt.Errorf("failed to hash chunk: %w", err)
+			}
 			bindigest := h.Sum(nil)
 			shahash := hex.EncodeToString(bindigest)
 
@@ -86,16 +87,20 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) {
 				fmt.Printf("New chunk[%s] %d bytes\n", shahash, len(c.current_chunk))
 				c.newchunk.Add(1)
 
-				client.UploadDynamicCompressedChunk(c.wrid, shahash, c.current_chunk)
+				if err := client.UploadDynamicCompressedChunk(c.wrid, shahash, c.current_chunk); err != nil {
+					return fmt.Errorf("failed to upload chunk %s: %w", shahash, err)
+				}
 			} else {
 				fmt.Printf("Reuse chunk[%s] %d bytes\n", shahash, len(c.current_chunk))
 				c.reusechunk.Add(1)
 			}
 
-			// TODO: error handling inside callback
-			binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.current_chunk))))
-			// TODO: error handling inside callback
-			c.chunkdigests.Write(h.Sum(nil))
+			if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.current_chunk)))); err != nil {
+				return fmt.Errorf("failed to write chunk offset: %w", err)
+			}
+			if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
+				return fmt.Errorf("failed to write chunk digest: %w", err)
+			}
 
 			c.assignments_offset = append(c.assignments_offset, c.pos)
 			c.assignments = append(c.assignments, shahash)
@@ -111,16 +116,16 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) {
 		//No further break happened, append remaining data
 		c.current_chunk = append(c.current_chunk, b...)
 	}
+	return nil
 }
 
-func (c *ChunkState) Eof(client *pbscommon.PBSClient) {
+func (c *ChunkState) Eof(client *pbscommon.PBSClient) error {
 	//Here we write the remainder of data for which cyclic hash did not trigger
 
 	if len(c.current_chunk) > 0 {
 		h := sha256.New()
-		_, err := h.Write(c.current_chunk)
-		if err != nil {
-			panic(err)
+		if _, err := h.Write(c.current_chunk); err != nil {
+			return fmt.Errorf("failed to hash final chunk: %w", err)
 		}
 
 		shahash := hex.EncodeToString(h.Sum(nil))

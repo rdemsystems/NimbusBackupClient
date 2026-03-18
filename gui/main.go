@@ -35,31 +35,28 @@ type WailsConfig struct {
 	} `json:"info"`
 }
 
-func init() {
-	// Load version from wails.json
-	data, err := os.ReadFile("wails.json")
-	if err != nil {
-		appVersion = "dev" // Fallback for development
-		return
-	}
-
-	var config WailsConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		appVersion = "dev"
-		return
-	}
-
-	appVersion = config.Info.ProductVersion
-	if appVersion == "" {
-		appVersion = "dev"
-	}
-
 var (
 	debugLogPath    string
 	crashReportPath string
 )
 
 func init() {
+	// Load version from wails.json
+	data, err := os.ReadFile("wails.json")
+	if err != nil {
+		appVersion = "dev" // Fallback for development
+	} else {
+		var config WailsConfig
+		if err := json.Unmarshal(data, &config); err != nil {
+			appVersion = "dev"
+		} else {
+			appVersion = config.Info.ProductVersion
+			if appVersion == "" {
+				appVersion = "dev"
+			}
+		}
+	}
+
 	// Get executable directory for crash reports
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
