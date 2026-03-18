@@ -102,7 +102,7 @@ func main() {
 			crashMsg := fmt.Sprintf("PANIC in main: %v\n%s", r, debug.Stack())
 			writeDebugLog(crashMsg)
 			writeCrashReport(crashMsg)
-			fmt.Fprintf(os.Stderr, "\n!!! APPLICATION CRASHED !!!\nSee crash_report.txt for details\n")
+			fmt.Fprint(os.Stderr, "\n!!! APPLICATION CRASHED !!!\nSee crash_report.txt for details\n")
 			os.Exit(1)
 		}
 	}()
@@ -160,7 +160,7 @@ func main() {
 		errMsg := fmt.Sprintf("ERROR: Wails.Run failed: %v\nStack trace:\n%s", err, debug.Stack())
 		writeDebugLog(errMsg)
 		writeCrashReport(errMsg)
-		fmt.Fprintf(os.Stderr, "\n!!! APPLICATION FAILED TO START !!!\n")
+		fmt.Fprint(os.Stderr, "\n!!! APPLICATION FAILED TO START !!!\n")
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Check crash_report.txt and %s\n", debugLogPath)
 		os.Exit(1)
