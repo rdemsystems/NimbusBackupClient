@@ -24,6 +24,18 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      - name: Install dependencies
+        working-directory: gui
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev
+
+      - name: Tidy dependencies
+        working-directory: gui
+        env:
+          GOWORK: off
+        run: go mod tidy
+
       - name: Run gosec
         env:
           GOWORK: off
@@ -53,6 +65,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev
+
+      - name: Tidy dependencies
+        working-directory: gui
+        env:
+          GOWORK: off
+        run: go mod tidy
 
       - name: Run tests
         working-directory: gui
