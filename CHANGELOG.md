@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-03-18
+
+### Fixed
+- **Junction point handling** - Critical fix for Windows backup failures
+  - Added detection of junction points/symlinks using os.Lstat()
+  - Automatically skip junction points with log message
+  - Prevents "access denied" errors on system symlinks
+  - Fixes backup failures introduced in v0.1.0 error handling refactor
+
+### Technical Details
+- Windows junction points (Application Data, Local Settings, etc.) are now detected and skipped
+- Uses os.ModeSymlink check to identify reparse points
+- Logs skipped paths: "Skipping junction point/symlink: [path]"
+- Returns nil error to continue backup without failing
+- Restores v0.0.23 behavior (skip junction points) with proper logging
+
+### Root Cause Analysis
+- v0.0.23: Junction point errors silently ignored → backup succeeds
+- v0.1.0 (commit 756da98 @ 09:20): Error handling added → backup fails on junction points
+- v0.1.26: Smart detection + graceful skip → backup succeeds with transparency
+
+## [0.1.25] - 2026-03-18
+
+### Fixed
+- **Version always showing "dev"** - CRITICAL FIX
+  - os.ReadFile("wails.json") doesn't work in compiled binary
+  - wails.json is not embedded in the executable
+  - Hardcoded version in main.go until ldflags injection is configured
+  - Now shows correct version "0.1.25" in About screen
+
+### Technical
+- Removed runtime wails.json reading (file doesn't exist in binary)
+- Hardcoded appVersion = "0.1.25" in main.go
+- Future: Use wails build -ldflags to inject version at compile time
+
 ## [0.1.24] - 2026-03-18
 
 ### Added

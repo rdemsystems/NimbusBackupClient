@@ -28,13 +28,8 @@ const (
 	appName = "Nimbus Backup"
 )
 
-var appVersion string // Loaded from wails.json
-
-type WailsConfig struct {
-	Info struct {
-		ProductVersion string `json:"productVersion"`
-	} `json:"info"`
-}
+// Version will be injected at build time via ldflags
+var appVersion = "0.1.26" // Updated manually until ldflags injection works
 
 var (
 	debugLogPath    string
@@ -42,21 +37,6 @@ var (
 )
 
 func init() {
-	// Load version from wails.json
-	data, err := os.ReadFile("wails.json")
-	if err != nil {
-		appVersion = "dev" // Fallback for development
-	} else {
-		var config WailsConfig
-		if err := json.Unmarshal(data, &config); err != nil {
-			appVersion = "dev"
-		} else {
-			appVersion = config.Info.ProductVersion
-			if appVersion == "" {
-				appVersion = "dev"
-			}
-		}
-	}
 
 	// Get executable directory for crash reports
 	exePath, _ := os.Executable()

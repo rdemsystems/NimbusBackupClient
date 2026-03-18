@@ -240,14 +240,22 @@ func append_u64_7bit(a []byte, v uint64) []byte {
 
 func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (CatalogDir, error) {
 	//fmt.Printf("Write dir %s at %d\n", path, a.pos)
+
+	// Check if directory is a junction point/symlink before reading it
+	fileInfo, err := os.Lstat(path)
+	if err != nil {
+		return CatalogDir{}, fmt.Errorf("failed to stat %s: %w", path, err)
+	}
+
+	// Skip directory junction points to avoid infinite loops and access errors
+	if !toplevel && fileInfo.Mode()&os.ModeSymlink != 0 {
+		fmt.Printf("Skipping directory junction point: %s\n", path)
+		return CatalogDir{}, nil // Return nil error to continue backup
+	}
+
 	files, err := os.ReadDir(path)
 	if err != nil {
 		return CatalogDir{}, fmt.Errorf("failed to read directory %s: %w", path, err)
-	}
-
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		return CatalogDir{}, fmt.Errorf("failed to stat %s: %w", path, err)
 	}
 
 	//Avoid writing filename entry on root
@@ -439,9 +447,17 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 // So backing up single file is not possible
 func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, error) {
 	//fmt.Printf("Write file %s at %d\n", path, a.pos)
-	fileInfo, err := os.Stat(path)
+
+	// Use Lstat to detect symlinks/junction points without following them
+	fileInfo, err := os.Lstat(path)
 	if err != nil {
 		return CatalogFile{}, fmt.Errorf("failed to stat %s: %w", path, err)
+	}
+
+	// Skip junction points and symlinks (common on Windows: "Application Data", etc.)
+	if fileInfo.Mode()&os.ModeSymlink != 0 {
+		fmt.Printf("Skipping junction point/symlink: %s\n", path)
+		return CatalogFile{}, nil // Return nil error to continue backup
 	}
 
 	file, err := os.Open(path)
