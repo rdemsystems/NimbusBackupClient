@@ -278,7 +278,7 @@ func RunBackupInline(opts BackupOptions) error {
 	}
 
 	if len(opts.BackupDirs) == 0 {
-		return fmt.Errorf("At least one backup directory or drive required")
+		return fmt.Errorf("at least one backup directory or drive required")
 	}
 
 	// Use hostname as backup ID if not specified

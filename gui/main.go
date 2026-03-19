@@ -402,22 +402,22 @@ func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters [
 
 	// Validate BackupID
 	if backupID == "" {
-		return fmt.Errorf("Backup ID requis")
+		return fmt.Errorf("backup ID requis")
 	}
 	if err := security.ValidateBackupID(backupID); err != nil {
-		return fmt.Errorf("Backup ID invalide: %w", err)
+		return fmt.Errorf("backup ID invalide: %w", err)
 	}
 
 	// Validate backup directories
 	for _, dir := range backupDirs {
 		if err := security.ValidatePath(dir); err != nil {
-			return fmt.Errorf("Chemin invalide '%s': %w", dir, err)
+			return fmt.Errorf("chemin invalide '%s': %w", dir, err)
 		}
 	}
 
 	// Check admin privileges if VSS is requested
 	if useVSS && !isAdmin() {
-		return fmt.Errorf("VSS (Shadow Copy) nécessite les privilèges administrateur. Veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS.")
+		return fmt.Errorf("VSS (Shadow Copy) nécessite les privilèges administrateur - veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS")
 	}
 
 	// Validate PBS config
@@ -429,13 +429,13 @@ func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters [
 	var targetDirs []string
 	if backupType == "directory" {
 		if len(backupDirs) == 0 {
-			return fmt.Errorf("Au moins un répertoire de sauvegarde requis")
+			return fmt.Errorf("au moins un répertoire de sauvegarde requis")
 		}
 		targetDirs = backupDirs
 	}
 	if backupType == "machine" {
 		if len(driveLetters) == 0 {
-			return fmt.Errorf("Au moins un disque physique requis")
+			return fmt.Errorf("au moins un disque physique requis")
 		}
 		// Physical drive paths are used directly (e.g., \\.\PhysicalDrive0)
 		targetDirs = driveLetters
@@ -529,7 +529,7 @@ func (a *App) ListSnapshots(backupID string) ([]map[string]string, error) {
 	snapshots, err := rm.ListSnapshots()
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("Failed to list snapshots: %v", err))
-		return nil, fmt.Errorf("Échec de la liste des snapshots: %v", err)
+		return nil, fmt.Errorf("échec de la liste des snapshots: %v", err)
 	}
 
 	// Convert to map format for frontend
@@ -565,7 +565,7 @@ func (a *App) RestoreSnapshot(snapshotID, destPath string) error {
 	}
 
 	if destPath == "" {
-		return fmt.Errorf("Chemin de destination requis")
+		return fmt.Errorf("chemin de destination requis")
 	}
 
 	// Create restore manager
@@ -592,7 +592,7 @@ func (a *App) RestoreSnapshot(snapshotID, destPath string) error {
 	err = rm.RestoreFile(snapshot, snapshot.Files[0], destPath)
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("Failed to restore: %v", err))
-		return fmt.Errorf("Échec de la restauration: %v", err)
+		return fmt.Errorf("échec de la restauration: %v", err)
 	}
 
 	writeDebugLog("Restore completed successfully")

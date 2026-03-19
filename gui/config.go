@@ -95,43 +95,43 @@ func (c *Config) Validate() error {
 
 	// Validate AuthID
 	if c.AuthID == "" {
-		return fmt.Errorf("Authentication ID requis")
+		return fmt.Errorf("authentication ID requis")
 	}
 	if err := security.ValidateAuthID(c.AuthID); err != nil {
-		return fmt.Errorf("Authentication ID invalide: %w", err)
+		return fmt.Errorf("authentication ID invalide: %w", err)
 	}
 
 	// Validate Secret (non-empty check)
 	if c.Secret == "" {
-		return fmt.Errorf("Secret requis")
+		return fmt.Errorf("secret requis")
 	}
 
 	// Validate Datastore
 	if c.Datastore == "" {
-		return fmt.Errorf("Datastore requis")
+		return fmt.Errorf("datastore requis")
 	}
 	if err := security.ValidateDatastore(c.Datastore); err != nil {
-		return fmt.Errorf("Datastore invalide: %w", err)
+		return fmt.Errorf("datastore invalide: %w", err)
 	}
 
 	// Validate BackupID if present
 	if c.BackupID != "" {
 		if err := security.ValidateBackupID(c.BackupID); err != nil {
-			return fmt.Errorf("Backup ID invalide: %w", err)
+			return fmt.Errorf("backup ID invalide: %w", err)
 		}
 	}
 
 	// Validate Certificate Fingerprint if present
 	if c.CertFingerprint != "" {
 		if err := security.ValidateFingerprint(c.CertFingerprint); err != nil {
-			return fmt.Errorf("Empreinte certificat invalide: %w", err)
+			return fmt.Errorf("empreinte certificat invalide: %w", err)
 		}
 	}
 
 	// Validate BackupDir if present
 	if c.BackupDir != "" {
 		if err := security.ValidatePath(c.BackupDir); err != nil {
-			return fmt.Errorf("Chemin de backup invalide: %w", err)
+			return fmt.Errorf("chemin de backup invalide: %w", err)
 		}
 	}
 

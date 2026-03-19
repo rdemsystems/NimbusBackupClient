@@ -56,7 +56,7 @@ func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFing
 	manifests, err := client.ListSnapshots()
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("Failed to list snapshots: %v", err))
-		return nil, fmt.Errorf("Failed to list snapshots: %v", err)
+		return nil, fmt.Errorf("failed to list snapshots: %v", err)
 	}
 
 	result := make([]SnapshotInfo, 0)
@@ -105,11 +105,11 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	}
 
 	if opts.BackupID == "" {
-		return fmt.Errorf("Backup ID required")
+		return fmt.Errorf("backup ID required")
 	}
 
 	if opts.DestPath == "" {
-		return fmt.Errorf("Destination path required")
+		return fmt.Errorf("destination path required")
 	}
 
 	progress(0.05, "Connecting to PBS...")
@@ -138,7 +138,7 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	pxarData, err := client.DownloadToBytes("backup.pxar.didx")
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("Failed to download PXAR: %v", err))
-		return fmt.Errorf("Failed to download backup archive: %v", err)
+		return fmt.Errorf("failed to download backup archive: %v", err)
 	}
 
 	writeDebugLog(fmt.Sprintf("Downloaded %d bytes", len(pxarData)))
@@ -150,13 +150,13 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	// Create destination directory if it doesn't exist
 	err = os.MkdirAll(opts.DestPath, 0755)
 	if err != nil {
-		return fmt.Errorf("Failed to create destination directory: %v", err)
+		return fmt.Errorf("failed to create destination directory: %v", err)
 	}
 
 	pxarFile := filepath.Join(opts.DestPath, "backup.pxar")
 	err = os.WriteFile(pxarFile, pxarData, 0644)
 	if err != nil {
-		return fmt.Errorf("Failed to save PXAR file: %v", err)
+		return fmt.Errorf("failed to save PXAR file: %v", err)
 	}
 
 	writeDebugLog(fmt.Sprintf("Saved PXAR file to: %s", pxarFile))
