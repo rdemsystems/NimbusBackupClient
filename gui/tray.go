@@ -4,6 +4,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -59,9 +61,16 @@ func onReady(a *App) func() {
 					runtime.WindowUnminimise(a.ctx)
 				case <-menuQuit.ClickedCh:
 					writeDebugLog("Tray: Quit clicked")
-					// Quit the application
-					runtime.Quit(a.ctx)
+					// Quit systray first
 					systray.Quit()
+					// Request Wails shutdown
+					runtime.Quit(a.ctx)
+					// Force exit after short delay if graceful shutdown doesn't work
+					go func() {
+						time.Sleep(2 * time.Second)
+						writeDebugLog("Force exit after timeout")
+						os.Exit(0)
+					}()
 				}
 			}
 		}()

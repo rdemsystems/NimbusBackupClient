@@ -140,6 +140,53 @@ func (a *App) GetScheduledJobs() ([]ScheduledJob, error) {
 	return jobs, nil
 }
 
+// UpdateScheduledJob updates an existing scheduled job
+func (a *App) UpdateScheduledJob(job ScheduledJob) error {
+	writeDebugLog(fmt.Sprintf("UpdateScheduledJob called for: %s", job.Name))
+
+	// Load existing jobs
+	jobs, err := a.GetScheduledJobs()
+	if err != nil {
+		return fmt.Errorf("failed to load jobs: %w", err)
+	}
+
+	// Find and update the job
+	found := false
+	for i, j := range jobs {
+		if j.ID == job.ID {
+			// Preserve enabled state
+			job.Enabled = j.Enabled
+			// Recalculate next run with new schedule time
+			job.NextRun = calculateNextRun(job.ScheduleTime)
+			jobs[i] = job
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("job with ID %s not found", job.ID)
+	}
+
+	// Save to file
+	jobsPath, err := getScheduledJobsPath()
+	if err != nil {
+		return fmt.Errorf("failed to get jobs path: %w", err)
+	}
+
+	data, err := json.MarshalIndent(jobs, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal jobs: %w", err)
+	}
+
+	if err := os.WriteFile(jobsPath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write jobs file: %w", err)
+	}
+
+	writeDebugLog(fmt.Sprintf("Scheduled job updated: %s (next run: %s)", job.Name, job.NextRun))
+	return nil
+}
+
 // DeleteScheduledJob removes a scheduled job by ID
 func (a *App) DeleteScheduledJob(jobID string) error {
 	writeDebugLog(fmt.Sprintf("DeleteScheduledJob called for ID: %s", jobID))

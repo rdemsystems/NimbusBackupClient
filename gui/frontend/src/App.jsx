@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 
 // Wails runtime imports (will be available when built with Wails)
 let GetConfigWithHostname, SaveConfig, TestConnection, StartBackup, ListSnapshots, RestoreSnapshot, ListPhysicalDisks, GetVersion, EventsOn
-let SaveScheduledJob, GetScheduledJobs, DeleteScheduledJob, GetJobHistory
+let SaveScheduledJob, UpdateScheduledJob, GetScheduledJobs, DeleteScheduledJob, GetJobHistory
 let EnableAutoStart, DisableAutoStart, IsAutoStartEnabled
 
 // Check if we're running in Wails
@@ -16,6 +16,7 @@ if (window.go) {
   ListPhysicalDisks = window.go.main.App.ListPhysicalDisks
   GetVersion = window.go.main.App.GetVersion
   SaveScheduledJob = window.go.main.App.SaveScheduledJob
+  UpdateScheduledJob = window.go.main.App.UpdateScheduledJob
   GetScheduledJobs = window.go.main.App.GetScheduledJobs
   DeleteScheduledJob = window.go.main.App.DeleteScheduledJob
   GetJobHistory = window.go.main.App.GetJobHistory
@@ -58,6 +59,7 @@ function App() {
   const [runAtStartup, setRunAtStartup] = useState(false)
   const [scheduledJobs, setScheduledJobs] = useState([])
   const [jobHistory, setJobHistory] = useState([])
+  const [editingJobId, setEditingJobId] = useState(null) // Track which job is being edited
   const [backupStats, setBackupStats] = useState({
     startTime: null,
     lastUpdate: null,
@@ -322,15 +324,15 @@ function App() {
       return
     }
 
-    // Scheduled mode - save job instead of executing immediately
+    // Scheduled mode - save or update job instead of executing immediately
     if (backupMode === 'scheduled') {
-      if (!SaveScheduledJob) {
+      if (!SaveScheduledJob || !UpdateScheduledJob) {
         showStatus('❌ Fonction de planification non disponible', 'error')
         return
       }
 
-      const newJob = {
-        id: Date.now().toString(),
+      const jobData = {
+        id: editingJobId || Date.now().toString(),
         name: `Backup ${config['backup-id'] || hostname}`,
         scheduleTime: scheduleTime,
         runAtStartup: runAtStartup,
@@ -341,11 +343,24 @@ function App() {
         excludeList: excludeList.split('\n').filter(l => l.trim())
       }
 
-      // Save to backend
+      // Save or update to backend
       try {
-        await SaveScheduledJob(newJob)
-        setScheduledJobs([...scheduledJobs, newJob])
-        showStatus(`✅ Backup planifié pour ${scheduleTime}`, 'success')
+        if (editingJobId) {
+          // Update existing job
+          await UpdateScheduledJob(jobData)
+          setScheduledJobs(scheduledJobs.map(j => j.id === editingJobId ? jobData : j))
+          showStatus(`✅ Backup modifié pour ${scheduleTime}`, 'success')
+          setEditingJobId(null)
+        } else {
+          // Create new job
+          await SaveScheduledJob(jobData)
+          setScheduledJobs([...scheduledJobs, jobData])
+          showStatus(`✅ Backup planifié pour ${scheduleTime}`, 'success')
+        }
+        // Reset form after save
+        setScheduleTime('02:00')
+        setRunAtStartup(false)
+        setBackupDirs('')
       } catch (err) {
         showStatus(`❌ Erreur: ${err}`, 'error')
       }
@@ -617,6 +632,12 @@ function App() {
             <div className="card" style={{marginTop: '20px', padding: '20px'}}>
               <h3 style={{marginTop: 0}}>⏰ Configuration de la planification</h3>
 
+              {editingJobId && (
+                <div className="info-box" style={{backgroundColor: '#fff3cd', borderColor: '#ffc107', marginBottom: '15px'}}>
+                  ✏️ <strong>Mode édition</strong> - Modifiez les paramètres et cliquez sur "Mettre à jour"
+                </div>
+              )}
+
               <div className="form-group">
                 <label>Heure d'exécution quotidienne</label>
                 <input
@@ -781,11 +802,22 @@ function App() {
           <button className="btn" onClick={handleStartBackup} disabled={progress > 0 && progress < 100}>
             {backupMode === 'oneshot'
               ? (progress > 0 && progress < 100 ? '⏳ Sauvegarde en cours...' : '🚀 Démarrer la sauvegarde')
-              : '💾 Enregistrer la planification'
+              : (editingJobId ? '✏️ Mettre à jour la planification' : '💾 Enregistrer la planification')
             }
           </button>
           {backupMode === 'oneshot' && (
             <button className="btn btn-secondary" onClick={() => setProgress(0)} disabled={progress === 0}>Arrêter</button>
+          )}
+          {backupMode === 'scheduled' && editingJobId && (
+            <button className="btn btn-secondary" onClick={() => {
+              setEditingJobId(null)
+              setScheduleTime('02:00')
+              setRunAtStartup(false)
+              setBackupDirs('')
+              showStatus('✖️ Édition annulée', 'info')
+            }}>
+              ✖️ Annuler
+            </button>
           )}
 
           {/* Scheduled Jobs List */}
@@ -812,6 +844,24 @@ function App() {
                     </div>
                     <div style={{display: 'flex', gap: '10px'}}>
                       <button
+                        className="btn"
+                        style={{padding: '8px 15px', fontSize: '14px'}}
+                        onClick={() => {
+                          // Load job data into form for editing
+                          setEditingJobId(job.id)
+                          setScheduleTime(job.scheduleTime)
+                          setRunAtStartup(job.runAtStartup)
+                          setBackupDirs(job.backupDirs.join('\n'))
+                          setConfig({...config, 'backup-id': job.backupId, usevss: job.useVSS})
+                          setBackupType(job.backupType)
+                          setExcludeList(job.excludeList.join('\n'))
+                          showStatus('✏️ Mode édition - modifiez et sauvegardez', 'info')
+                          window.scrollTo({top: 0, behavior: 'smooth'})
+                        }}
+                      >
+                        ✏️ Éditer
+                      </button>
+                      <button
                         className="btn btn-secondary"
                         style={{padding: '8px 15px', fontSize: '14px'}}
                         onClick={async () => {
@@ -819,6 +869,10 @@ function App() {
                             await DeleteScheduledJob(job.id)
                             setScheduledJobs(scheduledJobs.filter(j => j.id !== job.id))
                             showStatus('Job supprimé', 'success')
+                            // Cancel edit mode if deleting the job being edited
+                            if (editingJobId === job.id) {
+                              setEditingJobId(null)
+                            }
                           } catch (err) {
                             showStatus(`❌ Erreur: ${err}`, 'error')
                           }
@@ -836,9 +890,9 @@ function App() {
           {/* Job History */}
           {jobHistory.length > 0 && (
             <div className="card" style={{marginTop: '30px'}}>
-              <h3 style={{marginTop: 0}}>📜 Historique des sauvegardes</h3>
+              <h3 style={{marginTop: 0}}>📜 Historique des sauvegardes (dernières 6)</h3>
               <div style={{maxHeight: '400px', overflowY: 'auto'}}>
-                {jobHistory.map(job => (
+                {jobHistory.slice(0, 6).map(job => (
                   <div key={job.id} style={{
                     padding: '15px',
                     marginBottom: '10px',
