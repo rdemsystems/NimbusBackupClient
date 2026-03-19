@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -14,7 +13,6 @@ type Server struct {
 	addr string
 	app  BackupHandler
 	mux  *http.ServeMux
-	mu   sync.Mutex
 }
 
 // BackupHandler interface that the service must implement
@@ -59,7 +57,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	status := StatusResponse{
 		Running:       true,
-		Version:       "0.1.58", // TODO: get from build
+		Version:       "0.1.61", // TODO: get from build
 		ActiveJobs:    0,         // TODO: track active jobs
 		Configuration: config,
 	}
@@ -147,7 +145,7 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 func (s *Server) writeJSON(w http.ResponseWriter, data interface{}, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 func (s *Server) writeError(w http.ResponseWriter, message string, status int) {

@@ -79,6 +79,11 @@
 
 ## 📜 Changelog récent
 
+### v0.1.61 (2026-03-19)
+- **FIX**: Version string mismatch in API server (0.1.58 → 0.1.61)
+- **FIX**: golangci-lint errcheck violations (6 issues fixed)
+- **FIX**: Remove unused sync.Mutex field from Server struct
+
 ### v0.1.60 (2026-03-19)
 - **FIX**: Compilation error - use standard log package in API
 - **QUALITY**: CI tests now pass (writeDebugLog undefined resolved)
@@ -104,5 +109,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.60
+**Version actuelle:** 0.1.61
 **Dernière mise à jour:** 2026-03-19

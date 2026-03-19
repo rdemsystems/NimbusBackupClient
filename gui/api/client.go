@@ -41,7 +41,7 @@ func (c *Client) IsServiceAvailable() bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return resp.StatusCode == http.StatusOK
 }
@@ -52,7 +52,7 @@ func (c *Client) GetStatus() (*StatusResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to service: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("service returned error: %d", resp.StatusCode)
@@ -81,7 +81,7 @@ func (c *Client) StartBackup(req *BackupRequest) (*BackupResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to send backup request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -110,7 +110,7 @@ func (c *Client) GetJobs() (*JobsResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get jobs: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("service returned error: %d", resp.StatusCode)
