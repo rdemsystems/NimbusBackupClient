@@ -79,6 +79,11 @@
 
 ## 📜 Changelog récent
 
+### v0.1.54 (2026-03-19)
+- **FIX**: Remove deprecated gosimple linter (merged into staticcheck in v2.x)
+- **VERIFIED**: All dependencies already at latest compatible versions
+- **STATUS**: Go 1.25 + golangci-lint v2.11.3 fully compatible
+
 ### v0.1.53 (2026-03-19)
 - **FEAT**: New manual workflow for dependency updates (workflow_dispatch)
 - **FEAT**: Automatic dependency checker shows available updates
@@ -153,5 +158,5 @@
 
 ---
 
-**Version actuelle:** 0.1.53
+**Version actuelle:** 0.1.54
 **Dernière mise à jour:** 2026-03-19
