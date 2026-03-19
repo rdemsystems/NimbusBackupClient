@@ -114,6 +114,10 @@ func main() {
 	writeDebugLog(fmt.Sprintf("Debug log: %s", debugLogPath))
 	writeDebugLog(fmt.Sprintf("Crash report path: %s", crashReportPath))
 
+	// Clean up legacy auto-start from previous versions
+	// (Task Scheduler or Registry entries before MSI service)
+	CleanupLegacyAutoStart()
+
 	// Create app instance
 	app := NewApp()
 	writeDebugLog("App instance created")
