@@ -106,13 +106,12 @@ func (a *App) SaveScheduledJob(job ScheduledJob) error {
 
 	writeDebugLog(fmt.Sprintf("Scheduled job saved: %s (next run: %s)", job.Name, job.NextRun))
 
-	// If this job has runAtStartup enabled, ensure app auto-start is enabled
-	if job.RunAtStartup {
-		writeDebugLog("Job has runAtStartup=true, enabling system auto-start")
-		if err := a.EnableAutoStart(); err != nil {
-			writeDebugLog(fmt.Sprintf("Warning: Failed to enable auto-start: %v", err))
-			// Don't fail the whole operation if auto-start fails
-		}
+	// Enable system auto-start when any scheduled job exists
+	// This ensures the app runs in background to execute scheduled backups after reboot
+	writeDebugLog("Enabling system auto-start for scheduled backup execution")
+	if err := a.EnableAutoStart(); err != nil {
+		writeDebugLog(fmt.Sprintf("Warning: Failed to enable auto-start: %v", err))
+		// Don't fail the whole operation if auto-start fails
 	}
 
 	return nil
@@ -338,20 +337,8 @@ func (a *App) executeScheduledJob(job ScheduledJob) {
 
 	writeDebugLog(fmt.Sprintf("Executing scheduled job: %s", job.Name))
 
-	// Add to history as "running"
-	historyEntry := JobHistory{
-		ID:         fmt.Sprintf("%d", time.Now().Unix()),
-		Name:       job.Name,
-		Timestamp:  time.Now().Format(time.RFC3339),
-		Status:     "running",
-		Message:    "Backup en cours...",
-		BackupDirs: job.BackupDirs,
-		BackupID:   job.BackupID,
-		UseVSS:     job.UseVSS,
-	}
-	if err := a.AddJobHistory(historyEntry); err != nil {
-		writeDebugLog(fmt.Sprintf("Warning: Failed to add job history: %v", err))
-	}
+	// Prepare history entry (will be added at the end with final status)
+	startTime := time.Now()
 
 	// Map frontend BackupType to PBS BackupType
 	pbsBackupType := "host" // Default for directory backups
@@ -376,13 +363,20 @@ func (a *App) executeScheduledJob(job ScheduledJob) {
 			writeDebugLog(fmt.Sprintf("Scheduled backup progress: %.1f%% - %s", percent, message))
 		},
 		OnComplete: func(success bool, message string) {
-			// Update history entry
-			historyEntry.Status = "success"
-			historyEntry.Message = message
+			// Create history entry with final status
+			historyEntry := JobHistory{
+				ID:         fmt.Sprintf("%d", startTime.Unix()),
+				Name:       job.Name,
+				Timestamp:  time.Now().Format(time.RFC3339),
+				Status:     "success",
+				Message:    message,
+				BackupDirs: job.BackupDirs,
+				BackupID:   job.BackupID,
+				UseVSS:     job.UseVSS,
+			}
 			if !success {
 				historyEntry.Status = "failed"
 			}
-			historyEntry.Timestamp = time.Now().Format(time.RFC3339)
 			if err := a.AddJobHistory(historyEntry); err != nil {
 				writeDebugLog(fmt.Sprintf("Warning: Failed to add job history: %v", err))
 			}
@@ -395,9 +389,17 @@ func (a *App) executeScheduledJob(job ScheduledJob) {
 	err := RunBackupInline(opts)
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("Scheduled job error: %v", err))
-		historyEntry.Status = "failed"
-		historyEntry.Message = fmt.Sprintf("Erreur: %v", err)
-		historyEntry.Timestamp = time.Now().Format(time.RFC3339)
+		// Add error to history (OnComplete might not be called on error)
+		historyEntry := JobHistory{
+			ID:         fmt.Sprintf("%d", startTime.Unix()),
+			Name:       job.Name,
+			Timestamp:  time.Now().Format(time.RFC3339),
+			Status:     "failed",
+			Message:    fmt.Sprintf("Erreur: %v", err),
+			BackupDirs: job.BackupDirs,
+			BackupID:   job.BackupID,
+			UseVSS:     job.UseVSS,
+		}
 		if err := a.AddJobHistory(historyEntry); err != nil {
 			writeDebugLog(fmt.Sprintf("Warning: Failed to add job history: %v", err))
 		}

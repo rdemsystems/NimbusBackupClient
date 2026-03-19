@@ -207,9 +207,10 @@ jobs:
           cd artifacts/cli-macOS && tar -czf ../../release/nimbus-backup-cli-${{ steps.version.outputs.VERSION }}-macos.tar.gz *
           cd ../..
 
-          # GUI Windows - Add both .exe and .zip
+          # GUI Windows - Add both .exe (with and without version) and .zip
           cd artifacts/NimbusBackup-Windows
           cp NimbusBackup.exe ../../release/NimbusBackup-${{ steps.version.outputs.VERSION }}.exe
+          cp NimbusBackup.exe ../../release/NimbusBackup.exe
           zip ../../release/NimbusBackup-${{ steps.version.outputs.VERSION }}-windows.zip *
           cd ../..
 

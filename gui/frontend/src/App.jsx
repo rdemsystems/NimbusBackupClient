@@ -223,6 +223,19 @@ function App() {
     }
 
     loadSchedulerData()
+
+    // Refresh history every 10 seconds to update status of running jobs
+    const intervalId = setInterval(() => {
+      if (GetJobHistory) {
+        GetJobHistory().then(history => {
+          setJobHistory(history || [])
+        }).catch(err => {
+          console.error('Failed to refresh job history:', err)
+        })
+      }
+    }, 10000) // 10 seconds
+
+    return () => clearInterval(intervalId)
   }, [])
 
   const showStatus = (message, type) => {
