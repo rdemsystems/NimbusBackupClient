@@ -79,6 +79,10 @@
 
 ## 📜 Changelog récent
 
+### v0.1.45 (2026-03-19)
+- **FIX**: Upgrade CI to Go 1.23 for kardianos/service compatibility
+- **FIX**: Update go.work to require Go 1.23
+
 ### v0.1.44 (2026-03-19)
 - **FEAT**: Installateur MSI avec service Windows
 - **FEAT**: Service démarre automatiquement au boot avec privilèges admin
@@ -108,5 +112,5 @@
 
 ---
 
-**Version actuelle:** 0.1.44
+**Version actuelle:** 0.1.45
 **Dernière mise à jour:** 2026-03-19
