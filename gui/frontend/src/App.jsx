@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 
 // Wails runtime imports (will be available when built with Wails)
 let GetConfigWithHostname, SaveConfig, TestConnection, StartBackup, ListSnapshots, RestoreSnapshot, ListPhysicalDisks, GetVersion, EventsOn
-let SaveScheduledJob, UpdateScheduledJob, GetScheduledJobs, DeleteScheduledJob, GetJobHistory
+let SaveScheduledJob, UpdateScheduledJob, GetScheduledJobs, DeleteScheduledJob, GetJobHistory, GetSystemInfo
 
 // Check if we're running in Wails
 if (window.go) {
@@ -19,6 +19,7 @@ if (window.go) {
   GetScheduledJobs = window.go.main.App.GetScheduledJobs
   DeleteScheduledJob = window.go.main.App.DeleteScheduledJob
   GetJobHistory = window.go.main.App.GetJobHistory
+  GetSystemInfo = window.go.main.App.GetSystemInfo
 }
 
 // Wails events
@@ -30,6 +31,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('config')
   const [hostname, setHostname] = useState('')
   const [appVersion, setAppVersion] = useState('dev')
+  const [systemInfo, setSystemInfo] = useState({ mode: 'Standalone', is_admin: false, service_available: false })
   const [config, setConfig] = useState({
     baseurl: '',
     certfingerprint: '',
@@ -168,6 +170,12 @@ function App() {
           setAppVersion(version || 'dev')
         }
 
+        // Load system info (mode, admin status, service availability)
+        if (GetSystemInfo) {
+          const sysInfo = await GetSystemInfo()
+          setSystemInfo(sysInfo || { mode: 'Standalone', is_admin: false, service_available: false })
+        }
+
         if (GetConfigWithHostname) {
           const data = await GetConfigWithHostname()
           if (data) {
@@ -259,8 +267,8 @@ function App() {
         datastore: (config.datastore || '').trim(),
         namespace: (config.namespace || '').trim(),
         backupdir: (config.backupdir || '').trim(),
-        'backup-id': (config['backup-id'] || '').trim(),
-        usevss: config.usevss || false
+        'backup-id': (config['backup-id'] || '').trim() || hostname, // Use hostname if empty
+        usevss: config.usevss !== undefined ? config.usevss : true
       }
       await SaveConfig(trimmedConfig)
       setConfig(trimmedConfig)
@@ -286,8 +294,8 @@ function App() {
         datastore: (config.datastore || '').trim(),
         namespace: (config.namespace || '').trim(),
         backupdir: (config.backupdir || '').trim(),
-        'backup-id': (config['backup-id'] || '').trim(),
-        usevss: config.usevss || false
+        'backup-id': (config['backup-id'] || '').trim() || hostname, // Use hostname if empty
+        usevss: config.usevss !== undefined ? config.usevss : true
       }
       await TestConnection(testConfig)
       showStatus('✅ Connexion réussie !', 'success')
@@ -751,10 +759,16 @@ function App() {
               />
               Utiliser VSS (Windows Shadow Copy)
             </label>
-            {config.usevss && (
+            {config.usevss && systemInfo.mode === 'Standalone' && !systemInfo.is_admin && (
               <div className="info-box" style={{marginTop: '10px', backgroundColor: '#fff3cd', borderColor: '#ffc107'}}>
                 ⚠️ <strong>VSS nécessite des privilèges administrateur.</strong><br/>
                 Redémarrez l'application en tant qu'administrateur (clic droit → Exécuter en tant qu'administrateur) pour utiliser VSS.
+              </div>
+            )}
+            {config.usevss && systemInfo.service_available && (
+              <div className="info-box" style={{marginTop: '10px', backgroundColor: '#d1ecf1', borderColor: '#bee5eb'}}>
+                ℹ️ <strong>VSS disponible via le service.</strong><br/>
+                Le service Windows tourne avec les privilèges nécessaires pour VSS.
               </div>
             )}
           </div>
