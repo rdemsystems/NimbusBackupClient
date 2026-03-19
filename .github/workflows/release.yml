@@ -1,9 +1,11 @@
 name: Release Nimbus Backup
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Disabled tag trigger to avoid duplicate with build-and-release.yml
+  # Use build-and-release.yml for full CI/CD (CLI + GUI + tests)
+  # push:
+  #   tags:
+  #     - 'v*'
   workflow_dispatch:
 
 permissions:
