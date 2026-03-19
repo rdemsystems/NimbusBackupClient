@@ -59,10 +59,8 @@
         <ServiceControl
           Id="StartNimbusBackupService"
           Name="NimbusBackup"
-          Start="install"
           Stop="both"
-          Remove="uninstall"
-          Wait="yes" />
+          Remove="uninstall" />
       </Component>
     </DirectoryRef>
 
