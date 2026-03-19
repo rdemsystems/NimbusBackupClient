@@ -79,6 +79,10 @@
 
 ## 📜 Changelog récent
 
+### v0.1.52 (2026-03-19)
+- **FIX**: CI workspace modules - remove go mod download for local replacements
+- **FIX**: Resolves missing ziphash errors for clientcommon/pbscommon/retry/security/snapshot
+
 ### v0.1.51 (2026-03-19)
 - **REFACTOR**: CI now uses reproducible dependency management
 - **FIX**: golangci-lint v2.11.3 config compatibility (output.formats format)
@@ -143,5 +147,5 @@
 
 ---
 
-**Version actuelle:** 0.1.51
+**Version actuelle:** 0.1.52
 **Dernière mise à jour:** 2026-03-19
