@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-03-19
+
+### Added
+- **Liens upsell Nimbus Backup** - Génération de leads directement depuis l'app
+  - Bouton CTA dans onglet "À propos"
+  - Message conditionnel dans Config si PBS non configuré
+  - Tracking UTM complet (source, medium, campaign, content)
+  - Version dynamique dans paramètres UTM
+
+### Fixed
+- **Build CLI macOS** - NBD skip sur macOS (Linux/Windows uniquement)
+  - Détection GOOS dans Makefile
+  - NBD build uniquement sur plateformes supportées
+  - Message clair lors du skip: "macOS not supported"
+
 ## [0.1.30] - 2026-03-18
 
 ### Fixed
