@@ -79,6 +79,14 @@
 
 ## 📜 Changelog récent
 
+### v0.1.81 (2026-03-20)
+- **CRITICAL FIX**: Service now reloads config before each backup (no restart needed)
+- **FIX**: Pre-fill backup dirs from last successful backup (UX improvement)
+- **ARCHITECTURE**: Multi-PBS support planned (pbs1, pbs2, etc.)
+- **ARCHITECTURE**: Jobs managed by service, editable via API
+- **TODO**: Added API endpoints for reload config/jobs (`POST /api/reload/config`)
+- **TODO**: Remote API for MSP provisioning documented
+
 ### v0.1.80 (2026-03-20)
 - **FIX**: backup-id now falls back to hostname in SaveConfig & TestConnection
 - **FIX**: VSS warning only shows when mode=Standalone AND !is_admin
