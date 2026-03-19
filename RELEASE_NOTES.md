@@ -79,6 +79,11 @@
 
 ## 📜 Changelog récent
 
+### v0.1.48 (2026-03-19)
+- **UPGRADE**: Go 1.25 on CI/CD (GitHub Actions + GitLab CI)
+- **PERF**: +5-8% compilation speed, +5-8% runtime performance
+- **SECURITY**: Latest security patches and bug fixes from Go 1.25
+
 ### v0.1.47 (2026-03-19)
 - **FIX**: Correct GetConfigWithHostname() call signature in service.go
 - **FIX**: Simplify service config loading (loaded per-job when needed)
@@ -120,5 +125,5 @@
 
 ---
 
-**Version actuelle:** 0.1.47
+**Version actuelle:** 0.1.48
 **Dernière mise à jour:** 2026-03-19
