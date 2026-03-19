@@ -507,18 +507,18 @@ func (a *App) pollBackupProgress(jobID string) {
 
 // startBackupDirect performs backup directly (standalone mode)
 func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool) error {
-	// Sanitize backup ID for logging
-	sanitizedID := backupID
-	if backupID != "" {
-		sanitizedID = security.SanitizeForLog(backupID)
+	// Use hostname as fallback if backupID is empty
+	if backupID == "" {
+		backupID = a.GetHostname()
+		writeDebugLog(fmt.Sprintf("[Backup ID] Empty backup-id, using hostname: %s", backupID))
 	}
+
+	// Sanitize backup ID for logging
+	sanitizedID := security.SanitizeForLog(backupID)
 	writeDebugLog(fmt.Sprintf("[Standalone Mode] StartBackup: type=%s, id=%s, vss=%v, dir_count=%d",
 		backupType, sanitizedID, useVSS, len(backupDirs)))
 
-	// Validate BackupID
-	if backupID == "" {
-		return fmt.Errorf("backup ID requis")
-	}
+	// Validate BackupID (now guaranteed to be non-empty)
 	if err := security.ValidateBackupID(backupID); err != nil {
 		return fmt.Errorf("backup ID invalide: %w", err)
 	}

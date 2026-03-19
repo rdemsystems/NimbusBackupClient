@@ -79,6 +79,11 @@
 
 ## 📜 Changelog récent
 
+### v0.1.77 (2026-03-19)
+- **FIX**: Empty backup-id now fallbacks to hostname (as intended)
+- **FIX**: Backup no longer fails with empty backup-id field
+- **DOC**: Clarify service logs location (C:\ProgramData\NimbusBackup\debug.log)
+
 ### v0.1.76 (2026-03-19)
 - **UX**: Test Connection now tests form values without saving first
 - **FEATURE**: TestConnection() accepts optional config parameter
@@ -191,5 +196,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.76
+**Version actuelle:** 0.1.77
 **Dernière mise à jour:** 2026-03-19
