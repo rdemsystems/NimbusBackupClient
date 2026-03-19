@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -29,10 +30,12 @@ func (s *NimbusService) Start(svc service.Service) error {
 func (s *NimbusService) run() {
 	writeDebugLog("NimbusBackup service running")
 
-	// Initialize app
+	// Initialize app with background context (service has no Wails runtime)
 	s.app = &App{
+		ctx:           context.Background(),
 		config:        LoadConfig(),
 		stopScheduler: make(chan struct{}),
+		apiClient:     api.NewClient(),
 	}
 
 	// Load configuration (service will read config from file when needed)

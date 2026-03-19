@@ -79,6 +79,12 @@
 
 ## 📜 Changelog récent
 
+### v0.1.64 (2026-03-19)
+- **FIX**: Service crash on backup (EventsEmit with nil context)
+- **FIX**: Protect all EventsEmit calls with ctx nil check
+- **FIX**: Initialize service App with context.Background()
+- **QUALITY**: Service can now execute backups without crashing
+
 ### v0.1.63 (2026-03-19)
 - **FEAT**: HTTP API fully integrated (GUI-Service communication)
 - **FEAT**: Mode detection (Service vs Standalone) with automatic routing
@@ -124,5 +130,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.63
+**Version actuelle:** 0.1.64
 **Dernière mise à jour:** 2026-03-19

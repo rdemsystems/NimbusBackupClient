@@ -514,17 +514,23 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 		UseVSS:          useVSS,
 		OnProgress: func(percent float64, message string) {
 			writeDebugLog(fmt.Sprintf("Progress: %.1f%% - %s", percent*100, message))
-			runtime.EventsEmit(a.ctx, "backup:progress", map[string]interface{}{
-				"percent": percent * 100,
-				"message": message,
-			})
+			// Only emit events if Wails context is available (GUI mode)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "backup:progress", map[string]interface{}{
+					"percent": percent * 100,
+					"message": message,
+				})
+			}
 		},
 		OnComplete: func(success bool, message string) {
 			writeDebugLog(fmt.Sprintf("Backup complete: success=%v, %s", success, message))
-			runtime.EventsEmit(a.ctx, "backup:complete", map[string]interface{}{
-				"success": success,
-				"message": message,
-			})
+			// Only emit events if Wails context is available (GUI mode)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "backup:complete", map[string]interface{}{
+					"success": success,
+					"message": message,
+				})
+			}
 
 			// Add manual backup to history
 			historyEntry := JobHistory{
