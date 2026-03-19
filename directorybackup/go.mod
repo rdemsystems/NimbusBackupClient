@@ -1,6 +1,6 @@
 module directorybackup
 
-go 1.22
+go 1.25
 
 require (
 	github.com/cornelk/hashmap v1.0.8

@@ -30,11 +30,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev
 
-      - name: Tidy dependencies
+      - name: Update critical dependencies
         working-directory: gui
         env:
           GOWORK: off
-        run: go mod tidy
+        run: |
+          go get -u golang.org/x/crypto golang.org/x/net golang.org/x/sys golang.org/x/text
+          go get -u github.com/wailsapp/wails/v2
+          go mod tidy
 
       - name: Run gosec
         env:
@@ -45,7 +48,7 @@ jobs:
 
       - name: Install golangci-lint
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.8
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Run golangci-lint
@@ -71,11 +74,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev
 
-      - name: Tidy dependencies
+      - name: Update critical dependencies
         working-directory: gui
         env:
           GOWORK: off
-        run: go mod tidy
+        run: |
+          go get -u golang.org/x/crypto golang.org/x/net golang.org/x/sys golang.org/x/text
+          go get -u github.com/wailsapp/wails/v2
+          go mod tidy
 
       - name: Run tests
         working-directory: gui

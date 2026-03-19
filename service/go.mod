@@ -1,6 +1,6 @@
 module service
 
-go 1.22
+go 1.25
 
 require github.com/kardianos/service v1.2.2
 

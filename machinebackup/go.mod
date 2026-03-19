@@ -1,6 +1,6 @@
 module machinebackup
 
-go 1.22
+go 1.25
 
 require (
 	clientcommon v0.0.0
