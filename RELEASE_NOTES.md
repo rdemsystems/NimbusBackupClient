@@ -79,6 +79,12 @@
 
 ## 📜 Changelog récent
 
+### v0.1.49 (2026-03-19)
+- **FEAT**: MSI installer now included in GitHub releases
+- **FEAT**: Auto-cleanup legacy auto-start on app startup
+- **CI**: WiX Toolset integration in GitHub Actions
+- **DELIVERY**: Both .exe (standalone) and .msi (service) available
+
 ### v0.1.48 (2026-03-19)
 - **UPGRADE**: Go 1.25 on CI/CD (GitHub Actions + GitLab CI)
 - **PERF**: +5-8% compilation speed, +5-8% runtime performance
@@ -125,5 +131,5 @@
 
 ---
 
-**Version actuelle:** 0.1.48
+**Version actuelle:** 0.1.49
 **Dernière mise à jour:** 2026-03-19
