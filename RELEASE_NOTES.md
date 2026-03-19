@@ -79,6 +79,13 @@
 
 ## 📜 Changelog récent
 
+### v0.1.80 (2026-03-20)
+- **FIX**: backup-id now falls back to hostname in SaveConfig & TestConnection
+- **FIX**: VSS warning only shows when mode=Standalone AND !is_admin
+- **FEATURE**: Smart VSS warnings - info message when service available
+- **UX**: No more misleading VSS admin warnings when service has privileges
+- **UX**: Importing minimal JSON config no longer creates empty fields
+
 ### v0.1.79 (2026-03-19)
 - **CRITICAL FIX**: VSS admin check now only in standalone mode (not when using service)
 - **FIX**: Service can now use VSS without GUI being admin
