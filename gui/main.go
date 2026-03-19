@@ -238,8 +238,10 @@ func (a *App) domReady(ctx context.Context) {
 
 // beforeClose is called when the application is about to quit
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
-	writeDebugLog("App.beforeClose() called")
-	return false
+	writeDebugLog("App.beforeClose() called - minimizing to tray")
+	// Instead of closing, minimize to tray
+	a.MinimizeToTray()
+	return true // Prevent actual close
 }
 
 // shutdown is called at application termination

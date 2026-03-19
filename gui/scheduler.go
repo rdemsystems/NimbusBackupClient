@@ -6,8 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
+
+// runningJobs tracks currently executing jobs to prevent duplicates
+var runningJobs = make(map[string]bool)
+var runningJobsMutex sync.Mutex
 
 // ScheduledJob represents a scheduled backup job
 type ScheduledJob struct {
@@ -314,6 +319,23 @@ func (a *App) checkAndRunScheduledJobs() {
 
 // executeScheduledJob executes a scheduled job
 func (a *App) executeScheduledJob(job ScheduledJob) {
+	// Check if job is already running
+	runningJobsMutex.Lock()
+	if runningJobs[job.ID] {
+		writeDebugLog(fmt.Sprintf("Job %s is already running, skipping", job.Name))
+		runningJobsMutex.Unlock()
+		return
+	}
+	runningJobs[job.ID] = true
+	runningJobsMutex.Unlock()
+
+	// Ensure we mark as not running when done
+	defer func() {
+		runningJobsMutex.Lock()
+		delete(runningJobs, job.ID)
+		runningJobsMutex.Unlock()
+	}()
+
 	writeDebugLog(fmt.Sprintf("Executing scheduled job: %s", job.Name))
 
 	// Add to history as "running"
