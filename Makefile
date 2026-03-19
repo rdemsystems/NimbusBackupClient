@@ -51,8 +51,14 @@ install-deps:
 	cd gui/frontend && npm install
 
 # CLI Builds
+# NBD is Linux/Windows only, skip on macOS
+ifneq ($(shell go env GOOS),darwin)
 cli: cli-directory cli-machine cli-nbd
 	@echo "✅ All CLI tools built successfully"
+else
+cli: cli-directory cli-machine
+	@echo "✅ CLI tools built successfully (NBD skipped - macOS not supported)"
+endif
 
 cli-directory:
 	@echo "🔨 Building Directory Backup CLI..."
@@ -69,11 +75,15 @@ cli-machine:
 	@echo "✅ Built: $(BUILD_DIR)/$(CLI_MACHINE_BIN)"
 
 cli-nbd:
+ifneq ($(shell go env GOOS),darwin)
 	@echo "🔨 Building NBD Server CLI..."
 	@mkdir -p $(BUILD_DIR)
 	cd nbd && go mod tidy && go build $(GO_FLAGS) -ldflags="$(LDFLAGS)" \
 		-o ../$(BUILD_DIR)/$(CLI_NBD_BIN)$(shell go env GOEXE)
 	@echo "✅ Built: $(BUILD_DIR)/$(CLI_NBD_BIN)"
+else
+	@echo "⏭️  Skipping NBD Server CLI (macOS not supported)"
+endif
 
 # GUI Build
 gui:
