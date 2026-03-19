@@ -27,8 +27,9 @@ const (
 	appName = "Nimbus Backup"
 )
 
-// Version will be injected at build time via ldflags
-var appVersion = "0.1.32" // Updated manually until ldflags injection works
+// Version injected at build time via ldflags (-X main.appVersion=x.y.z)
+// Source of truth: gui/wails.json productVersion
+var appVersion = "dev" // Default for local dev without ldflags
 
 var (
 	debugLogPath    string

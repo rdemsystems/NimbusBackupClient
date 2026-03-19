@@ -87,8 +87,9 @@ endif
 
 # GUI Build
 gui:
-	@echo "🎨 Building GUI application..."
-	cd gui && wails build -clean -platform $(shell go env GOOS)/$(shell go env GOARCH)
+	@echo "🎨 Building GUI application (version $(VERSION))..."
+	cd gui && wails build -clean -platform $(shell go env GOOS)/$(shell go env GOARCH) \
+		-ldflags "-X main.appVersion=$(VERSION)"
 	@mkdir -p $(BUILD_DIR)
 	@cp gui/build/bin/$(GUI_BIN)$(shell go env GOEXE) $(BUILD_DIR)/
 	@echo "✅ Built: $(BUILD_DIR)/$(GUI_BIN)"

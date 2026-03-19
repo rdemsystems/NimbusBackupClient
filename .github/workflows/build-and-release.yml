@@ -143,11 +143,20 @@ jobs:
         working-directory: gui/frontend
         run: npm install
 
+      - name: Extract version from wails.json
+        id: version
+        working-directory: gui
+        run: |
+          $version = (Get-Content wails.json | ConvertFrom-Json).info.productVersion
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          echo "Building version: $version"
+        shell: pwsh
+
       - name: Build GUI
         working-directory: gui
         env:
           GOWORK: off
-        run: wails build -clean -platform windows/amd64
+        run: wails build -clean -platform windows/amd64 -ldflags "-X main.appVersion=${{ steps.version.outputs.VERSION }}"
 
       - name: Copy binary to dist
         run: |
