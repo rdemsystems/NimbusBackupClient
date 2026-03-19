@@ -106,13 +106,8 @@ func (a *App) SaveScheduledJob(job ScheduledJob) error {
 
 	writeDebugLog(fmt.Sprintf("Scheduled job saved: %s (next run: %s)", job.Name, job.NextRun))
 
-	// Enable system auto-start when any scheduled job exists
-	// This ensures the app runs in background to execute scheduled backups after reboot
-	writeDebugLog("Enabling system auto-start for scheduled backup execution")
-	if err := a.EnableAutoStart(); err != nil {
-		writeDebugLog(fmt.Sprintf("Warning: Failed to enable auto-start: %v", err))
-		// Don't fail the whole operation if auto-start fails
-	}
+	// Note: For automatic execution after reboot, use the MSI installer
+	// which installs NimbusBackup as a Windows Service
 
 	return nil
 }

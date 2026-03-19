@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react'
 // Wails runtime imports (will be available when built with Wails)
 let GetConfigWithHostname, SaveConfig, TestConnection, StartBackup, ListSnapshots, RestoreSnapshot, ListPhysicalDisks, GetVersion, EventsOn
 let SaveScheduledJob, UpdateScheduledJob, GetScheduledJobs, DeleteScheduledJob, GetJobHistory
-let EnableAutoStart, DisableAutoStart, IsAutoStartEnabled
 
 // Check if we're running in Wails
 if (window.go) {
@@ -20,9 +19,6 @@ if (window.go) {
   GetScheduledJobs = window.go.main.App.GetScheduledJobs
   DeleteScheduledJob = window.go.main.App.DeleteScheduledJob
   GetJobHistory = window.go.main.App.GetJobHistory
-  EnableAutoStart = window.go.main.App.EnableAutoStart
-  DisableAutoStart = window.go.main.App.DisableAutoStart
-  IsAutoStartEnabled = window.go.main.App.IsAutoStartEnabled
 }
 
 // Wails events

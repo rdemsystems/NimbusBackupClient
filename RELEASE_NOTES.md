@@ -1,5 +1,22 @@
 # Nimbus Backup - Release Notes
 
+## 📦 Versions disponibles
+
+### NimbusBackup.exe (Standalone)
+- ✅ **Backups manuels** : Fonctionne parfaitement
+- ✅ **Backups planifiés** : OK quand l'application est lancée manuellement
+- ❌ **Persistance au reboot** : Non - l'application ne redémarre pas automatiquement
+- 💡 **Usage** : Idéal pour backups ponctuels ou tests
+
+### NimbusBackup.msi (Installateur - Recommandé)
+- ✅ **Service Windows** : Démarre automatiquement au boot système
+- ✅ **Privilèges admin** : Service tourne toujours avec droits admin (VSS garanti)
+- ✅ **Backups planifiés** : Exécutés automatiquement même après reboot
+- ✅ **Désinstallation propre** : Nettoyage complet via Panneau de configuration
+- 💡 **Usage** : Production et backups automatiques fiables
+
+---
+
 ## ✅ Works (Fonctionnalités opérationnelles)
 
 ### Backup & Restore
@@ -15,9 +32,9 @@
 - ✅ Interface graphique Wails (Go + React)
 - ✅ Historique des backups (6 derniers affichés)
 - ✅ Relance des backups échoués
-- ✅ Mode "Run at startup" pour jobs planifiés
+- ✅ Planification quotidienne avec heure configurable
 - ✅ Barre de progression avec statistiques
-- ✅ Minimize to tray
+- ✅ Minimize to tray avec icône visible
 - ✅ Exit from tray (force quit after 2s)
 
 ### Configuration
@@ -28,17 +45,17 @@
 
 ## 🚧 In Progress (En cours de développement)
 
-- 🔄 **Systray icon visible** (v0.1.42 - fix avec go:embed du vrai .ico, en test)
-- 🔄 **Auto-start avec privilèges admin** (v0.1.42 - Task Scheduler HIGHEST, en test)
-- 🔄 **Fix double lancement au boot** (v0.1.42 - cleanup + délai, en test)
+- 🔄 **Installateur MSI** (v0.1.44 - service Windows pour persistance au reboot)
+- 🔄 **Service Windows** (backups automatiques même après reboot)
+- 🔄 **Vérification stabilité scheduler** (monitoring jobs planifiés)
 
 ## 📋 TODO (À faire)
 
 ### Priorité haute
 - 🌍 **Traduction EN** (interface actuellement en français uniquement)
-- 📦 **Installateur MSI** (plus professionnel que .exe standalone)
 - 🔧 **Amélioration gestion erreurs VSS** (messages plus clairs)
 - 🔔 **Notifications Windows** (succès/échec des backups planifiés)
+- 📊 **Dashboard service status** (afficher état du service Windows)
 
 ### Priorité moyenne
 - 📊 **Statistiques détaillées** (taille sauvegardée, durée, vitesse moyenne)
@@ -56,12 +73,26 @@
 
 ## 📌 Known Issues (Problèmes connus)
 
-- ⚠️ Icône systray peut être transparente (fix v0.1.42 en test)
-- ⚠️ Double lancement au boot (fix v0.1.42 en test)
+- ⚠️ **Version .exe standalone** : Pas de persistance au reboot → Utiliser le MSI pour production
 - ⚠️ Pas de validation du format des exclusions
 - ⚠️ Interface uniquement en français
 
 ## 📜 Changelog récent
+
+### v0.1.44 (2026-03-19)
+- **FEAT**: Installateur MSI avec service Windows
+- **FEAT**: Service démarre automatiquement au boot avec privilèges admin
+- **FEAT**: Support flag `--service` pour mode service
+- **FEAT**: Persistance garantie après reboot (MSI uniquement)
+- **REMOVED**: Code d'auto-start (remplacé par service Windows)
+- **DOCS**: Distinction claire .exe (standalone) vs .msi (service)
+- **DOCS**: Guide complet de build et installation du MSI
+
+### v0.1.43 (2026-03-19)
+- **FEAT**: Système de release notes automatiques (Works/In Progress/TODO)
+- **FEAT**: Section "Tested with NimbusBackup" dans les releases
+- **DOCS**: Ajout section managed service dans README
+- **DOCS**: Workflow GitHub met à jour les release notes automatiquement
 
 ### v0.1.42 (2026-03-19)
 - **FIX**: Icône systray embarquée depuis vrai .ico (go:embed)
@@ -77,5 +108,5 @@
 
 ---
 
-**Version actuelle:** 0.1.42
+**Version actuelle:** 0.1.44
 **Dernière mise à jour:** 2026-03-19

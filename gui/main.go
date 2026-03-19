@@ -79,7 +79,14 @@ func init() {
 func main() {
 	// Parse command line flags
 	minimized := flag.Bool("minimized", false, "Start minimized to system tray")
+	serviceMode := flag.Bool("service", false, "Run as Windows Service")
 	flag.Parse()
+
+	// Check if running as Windows Service
+	if *serviceMode || IsServiceMode() {
+		RunAsService()
+		return
+	}
 
 	// Setup panic recovery for main
 	defer func() {

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?define ProductName = "Nimbus Backup" ?>
+  <?define ProductVersion = "0.1.44" ?>
+  <?define Manufacturer = "RDEM Systems" ?>
+  <?define UpgradeCode = "12345678-1234-1234-1234-123456789012" ?>
+
+  <Product Id="*"
+           Name="$(var.ProductName)"
+           Language="1033"
+           Version="$(var.ProductVersion)"
+           Manufacturer="$(var.Manufacturer)"
+           UpgradeCode="$(var.UpgradeCode)">
+
+    <Package InstallerVersion="200"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="$(var.ProductName) - Proxmox Backup Server Client"
+             Comments="Backup client with automatic scheduling and VSS support" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Installation directory -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="NimbusBackup" />
+      </Directory>
+
+      <!-- Start Menu shortcut -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Nimbus Backup"/>
+      </Directory>
+    </Directory>
+
+    <!-- Main application files -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="MainExecutable" Guid="*" Win64="yes">
+        <File Id="NimbusBackupEXE"
+              Source="../../gui/build/bin/NimbusBackup.exe"
+              KeyPath="yes" />
+
+        <!-- Service installation -->
+        <ServiceInstall
+          Id="NimbusBackupService"
+          Type="ownProcess"
+          Name="NimbusBackup"
+          DisplayName="Nimbus Backup Service"
+          Description="Executes scheduled backups to Proxmox Backup Server with VSS support"
+          Start="auto"
+          Account="LocalSystem"
+          ErrorControl="normal"
+          Interactive="no"
+          Arguments="--service">
+          <ServiceDependency Id="RPCSS"/>
+        </ServiceInstall>
+
+        <ServiceControl
+          Id="StartNimbusBackupService"
+          Name="NimbusBackup"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Start Menu shortcut -->
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcut" Guid="*">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="Nimbus Backup"
+                  Description="Backup client for Proxmox Backup Server"
+                  Target="[INSTALLFOLDER]NimbusBackup.exe"
+                  WorkingDirectory="INSTALLFOLDER"/>
+        <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
+        <RegistryValue Root="HKCU"
+                       Key="Software\RDEMSystems\NimbusBackup"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes"/>
+      </Component>
+    </DirectoryRef>
+
+    <!-- Features -->
+    <Feature Id="ProductFeature"
+             Title="Nimbus Backup"
+             Level="1"
+             Description="Complete backup solution with automatic scheduling">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+
+    <!-- UI -->
+    <UIRef Id="WixUI_InstallDir" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+    <!-- Custom banner and dialog images -->
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+    <WixVariable Id="WixUIBannerBmp" Value="Banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="Dialog.bmp" />
+
+  </Product>
+</Wix>
