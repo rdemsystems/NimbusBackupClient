@@ -250,17 +250,17 @@ function App() {
     }
 
     try {
-      // Trim all string values to remove whitespace
+      // Trim all string values to remove whitespace (with safe fallback for undefined)
       const trimmedConfig = {
-        baseurl: config.baseurl.trim(),
-        certfingerprint: config.certfingerprint.trim(),
-        authid: config.authid.trim(),
-        secret: config.secret.trim(),
-        datastore: config.datastore.trim(),
-        namespace: config.namespace.trim(),
-        backupdir: config.backupdir.trim(),
-        'backup-id': config['backup-id'].trim(),
-        usevss: config.usevss
+        baseurl: (config.baseurl || '').trim(),
+        certfingerprint: (config.certfingerprint || '').trim(),
+        authid: (config.authid || '').trim(),
+        secret: (config.secret || '').trim(),
+        datastore: (config.datastore || '').trim(),
+        namespace: (config.namespace || '').trim(),
+        backupdir: (config.backupdir || '').trim(),
+        'backup-id': (config['backup-id'] || '').trim(),
+        usevss: config.usevss || false
       }
       await SaveConfig(trimmedConfig)
       setConfig(trimmedConfig)

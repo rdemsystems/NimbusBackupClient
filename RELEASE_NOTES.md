@@ -79,6 +79,10 @@
 
 ## 📜 Changelog récent
 
+### v0.1.75 (2026-03-19)
+- **FIX**: Safe trim() with fallback for undefined config fields (JSON import crash fix)
+- **QUALITY**: Frontend now handles incomplete/partial config JSON gracefully
+
 ### v0.1.74 (2026-03-19)
 - **FEATURE**: Real-time backup progress tracking via API callbacks
 - **FEATURE**: Custom progress callbacks for API server mode
@@ -182,5 +186,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.74
+**Version actuelle:** 0.1.75
 **Dernière mise à jour:** 2026-03-19
