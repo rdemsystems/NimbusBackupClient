@@ -20,7 +20,7 @@ type Server struct {
 type BackupHandler interface {
 	StartBackup(backupType string, backupDirs, driveLetters, excludeList []string, backupID string, useVSS bool) error
 	GetConfigWithHostname() map[string]interface{}
-	GetScheduledJobs() []map[string]interface{}
+	GetScheduledJobsForAPI() []map[string]interface{}
 }
 
 // NewServer creates a new API server
@@ -57,7 +57,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	status := StatusResponse{
 		Running:       true,
-		Version:       "0.1.64", // TODO: get from build
+		Version:       "0.1.65", // TODO: get from build
 		ActiveJobs:    0,         // TODO: track active jobs
 		Configuration: config,
 	}
@@ -119,7 +119,7 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobsData := s.app.GetScheduledJobs()
+	jobsData := s.app.GetScheduledJobsForAPI()
 
 	jobs := make([]JobInfo, 0, len(jobsData))
 	for _, j := range jobsData {

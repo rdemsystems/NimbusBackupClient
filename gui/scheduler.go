@@ -135,6 +135,34 @@ func (a *App) GetScheduledJobs() ([]ScheduledJob, error) {
 	return jobs, nil
 }
 
+// GetScheduledJobsForAPI returns scheduled jobs as map[string]interface{} for API compatibility
+// This method is used by the BackupHandler interface for HTTP API
+func (a *App) GetScheduledJobsForAPI() []map[string]interface{} {
+	jobs, err := a.GetScheduledJobs()
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("GetScheduledJobsForAPI error: %v", err))
+		return []map[string]interface{}{}
+	}
+
+	result := make([]map[string]interface{}, len(jobs))
+	for i, job := range jobs {
+		result[i] = map[string]interface{}{
+			"id":           job.ID,
+			"name":         job.Name,
+			"backup_type":  job.BackupType,
+			"backup_id":    job.BackupID,
+			"schedule":     job.ScheduleTime,
+			"use_vss":      job.UseVSS,
+			"backup_dirs":  job.BackupDirs,
+			"exclude_list": job.ExcludeList,
+			"last_run":     job.LastRun,
+			"next_run":     job.NextRun,
+			"enabled":      job.Enabled,
+		}
+	}
+	return result
+}
+
 // UpdateScheduledJob updates an existing scheduled job
 func (a *App) UpdateScheduledJob(job ScheduledJob) error {
 	writeDebugLog(fmt.Sprintf("UpdateScheduledJob called for: %s", job.Name))

@@ -79,6 +79,11 @@
 
 ## 📜 Changelog récent
 
+### v0.1.65 (2026-03-19)
+- **FIX**: BackupHandler interface type mismatch (GetScheduledJobs signature)
+- **FEAT**: Add GetScheduledJobsForAPI() adapter method for API compatibility
+- **BUILD**: Compilation now succeeds (type errors resolved)
+
 ### v0.1.64 (2026-03-19)
 - **FIX**: Service crash on backup (EventsEmit with nil context)
 - **FIX**: Protect all EventsEmit calls with ctx nil check
@@ -130,5 +135,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.64
+**Version actuelle:** 0.1.65
 **Dernière mise à jour:** 2026-03-19
