@@ -470,12 +470,6 @@ func (a *App) executeScheduledJob(job ScheduledJob) {
 	// Prepare history entry (will be added at the end with final status)
 	startTime := time.Now()
 
-	// Map frontend BackupType to PBS BackupType
-	pbsBackupType := "host" // Default for directory backups
-	if job.BackupType == "machine" {
-		pbsBackupType = "vm"
-	}
-
 	// Use StartBackup to route through mode detection (service or direct)
 	writeDebugLog(fmt.Sprintf("[Scheduled Job] Executing via StartBackup (mode: %s)", a.mode.String()))
 
