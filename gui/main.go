@@ -471,6 +471,13 @@ func (a *App) GetLastBackupDirs() []string {
 	return a.config.LastBackupDirs
 }
 
+// ReloadConfig reloads configuration from disk (for service when config changes)
+func (a *App) ReloadConfig() {
+	newConfig := LoadConfig()
+	a.config = newConfig
+	writeDebugLog("Config reloaded from disk")
+}
+
 // StartBackup starts a backup operation (routes to service or direct based on mode)
 func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool) error {
 	writeDebugLog(fmt.Sprintf("StartBackup() called - mode: %s, VSS: %v", a.mode.String(), useVSS))

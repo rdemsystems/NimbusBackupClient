@@ -46,3 +46,5 @@ Thumbs.db
 
 # Logs
 *.log
+# Idées/notes locales (pas dans git)
+GEMINI_IDEAS.md

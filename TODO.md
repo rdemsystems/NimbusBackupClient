@@ -2,42 +2,73 @@
 
 ## 🔴 P0 - CRITIQUE (En cours)
 
-### Communication GUI ↔ Service (HTTP Local)
-**Choix: HTTP sur localhost - dev rapide + évolution entreprise**
+### Fix Bug Config Service (URGENT)
+**Problème:** Service charge config au démarrage, ne recharge jamais → backup échoue si config change
 
-- [ ] **HTTP Server** (Service Windows)
-  - [ ] Créer `gui/api/server.go`
-  - [ ] Port: `localhost:18765` (bind 127.0.0.1 uniquement)
-  - [ ] Endpoints REST:
-    - `POST /backup` - Lance un backup
-    - `GET /status` - État du service
-    - `GET /jobs` - Liste des jobs configurés
-    - `DELETE /job/{id}` - Cancel job en cours
-  - [ ] Auth: Token simple (généré au install, stocké dans config)
-  - [ ] Timeout: 30s par requête
-  - [ ] CORS: disabled (localhost only)
-  - [ ] Error handling: JSON errors + logs
+- [x] ~~HTTP API existe~~ ✓ (`gui/api/server.go`)
+- [x] ~~Service Windows fonctionne~~ ✓ (`gui/service.go`)
+- [ ] **ReloadConfig avant backup** (PATCH EN COURS)
+  - [x] Méthode `ReloadConfig()` ajoutée dans App
+  - [x] `handleBackup()` appelle `ReloadConfig()` avant backup
+  - [ ] Test: Sauvegarder config → Backup → Utilise nouvelle config
+  - [ ] Rebuild + MSI + test sur Windows
 
-- [ ] **HTTP Client** (GUI Wails)
-  - [ ] Créer `gui/api/client.go`
-  - [ ] Wrapper: `client.StartBackup()`, `client.GetStatus()`
-  - [ ] Retry logic: 3 tentatives si service occupé
-  - [ ] Fallback: afficher erreur propre si service down
-  - [ ] UI: spinner pendant l'attente de réponse
+**Temps estimé:** 1h (rebuild + test)
 
-- [ ] **Refactoring GUI**
-  - [ ] Remplacer appels directs backup par `pipe_client.SendBackupCommand()`
-  - [ ] Bouton "Backup" → appel pipe au lieu d'exec direct
-  - [ ] Status bar: poll `GetServiceStatus()` toutes les 5s
+### Multi-PBS Architecture (FEATURE MORTELLE 🚀)
+**Use case:** Multi-datastore (C:\ → bigdata, C:\Users → ssd) + GUI distante
 
-- [ ] **Tests**
-  - [ ] Service seul sans GUI → fonctionne
-  - [ ] GUI seul sans Service → erreur propre
-  - [ ] Backup VSS via HTTP → succès
-  - [ ] 2 GUI simultanés → pas de race condition
-  - [ ] Firewall Windows: autoriser localhost (pas de prompt)
+- [ ] **Config Multi-PBS**
+  ```json
+  {
+    "pbs_servers": {
+      "pbs1": { "name": "Big Data", "baseurl": "...", "datastore": "bigdata" },
+      "pbs2": { "name": "SSD Fast", "baseurl": "...", "datastore": "ssd" }
+    },
+    "backup_id_template": "{{hostname}}", // Ou custom
+    "default_pbs": "pbs1"
+  }
+  ```
+  - [ ] Structure config avec map de PBS
+  - [ ] Validation: au moins 1 PBS configuré
+  - [ ] Migration: config actuelle → pbs_servers["default"]
 
-**Temps estimé:** 3-4 heures (HTTP plus rapide que Named Pipes!)
+- [ ] **BackupRequest avec PBS ID**
+  ```go
+  type BackupRequest struct {
+      PBSID       string   `json:"pbs_id"`        // "pbs1", "pbs2"
+      BackupType  string   `json:"backup_type"`
+      BackupDirs  []string `json:"backup_dirs"`
+      BackupID    string   `json:"backup_id"`
+      UseVSS      bool     `json:"use_vss"`
+      ExcludeList []string `json:"exclude_list"`
+  }
+  ```
+  - [ ] API: Accepter `pbs_id` dans requête
+  - [ ] Service: Charger config du PBS correspondant
+  - [ ] Fallback: Si `pbs_id` vide → utiliser `default_pbs`
+
+- [ ] **Jobs gérés par Service** (pas GUI)
+  - [ ] Jobs stockés dans service (`C:\ProgramData\Nimbus\jobs.json`)
+  - [ ] Chaque job → 1 PBS spécifique
+  - [ ] **Rechargement jobs** : Service relit `jobs.json` avant chaque exécution
+  - [x] Config auto-reload avant backup ✓ (v0.1.81)
+  - [ ] **API Reload** : `POST /api/reload/config` et `POST /api/reload/jobs`
+  - [ ] GUI peut éditer, déclencher reload, service répond OK
+  - [ ] API: `POST /jobs` (créer), `PUT /jobs/{id}` (modifier), `DELETE /jobs/{id}`
+  - [ ] GUI distante peut provisionner le service via API
+
+- [ ] **GUI Multi-PBS**
+  - [ ] Dropdown "Serveur PBS" dans formulaire backup
+  - [ ] Gestion PBS: Ajouter/Modifier/Supprimer serveurs
+  - [ ] Test connexion par PBS
+  - [ ] Indicateur: 🟢 Online / 🔴 Offline par PBS
+
+**Temps estimé:** 1-2 semaines (grosse feature!)
+
+---
+
+## 🟠 P1 - IMPORTANT (Architecture Entreprise)
 
 ---
 
@@ -134,59 +165,50 @@
   - [ ] Détecter fichier ouvert sans VSS
   - [ ] Erreur propre: "Fichier X verrouillé, activer VSS?"
 
-### Multi-Serveurs PBS (Phase 2)
-**Architecture: 1 job = 1 serveur (multi-jobs = multi-serveurs)**
+### API Remote - Provisioning Distant (Phase 2)
+**Use case:** MSP gère 100+ clients Nimbus depuis interface centrale
 
-- [ ] **Config: Liste de serveurs disponibles**
+- [ ] **API Remote activable**
   ```json
-  "pbs_servers": [
-    {
-      "id": "pbs-local",
-      "name": "PBS Local (Rapide)",
-      "url": "https://pbs.local:8007",
-      "auth_id": "backup@pbs",
-      "secret": "xxx",
-      "datastore": "backup"
-    },
-    {
-      "id": "pbs-cloud",
-      "name": "PBS Cloud (Archive)",
-      "url": "https://pbs.cloud:8007",
-      "auth_id": "backup@pbs",
-      "secret": "yyy",
-      "datastore": "archive"
+  {
+    "api": {
+      "remote_enabled": false,  // Désactivé par défaut (sécurité)
+      "bind_address": "0.0.0.0:18765",  // Si activé
+      "auth_token": "generated-at-install",
+      "tls_cert": "/path/to/cert.pem",  // Optionnel
+      "allowed_ips": ["192.168.1.0/24"]  // Whitelist
     }
-  ]
+  }
   ```
+  - [ ] Flag service: `--remote-api` pour activer
+  - [ ] Auth: Bearer token (généré install, 32 chars)
+  - [ ] TLS: Certificat auto-signé ou fourni
+  - [ ] Rate limiting: max 10 req/s par IP
+  - [ ] Whitelist IPs configurables
 
-- [ ] **Job: Sélection du serveur**
-  ```json
-  "jobs": [
-    {
-      "name": "Tous les users",
-      "paths": ["C:\\Users"],
-      "server_id": "pbs-local",
-      "schedule": "daily 02:00"
-    },
-    {
-      "name": "Documents importants",
-      "paths": ["C:\\Users\\richard\\documents"],
-      "server_id": "pbs-cloud",
-      "schedule": "hourly"
-    }
-  ]
-  ```
+- [ ] **Endpoints Provisioning**
+  - `GET /api/v1/info` - Info système (hostname, version, mode)
+  - `GET /api/v1/pbs` - Liste serveurs PBS configurés
+  - `POST /api/v1/pbs` - Ajouter serveur PBS
+  - `PUT /api/v1/pbs/{id}` - Modifier serveur PBS
+  - `DELETE /api/v1/pbs/{id}` - Supprimer serveur PBS
+  - `POST /api/v1/pbs/{id}/test` - Test connexion
+  - `GET /api/v1/jobs` - Liste jobs
+  - `POST /api/v1/jobs` - Créer job
+  - `PUT /api/v1/jobs/{id}` - Modifier job
+  - `DELETE /api/v1/jobs/{id}` - Supprimer job
+  - `POST /api/v1/backup` - Lancer backup manuel
 
-- [ ] **GUI**
-  - [ ] Gestion serveurs: liste, ajouter, éditer, supprimer
-  - [ ] Job config: dropdown "Serveur PBS" (liste les serveurs)
-  - [ ] Test connexion par serveur (bouton "Tester")
-  - [ ] Badge couleur: 🟢 online / 🔴 offline
+- [ ] **GUI Centrale MSP** (Futur produit séparé)
+  - Dashboard: grille avec tous les clients
+  - Actions groupées: "Backup tout le parc"
+  - Alertes: machine pas vue depuis 24h
+  - Statistiques globales
 
-- [ ] **Use Cases réels**
-  - Backup quotidien gros volumes → PBS local (rapide)
-  - Backup horaire données critiques → PBS cloud (redondance)
-  - Backup dev/test → PBS dev, backup prod → PBS prod
+**Temps estimé:** 2-3 semaines
+
+### Multi-Serveurs PBS
+**→ DÉPLACÉ EN P0** (voir "Multi-PBS Architecture" ci-dessus)
 
 ### Chiffrement (Phase 3)
 - [ ] **Key Management**
@@ -210,20 +232,7 @@
   - [ ] Extraction via service (droits admin)
 
 ### Mode Entreprise (Phase 5)
-**Évolution naturelle grâce à l'architecture HTTP!**
-
-- [ ] **HTTP Remote API** (extension du mode local)
-  - [ ] Flag service: `--remote-api --bind 0.0.0.0 --port 18765`
-  - [ ] Auth: Bearer token (généré, 32 chars aléatoires)
-  - [ ] TLS: certificat auto-signé ou fourni par admin
-  - [ ] Rate limiting: max 10 req/s par IP
-  - [ ] Whitelist IPs: config pour restreindre accès
-
-- [ ] **GUI Centrale**
-  - [ ] Découverte machines: scan réseau ou import CSV
-  - [ ] Dashboard: grille avec état de tous les backups
-  - [ ] Actions groupées: "Backup tout le parc"
-  - [ ] Alertes: notification si machine pas vue depuis 24h
+**→ DÉPLACÉ EN P1** (voir "API Remote - Provisioning Distant")
 
 ---
 

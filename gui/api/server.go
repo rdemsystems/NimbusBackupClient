@@ -90,6 +90,13 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reload config before backup (config may have been updated by GUI)
+	// This ensures service uses latest config without needing restart
+	if reloader, ok := s.app.(interface{ ReloadConfig() }); ok {
+		reloader.ReloadConfig()
+		log.Printf("[API] Config reloaded before backup")
+	}
+
 	// Start backup asynchronously (don't block HTTP request)
 	jobID := fmt.Sprintf("backup-%d", time.Now().Unix())
 

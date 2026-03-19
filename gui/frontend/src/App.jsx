@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 
 // Wails runtime imports (will be available when built with Wails)
 let GetConfigWithHostname, SaveConfig, TestConnection, StartBackup, ListSnapshots, RestoreSnapshot, ListPhysicalDisks, GetVersion, EventsOn
-let SaveScheduledJob, UpdateScheduledJob, GetScheduledJobs, DeleteScheduledJob, GetJobHistory, GetSystemInfo
+let SaveScheduledJob, UpdateScheduledJob, GetScheduledJobs, DeleteScheduledJob, GetJobHistory, GetSystemInfo, GetLastBackupDirs
 
 // Check if we're running in Wails
 if (window.go) {
@@ -20,6 +20,7 @@ if (window.go) {
   DeleteScheduledJob = window.go.main.App.DeleteScheduledJob
   GetJobHistory = window.go.main.App.GetJobHistory
   GetSystemInfo = window.go.main.App.GetSystemInfo
+  GetLastBackupDirs = window.go.main.App.GetLastBackupDirs
 }
 
 // Wails events
@@ -174,6 +175,14 @@ function App() {
         if (GetSystemInfo) {
           const sysInfo = await GetSystemInfo()
           setSystemInfo(sysInfo || { mode: 'Standalone', is_admin: false, service_available: false })
+        }
+
+        // Load last backup directories to pre-fill the form
+        if (GetLastBackupDirs) {
+          const lastDirs = await GetLastBackupDirs()
+          if (lastDirs && lastDirs.length > 0) {
+            setBackupDirs(lastDirs.join('\n'))
+          }
         }
 
         if (GetConfigWithHostname) {
