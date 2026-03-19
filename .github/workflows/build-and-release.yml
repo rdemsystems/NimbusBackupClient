@@ -219,21 +219,41 @@ jobs:
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
 
-          # Extract changelog for this version
-          sed -n "/## \[${VERSION#v}\]/,/## \[/p" CHANGELOG.md | sed '$d' > RELEASE_NOTES.md
+          # Create release notes from RELEASE_NOTES.md + recent commits
+          cat > RELEASE_BODY.md << 'EOFNOTES'
+          # 🚀 Nimbus Backup ${{ steps.version.outputs.VERSION }}
+
+          ## 📝 What's in this release
+
+          EOFNOTES
+
+          # Get commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            echo "### Changes since ${PREV_TAG}" >> RELEASE_BODY.md
+            echo "" >> RELEASE_BODY.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges >> RELEASE_BODY.md
+            echo "" >> RELEASE_BODY.md
+          fi
+
+          # Add full status from RELEASE_NOTES.md
+          echo "" >> RELEASE_BODY.md
+          echo "---" >> RELEASE_BODY.md
+          echo "" >> RELEASE_BODY.md
+          cat RELEASE_NOTES.md >> RELEASE_BODY.md
 
           # Add links at the end
-          echo "" >> RELEASE_NOTES.md
-          echo "---" >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-          echo "**RDEM Systems**: https://www.rdem-systems.com/" >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-          echo "**Nimbus Backup - Fully managed Proxmox Backup Servers Datastore**: https://nimbus.rdem-systems.com/" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_BODY.md
+          echo "---" >> RELEASE_BODY.md
+          echo "" >> RELEASE_BODY.md
+          echo "**RDEM Systems**: https://www.rdem-systems.com/" >> RELEASE_BODY.md
+          echo "" >> RELEASE_BODY.md
+          echo "**Nimbus Backup - Fully managed Proxmox Backup Servers Datastore**: https://nimbus.rdem-systems.com/" >> RELEASE_BODY.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          body_path: RELEASE_NOTES.md
+          body_path: RELEASE_BODY.md
           files: release/*
           draft: false
           prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
