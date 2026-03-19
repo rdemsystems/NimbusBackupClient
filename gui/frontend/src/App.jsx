@@ -444,6 +444,21 @@ function App() {
           <button className="btn" onClick={handleTestConnection}>Tester la connexion</button>
           <button className="btn btn-secondary" onClick={handleSaveConfig}>Enregistrer</button>
 
+          {/* Upsell message if no backup configured */}
+          {!config.baseurl && (
+            <div className="info-box" style={{backgroundColor: '#eef2ff', borderLeft: '4px solid #667eea'}}>
+              <strong>📦 Vous n'avez pas encore de serveur PBS ?</strong><br/>
+              <a
+                href={`https://nimbus.rdem-systems.com/choisir-mon-backup/?utm_source=NimbusGui&utm_medium=tooling&utm_campaign=version-${appVersion}&utm_content=config-empty`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{color: '#667eea', fontWeight: 'bold', textDecoration: 'underline'}}
+              >
+                Commander du stockage Nimbus Backup →
+              </a>
+            </div>
+          )}
+
           <div className="info-box">
             💡 <strong>Astuce :</strong> Obtenez votre API Token depuis l'interface PBS:<br/>
             Configuration → Access Control → API Tokens
@@ -676,6 +691,29 @@ function App() {
           <div style={{textAlign: 'center', marginTop: '30px'}}>
             <h3>Nimbus Backup</h3>
             <p style={{color: '#718096', margin: '10px 0'}}>Version {appVersion}</p>
+
+            {/* Upsell CTA */}
+            <div style={{margin: '20px 0'}}>
+              <a
+                href={`https://nimbus.rdem-systems.com/choisir-mon-backup/?utm_source=NimbusGui&utm_medium=tooling&utm_campaign=version-${appVersion}&utm_content=version-${appVersion}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-block',
+                  padding: '12px 24px',
+                  backgroundColor: '#667eea',
+                  color: 'white',
+                  textDecoration: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 'bold',
+                  transition: 'background-color 0.3s'
+                }}
+                onMouseEnter={(e) => e.target.style.backgroundColor = '#5568d3'}
+                onMouseLeave={(e) => e.target.style.backgroundColor = '#667eea'}
+              >
+                📦 Commander du stockage Nimbus Backup
+              </a>
+            </div>
 
             <div className="grid" style={{marginTop: '30px', textAlign: 'left'}}>
               <div className="card">
