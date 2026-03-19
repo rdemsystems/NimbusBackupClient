@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-03-19
+
+### Fixed
+- **CI/CD duplication** - Désactivé trigger tags sur release.yml
+  - Évite 2 pipelines simultanées sur chaque tag
+  - build-and-release.yml gère tous les builds (CLI + GUI + tests)
+  - release.yml disponible uniquement en manual (workflow_dispatch)
+
+- **Build NBD final** - NBD strictement Linux-only
+  - Windows: directory + machine ✅ (nbd skippé)
+  - macOS: directory + machine ✅ (nbd skippé)
+  - Linux: directory + machine + nbd ✅
+
 ## [0.1.31] - 2026-03-19
 
 ### Added
