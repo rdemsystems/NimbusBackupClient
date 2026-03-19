@@ -215,14 +215,16 @@ Please report this issue to RDEM Systems:
 
 // App struct
 type App struct {
-	ctx    context.Context
-	config *Config
+	ctx          context.Context
+	config       *Config
+	stopScheduler chan struct{}
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		config: LoadConfig(),
+		config:        LoadConfig(),
+		stopScheduler: make(chan struct{}),
 	}
 }
 

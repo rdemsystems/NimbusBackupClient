@@ -298,10 +298,22 @@ func (a *App) StartScheduler() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			a.checkAndRunScheduledJobs()
+		for {
+			select {
+			case <-ticker.C:
+				a.checkAndRunScheduledJobs()
+			case <-a.stopScheduler:
+				writeDebugLog("Scheduler stopped")
+				return
+			}
 		}
 	}()
+}
+
+// StopScheduler stops the background job scheduler
+func (a *App) StopScheduler() {
+	writeDebugLog("Stopping background job scheduler")
+	close(a.stopScheduler)
 }
 
 // CleanupAbandonedJobs marks any "running" jobs as abandoned on app startup

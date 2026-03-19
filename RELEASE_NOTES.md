@@ -79,6 +79,12 @@
 
 ## 📜 Changelog récent
 
+### v0.1.62 (2026-03-19)
+- **FIX**: Service now starts after installation (Start="install" Wait="no")
+- **FIX**: Service starts automatically after reboot (already had Start="auto")
+- **FIX**: Service stops gracefully with StopScheduler() mechanism
+- **FEAT**: Scheduler can be stopped with stop channel (prevents hanging shutdown)
+
 ### v0.1.61 (2026-03-19)
 - **FIX**: Version string mismatch in API server (0.1.58 → 0.1.61)
 - **FIX**: golangci-lint errcheck violations (6 issues fixed)
@@ -109,5 +115,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.61
+**Version actuelle:** 0.1.62
 **Dernière mise à jour:** 2026-03-19

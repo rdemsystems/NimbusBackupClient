@@ -28,7 +28,10 @@ func (s *NimbusService) run() {
 	writeDebugLog("NimbusBackup service running")
 
 	// Initialize app
-	s.app = &App{}
+	s.app = &App{
+		config:        LoadConfig(),
+		stopScheduler: make(chan struct{}),
+	}
 
 	// Load configuration (service will read config from file when needed)
 	configMap := s.app.GetConfigWithHostname()
@@ -46,17 +49,27 @@ func (s *NimbusService) run() {
 	// Start the scheduler
 	s.app.StartScheduler()
 
-	// Keep the service running
+	// Keep the service running (scheduler runs in background goroutine)
 	for {
 		time.Sleep(1 * time.Minute)
 		// Service is alive, scheduler runs in background
+		// When Stop() is called, the scheduler will stop and this loop will be interrupted
 	}
 }
 
 // Stop is called when the service stops
 func (s *NimbusService) Stop(svc service.Service) error {
 	writeDebugLog("NimbusBackup service stopping...")
-	// Cleanup if needed
+
+	// Stop the scheduler gracefully
+	if s.app != nil {
+		s.app.StopScheduler()
+	}
+
+	// Give it a moment to finish current operations
+	time.Sleep(2 * time.Second)
+
+	writeDebugLog("NimbusBackup service stopped")
 	return nil
 }
 
