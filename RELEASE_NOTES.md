@@ -79,6 +79,12 @@
 
 ## 📜 Changelog récent
 
+### v0.1.87 (2026-03-20)
+- **CRITICAL FIX**: Infinite loop when service re-detects itself as available
+- **FIX**: Service process never re-detects mode (stays in Standalone)
+- **ROOT CAUSE**: Mode re-detection in v0.1.84 caused service to route to itself
+- **RESULT**: Backups now execute correctly without recursive API calls
+
 ### v0.1.86 (2026-03-20)
 - **DEBUG**: Enhanced scheduler logging (job count, NextRun, ShouldRun)
 - **DEBUG**: Logs when no jobs found or jobs disabled
@@ -253,5 +259,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.86
+**Version actuelle:** 0.1.87
 **Dernière mise à jour:** 2026-03-19

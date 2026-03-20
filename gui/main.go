@@ -241,6 +241,7 @@ type App struct {
 	mode             api.ExecutionMode
 	callbacksMap     map[string]*progressCallbacks
 	callbacksMutex   sync.RWMutex
+	isServiceProcess bool // True if running as Windows Service (never re-detect mode)
 }
 
 // NewApp creates a new App application struct
@@ -497,10 +498,11 @@ func (a *App) ReloadConfig() {
 
 // StartBackup starts a backup operation (routes to service or direct based on mode)
 func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool) error {
-	writeDebugLog(fmt.Sprintf("StartBackup() called - mode: %s, VSS: %v", a.mode.String(), useVSS))
+	writeDebugLog(fmt.Sprintf("StartBackup() called - mode: %s, VSS: %v, isServiceProcess: %v", a.mode.String(), useVSS, a.isServiceProcess))
 
 	// Re-detect mode if currently Standalone (service may have started after GUI)
-	if a.mode == api.ModeStandalone {
+	// IMPORTANT: Never re-detect if we ARE the service process (prevents infinite loop)
+	if !a.isServiceProcess && a.mode == api.ModeStandalone {
 		if a.apiClient.IsServiceAvailable() {
 			writeDebugLog("[Mode Detection] Service now available, switching to Service mode")
 			a.mode = api.ModeService
