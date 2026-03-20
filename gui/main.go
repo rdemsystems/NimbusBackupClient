@@ -451,17 +451,18 @@ func (a *App) TestConnection(config *Config) error {
 
 	// Debug log with sanitized credentials
 	writeDebugLog(fmt.Sprintf("Testing connection: URL=%s, AuthID=%s, Secret=%s, Datastore=%s",
-		security.SanitizeURL(a.config.BaseURL),
-		a.config.AuthID,
-		security.SanitizeSecret(a.config.Secret),
-		a.config.Datastore))
+		security.SanitizeURL(testConfig.BaseURL),
+		testConfig.AuthID,
+		security.SanitizeSecret(testConfig.Secret),
+		testConfig.Datastore))
 
-	// Try to connect in backup mode (not reader) to test with Datastore.Backup permission
-	client.Connect(false, "host")
+	// Perform real HTTP test (checks DNS, connectivity, auth, datastore access)
+	if err := client.TestConnection(); err != nil {
+		writeDebugLog(fmt.Sprintf("Connection test failed: %v", err))
+		return err
+	}
 
-	// Simple test: if Connect() doesn't panic/error, connection is OK
-	// We can't easily test without actually starting a backup session
-	writeDebugLog("Connection test successful (authenticated)")
+	writeDebugLog("Connection test successful (authenticated + datastore accessible)")
 	return nil
 }
 

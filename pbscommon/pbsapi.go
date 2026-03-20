@@ -510,6 +510,54 @@ func (pbs *PBSClient) Finish() error {
 	return nil
 }
 
+// TestConnection performs a real HTTP request to verify PBS connectivity
+// Returns error if hostname unreachable, credentials invalid, or datastore inaccessible
+func (pbs *PBSClient) TestConnection() error {
+	// Create TLS config for the test
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: pbs.Insecure || pbs.CertFingerPrint == "",
+	}
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+	}
+
+	// Test endpoint: GET datastore status (requires auth + datastore access)
+	testURL := fmt.Sprintf("%s/api2/json/admin/datastore/%s/status", pbs.BaseURL, pbs.Datastore)
+
+	req, err := http.NewRequest("GET", testURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add PBS authentication header
+	req.Header.Set("Authorization", fmt.Sprintf("PBSAPIToken=%s:%s", pbs.AuthID, pbs.Secret))
+
+	// Execute request
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("connection failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check HTTP status
+	if resp.StatusCode == 401 {
+		return fmt.Errorf("authentication failed: invalid credentials")
+	}
+	if resp.StatusCode == 403 {
+		return fmt.Errorf("access denied: check datastore permissions")
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("server error: HTTP %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
 func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 	pbs.WritersManifest = make(map[uint64]int)
 	pbs.SkippedFiles = []string{} // Reset skipped files for new backup
