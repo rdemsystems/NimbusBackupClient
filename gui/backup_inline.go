@@ -317,6 +317,7 @@ func RunBackupInline(opts BackupOptions) error {
 	}
 
 	progress(0.05, "Connecting to PBS...")
+	writeDebugLog("[DEBUG] After progress(0.05), before connection log")
 
 	// Debug: log connection parameters with sanitized credentials
 	writeDebugLog(fmt.Sprintf("PBS Connection: URL=%s, AuthID=%s, Secret=%s, Datastore=%s, BackupID=%s",
@@ -325,6 +326,8 @@ func RunBackupInline(opts BackupOptions) error {
 		security.SanitizeSecret(opts.Secret),
 		opts.Datastore,
 		opts.BackupID))
+
+	writeDebugLog("[DEBUG] Creating PBS client struct")
 
 	// Create PBS client
 	client := &pbscommon.PBSClient{
@@ -339,6 +342,8 @@ func RunBackupInline(opts BackupOptions) error {
 			BackupID: opts.BackupID,
 		},
 	}
+
+	writeDebugLog("[DEBUG] PBS client created, starting directory backup loop")
 
 	// Backup each directory
 	var newchunk atomic.Uint64

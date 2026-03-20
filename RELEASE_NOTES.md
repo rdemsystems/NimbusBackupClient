@@ -79,6 +79,11 @@
 
 ## 📜 Changelog récent
 
+### v0.1.88 (2026-03-20)
+- **DEBUG**: Trace logs to identify backup hang point
+- **DEBUG**: Logs after progress(0.05), client creation, directory loop
+- **TROUBLESHOOTING**: Find where backup blocks after "Connecting to PBS"
+
 ### v0.1.87 (2026-03-20)
 - **CRITICAL FIX**: Infinite loop when service re-detects itself as available
 - **FIX**: Service process never re-detects mode (stays in Standalone)
@@ -259,5 +264,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.87
+**Version actuelle:** 0.1.88
 **Dernière mise à jour:** 2026-03-19
