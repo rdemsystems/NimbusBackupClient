@@ -79,6 +79,10 @@
 
 ## 📜 Changelog récent
 
+### v0.1.91 (2026-03-21)
+- **FIX**: Build error - missing totalSize variable declaration
+- **QUALITY**: CI tests now pass
+
 ### v0.1.90 (2026-03-21)
 - **FEATURE**: Backup completion report shows duration and size
 - **UX**: "Backup completed in 2m 34s: 1.8 GB backed up (89 new, 565 reused chunks)"
@@ -276,5 +280,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.90
+**Version actuelle:** 0.1.91
 **Dernière mise à jour:** 2026-03-19

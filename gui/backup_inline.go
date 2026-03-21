@@ -371,6 +371,7 @@ func RunBackupInline(opts BackupOptions) error {
 	// Backup each directory
 	var newchunk atomic.Uint64
 	var reusechunk atomic.Uint64
+	var totalSize atomic.Uint64
 
 	for idx, dir := range opts.BackupDirs {
 		// Log directory start but don't call progress() to avoid interfering with ChunkState progress
