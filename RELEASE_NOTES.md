@@ -79,6 +79,12 @@
 
 ## 📜 Changelog récent
 
+### v0.1.89 (2026-03-21)
+- **CRITICAL FIX**: Service scheduled jobs blocked on Wails EventsEmit
+- **ROOT CAUSE**: context.Background() is not nil, triggered Wails event emission
+- **FIX**: Service process never emits Wails events (no runtime available)
+- **RESULT**: Scheduled backups now execute correctly via service
+
 ### v0.1.88 (2026-03-20)
 - **DEBUG**: Trace logs to identify backup hang point
 - **DEBUG**: Logs after progress(0.05), client creation, directory loop
@@ -264,5 +270,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.88
+**Version actuelle:** 0.1.89
 **Dernière mise à jour:** 2026-03-19

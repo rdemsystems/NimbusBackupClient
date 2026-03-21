@@ -666,14 +666,15 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 			a.callbacksMutex.RUnlock()
 
 			// If no custom callbacks and we have Wails context, emit events (GUI standalone mode)
-			if !hasCallbacks && a.ctx != nil {
+			// NEVER emit events if we're the service process (no Wails runtime)
+			if !hasCallbacks && !a.isServiceProcess && a.ctx != nil {
 				writeDebugLog("[OnProgress] Emitting Wails event (GUI mode)")
 				runtime.EventsEmit(a.ctx, "backup:progress", map[string]interface{}{
 					"percent": percent * 100,
 					"message": message,
 				})
-			} else if !hasCallbacks && a.ctx == nil {
-				writeDebugLog("[OnProgress] WARNING: No callback or context available")
+			} else if !hasCallbacks && (a.isServiceProcess || a.ctx == nil) {
+				writeDebugLog("[OnProgress] No callbacks/context (service or headless mode)")
 			}
 		},
 		OnComplete: func(success bool, message string) {
@@ -706,14 +707,15 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 			}
 
 			// If no custom callbacks and we have Wails context, emit events (GUI standalone mode)
-			if !hasCallbacks && a.ctx != nil {
+			// NEVER emit events if we're the service process (no Wails runtime)
+			if !hasCallbacks && !a.isServiceProcess && a.ctx != nil {
 				writeDebugLog("[OnComplete] Emitting Wails event (GUI mode)")
 				runtime.EventsEmit(a.ctx, "backup:complete", map[string]interface{}{
 					"success": success,
 					"message": message,
 				})
-			} else if !hasCallbacks && a.ctx == nil {
-				writeDebugLog("[OnComplete] WARNING: No callback or context available")
+			} else if !hasCallbacks && (a.isServiceProcess || a.ctx == nil) {
+				writeDebugLog("[OnComplete] No callbacks/context (service or headless mode)")
 			}
 
 			// Add manual backup to history

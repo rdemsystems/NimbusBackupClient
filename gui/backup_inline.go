@@ -273,15 +273,18 @@ func RunBackupInline(opts BackupOptions) error {
 	writeDebugLog("Starting inline backup")
 
 	// Validate options
+	writeDebugLog("[DEBUG] Validating backup options")
 	if opts.BaseURL == "" || opts.AuthID == "" || opts.Secret == "" {
 		return fmt.Errorf("PBS connection parameters required")
 	}
+	writeDebugLog("[DEBUG] Options validated")
 
 	if len(opts.BackupDirs) == 0 {
 		return fmt.Errorf("at least one backup directory or drive required")
 	}
 
 	// Use hostname as backup ID if not specified
+	writeDebugLog("[DEBUG] Getting hostname if needed")
 	if opts.BackupID == "" {
 		hostname, err := os.Hostname()
 		if err == nil {
@@ -290,6 +293,7 @@ func RunBackupInline(opts BackupOptions) error {
 			opts.BackupID = "unnamed-backup"
 		}
 	}
+	writeDebugLog(fmt.Sprintf("[DEBUG] BackupID set to: %s", opts.BackupID))
 
 	// Default to "host" type for directory backups
 	if opts.BackupType == "" {
@@ -305,7 +309,9 @@ func RunBackupInline(opts BackupOptions) error {
 	}
 
 	// Check if all backup directories exist
-	for _, dir := range opts.BackupDirs {
+	writeDebugLog(fmt.Sprintf("[DEBUG] Checking %d backup directories exist", len(opts.BackupDirs)))
+	for idx, dir := range opts.BackupDirs {
+		writeDebugLog(fmt.Sprintf("[DEBUG] Checking directory %d/%d: %s", idx+1, len(opts.BackupDirs), dir))
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			errMsg := fmt.Sprintf("Backup directory does not exist: %s", dir)
 			writeDebugLog(errMsg)
@@ -315,6 +321,7 @@ func RunBackupInline(opts BackupOptions) error {
 			return fmt.Errorf("%s", errMsg)
 		}
 	}
+	writeDebugLog("[DEBUG] All directories checked, calling progress(0.05)")
 
 	progress(0.05, "Connecting to PBS...")
 	writeDebugLog("[DEBUG] After progress(0.05), before connection log")
