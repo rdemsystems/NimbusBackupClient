@@ -20,11 +20,10 @@ func (a *App) GetConfigWithHostname() map[string]interface{} {
 	}
 
 	if a.config != nil {
-		result["server"] = a.config.Server
+		result["baseurl"] = a.config.BaseURL
 		result["datastore"] = a.config.Datastore
-		result["fingerprint"] = a.config.Fingerprint
+		result["certfingerprint"] = a.config.CertFingerprint
 		result["backup-id"] = a.config.BackupID
-		result["encryption-key"] = a.config.EncryptionKey
 	}
 
 	return result
