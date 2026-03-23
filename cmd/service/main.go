@@ -15,9 +15,9 @@ import (
 
 	"github.com/kardianos/service"
 
-	// Import from gui package for App logic and API
-	gui "github.com/tizbac/proxmoxbackupclient_go/gui"
+	// Import from gui/app package for App logic
 	"github.com/tizbac/proxmoxbackupclient_go/gui/api"
+	"github.com/tizbac/proxmoxbackupclient_go/gui/app"
 )
 
 const (
@@ -34,7 +34,7 @@ var (
 
 // NimbusService wraps the application for Windows Service execution
 type NimbusService struct {
-	app       *gui.App
+	app       *app.App
 	apiServer *api.Server
 	stopChan  chan struct{}
 }
@@ -63,7 +63,7 @@ func (s *NimbusService) run() {
 	writeLog("Nimbus Backup service running")
 
 	// Initialize app with background context (service has no Wails runtime)
-	s.app = gui.NewAppForService(context.Background())
+	s.app = app.NewAppForService(context.Background())
 
 	hostname, _ := os.Hostname()
 	writeLog(fmt.Sprintf("Service running for host: %s", hostname))
