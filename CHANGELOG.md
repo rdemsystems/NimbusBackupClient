@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-03-23
+
+### Fixed
+- **Missing gui/api/go.mod** - Service build error
+  - Created gui/api/go.mod module definition
+  - Fixes "reading go.mod: file not found" error
+
 ## [0.2.6] - 2026-03-23
 
 ### Fixed

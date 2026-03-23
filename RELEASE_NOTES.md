@@ -81,6 +81,9 @@
 
 ## 📜 Changelog récent
 
+### v0.2.7 (2026-03-23)
+- **FIX**: Missing gui/api/go.mod module definition
+
 ### v0.2.6 (2026-03-23)
 - **FIX**: Service build error - "gui is a program, not an importable package"
 - **REFACTOR**: Extracted App to gui/app package (importable)
@@ -441,5 +444,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.2.6
+**Version actuelle:** 0.2.7
 **Dernière mise à jour:** 2026-03-23
