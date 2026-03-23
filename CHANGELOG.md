@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## [0.2.8] - 2026-03-23
+
+### Fixed
+- **GUI build error** - Missing gui/api in go.mod
+  - Added gui/api to require and replace directives
+  - Fixes "module @latest found, but does not contain package gui/api"
+
 
 ## [0.2.7] - 2026-03-23
 

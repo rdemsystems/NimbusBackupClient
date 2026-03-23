@@ -81,6 +81,10 @@
 
 ## 📜 Changelog récent
 
+### v0.2.8 (2026-03-23)
+- **FIX**: GUI build error - Missing gui/api in go.mod
+
+
 ### v0.2.7 (2026-03-23)
 - **FIX**: Missing gui/api/go.mod module definition
 
@@ -444,5 +448,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.2.7
+**Version actuelle:** 0.2.8
 **Dernière mise à jour:** 2026-03-23
