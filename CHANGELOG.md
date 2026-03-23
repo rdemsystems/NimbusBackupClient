@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.2] - 2026-03-23
 
+### Added
+- **Automatic exclusion of Windows system folders** - File-mode backups now skip system folders
+  - `System Volume Information` (VSS snapshots storage - can be 100s of GB)
+  - `$RECYCLE.BIN` (Windows recycle bin)
+  - `Recovery` (Windows recovery partition data)
+  - Prevents backing up VSS snapshots when selecting entire drive (e.g., `D:\`)
+  - Case-insensitive matching for Windows compatibility
+  - Skipped folders logged in backup report
+
+- **Automatic exclusion of Windows system files**
+  - `pagefile.sys` (Windows page file)
+  - `hiberfil.sys` (Hibernation file)
+  - `swapfile.sys` (Windows swap file)
+  - `DumpStack.log.tmp` (Crash dump temporary file)
+  - Prevents backing up large system files that shouldn't be in backups
+
 ### Fixed
 - **CI/CD build error** - Service executable not built before MSI creation
   - Added build step for `NimbusBackupSVC.exe` in GitHub Actions workflow
@@ -18,9 +34,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Technical
 - **Modified files:**
+  - `pbscommon/pxar.go` - Added `shouldSkipSystemFolder()` and `shouldSkipSystemFile()`
+  - Exclusion logic in `WriteDir()` loop before recursing into subdirectories
   - `.github/workflows/build-and-release.yml` - Added service build step
   - Service built with same flags as GUI: `-trimpath -buildmode=pie -ldflags "-s -w"`
   - Build order: GUI → Service → MSI packaging
+
+### Important Note - File Mode Backups
+When backing up an entire drive (e.g., `D:\`) in **file mode**, the backup will now automatically exclude:
+- VSS snapshot storage (`System Volume Information`) which can contain hundreds of GB
+- Recycle bin and recovery data
+- Large system paging files
+
+**Impact**: Backup size will match actual file size instead of including hidden system data.
+**Example**: Drive shows 1.03 TB used but files are 141 GB → Backup will be ~141 GB (not 1.03 TB)
+
+**Recommendation**:
+- For **file-level restore**: Use file mode (current behavior)
+- For **bare-metal restore**: Use disk mode (includes everything, requires separate job)
 
 ## [0.2.1] - 2026-03-23
 

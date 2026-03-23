@@ -82,6 +82,9 @@
 ## 📜 Changelog récent
 
 ### v0.2.2 (2026-03-23)
+- **FEATURE**: Auto-exclusion of Windows system folders (System Volume Information, $RECYCLE.BIN, Recovery)
+- **FEATURE**: Auto-exclusion of Windows system files (pagefile.sys, hiberfil.sys, swapfile.sys)
+- **IMPORTANT**: File-mode backups now skip VSS snapshots storage (can save 100s of GB)
 - **FIX**: CI/CD build error - Service executable not built before MSI creation
 - **FIX**: LGHT0103 error resolved (missing NimbusBackupSVC.exe)
 - **BUILD**: GitHub Actions workflow now builds service before MSI packaging

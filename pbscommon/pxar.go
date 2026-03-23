@@ -7,6 +7,7 @@ import (
 	"math/bits"
 	"os"
 	"sort"
+	"strings"
 
 	//	"io/ioutil"
 	"path/filepath"
@@ -36,6 +37,46 @@ const (
 )
 
 var catalog_magic = []byte{145, 253, 96, 249, 196, 103, 88, 213}
+
+// Windows system folders to exclude automatically from backups
+// These folders contain VSS snapshots, recycle bin, and other system data
+// that should not be included in file-mode backups
+var excludedSystemFolders = []string{
+	"System Volume Information", // VSS snapshots storage
+	"$RECYCLE.BIN",               // Windows recycle bin
+	"Recovery",                   // Windows recovery partition data
+}
+
+// Windows system files to exclude automatically from backups
+// These are large paging/hibernation files that should not be backed up
+var excludedSystemFiles = []string{
+	"pagefile.sys",  // Windows page file
+	"hiberfil.sys",  // Hibernation file
+	"swapfile.sys",  // Windows swap file
+	"DumpStack.log.tmp", // Crash dump temporary file
+}
+
+// shouldSkipSystemFolder checks if a folder should be automatically excluded
+// Uses case-insensitive comparison for Windows compatibility
+func shouldSkipSystemFolder(name string) bool {
+	for _, excluded := range excludedSystemFolders {
+		if strings.EqualFold(name, excluded) {
+			return true
+		}
+	}
+	return false
+}
+
+// shouldSkipSystemFile checks if a file should be automatically excluded
+// Uses case-insensitive comparison for Windows compatibility
+func shouldSkipSystemFile(name string) bool {
+	for _, excluded := range excludedSystemFiles {
+		if strings.EqualFold(name, excluded) {
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	IFMT   uint64 = 0o0170000
@@ -318,6 +359,12 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 	for _, file := range files {
 		startpos := a.pos
 		if file.IsDir() {
+			// Skip Windows system folders (VSS snapshots, recycle bin, etc.)
+			if shouldSkipSystemFolder(file.Name()) {
+				skipMsg := fmt.Sprintf("System folder (auto-excluded): %s", filepath.Join(path, file.Name()))
+				a.SkippedFiles = append(a.SkippedFiles, skipMsg)
+				continue
+			}
 
 			D, err := a.WriteDir(filepath.Join(path, file.Name()), file.Name(), false)
 			if err != nil {
@@ -330,6 +377,13 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 				len:    a.pos - startpos,
 			})
 		} else {
+			// Skip Windows system files (pagefile, hiberfil, etc.)
+			if shouldSkipSystemFile(file.Name()) {
+				skipMsg := fmt.Sprintf("System file (auto-excluded): %s", filepath.Join(path, file.Name()))
+				a.SkippedFiles = append(a.SkippedFiles, skipMsg)
+				continue
+			}
+
 			F, err := a.WriteFile(filepath.Join(path, file.Name()), file.Name())
 			if err != nil {
 				return CatalogDir{}, err

@@ -36,6 +36,28 @@ Don't want to self-host PBS? Use our managed service:
 - Comprehensive error handling
 - 100% lint compliance
 
+### Smart System Exclusions (File Mode)
+When backing up an entire drive (e.g., `D:\`), Nimbus Backup automatically excludes:
+
+**System Folders:**
+- `System Volume Information` - VSS snapshots storage (can be 100+ GB)
+- `$RECYCLE.BIN` - Windows recycle bin
+- `Recovery` - Windows recovery partition data
+
+**System Files:**
+- `pagefile.sys` - Windows page file
+- `hiberfil.sys` - Hibernation file
+- `swapfile.sys` - Windows swap file
+
+**Why this matters:**
+- Drive shows 1.03 TB used but actual files are 141 GB
+- Without exclusions, backup would include VSS snapshots (wasted space + time)
+- With exclusions, backup size matches real data (~141 GB)
+
+**Recommendation:**
+- **File-level backups** (default): Use file mode with auto-exclusions
+- **Bare-metal restore**: Use disk mode in separate job (includes everything)
+
 ## 🚀 Quick Start
 
 1. Download `NimbusBackup.exe` from releases
