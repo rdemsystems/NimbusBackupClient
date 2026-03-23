@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-03-23
+
+### Fixed
+- **UI overflow on small screens** - Window too small causes UI elements to be cut off
+  - Added MinWidth: 600 and MinHeight: 500 to Wails window options
+  - Prevents close button from being inaccessible
+  - Prevents buttons and content from overflowing
+  - Ensures all UI elements remain visible and usable
+
+### Improved
+- Better UX on small screens and low-resolution displays
+
 ## [0.2.10] - 2026-03-23
 
 ### Fixed

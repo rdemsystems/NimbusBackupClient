@@ -81,6 +81,10 @@
 
 ## 📜 Changelog récent
 
+### v0.2.11 (2026-03-23)
+- **FIX**: UI overflow on small screens - Added minimum window size (600x500)
+- **UX**: Better usability on low-resolution displays
+
 ### v0.2.10 (2026-03-23)
 - **FIX**: MSI build - Incorrect service exe path
 
@@ -454,5 +458,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.2.10
+**Version actuelle:** 0.2.11
 **Dernière mise à jour:** 2026-03-23
