@@ -81,6 +81,11 @@
 
 ## 📜 Changelog récent
 
+### v0.2.4 (2026-03-23)
+- **FIX**: Service build error in CI/CD - Missing replace directives
+- **FIX**: Malformed module path errors for local modules resolved
+- **BUILD**: cmd/service/go.mod now properly resolves all local dependencies
+
 ### v0.2.3 (2026-03-23) - Complete Release Since v0.2.0
 
 #### 🎯 Major Features (v0.2.0 → v0.2.3)
@@ -428,5 +433,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.2.3
+**Version actuelle:** 0.2.4
 **Dernière mise à jour:** 2026-03-23

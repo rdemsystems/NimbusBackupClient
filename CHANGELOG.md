@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-03-23
+
+### Fixed
+- **Service build error** - Missing replace directives in cmd/service/go.mod
+  - Added replace directives for all local modules (clientcommon, pbscommon, retry, security, snapshot)
+  - Paths adjusted relative to cmd/service/ directory
+  - Fixes CI error: "malformed module path: missing dot in first path element"
+  - Service now builds successfully in GitHub Actions
+
+### Technical
+- **Modified files:**
+  - `cmd/service/go.mod` - Added replace directives with relative paths
+  - Local modules now properly resolved during `go mod tidy`
+
 ## [0.2.3] - 2026-03-23
 
 ### Changed
