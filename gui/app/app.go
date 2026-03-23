@@ -46,3 +46,39 @@ func (a *App) StopScheduler() {
 		close(a.stopScheduler)
 	}
 }
+
+// StartBackup starts a backup job
+func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeList []string, backupID string, useVSS bool) error {
+	// TODO: Implement backup logic
+	return nil
+}
+
+// GetConfigWithHostname returns the configuration with hostname
+func (a *App) GetConfigWithHostname() map[string]interface{} {
+	// TODO: Implement config retrieval
+	return make(map[string]interface{})
+}
+
+// GetScheduledJobsForAPI returns all scheduled jobs
+func (a *App) GetScheduledJobsForAPI() []map[string]interface{} {
+	// TODO: Implement job listing
+	return make([]map[string]interface{}, 0)
+}
+
+// SaveScheduledJobFromMap creates a new scheduled job
+func (a *App) SaveScheduledJobFromMap(job map[string]interface{}) error {
+	// TODO: Implement job creation
+	return nil
+}
+
+// UpdateScheduledJobFromMap updates an existing scheduled job
+func (a *App) UpdateScheduledJobFromMap(job map[string]interface{}) error {
+	// TODO: Implement job update
+	return nil
+}
+
+// DeleteScheduledJobFromMap deletes a scheduled job
+func (a *App) DeleteScheduledJobFromMap(jobID string) error {
+	// TODO: Implement job deletion
+	return nil
+}
