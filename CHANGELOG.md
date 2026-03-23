@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-03-23
+
+### Fixed
+- **CI/CD build error** - Service executable not built before MSI creation
+  - Added build step for `NimbusBackupSVC.exe` in GitHub Actions workflow
+  - Service now built from `cmd/service` before WiX packaging
+  - Fixed LGHT0103 error: "The system cannot find the file NimbusBackupSVC.exe"
+  - Both binaries (GUI + Service) now copied to dist/ folder
+
+### Technical
+- **Modified files:**
+  - `.github/workflows/build-and-release.yml` - Added service build step
+  - Service built with same flags as GUI: `-trimpath -buildmode=pie -ldflags "-s -w"`
+  - Build order: GUI → Service → MSI packaging
+
 ## [0.2.1] - 2026-03-23
 
 ### Added

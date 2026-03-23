@@ -22,11 +22,13 @@
 ### Backup & Restore
 - ✅ Backup one-shot (exécution immédiate)
 - ✅ Backup planifié (quotidien avec heure configurable)
+- ✅ **Auto-split pour backups >100GB** (découpage intelligent en jobs de ~100GB)
 - ✅ Édition des jobs planifiés
 - ✅ VSS (Volume Shadow Copy) support
 - ✅ Exclusion de fichiers/dossiers
 - ✅ Restauration de snapshots
 - ✅ Liste des snapshots disponibles
+- ✅ Backups longue durée robustes (keep-alive 30s)
 
 ### Interface & UX
 - ✅ Interface graphique Wails (Go + React)
@@ -45,9 +47,9 @@
 
 ## 🚧 In Progress (En cours de développement)
 
-- 🔄 **Installateur MSI** (v0.1.44 - service Windows pour persistance au reboot)
-- 🔄 **Service Windows** (backups automatiques même après reboot)
-- 🔄 **Vérification stabilité scheduler** (monitoring jobs planifiés)
+- 🔄 **Architecture binaire séparée** - ✅ Complété en v0.2.0
+- 🔄 **Auto-split backups** - ✅ Complété en v0.2.1
+- 🔄 **Tests en production** (validation backups 11h+ avec keep-alive 30s)
 
 ## 📋 TODO (À faire)
 
@@ -78,6 +80,27 @@
 - ⚠️ Interface uniquement en français
 
 ## 📜 Changelog récent
+
+### v0.2.2 (2026-03-23)
+- **FIX**: CI/CD build error - Service executable not built before MSI creation
+- **FIX**: LGHT0103 error resolved (missing NimbusBackupSVC.exe)
+- **BUILD**: GitHub Actions workflow now builds service before MSI packaging
+
+### v0.2.1 (2026-03-23)
+- **FEATURE**: Auto-split for large backups (>100GB threshold)
+- **FEATURE**: Bin-packing algorithm distributes folders into balanced jobs
+- **UX**: Confirmation dialog shows total size and suggested split count
+- **ARCHITECTURE**: Sequential execution with per-job retry capability
+- **BENEFIT**: If one job fails, only retry ~100GB instead of losing 11+ hours
+
+### v0.2.0 (2026-03-23)
+- **BREAKING**: Binary separation architecture (GUI + Service)
+- **ARCHITECTURE**: NimbusBackup.exe (GUI) + NimbusBackupSVC.exe (Service)
+- **FEATURE**: HTTP API on localhost:18765 for GUI-Service communication
+- **FEATURE**: Single instance enforcement (Windows mutex)
+- **CRITICAL FIX**: Keep-alive interval changed from 5min to 30s
+- **FIX**: Prevents "dynamic writer not registered" errors after 11+ hour backups
+- **FIX**: MSI installer dual binary support
 
 ### v0.1.92 (2026-03-21)
 - **FIX**: MSI upgrade now uses afterInstallInitialize schedule
@@ -286,5 +309,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.1.92
-**Dernière mise à jour:** 2026-03-19
+**Version actuelle:** 0.2.2
+**Dernière mise à jour:** 2026-03-23
