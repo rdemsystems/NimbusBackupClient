@@ -81,6 +81,11 @@
 
 ## 📜 Changelog récent
 
+### v0.2.6 (2026-03-23)
+- **FIX**: Service build error - "gui is a program, not an importable package"
+- **REFACTOR**: Extracted App to gui/app package (importable)
+- **BUILD**: Service now builds successfully in CI/CD
+
 ### v0.2.5 (2026-03-23)
 - Re-release of v0.2.4 with proper build sequence (no functional changes)
 
@@ -436,5 +441,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.2.5
+**Version actuelle:** 0.2.6
 **Dernière mise à jour:** 2026-03-23

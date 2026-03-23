@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-03-23
+
+### Fixed
+- **Service build error** - "gui is a program, not an importable package"
+  - Extracted App struct to new `gui/app` package
+  - Service now imports `gui/app` instead of `gui` (package main)
+  - Created gui/app/go.mod as separate module
+  - Core methods implemented as stubs (CleanupAbandonedJobs, StartScheduler, StopScheduler)
+
+### Technical
+- **New package:**
+  - `gui/app/` - Importable package with App logic
+  - `gui/app/app.go` - App struct and service methods
+  - `gui/app/go.mod` - Separate module definition
+- **Modified files:**
+  - `cmd/service/main.go` - Import gui/app instead of gui
+  - `cmd/service/go.mod` - Updated dependencies (gui/app, gui/api)
+
+### Note
+Full App implementation will be migrated from gui/main.go to gui/app in future commits.
+Current version uses minimal stubs to unblock service build.
+
 ## [0.2.5] - 2026-03-23
 
 ### Note
