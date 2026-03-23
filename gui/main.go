@@ -107,8 +107,10 @@ func main() {
 	// Create application options
 	appOptions := &options.App{
 		Title:     fmt.Sprintf("%s v%s", appName, appVersion),
-		Width:     1200,
-		Height:    800,
+		Width:     1000,
+		Height:    700,
+		MaxWidth:  1400, // Prevent window from being too large
+		MaxHeight: 900,  // Prevent title bar from going off-screen
 		MinWidth:  400,  // Allow very small windows for low-res screens
 		MinHeight: 300,  // Allow very small windows for low-res screens
 		AssetServer: &assetserver.Options{
