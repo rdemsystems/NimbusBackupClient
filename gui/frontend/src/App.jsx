@@ -40,7 +40,7 @@ if (window.runtime) {
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState('config')
+  const [activeTab, setActiveTab] = useState('servers')
   const [hostname, setHostname] = useState('')
   const [appVersion, setAppVersion] = useState('dev')
   const [systemInfo, setSystemInfo] = useState({ mode: 'Standalone', is_admin: false, service_available: false })
@@ -669,11 +669,8 @@ function App() {
 
       <div className="container">
         <div className="tabs">
-          <div className={`tab ${activeTab === 'config' ? 'active' : ''}`} onClick={() => setActiveTab('config')}>
-            Configuration PBS
-          </div>
           <div className={`tab ${activeTab === 'servers' ? 'active' : ''}`} onClick={() => setActiveTab('servers')}>
-            Serveurs PBS
+            Configuration PBS
           </div>
           <div className={`tab ${activeTab === 'backup' ? 'active' : ''}`} onClick={() => setActiveTab('backup')}>
             Sauvegarde
@@ -686,147 +683,34 @@ function App() {
           </div>
         </div>
 
-        {/* Config Tab */}
-        <div className={`tab-content ${activeTab === 'config' ? 'active' : ''}`}>
-          <h2>Configuration du serveur PBS</h2>
-
-          {(config['backup-id'] || hostname) && (
-            <div className="info-box" style={{marginBottom: '20px'}}>
-              🖥️ <strong>Machine :</strong> {config['backup-id'] || hostname}
-            </div>
-          )}
-
-          <div className="form-group">
-            <label>URL du serveur PBS</label>
-            <input
-              type="text"
-              value={config.baseurl}
-              onChange={(e) => setConfig({...config, baseurl: e.target.value})}
-              placeholder="https://pbs.example.com:8007"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Empreinte certificat SSL (optionnel)</label>
-            <input
-              type="text"
-              value={config.certfingerprint}
-              onChange={(e) => setConfig({...config, certfingerprint: e.target.value})}
-              placeholder="AA:BB:CC:DD:..."
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Authentication ID</label>
-            <input
-              type="text"
-              value={config.authid}
-              onChange={(e) => setConfig({...config, authid: e.target.value})}
-              placeholder="backup@pbs!token-name"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Secret (API Token)</label>
-            <input
-              type="password"
-              value={config.secret}
-              onChange={(e) => setConfig({...config, secret: e.target.value})}
-              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Datastore</label>
-            <input
-              type="text"
-              value={config.datastore}
-              onChange={(e) => setConfig({...config, datastore: e.target.value})}
-              placeholder="backup-prod"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Namespace (optionnel)</label>
-            <input
-              type="text"
-              value={config.namespace}
-              onChange={(e) => setConfig({...config, namespace: e.target.value})}
-              placeholder="production"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Backup ID (identifiant de sauvegarde)</label>
-            <input
-              type="text"
-              value={config['backup-id']}
-              onChange={(e) => setConfig({...config, 'backup-id': e.target.value})}
-              placeholder={hostname || "Nom de la machine"}
-            />
-            <small style={{color: '#718096', fontSize: '12px'}}>
-              Laissez vide pour utiliser le nom de machine détecté : {hostname}
-            </small>
-          </div>
-
-          <div className="form-group">
-            <label>Charger une configuration existante</label>
-            <input
-              type="file"
-              id="configFile"
-              accept=".json,.txt"
-              style={{display: 'none'}}
-              onChange={handleLoadConfigFile}
-            />
-            <button className="btn btn-secondary" onClick={() => document.getElementById('configFile').click()}>
-              📁 Charger mon fichier (.json ou .txt)
-            </button>
-          </div>
-
-          <button className="btn" onClick={handleTestConnection}>Tester la connexion</button>
-          <button className="btn btn-secondary" onClick={handleSaveConfig}>Enregistrer</button>
-
-          {/* Upsell message if no backup configured */}
-          {!config.baseurl && (
-            <div className="info-box" style={{backgroundColor: '#eef2ff', borderLeft: '4px solid #667eea'}}>
-              <strong>📦 Vous n'avez pas encore de serveur PBS ?</strong><br/>
-              <a
-                href={`https://nimbus.rdem-systems.com/choisir-mon-backup/?utm_source=NimbusGui&utm_medium=tooling&utm_campaign=version-${appVersion}&utm_content=config-empty`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{color: '#667eea', fontWeight: 'bold', textDecoration: 'underline'}}
-              >
-                Commander du stockage Nimbus Backup →
-              </a>
-            </div>
-          )}
-
-          <div className="info-box">
-            💡 <strong>Astuce :</strong> Obtenez votre API Token depuis l'interface PBS:<br/>
-            Configuration → Access Control → API Tokens
-          </div>
-
-          {status.visible && activeTab === 'config' && (
-            <div className={`status ${status.type} visible`}>{status.message}</div>
-          )}
-        </div>
-
-        {/* PBS Servers Tab */}
+        {/* PBS Configuration Tab */}
         <div className={`tab-content ${activeTab === 'servers' ? 'active' : ''}`}>
-          <h2>🖥️ Gestion des serveurs PBS</h2>
+          <h2>🖥️ Configuration PBS</h2>
 
-          <div className="info-box" style={{marginBottom: '20px'}}>
-            💡 <strong>Multi-PBS :</strong> Configurez plusieurs serveurs PBS pour vos backups.<br/>
-            Exemple : C:\ → PBS big-data (lent, gros espace) | C:\Users → PBS SSD (rapide, petit)
-          </div>
+          {/* Show form first if no servers configured */}
+          {pbsServers.length === 0 ? (
+            <>
+              <div className="info-box" style={{marginBottom: '20px', backgroundColor: '#eef2ff', borderLeft: '4px solid #667eea'}}>
+                👋 <strong>Bienvenue !</strong> Configurez votre premier serveur PBS pour commencer les backups.<br/>
+                {!config.baseurl && (
+                  <>
+                    <br/>
+                    <strong>📦 Vous n'avez pas encore de serveur PBS ?</strong><br/>
+                    <a
+                      href={`https://nimbus.rdem-systems.com/choisir-mon-backup/?utm_source=NimbusGui&utm_medium=tooling&utm_campaign=version-${appVersion}&utm_content=first-setup`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{color: '#667eea', fontWeight: 'bold', textDecoration: 'underline'}}
+                    >
+                      Commander du stockage Nimbus Backup →
+                    </a>
+                  </>
+                )}
+              </div>
 
-          {/* Server List */}
-          <div className="card" style={{marginBottom: '20px'}}>
-            <h3>Serveurs configurés ({pbsServers.length})</h3>
-
-            {pbsServers.length === 0 ? (
-              <p style={{color: '#999', fontStyle: 'italic'}}>Aucun serveur PBS configuré. Ajoutez-en un ci-dessous.</p>
-            ) : (
+              {/* Add Server Form - Prominent when no servers */}
+              <div className="card">
+                <h3>➕ Ajouter votre serveur PBS</h3>
               <table style={{width: '100%', marginTop: '15px'}}>
                 <thead>
                   <tr>
@@ -984,11 +868,192 @@ function App() {
                 </>
               ) : (
                 <button onClick={handleAddPBSServer} style={{flex: 1}}>
-                  ➕ Ajouter le serveur
+                  ➕ Ajouter mon premier serveur
                 </button>
               )}
             </div>
+
+            <div className="info-box" style={{marginTop: '20px'}}>
+              💡 <strong>Astuce :</strong> Obtenez votre API Token depuis l'interface PBS:<br/>
+              Configuration → Access Control → API Tokens
+            </div>
           </div>
+            </>
+          ) : (
+            <>
+              {/* Multi-PBS info for users with existing servers */}
+              <div className="info-box" style={{marginBottom: '20px'}}>
+                💡 <strong>Multi-PBS :</strong> Gérez plusieurs serveurs PBS pour vos backups.<br/>
+                Exemple : C:\ → PBS big-data (lent, gros espace) | C:\Users → PBS SSD (rapide, petit)
+              </div>
+
+              {/* Server List */}
+              <div className="card" style={{marginBottom: '20px'}}>
+                <h3>Serveurs configurés ({pbsServers.length})</h3>
+
+                <table style={{width: '100%', marginTop: '15px'}}>
+                  <thead>
+                    <tr>
+                      <th>Nom</th>
+                      <th>URL</th>
+                      <th>Datastore</th>
+                      <th>Statut</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pbsServers.map(server => (
+                      <tr key={server.id}>
+                        <td>
+                          <strong>{server.name}</strong>
+                          {server.id === defaultPBSID && <span style={{marginLeft: '5px', color: '#fbbf24'}}>⭐ Défaut</span>}
+                          {server.description && <div style={{fontSize: '0.85em', color: '#999'}}>{server.description}</div>}
+                        </td>
+                        <td>{server.baseurl}</td>
+                        <td>{server.datastore}/{server.namespace || '-'}</td>
+                        <td>
+                          {serverStatus[server.id] === 'testing' && <span style={{color: '#3b82f6'}}>🔄 Test...</span>}
+                          {serverStatus[server.id] === 'online' && <span style={{color: '#10b981'}}>🟢 Online</span>}
+                          {serverStatus[server.id] === 'offline' && <span style={{color: '#ef4444'}}>🔴 Offline</span>}
+                          {!serverStatus[server.id] && <span style={{color: '#999'}}>⚪ Non testé</span>}
+                        </td>
+                        <td>
+                          <button onClick={() => handleTestPBSConnection(server.id)} style={{marginRight: '5px', padding: '5px 10px', fontSize: '0.9em'}}>
+                            🔍 Tester
+                          </button>
+                          <button onClick={() => handleEditServer(server)} style={{marginRight: '5px', padding: '5px 10px', fontSize: '0.9em'}}>
+                            ✏️ Modifier
+                          </button>
+                          {server.id !== defaultPBSID && (
+                            <button onClick={() => handleSetDefaultPBS(server.id)} style={{marginRight: '5px', padding: '5px 10px', fontSize: '0.9em', backgroundColor: '#fbbf24'}}>
+                              ⭐ Par défaut
+                            </button>
+                          )}
+                          <button onClick={() => handleDeletePBSServer(server.id)} style={{padding: '5px 10px', fontSize: '0.9em', backgroundColor: '#ef4444', color: 'white'}}>
+                            🗑️ Supprimer
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Add/Edit Server Form */}
+              <div className="card">
+                <h3>{editingServer ? '✏️ Modifier le serveur' : '➕ Ajouter un autre serveur PBS'}</h3>
+
+                <div className="form-group">
+                  <label>Nom du serveur</label>
+                  <input
+                    type="text"
+                    value={serverFormData.name}
+                    onChange={(e) => setServerFormData({...serverFormData, name: e.target.value})}
+                    placeholder="SSD Rapide"
+                  />
+                </div>
+
+                {!editingServer && (
+                  <div className="form-group">
+                    <label>ID du serveur (auto-généré si vide)</label>
+                    <input
+                      type="text"
+                      value={serverFormData.id}
+                      onChange={(e) => setServerFormData({...serverFormData, id: e.target.value})}
+                      placeholder="pbs-ssd (laissez vide pour auto-génération)"
+                    />
+                  </div>
+                )}
+
+                <div className="form-group">
+                  <label>URL du serveur PBS</label>
+                  <input
+                    type="text"
+                    value={serverFormData.baseurl}
+                    onChange={(e) => setServerFormData({...serverFormData, baseurl: e.target.value})}
+                    placeholder="https://pbs-ssd.example.com:8007"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Authentication ID</label>
+                  <input
+                    type="text"
+                    value={serverFormData.authid}
+                    onChange={(e) => setServerFormData({...serverFormData, authid: e.target.value})}
+                    placeholder="backup@pbs!token-name"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Secret (API Token)</label>
+                  <input
+                    type="password"
+                    value={serverFormData.secret}
+                    onChange={(e) => setServerFormData({...serverFormData, secret: e.target.value})}
+                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Datastore</label>
+                  <input
+                    type="text"
+                    value={serverFormData.datastore}
+                    onChange={(e) => setServerFormData({...serverFormData, datastore: e.target.value})}
+                    placeholder="ssd-fast"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Namespace (optionnel)</label>
+                  <input
+                    type="text"
+                    value={serverFormData.namespace}
+                    onChange={(e) => setServerFormData({...serverFormData, namespace: e.target.value})}
+                    placeholder="clients"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Empreinte certificat SSL (optionnel)</label>
+                  <input
+                    type="text"
+                    value={serverFormData.certfingerprint}
+                    onChange={(e) => setServerFormData({...serverFormData, certfingerprint: e.target.value})}
+                    placeholder="AA:BB:CC:DD:..."
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Description (optionnelle)</label>
+                  <textarea
+                    value={serverFormData.description}
+                    onChange={(e) => setServerFormData({...serverFormData, description: e.target.value})}
+                    placeholder="Stockage SSD pour backups critiques"
+                    rows="2"
+                  />
+                </div>
+
+                <div style={{display: 'flex', gap: '10px', marginTop: '20px'}}>
+                  {editingServer ? (
+                    <>
+                      <button onClick={handleUpdatePBSServer} style={{flex: 1}}>
+                        💾 Mettre à jour
+                      </button>
+                      <button onClick={handleCancelEdit} style={{flex: 1, backgroundColor: '#999'}}>
+                        ❌ Annuler
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={handleAddPBSServer} style={{flex: 1}}>
+                      ➕ Ajouter le serveur
+                    </button>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
 
           {status.visible && activeTab === 'servers' && (
             <div className={`status ${status.type} visible`}>{status.message}</div>
@@ -1237,6 +1302,9 @@ function App() {
               setScheduleTime('02:00')
               setRunAtStartup(false)
               setBackupDirs('')
+              setExcludeList('')
+              setBackupType('directory')
+              setActiveTab('scheduled')
               showStatus('✖️ Édition annulée', 'info')
             }}>
               ✖️ Annuler
@@ -1272,12 +1340,15 @@ function App() {
                         onClick={() => {
                           // Load job data into form for editing
                           setEditingJobId(job.id)
+                          setBackupMode('scheduled')
                           setScheduleTime(job.scheduleTime)
                           setRunAtStartup(job.runAtStartup)
                           setBackupDirs(job.backupDirs.join('\n'))
                           setConfig({...config, 'backup-id': job.backupId, usevss: job.useVSS})
                           setBackupType(job.backupType)
                           setExcludeList(job.excludeList.join('\n'))
+                          // Switch to backup tab to show the form
+                          setActiveTab('backup')
                           showStatus('✏️ Mode édition - modifiez et sauvegardez', 'info')
                           window.scrollTo({top: 0, behavior: 'smooth'})
                         }}

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <?define ProductName = "Nimbus Backup" ?>
-  <?define ProductVersion = "0.1.94" ?>
+  <?define ProductVersion = "0.1.95" ?>
   <?define Manufacturer = "RDEM Systems" ?>
   <?define UpgradeCode = "12345678-1234-1234-1234-123456789012" ?>
 
@@ -112,6 +112,14 @@
     <CustomAction Id="SetKeepConfigNo" Property="KEEP_CONFIG" Value="0" />
     <CustomAction Id="SetKeepConfigYes" Property="KEEP_CONFIG" Value="1" />
 
+    <!-- Custom action to kill all GUI processes before upgrade -->
+    <CustomAction Id="KillGUIProcesses"
+                  Directory="TARGETDIR"
+                  ExeCommand='cmd.exe /c "taskkill /F /IM NimbusBackup.exe /T 2&gt;nul || exit 0"'
+                  Execute="immediate"
+                  Impersonate="no"
+                  Return="ignore" />
+
     <!-- Custom action to delete config directory -->
     <CustomAction Id="DeleteConfigFolder"
                   Directory="TARGETDIR"
@@ -122,6 +130,11 @@
 
     <!-- Schedule custom actions -->
     <InstallExecuteSequence>
+      <!-- Kill GUI processes during upgrades before stopping service -->
+      <Custom Action="KillGUIProcesses" Before="StopServices">
+        UPGRADINGPRODUCTCODE
+      </Custom>
+
       <!-- Only delete config if KEEP_CONFIG=0 AND we're uninstalling (not upgrading) -->
       <Custom Action="DeleteConfigFolder" Before="RemoveFiles">
         (REMOVE="ALL") AND NOT UPGRADINGPRODUCTCODE AND (KEEP_CONFIG="0")
