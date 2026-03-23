@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-03-23
+
+### Fixed
+- **MSI build error** - Incorrect service exe path in Product.wxs
+  - Changed path from `../../cmd/service/` to `../../gui/build/bin/`
+  - Workflow builds service to gui/build/bin/NimbusBackupSVC.exe
+  - Fixes "LGHT0103: The system cannot find the file"
+
 ## [0.2.9] - 2026-03-23
 
 ### Fixed

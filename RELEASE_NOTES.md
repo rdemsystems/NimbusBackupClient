@@ -81,6 +81,9 @@
 
 ## 📜 Changelog récent
 
+### v0.2.10 (2026-03-23)
+- **FIX**: MSI build - Incorrect service exe path
+
 ### v0.2.9 (2026-03-23)
 - **FIX**: Service build - app.App missing BackupHandler interface methods
 
@@ -451,5 +454,5 @@ Older versions - see git history
 
 ---
 
-**Version actuelle:** 0.2.9
+**Version actuelle:** 0.2.10
 **Dernière mise à jour:** 2026-03-23
