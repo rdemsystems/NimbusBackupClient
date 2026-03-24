@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 const (
@@ -14,6 +15,25 @@ const (
 	// MaxChunkSize: Each split job should be ~100GB max
 	MaxChunkSize = 100 * 1024 * 1024 * 1024 // 100 GB
 )
+
+// GenerateBackupID creates a backup-id from hostname and path
+// Format: hostname_DRIVE_PATH (e.g., SERVER01_D_DATA_Users)
+func GenerateBackupID(hostname, path string) string {
+	// Clean path and replace backslashes with underscores
+	cleanPath := filepath.Clean(path)
+	cleanPath = strings.ReplaceAll(cleanPath, "\\", "_")
+	cleanPath = strings.ReplaceAll(cleanPath, "/", "_")
+	cleanPath = strings.ReplaceAll(cleanPath, ":", "")
+
+	// Remove leading/trailing underscores
+	cleanPath = strings.Trim(cleanPath, "_")
+
+	// Combine hostname and path
+	if cleanPath == "" {
+		return hostname
+	}
+	return fmt.Sprintf("%s_%s", hostname, cleanPath)
+}
 
 // FolderInfo represents a top-level folder with its size
 type FolderInfo struct {

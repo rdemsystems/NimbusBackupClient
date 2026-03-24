@@ -318,6 +318,68 @@ func RunBackupInline(opts BackupOptions) error {
 		return fmt.Errorf("at least one backup directory or drive required")
 	}
 
+	// Get hostname for backup-id generation
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unnamed-backup"
+	}
+
+	// Auto-split: Analyze directories and split if > 100GB
+	writeDebugLog("[Auto-Split] Analyzing backup directories for automatic splitting...")
+	analysis, err := AnalyzeBackupDirs(opts.BackupDirs)
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("[Auto-Split] Analysis failed: %v - continuing without split", err))
+	} else {
+		writeDebugLog(fmt.Sprintf("[Auto-Split] Total size: %s, Should split: %v", FormatSize(analysis.TotalSize), analysis.ShouldSplit))
+
+		if analysis.ShouldSplit {
+			// Generate base backup-id from first directory path if not already set
+			baseBackupID := opts.BackupID
+			if baseBackupID == "" {
+				baseBackupID = GenerateBackupID(hostname, opts.BackupDirs[0])
+			}
+
+			// Create split jobs
+			splitJobs := CreateSplitJobs(analysis, baseBackupID)
+			writeDebugLog(fmt.Sprintf("[Auto-Split] Splitting into %d jobs", len(splitJobs)))
+
+			// Execute each split job sequentially
+			for _, job := range splitJobs {
+				writeDebugLog(fmt.Sprintf("[Auto-Split] Starting job %d/%d: %s (%s, %d folders)",
+					job.Index, job.TotalJobs, job.BackupID, FormatSize(job.TotalSize), len(job.Folders)))
+
+				// Create options for this split job
+				splitOpts := opts
+				splitOpts.BackupDirs = job.Folders
+				splitOpts.BackupID = job.BackupID
+
+				// Recursive call for each split (will acquire lock individually)
+				if err := runBackupInlineInternal(splitOpts); err != nil {
+					writeDebugLog(fmt.Sprintf("[Auto-Split] Job %d/%d failed: %v", job.Index, job.TotalJobs, err))
+					// Continue with remaining jobs even if one fails
+				} else {
+					writeDebugLog(fmt.Sprintf("[Auto-Split] Job %d/%d completed successfully", job.Index, job.TotalJobs))
+				}
+			}
+
+			// All split jobs done
+			duration := time.Since(startTime)
+			writeDebugLog(fmt.Sprintf("[Auto-Split] All %d jobs completed in %s", len(splitJobs), formatDuration(duration)))
+			if opts.OnComplete != nil {
+				opts.OnComplete(true, fmt.Sprintf("Backup completed (%d split jobs) in %s", len(splitJobs), formatDuration(duration)))
+			}
+			return nil
+		}
+	}
+
+	// No split needed, continue with normal backup
+	return runBackupInlineInternal(opts)
+}
+
+// runBackupInlineInternal is the actual backup implementation (called by RunBackupInline)
+func runBackupInlineInternal(opts BackupOptions) error {
+	startTime := time.Now()
+
 	// Acquire backup lock for this destination to prevent concurrent backups
 	backupLock := getBackupLock(opts.BaseURL, opts.Datastore)
 	writeDebugLog(fmt.Sprintf("[Backup Lock] Waiting for lock on %s/%s (prevents concurrent backups)", opts.BaseURL, opts.Datastore))
@@ -334,14 +396,19 @@ func RunBackupInline(opts BackupOptions) error {
 		writeDebugLog(fmt.Sprintf("[Backup Lock] ✓ Lock released for %s/%s", opts.BaseURL, opts.Datastore))
 	}()
 
-	// Use hostname as backup ID if not specified
-	writeDebugLog("[DEBUG] Getting hostname if needed")
+	// Generate backup ID from path if not specified
+	writeDebugLog("[DEBUG] Generating backup ID if needed")
 	if opts.BackupID == "" {
 		hostname, err := os.Hostname()
-		if err == nil {
-			opts.BackupID = hostname
+		if err != nil {
+			hostname = "unnamed-backup"
+		}
+
+		// Generate backup-id from first directory path: hostname_DRIVE_PATH
+		if len(opts.BackupDirs) > 0 {
+			opts.BackupID = GenerateBackupID(hostname, opts.BackupDirs[0])
 		} else {
-			opts.BackupID = "unnamed-backup"
+			opts.BackupID = hostname
 		}
 	}
 	writeDebugLog(fmt.Sprintf("[DEBUG] BackupID set to: %s", opts.BackupID))
