@@ -33,7 +33,11 @@ func writeDebugLog(message string) {
 		fmt.Fprintf(os.Stderr, "Failed to write debug log: %v\n", err)
 		return
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Failed to close debug log: %v\n", closeErr)
+		}
+	}()
 
 	if _, err := f.WriteString(logLine); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to write to debug log: %v\n", err)
