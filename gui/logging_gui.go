@@ -10,38 +10,69 @@ import (
 	"time"
 )
 
-var debugLogPath string
+var (
+	backupLogger  *RotatingLogger
+	serviceLogger *RotatingLogger
+	logDir        string
+)
 
 func init() {
-	// Setup debug log path for GUI
+	// Setup log directory for GUI
 	programData := os.Getenv("ProgramData")
 	if programData == "" {
 		programData = "C:\\ProgramData"
 	}
-	logDir := filepath.Join(programData, "NimbusBackup")
+	logDir = filepath.Join(programData, "NimbusBackup")
 	// #nosec G703 -- ProgramData is a trusted Windows system environment variable
 	_ = os.MkdirAll(logDir, 0700)
-	debugLogPath = filepath.Join(logDir, "debug-gui.log")
+
+	// Initialize rotating loggers
+	var err error
+	backupLogger, err = NewRotatingLogger(
+		filepath.Join(logDir, "backup-gui.log"),
+		MaxLogSize,
+		MaxLogFiles,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create backup logger: %v\n", err)
+	}
+
+	serviceLogger, err = NewRotatingLogger(
+		filepath.Join(logDir, "service-gui.log"),
+		MaxLogSize,
+		MaxLogFiles,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create service logger: %v\n", err)
+	}
 }
 
+// writeDebugLog writes to service log (scheduler, general operations)
 func writeDebugLog(message string) {
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	logLine := fmt.Sprintf("[%s] %s\n", timestamp, message)
+	writeLogToLogger(serviceLogger, "SERVICE", message)
+}
 
-	f, err := os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write debug log: %v\n", err)
+// writeBackupLog writes to backup log (backup operations)
+func writeBackupLog(message string) {
+	writeLogToLogger(backupLogger, "BACKUP", message)
+}
+
+func writeLogToLogger(logger *RotatingLogger, prefix string, message string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	logLine := fmt.Sprintf("[%s] [%s] %s\n", prefix, timestamp, message)
+
+	// Fallback to stderr if logger is not initialized
+	if logger == nil {
+		fmt.Fprint(os.Stderr, logLine)
 		return
 	}
-	defer func() {
-		if closeErr := f.Close(); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "Failed to close debug log: %v\n", closeErr)
-		}
-	}()
 
-	if _, err := f.WriteString(logLine); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write to debug log: %v\n", err)
+	// Write to rotating logger
+	if err := logger.Write(logLine); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write log: %v\n", err)
+		fmt.Fprint(os.Stderr, logLine)
 	}
 
+	// Also write to stderr for console output
 	fmt.Fprint(os.Stderr, logLine)
 }

@@ -7,11 +7,11 @@ import (
 // AnalyzeBackup analyzes backup directories and determines if split is needed
 // Returns analysis with total size, folder breakdown, and split recommendation
 func (a *App) AnalyzeBackup(backupDirs []string) (map[string]interface{}, error) {
-	writeDebugLog(fmt.Sprintf("AnalyzeBackup called for %d directories", len(backupDirs)))
+	writeBackupLog(fmt.Sprintf("AnalyzeBackup called for %d directories", len(backupDirs)))
 
 	analysis, err := AnalyzeBackupDirs(backupDirs)
 	if err != nil {
-		writeDebugLog(fmt.Sprintf("AnalyzeBackup failed: %v", err))
+		writeBackupLog(fmt.Sprintf("AnalyzeBackup failed: %v", err))
 		return nil, err
 	}
 
@@ -34,7 +34,7 @@ func (a *App) AnalyzeBackup(backupDirs []string) (map[string]interface{}, error)
 		}
 	}
 
-	writeDebugLog(fmt.Sprintf("Analysis: %s total, split=%v, %d jobs suggested",
+	writeBackupLog(fmt.Sprintf("Analysis: %s total, split=%v, %d jobs suggested",
 		FormatSize(analysis.TotalSize), analysis.ShouldSplit, analysis.SuggestedJobs))
 
 	return result, nil
@@ -43,7 +43,7 @@ func (a *App) AnalyzeBackup(backupDirs []string) (map[string]interface{}, error)
 // CreateBackupSplitPlan creates a plan for splitting a large backup
 // Returns the split jobs that will be created
 func (a *App) CreateBackupSplitPlan(backupDirs []string, backupID string) ([]map[string]interface{}, error) {
-	writeDebugLog(fmt.Sprintf("CreateBackupSplitPlan called for backup ID: %s", backupID))
+	writeBackupLog(fmt.Sprintf("CreateBackupSplitPlan called for backup ID: %s", backupID))
 
 	analysis, err := AnalyzeBackupDirs(backupDirs)
 	if err != nil {
@@ -66,6 +66,6 @@ func (a *App) CreateBackupSplitPlan(backupDirs []string, backupID string) ([]map
 		}
 	}
 
-	writeDebugLog(fmt.Sprintf("Split plan created: %d jobs", len(splitJobs)))
+	writeBackupLog(fmt.Sprintf("Split plan created: %d jobs", len(splitJobs)))
 	return result, nil
 }

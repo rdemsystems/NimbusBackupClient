@@ -34,7 +34,7 @@ type SnapshotInfo struct {
 
 // ListSnapshotsInline lists available snapshots from PBS
 func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFingerprint, backupID string) ([]SnapshotInfo, error) {
-	writeDebugLog(fmt.Sprintf("Listing snapshots for backup ID: %s", backupID))
+	writeBackupLog(fmt.Sprintf("Listing snapshots for backup ID: %s", backupID))
 
 	// Create PBS client
 	client := &pbscommon.PBSClient{
@@ -55,7 +55,7 @@ func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFing
 	// It uses direct HTTP GET request
 	manifests, err := client.ListSnapshots()
 	if err != nil {
-		writeDebugLog(fmt.Sprintf("Failed to list snapshots: %v", err))
+		writeBackupLog(fmt.Sprintf("Failed to list snapshots: %v", err))
 		return nil, fmt.Errorf("failed to list snapshots: %v", err)
 	}
 
@@ -82,18 +82,18 @@ func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFing
 		result = append(result, info)
 	}
 
-	writeDebugLog(fmt.Sprintf("Found %d snapshots", len(result)))
+	writeBackupLog(fmt.Sprintf("Found %d snapshots", len(result)))
 	return result, nil
 }
 
 // RestoreSnapshotInline restores a snapshot from PBS
 func RestoreSnapshotInline(opts RestoreOptions) error {
-	writeDebugLog(fmt.Sprintf("Starting restore: snapshot=%s, dest=%s",
+	writeBackupLog(fmt.Sprintf("Starting restore: snapshot=%s, dest=%s",
 		opts.SnapshotTime.Format("2006-01-02T15:04:05Z"), opts.DestPath))
 
 	// Progress callback wrapper
 	progress := func(pct float64, msg string) {
-		writeDebugLog(fmt.Sprintf("Restore progress: %.1f%% - %s", pct*100, msg))
+		writeBackupLog(fmt.Sprintf("Restore progress: %.1f%% - %s", pct*100, msg))
 		if opts.OnProgress != nil {
 			opts.OnProgress(pct, msg)
 		}
@@ -137,11 +137,11 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 
 	pxarData, err := client.DownloadToBytes("backup.pxar.didx")
 	if err != nil {
-		writeDebugLog(fmt.Sprintf("Failed to download PXAR: %v", err))
+		writeBackupLog(fmt.Sprintf("Failed to download PXAR: %v", err))
 		return fmt.Errorf("failed to download backup archive: %v", err)
 	}
 
-	writeDebugLog(fmt.Sprintf("Downloaded %d bytes", len(pxarData)))
+	writeBackupLog(fmt.Sprintf("Downloaded %d bytes", len(pxarData)))
 	progress(0.80, "Archive downloaded")
 
 	// Save PXAR file
@@ -159,7 +159,7 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		return fmt.Errorf("failed to save PXAR file: %v", err)
 	}
 
-	writeDebugLog(fmt.Sprintf("Saved PXAR file to: %s", pxarFile))
+	writeBackupLog(fmt.Sprintf("Saved PXAR file to: %s", pxarFile))
 	progress(0.95, "Archive saved")
 
 	// Note: Full PXAR extraction would require implementing the PXAR format parser
