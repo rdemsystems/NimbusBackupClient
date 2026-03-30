@@ -131,7 +131,7 @@ func main() {
 
 	// Run application
 	writeDebugLog("Starting Wails runtime...")
-	err = wails.Run(appOptions)
+	err := wails.Run(appOptions)
 
 	if err != nil {
 		errMsg := fmt.Sprintf("ERROR: Wails.Run failed: %v\nStack trace:\n%s", err, debug.Stack())
