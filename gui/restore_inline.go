@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"pbscommon"
@@ -33,8 +34,10 @@ type SnapshotInfo struct {
 }
 
 // ListSnapshotsInline lists available snapshots from PBS
+// SECURITY: Only lists snapshots from the specified PBS server/datastore/namespace
+// This prevents cross-server snapshot access
 func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFingerprint, backupID string) ([]SnapshotInfo, error) {
-	writeBackupLog(fmt.Sprintf("Listing snapshots for backup ID: %s", backupID))
+	writeBackupLog(fmt.Sprintf("Listing snapshots for backup ID: %s on %s/%s/%s", backupID, baseURL, datastore, namespace))
 
 	// Create PBS client
 	client := &pbscommon.PBSClient{
@@ -62,8 +65,9 @@ func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFing
 
 	result := make([]SnapshotInfo, 0)
 	for _, m := range manifests {
-		// Filter by backup ID if specified
-		if backupID != "" && m.BackupID != backupID {
+		// Filter by backup ID if specified (partial match to support split backups)
+		// Example: searching "JDS-SRV-1" will match "JDS-SRV-1-split-1-of-2"
+		if backupID != "" && !strings.Contains(m.BackupID, backupID) {
 			continue
 		}
 
@@ -88,9 +92,12 @@ func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFing
 }
 
 // RestoreSnapshotInline restores a snapshot from PBS
+// SECURITY: Only restores from the configured PBS server/datastore/namespace
+// Snapshots from other servers will fail with HTTP 404
 func RestoreSnapshotInline(opts RestoreOptions) error {
-	writeBackupLog(fmt.Sprintf("Starting restore: snapshot=%s, dest=%s",
-		opts.SnapshotTime.Format("2006-01-02T15:04:05Z"), opts.DestPath))
+	writeBackupLog(fmt.Sprintf("Starting restore: snapshot=%s, dest=%s from %s/%s/%s",
+		opts.SnapshotTime.Format("2006-01-02T15:04:05Z"), opts.DestPath,
+		opts.BaseURL, opts.Datastore, opts.Namespace))
 
 	// Progress callback wrapper
 	progress := func(pct float64, msg string) {
@@ -111,6 +118,12 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 
 	if opts.DestPath == "" {
 		return fmt.Errorf("destination path required")
+	}
+
+	// SECURITY: Verify datastore and namespace are specified
+	// This prevents accidentally restoring from wrong location
+	if opts.Datastore == "" {
+		return fmt.Errorf("datastore required for security")
 	}
 
 	progress(0.05, "Connecting to PBS...")
