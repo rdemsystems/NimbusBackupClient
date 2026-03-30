@@ -136,7 +136,7 @@ func compressLogFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open source file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	// Create compressed file
 	gzPath := path + ".gz"
@@ -144,11 +144,11 @@ func compressLogFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create compressed file: %w", err)
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	// Create gzip writer
 	gzWriter := gzip.NewWriter(dst)
-	defer gzWriter.Close()
+	defer func() { _ = gzWriter.Close() }()
 
 	// Copy and compress
 	if _, err := io.Copy(gzWriter, src); err != nil {
