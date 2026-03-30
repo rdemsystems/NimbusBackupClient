@@ -362,12 +362,58 @@ func RunBackupInline(opts BackupOptions) error {
 		hostname = "unnamed-backup"
 	}
 
-	// Auto-split DISABLED: Too slow in GUI due to permission issues when calculating directory sizes
-	// The splitting logic has been disabled to avoid slow analysis and incorrect size detection
-	// Users can still manually split large backups by selecting specific folders
-	writeBackupLog("[Auto-Split] DISABLED - Direct backup without automatic splitting")
+	// Auto-split: Analyze directories and split if > 100GB
+	writeBackupLog("[Auto-Split] Analyzing backup directories for automatic splitting...")
+	analysis, err := AnalyzeBackupDirs(opts.BackupDirs)
+	if err != nil {
+		writeBackupLog(fmt.Sprintf("[Auto-Split] Analysis failed: %v - continuing without split", err))
+	} else {
+		writeBackupLog(fmt.Sprintf("[Auto-Split] Total size: %s, Should split: %v", FormatSize(analysis.TotalSize), analysis.ShouldSplit))
 
-	// Continue with normal backup (no splitting)
+		if analysis.ShouldSplit {
+			// Generate base backup-id from first directory path if not already set
+			baseBackupID := opts.BackupID
+			if baseBackupID == "" {
+				baseBackupID = GenerateBackupID(hostname, opts.BackupDirs[0])
+			}
+
+			// Create split jobs
+			splitJobs := CreateSplitJobs(analysis, baseBackupID)
+			writeBackupLog(fmt.Sprintf("[Auto-Split] Splitting into %d jobs", len(splitJobs)))
+
+			// Execute each split job sequentially
+			for _, job := range splitJobs {
+				writeBackupLog(fmt.Sprintf("[Auto-Split] Starting job %d/%d: %s (%s, %d folders)",
+					job.Index, job.TotalJobs, job.BackupID, FormatSize(job.TotalSize), len(job.Folders)))
+
+				// Create options for this split job
+				splitOpts := opts
+				splitOpts.BackupDirs = job.Folders
+				splitOpts.BackupID = job.BackupID
+
+				// Recursive call for each split (will acquire lock individually)
+				if err := runBackupInlineInternal(splitOpts); err != nil {
+					// Log error but CONTINUE with remaining jobs
+					errMsg := fmt.Sprintf("[Auto-Split] Job %d/%d failed: %v", job.Index, job.TotalJobs, err)
+					writeBackupLog(errMsg)
+					// Return error so the whole backup is marked as failed
+					return fmt.Errorf("%s", errMsg)
+				} else {
+					writeBackupLog(fmt.Sprintf("[Auto-Split] Job %d/%d completed successfully", job.Index, job.TotalJobs))
+				}
+			}
+
+			// All split jobs done
+			duration := time.Since(startTime)
+			writeBackupLog(fmt.Sprintf("[Auto-Split] All %d jobs completed in %s", len(splitJobs), formatDuration(duration)))
+			if opts.OnComplete != nil {
+				opts.OnComplete(true, fmt.Sprintf("Backup completed (%d split jobs) in %s", len(splitJobs), formatDuration(duration)))
+			}
+			return nil
+		}
+	}
+
+	// No split needed, continue with normal backup
 	return runBackupInlineInternal(opts)
 }
 

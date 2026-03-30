@@ -495,18 +495,23 @@ func (pbs *PBSClient) UploadManifest() error {
 
 func (pbs *PBSClient) Finish() error {
 	req, err := http.NewRequest("POST", pbs.BaseURL+"/finish", nil)
-	req.Header.Add("Authorization", fmt.Sprintf("PBSAPIToken=%s:%s", pbs.AuthID, pbs.Secret))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create finish request: %w", err)
 	}
+	req.Header.Add("Authorization", fmt.Sprintf("PBSAPIToken=%s:%s", pbs.AuthID, pbs.Secret))
+
 	resp2, err := pbs.Client.Do(req)
 	if err != nil {
-		fmt.Println("Error making request:", err)
-		if err != nil {
-			return err
-		}
+		return fmt.Errorf("finish request failed: %w", err)
 	}
 	defer resp2.Body.Close()
+
+	// CRITICAL: Check HTTP status code
+	if resp2.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp2.Body)
+		return fmt.Errorf("PBS finish failed: HTTP %d - %s", resp2.StatusCode, string(bodyBytes))
+	}
+
 	return nil
 }
 
