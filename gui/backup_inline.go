@@ -58,12 +58,25 @@ func getBackupLock(baseURL, datastore string) *sync.Mutex {
 }
 
 // calculateDirSize scans a directory recursively and returns total size in bytes
-func calculateDirSize(path string) uint64 {
+// Returns size and error if access was denied (needs VSS)
+func calculateDirSize(path string) (uint64, error) {
 	var totalSize uint64
+	var accessDenied bool
 
-	_ = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Skip errors
+			// Check if it's an access denied error
+			if strings.Contains(err.Error(), "Access is denied") ||
+			   strings.Contains(err.Error(), "permission denied") {
+				accessDenied = true
+				// Stop walking this path, but continue with others
+				if filePath == path {
+					// Root path denied - cannot scan at all
+					return fmt.Errorf("access denied to root path")
+				}
+				return filepath.SkipDir
+			}
+			return nil // Skip other errors
 		}
 		if !info.IsDir() {
 			totalSize += uint64(info.Size())
@@ -71,7 +84,11 @@ func calculateDirSize(path string) uint64 {
 		return nil
 	})
 
-	return totalSize
+	if accessDenied && totalSize == 0 {
+		return 0, fmt.Errorf("access denied: %s", path)
+	}
+
+	return totalSize, err
 }
 
 type ChunkState struct {
@@ -363,6 +380,7 @@ func RunBackupInline(opts BackupOptions) error {
 	}
 
 	// Auto-split: Analyze directories and split if > 100GB
+	// BUT: Skip split if previous backup exists (deduplication will make it small)
 	writeBackupLog("[Auto-Split] Analyzing backup directories for automatic splitting...")
 	analysis, err := AnalyzeBackupDirs(opts.BackupDirs)
 	if err != nil {
@@ -377,8 +395,34 @@ func RunBackupInline(opts BackupOptions) error {
 				baseBackupID = GenerateBackupID(hostname, opts.BackupDirs[0])
 			}
 
+			// Check if previous backup exists - if yes, skip split (dedup makes it small)
+			tempClient := &pbscommon.PBSClient{
+				BaseURL:         opts.BaseURL,
+				CertFingerPrint: opts.CertFingerprint,
+				AuthID:          opts.AuthID,
+				Secret:          opts.Secret,
+				Datastore:       opts.Datastore,
+				Namespace:       opts.Namespace,
+				Insecure:        opts.CertFingerprint != "",
+				Manifest: pbscommon.BackupManifest{
+					BackupID: baseBackupID,
+				},
+			}
+			tempClient.Connect(false, "host")
+			previousDidx, err := tempClient.DownloadPreviousToBytes("backup.pxar.didx")
+
+			if err == nil && len(previousDidx) > 0 {
+				writeBackupLog(fmt.Sprintf("[Auto-Split] Previous backup found (%d bytes) - SKIPPING split (deduplication will optimize size)", len(previousDidx)))
+				analysis.ShouldSplit = false
+			} else {
+				writeBackupLog("[Auto-Split] First backup detected - split will be applied")
+			}
+		}
+
+		if analysis.ShouldSplit {
+
 			// Create split jobs
-			splitJobs := CreateSplitJobs(analysis, baseBackupID)
+			splitJobs := CreateSplitJobs(analysis, baseBackupID, hostname)
 			writeBackupLog(fmt.Sprintf("[Auto-Split] Splitting into %d jobs", len(splitJobs)))
 
 			// Execute each split job sequentially

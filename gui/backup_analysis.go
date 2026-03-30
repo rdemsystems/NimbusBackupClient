@@ -37,9 +37,10 @@ func GenerateBackupID(hostname, path string) string {
 
 // FolderInfo represents a top-level folder with its size
 type FolderInfo struct {
-	Path string `json:"path"`
-	Name string `json:"name"`
-	Size uint64 `json:"size"`
+	Path         string `json:"path"`
+	Name         string `json:"name"`
+	Size         uint64 `json:"size"`
+	AccessDenied bool   `json:"access_denied"` // True if size couldn't be calculated due to permissions
 }
 
 // BackupAnalysis contains the analysis of directories to backup
@@ -77,15 +78,23 @@ func AnalyzeBackupDirs(backupDirs []string) (*BackupAnalysis, error) {
 		for _, entry := range entries {
 			if entry.IsDir() {
 				folderPath := filepath.Join(dir, entry.Name())
-				size := calculateDirSize(folderPath)
+				size, err := calculateDirSize(folderPath)
 
-				analysis.Folders = append(analysis.Folders, FolderInfo{
+				folderInfo := FolderInfo{
 					Path: folderPath,
 					Name: entry.Name(),
 					Size: size,
-				})
+				}
 
-				analysis.TotalSize += size
+				// If access denied, mark folder and estimate large size (will be split separately)
+				if err != nil && strings.Contains(err.Error(), "access denied") {
+					folderInfo.AccessDenied = true
+					// Estimate 500GB for denied folders (will be in separate job with VSS)
+					folderInfo.Size = 500 * 1024 * 1024 * 1024
+				}
+
+				analysis.Folders = append(analysis.Folders, folderInfo)
+				analysis.TotalSize += folderInfo.Size
 			}
 		}
 	}
@@ -123,7 +132,8 @@ type SplitJob struct {
 
 // CreateSplitJobs creates multiple smaller jobs from a large backup
 // Uses bin-packing algorithm to distribute folders evenly
-func CreateSplitJobs(analysis *BackupAnalysis, baseBackupID string) []SplitJob {
+// Folders with AccessDenied are placed in separate jobs (will use VSS)
+func CreateSplitJobs(analysis *BackupAnalysis, baseBackupID string, hostname string) []SplitJob {
 	if !analysis.ShouldSplit {
 		// No split needed, return single job
 		allFolders := make([]string, len(analysis.Folders))
@@ -140,15 +150,38 @@ func CreateSplitJobs(analysis *BackupAnalysis, baseBackupID string) []SplitJob {
 		}}
 	}
 
-	// Bin-packing: Distribute folders into jobs of ~MaxChunkSize each
 	jobs := make([]SplitJob, 0)
+
+	// Separate folders: accessible vs denied
+	accessibleFolders := make([]FolderInfo, 0)
+	deniedFolders := make([]FolderInfo, 0)
+
+	for _, folder := range analysis.Folders {
+		if folder.AccessDenied {
+			deniedFolders = append(deniedFolders, folder)
+		} else {
+			accessibleFolders = append(accessibleFolders, folder)
+		}
+	}
+
+	// Create jobs for DENIED folders FIRST (each in separate job with descriptive ID)
+	for _, folder := range deniedFolders {
+		jobs = append(jobs, SplitJob{
+			Folders:   []string{folder.Path},
+			TotalSize: folder.Size,
+			BackupID:  GenerateBackupID(hostname, folder.Path), // e.g., JDS-SRV-1_D_DATA
+			ParentID:  baseBackupID,
+		})
+	}
+
+	// Bin-packing for accessible folders
 	currentJob := SplitJob{
 		Folders:  make([]string, 0),
 		ParentID: baseBackupID,
 	}
 	currentSize := uint64(0)
 
-	for _, folder := range analysis.Folders {
+	for _, folder := range accessibleFolders {
 		// If adding this folder exceeds MaxChunkSize and we already have folders, start new job
 		if currentSize+folder.Size > MaxChunkSize && len(currentJob.Folders) > 0 {
 			jobs = append(jobs, currentJob)
@@ -169,12 +202,18 @@ func CreateSplitJobs(analysis *BackupAnalysis, baseBackupID string) []SplitJob {
 		jobs = append(jobs, currentJob)
 	}
 
-	// Set indices and backup IDs
+	// Set indices and backup IDs for mixed jobs (not denied folders)
 	totalJobs := len(jobs)
+	splitIndex := 1
 	for i := range jobs {
 		jobs[i].Index = i + 1
 		jobs[i].TotalJobs = totalJobs
-		jobs[i].BackupID = fmt.Sprintf("%s-split-%d-of-%d", baseBackupID, i+1, totalJobs)
+
+		// Only add split suffix for multi-folder jobs
+		if jobs[i].BackupID == "" {
+			jobs[i].BackupID = fmt.Sprintf("%s-split-%d-of-%d", baseBackupID, splitIndex, totalJobs)
+			splitIndex++
+		}
 	}
 
 	return jobs

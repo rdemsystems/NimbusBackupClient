@@ -50,7 +50,11 @@ func (a *App) CreateBackupSplitPlan(backupDirs []string, backupID string) ([]map
 		return nil, err
 	}
 
-	splitJobs := CreateSplitJobs(analysis, backupID)
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+	splitJobs := CreateSplitJobs(analysis, backupID, hostname)
 
 	// Convert to map array for JSON
 	result := make([]map[string]interface{}, len(splitJobs))
