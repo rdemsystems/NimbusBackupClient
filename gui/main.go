@@ -8,8 +8,6 @@ import (
 	"embed"
 	"flag"
 	"fmt"
-	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -81,19 +79,11 @@ func main() {
 		}
 	}()
 
-	// Setup logging to both file and stderr
-	logFile, err := os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open log file: %v\n", err)
-	} else {
-		defer func() { _ = logFile.Close() }()
-		// Log to both file and stderr
-		log.SetOutput(io.MultiWriter(logFile, os.Stderr))
-	}
-
+	// Logging is now handled by RotatingLogger (initialized in logging_gui.go)
 	writeDebugLog(fmt.Sprintf("=== %s v%s Starting ===", appName, appVersion))
 	writeDebugLog(fmt.Sprintf("Time: %s", time.Now().Format(time.RFC3339)))
-	writeDebugLog(fmt.Sprintf("Debug log: %s", debugLogPath))
+	writeDebugLog(fmt.Sprintf("Service log: %s", GetServiceLogPath()))
+	writeDebugLog(fmt.Sprintf("Backup log: %s", GetBackupLogPath()))
 	writeDebugLog(fmt.Sprintf("Crash report path: %s", crashReportPath))
 
 	// Clean up legacy auto-start from previous versions
@@ -149,7 +139,7 @@ func main() {
 		writeCrashReport(errMsg)
 		fmt.Fprint(os.Stderr, "\n!!! APPLICATION FAILED TO START !!!\n")
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Check crash_report.txt and %s\n", debugLogPath)
+		fmt.Fprintf(os.Stderr, "Check crash_report.txt and %s\n", GetServiceLogPath())
 		os.Exit(1)
 	}
 
@@ -167,12 +157,13 @@ Version: %s
 %s
 
 === SYSTEM INFO ===
-Debug Log: %s
+Service Log: %s
+Backup Log: %s
 
 Please report this issue to RDEM Systems:
 - Website: https://nimbus.rdem-systems.com
 - Include this crash_report.txt file
-`, timestamp, appVersion, message, debugLogPath)
+`, timestamp, appVersion, message, GetServiceLogPath(), GetBackupLogPath())
 
 	// Write to crash report file (overwrite each time)
 	err := os.WriteFile(crashReportPath, []byte(crashContent), 0600)

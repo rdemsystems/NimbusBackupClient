@@ -47,6 +47,16 @@ func init() {
 	}
 }
 
+// GetServiceLogPath returns the path to the service log file
+func GetServiceLogPath() string {
+	return filepath.Join(logDir, "service-service.log")
+}
+
+// GetBackupLogPath returns the path to the backup log file
+func GetBackupLogPath() string {
+	return filepath.Join(logDir, "backup-service.log")
+}
+
 // writeDebugLog writes to service log (scheduler, general operations)
 func writeDebugLog(message string) {
 	writeLogToLogger(serviceLogger, "SERVICE", message)
