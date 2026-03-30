@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 )
 
 // AnalyzeBackup analyzes backup directories and determines if split is needed

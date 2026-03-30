@@ -10,6 +10,7 @@ import (
 	"hash"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -204,6 +205,7 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 				sizeMB := c.pos / (1024 * 1024)
 
 				// Build progress message with chunk stats
+				var msg string
 				failed := c.failedchunk.Load()
 				if failed > 0 {
 					msg = fmt.Sprintf("Traité: %d MB (New: %d, Reused: %d, ⚠️ Failed: %d chunks)",
@@ -388,13 +390,13 @@ func RunBackupInline(opts BackupOptions) error {
 	} else {
 		writeBackupLog(fmt.Sprintf("[Auto-Split] Total size: %s, Should split: %v", FormatSize(analysis.TotalSize), analysis.ShouldSplit))
 
-		if analysis.ShouldSplit {
-			// Generate base backup-id from first directory path if not already set
-			baseBackupID := opts.BackupID
-			if baseBackupID == "" {
-				baseBackupID = GenerateBackupID(hostname, opts.BackupDirs[0])
-			}
+		// Generate base backup-id (used for checking existing backups and creating splits)
+		baseBackupID := opts.BackupID
+		if baseBackupID == "" {
+			baseBackupID = GenerateBackupID(hostname, opts.BackupDirs[0])
+		}
 
+		if analysis.ShouldSplit {
 			// Check each folder individually for existing backups
 			tempClient := &pbscommon.PBSClient{
 				BaseURL:         opts.BaseURL,
@@ -706,7 +708,10 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 	totalSize := &atomic.Uint64{}
 	go func() {
 		writeBackupLog(fmt.Sprintf("Starting background size calculation for: %s", backupdir))
-		size := calculateDirSize(backupdir)
+		size, err := calculateDirSize(backupdir)
+		if err != nil {
+			writeBackupLog(fmt.Sprintf("WARNING: Size calculation had errors: %v", err))
+		}
 		totalSize.Store(size)
 		writeBackupLog(fmt.Sprintf("Total size calculated: %d MB", size/(1024*1024)))
 	}()
