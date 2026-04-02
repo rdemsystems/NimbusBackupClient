@@ -12,8 +12,9 @@ const (
 	// SplitThreshold: If total backup size > 100GB, propose split
 	SplitThreshold = 100 * 1024 * 1024 * 1024 // 100 GB
 
-	// MaxChunkSize: Each split job should be ~100GB max
-	MaxChunkSize = 100 * 1024 * 1024 * 1024 // 100 GB
+	// MaxChunkSize: Each split job should be ~50GB max (reduced from 100GB to prevent manifest overflow)
+	// PBS has a ~4-6MB limit on manifest blob size. With 50GB jobs, we get ~15k chunks/job = ~3-4MB manifest
+	MaxChunkSize = 50 * 1024 * 1024 * 1024 // 50 GB
 )
 
 // GenerateBackupID creates a backup-id from hostname and path
