@@ -15,6 +15,14 @@ const (
 	// MaxChunkSize: Each split job should be ~50GB max (reduced from 100GB to prevent manifest overflow)
 	// PBS has a ~4-6MB limit on manifest blob size. With 50GB jobs, we get ~15k chunks/job = ~3-4MB manifest
 	MaxChunkSize = 50 * 1024 * 1024 * 1024 // 50 GB
+
+	// MaxSubdivisions: Maximum number of sub-folders to create when subdividing
+	// If a folder has more sub-folders than this, don't subdivide (keep as single job)
+	MaxSubdivisions = 20
+
+	// MinSubfolderSize: Minimum size for a subfolder to justify subdivision (10GB)
+	// Don't subdivide if subfolders are too small (creates too many tiny jobs)
+	MinSubfolderSize = 10 * 1024 * 1024 * 1024 // 10 GB
 )
 
 // GenerateBackupID creates a backup-id from hostname and path
@@ -231,23 +239,38 @@ func CreateSplitJobs(analysis *BackupAnalysis, baseBackupID string, hostname str
 	allFolders := append(deniedFolders, accessibleFolders...)
 
 	for _, folder := range allFolders {
-		// If folder is too large, subdivide into direct sub-folders
+		// If folder is too large, try to subdivide into direct sub-folders
 		if folder.Size > MaxChunkSize && !folder.AccessDenied {
 			subFolders, err := getSubFolders(folder.Path)
-			if err == nil && len(subFolders) > 1 {
-				// Create one job per sub-folder
-				for _, subFolder := range subFolders {
-					backupID := GenerateBackupID(hostname, subFolder.Path)
-					jobs = append(jobs, SplitJob{
-						Folders:   []string{subFolder.Path},
-						TotalSize: subFolder.Size,
-						BackupID:  backupID, // e.g., JDS-SRV-1_D_DATA_app
-						ParentID:  baseBackupID,
-					})
+
+			// Only subdivide if:
+			// 1. No error getting subfolders
+			// 2. Between 2 and MaxSubdivisions subfolders (not too many)
+			// 3. At least one subfolder is large enough to justify split
+			if err == nil && len(subFolders) >= 2 && len(subFolders) <= MaxSubdivisions {
+				hasLargeSubfolder := false
+				for _, sf := range subFolders {
+					if sf.Size >= MinSubfolderSize {
+						hasLargeSubfolder = true
+						break
+					}
 				}
-				continue
+
+				if hasLargeSubfolder {
+					// Subdivide: create one job per sub-folder
+					for _, subFolder := range subFolders {
+						backupID := GenerateBackupID(hostname, subFolder.Path)
+						jobs = append(jobs, SplitJob{
+							Folders:   []string{subFolder.Path},
+							TotalSize: subFolder.Size,
+							BackupID:  backupID, // e.g., JDS-SRV-1_D_DATA_app
+							ParentID:  baseBackupID,
+						})
+					}
+					continue
+				}
 			}
-			// If subdivision failed or only 1 subfolder, fall through to single job
+			// If subdivision not suitable (too many subfolders, too small, or error), fall through to single job
 		}
 
 		// Single job for this folder
