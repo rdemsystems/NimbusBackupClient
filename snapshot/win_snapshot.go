@@ -74,11 +74,57 @@ func CreateVSSSnapshot(paths []string, backup_callback func(sn map[string]SnapSh
 		defer sn.Release()
 
 		fmt.Print("Creating VSS Snapshot...")
+
+		// Check VSS writers status before creating snapshot
+		checkWritersCmd := exec.Command("vssadmin", "list", "writers")
+		writersOutput, _ := checkWritersCmd.CombinedOutput()
+		writersStatus := string(writersOutput)
+
+		// Log warnings for writers with known errors
+		hasWriterWarnings := false
+		if strings.Contains(writersStatus, "System Writer") && strings.Contains(writersStatus, "Last error") {
+			fmt.Println("⚠️  WARNING: System Writer has errors - system state may not be fully captured")
+			hasWriterWarnings = true
+		}
+		if strings.Contains(writersStatus, "NTDS") && (strings.Contains(writersStatus, "Last error") || strings.Contains(writersStatus, "0x800423f4")) {
+			fmt.Println("⚠️  WARNING: NTDS Writer refuses to participate - Active Directory state will not be captured")
+			hasWriterWarnings = true
+		}
+		if strings.Contains(writersStatus, "Dhcp") && strings.Contains(writersStatus, "Last error") {
+			fmt.Println("⚠️  WARNING: DHCP Jet Writer has errors - DHCP configuration may not be captured")
+			hasWriterWarnings = true
+		}
+
+		if hasWriterWarnings {
+			fmt.Println("         → Backup will continue with available writers only")
+			fmt.Println("         → File-level backup will work normally")
+		}
+
 		snapshot, err := sn.CreateSnapshot(volName, false, 180)
 		if err != nil {
-			return err
+			errMsg := err.Error()
+			// Check if error is ONLY due to writer failures (0x80070005 = Access Denied, 0x800423f4 = Non-retryable)
+			if strings.Contains(errMsg, "0x80070005") || strings.Contains(errMsg, "0x800423f4") {
+				// These are writer-specific errors, not snapshot creation errors
+				// Log but DON'T fail - the snapshot might still be usable for file backup
+				fmt.Printf("⚠️  VSS Writers error during snapshot creation: %v\n", err)
+				fmt.Println("         → Attempting to use snapshot anyway for file-level backup")
+				// snapshot might still be valid even with writer errors - check below
+			} else {
+				// Other errors are critical
+				return fmt.Errorf("VSS snapshot creation failed: %v", err)
+			}
 		}
-		fmt.Printf("Snapshot created: %s\n", snapshot.Id)
+
+		// Verify snapshot was actually created
+		if snapshot == nil || snapshot.Id == "" {
+			return fmt.Errorf("VSS snapshot creation failed: no valid snapshot created")
+		}
+
+		fmt.Printf("✓ Snapshot created: %s\n", snapshot.Id)
+		if hasWriterWarnings {
+			fmt.Println("  Note: Snapshot created despite writer warnings - file-level backup will proceed")
+		}
 
 		_, err = SymlinkSnapshot(filepath.Join(appDataFolder, "VSS"), snapshot.Id, snapshot.DeviceObjectPath)
 
