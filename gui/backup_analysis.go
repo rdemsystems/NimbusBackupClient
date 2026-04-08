@@ -12,9 +12,11 @@ const (
 	// SplitThreshold: If total backup size > 100GB, propose split
 	SplitThreshold = 100 * 1024 * 1024 * 1024 // 100 GB
 
-	// MaxChunkSize: Each split job should be ~50GB max (reduced from 100GB to prevent manifest overflow)
-	// PBS has a ~4-6MB limit on manifest blob size. With 50GB jobs, we get ~15k chunks/job = ~3-4MB manifest
-	MaxChunkSize = 50 * 1024 * 1024 * 1024 // 50 GB
+	// MaxChunkSize: Each split job should be ~100GB max
+	// Was reduced to 50GB as workaround for manifest overflow, but the real cause
+	// was 8MB chunk avg producing oversized chunks. With 4MB avg (v0.2.50), 100GB
+	// jobs produce ~25k chunks = ~5MB manifest, well within PBS limits.
+	MaxChunkSize = 100 * 1024 * 1024 * 1024 // 100 GB
 
 	// MaxSubdivisions: Maximum number of sub-folders to create when subdividing
 	// If a folder has more sub-folders than this, don't subdivide (keep as single job)
