@@ -739,10 +739,38 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 					if len(toks) > 1 && toks[1] != "101" {
 						statusCode := strings.Join(toks[1:], " ")
 						fmt.Printf("ERROR: PBS rejected upgrade with status: %s\n", statusCode)
-						fmt.Printf("Full response body:\n%s\n", string(buf))
+						fmt.Printf("Response headers:\n%s\n", string(buf))
+
+						// Read the response body (JSON error details) based on Content-Length
+						var contentLength int
+						for _, line := range lines {
+							line = strings.TrimSpace(line)
+							if strings.HasPrefix(strings.ToLower(line), "content-length:") {
+								fmt.Sscanf(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), "%d", &contentLength)
+							}
+						}
+						var responseBody string
+						if contentLength > 0 && contentLength < 4096 {
+							bodyBuf := make([]byte, contentLength)
+							totalRead := 0
+							for totalRead < contentLength {
+								n, readErr := conn.Read(bodyBuf[totalRead:])
+								if readErr != nil || n == 0 {
+									break
+								}
+								totalRead += n
+							}
+							responseBody = string(bodyBuf[:totalRead])
+							fmt.Printf("PBS error body: %s\n", responseBody)
+						}
+
+						errBody := string(buf)
+						if responseBody != "" {
+							errBody = errBody + "\nBody: " + responseBody
+						}
 						return nil, &AuthErr{
 							StatusCode:   statusCode,
-							ResponseBody: string(buf),
+							ResponseBody: errBody,
 						}
 					}
 				}

@@ -33,6 +33,17 @@ func GenerateBackupID(hostname, path string) string {
 	cleanPath = strings.ReplaceAll(cleanPath, "\\", "_")
 	cleanPath = strings.ReplaceAll(cleanPath, "/", "_")
 	cleanPath = strings.ReplaceAll(cleanPath, ":", "")
+	cleanPath = strings.ReplaceAll(cleanPath, " ", "-")
+
+	// Remove any remaining characters not allowed by PBS backup-id format
+	// PBS requires: ^[A-Za-z0-9_][A-Za-z0-9._\-]*$
+	var sanitized []byte
+	for _, c := range []byte(cleanPath) {
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-' {
+			sanitized = append(sanitized, c)
+		}
+	}
+	cleanPath = string(sanitized)
 
 	// Remove leading/trailing underscores
 	cleanPath = strings.Trim(cleanPath, "_")
