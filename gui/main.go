@@ -202,6 +202,9 @@ func (a *App) startup(ctx context.Context) {
 		// Cleanup any abandoned "running" jobs from previous session
 		a.CleanupAbandonedJobs()
 
+		// Recalculate stale nextRun values (e.g. after restart or missed window)
+		a.RecalculateNextRuns()
+
 		// Start background job scheduler
 		a.StartScheduler()
 		writeDebugLog("Background scheduler started (standalone mode)")

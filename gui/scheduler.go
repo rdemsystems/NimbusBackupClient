@@ -345,6 +345,62 @@ func calculateNextRun(scheduleTime string) string {
 	return nextRun.Format(time.RFC3339)
 }
 
+// RecalculateNextRuns recalculates nextRun for all jobs whose nextRun is stale (in the past).
+// This prevents jobs from being permanently stuck after a service restart or missed window.
+func (a *App) RecalculateNextRuns() {
+	writeDebugLog("RecalculateNextRuns called - fixing stale nextRun values")
+
+	jobs, err := a.GetScheduledJobs()
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("Error loading scheduled jobs: %v", err))
+		return
+	}
+
+	now := time.Now()
+	modified := false
+
+	for i, job := range jobs {
+		if !job.Enabled || job.NextRun == "" || job.ScheduleTime == "" {
+			continue
+		}
+
+		nextRun, err := time.Parse(time.RFC3339, job.NextRun)
+		if err != nil {
+			writeDebugLog(fmt.Sprintf("Error parsing nextRun for %s: %v", job.Name, err))
+			continue
+		}
+
+		// If nextRun is more than 2 minutes in the past, recalculate it
+		if now.After(nextRun.Add(2 * time.Minute)) {
+			newNextRun := calculateNextRun(job.ScheduleTime)
+			writeDebugLog(fmt.Sprintf("[RecalculateNextRuns] Job %s: nextRun was stale (%s), recalculated to %s",
+				job.Name, job.NextRun, newNextRun))
+			jobs[i].NextRun = newNextRun
+			modified = true
+		}
+	}
+
+	if modified {
+		jobsPath, err := getScheduledJobsPath()
+		if err != nil {
+			writeDebugLog(fmt.Sprintf("Error getting jobs path: %v", err))
+			return
+		}
+
+		data, err := json.MarshalIndent(jobs, "", "  ")
+		if err != nil {
+			writeDebugLog(fmt.Sprintf("Error marshaling jobs: %v", err))
+			return
+		}
+
+		if err := os.WriteFile(jobsPath, data, 0600); err != nil {
+			writeDebugLog(fmt.Sprintf("Error saving recalculated jobs: %v", err))
+		} else {
+			writeDebugLog("Successfully recalculated stale nextRun values")
+		}
+	}
+}
+
 // StartScheduler starts the background job scheduler
 func (a *App) StartScheduler() {
 	writeDebugLog("Starting background job scheduler")

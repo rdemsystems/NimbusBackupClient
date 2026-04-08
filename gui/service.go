@@ -57,6 +57,9 @@ func (s *NimbusService) run() {
 	// Clean up any abandoned jobs from previous crash
 	s.app.CleanupAbandonedJobs()
 
+	// Recalculate stale nextRun values (e.g. after service restart or missed window)
+	s.app.RecalculateNextRuns()
+
 	// Start the scheduler
 	s.app.StartScheduler()
 
