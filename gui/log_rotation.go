@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -22,12 +23,12 @@ const (
 
 // RotatingLogger manages a log file with automatic rotation and compression
 type RotatingLogger struct {
-	path       string
-	maxSize    int64
-	maxFiles   int
-	file       *os.File
+	path        string
+	maxSize     int64
+	maxFiles    int
+	file        *os.File
 	currentSize int64
-	mu         sync.Mutex
+	mu          sync.Mutex
 }
 
 // NewRotatingLogger creates a new rotating logger
@@ -61,22 +62,19 @@ func (l *RotatingLogger) Write(message string) error {
 	// Check if rotation is needed
 	if l.currentSize >= l.maxSize {
 		if err := l.rotate(); err != nil {
-			return fmt.Errorf("failed to rotate log: %w", err)
+			// Rotation failed but logger is still usable (truncate strategy)
+			fmt.Fprintf(os.Stderr, "Log rotation failed: %v (continuing with current file)\n", err)
 		}
 	}
 
-	// Write message
-	// CRITICAL: Check if file is nil (can happen if rotation failed)
 	if l.file == nil {
-		return fmt.Errorf("log file is nil, cannot write (rotation may have failed)")
+		return fmt.Errorf("log file is nil, cannot write")
 	}
 	n, err := l.file.WriteString(message)
 	if err != nil {
 		return fmt.Errorf("failed to write to log: %w", err)
 	}
 
-	// CRITICAL: Force immediate flush to disk to prevent data loss on crashes
-	// This ensures log data is persisted even if process terminates unexpectedly
 	if err := l.file.Sync(); err != nil {
 		return fmt.Errorf("failed to sync log to disk: %w", err)
 	}
@@ -85,66 +83,109 @@ func (l *RotatingLogger) Write(message string) error {
 	return nil
 }
 
-// rotate rotates the log file and compresses old logs
+// rotate rotates the log file.
+// On Windows, files must be closed before rename, so we use a copy+truncate
+// strategy to avoid losing the file handle if rename fails.
 func (l *RotatingLogger) rotate() error {
-	// Close current file
-	if err := l.file.Close(); err != nil {
-		return fmt.Errorf("failed to close log file: %w", err)
-	}
-
-	// Generate timestamp for rotated file
 	timestamp := time.Now().Format("20060102-150405")
 	rotatedPath := fmt.Sprintf("%s.%s", l.path, timestamp)
 
-	// Rename current log to rotated name
+	if runtime.GOOS == "windows" {
+		return l.rotateWindows(rotatedPath)
+	}
+	return l.rotatePosix(rotatedPath)
+}
+
+// rotatePosix uses rename (safe on Linux/Mac where open files can be renamed)
+func (l *RotatingLogger) rotatePosix(rotatedPath string) error {
+	// Close, rename, reopen
+	l.file.Close()
+
 	if err := os.Rename(l.path, rotatedPath); err != nil {
+		// Reopen the original file to keep logging
+		l.reopenOrDie()
 		return fmt.Errorf("failed to rename log file: %w", err)
 	}
 
-	// Compress the rotated file in background
-	go func() {
-		if err := compressLogFile(rotatedPath); err != nil {
-			// Log to stderr if compression fails (can't use rotating logger here)
-			fmt.Fprintf(os.Stderr, "Failed to compress log %s: %v\n", rotatedPath, err)
-		}
-	}()
+	// Start background compression
+	go l.compressAndCleanup(rotatedPath)
 
-	// Clean up old rotated logs (keep only maxFiles)
-	go func() {
-		if err := cleanupOldLogs(l.path, l.maxFiles); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to cleanup old logs: %v\n", err)
-		}
-	}()
-
-	// Create new log file
+	// Open new log file
 	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
-		// CRITICAL: If we can't create new log file, try to reopen the rotated file
-		// to prevent losing all subsequent logs
-		fmt.Fprintf(os.Stderr, "CRITICAL: Failed to create new log file %s: %v\n", l.path, err)
-		fmt.Fprintf(os.Stderr, "Attempting to reopen rotated file %s\n", rotatedPath)
-
-		// Try to reopen the rotated file as fallback
-		fallbackFile, fallbackErr := os.OpenFile(rotatedPath, os.O_WRONLY|os.O_APPEND, 0600)
-		if fallbackErr != nil {
-			// Can't reopen rotated file either - this is FATAL
-			fmt.Fprintf(os.Stderr, "FATAL: Cannot reopen rotated file: %v\n", fallbackErr)
-			fmt.Fprintf(os.Stderr, "Logging is now BROKEN - backup may fail\n")
-			// Set to nil to trigger fallback to stderr in writeLogToLogger
-			l.file = nil
-			return fmt.Errorf("failed to create new log file and reopen rotated file: %w", err)
-		}
-
-		// Successfully reopened rotated file - continue using it
-		l.file = fallbackFile
-		fmt.Fprintf(os.Stderr, "WARNING: Using rotated file %s for continued logging\n", rotatedPath)
-		return nil
+		l.reopenOrDie()
+		return fmt.Errorf("failed to create new log file: %w", err)
 	}
 
 	l.file = file
 	l.currentSize = 0
+	return nil
+}
+
+// rotateWindows uses copy+truncate to avoid Windows file locking issues.
+// The current file is copied to the rotated path, then truncated in place.
+// This avoids Close→Rename→Open which breaks if Rename fails on Windows.
+func (l *RotatingLogger) rotateWindows(rotatedPath string) error {
+	// Sync before copying
+	l.file.Sync()
+
+	// Seek to beginning for copying
+	if _, err := l.file.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to seek log file: %w", err)
+	}
+
+	// Copy current content to rotated file
+	dst, err := os.Create(rotatedPath)
+	if err != nil {
+		// Seek back to end for continued writing
+		l.file.Seek(0, 2)
+		return fmt.Errorf("failed to create rotated file: %w", err)
+	}
+
+	if _, err := io.Copy(dst, l.file); err != nil {
+		dst.Close()
+		os.Remove(rotatedPath)
+		l.file.Seek(0, 2)
+		return fmt.Errorf("failed to copy log content: %w", err)
+	}
+	dst.Close()
+
+	// Truncate the original file (keep the handle open)
+	if err := l.file.Truncate(0); err != nil {
+		return fmt.Errorf("failed to truncate log file: %w", err)
+	}
+	l.file.Seek(0, 0)
+	l.currentSize = 0
+
+	// Start background compression
+	go l.compressAndCleanup(rotatedPath)
 
 	return nil
+}
+
+// reopenOrDie tries to reopen the log file after a failed rotation.
+// If it can't, sets l.file to nil (writes will go to stderr).
+func (l *RotatingLogger) reopenOrDie() {
+	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: Cannot reopen log file %s: %v\n", l.path, err)
+		l.file = nil
+		return
+	}
+	l.file = file
+	if info, err := l.file.Stat(); err == nil {
+		l.currentSize = info.Size()
+	}
+}
+
+// compressAndCleanup compresses a rotated log file and cleans up old logs
+func (l *RotatingLogger) compressAndCleanup(rotatedPath string) {
+	if err := compressLogFile(rotatedPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to compress log %s: %v\n", rotatedPath, err)
+	}
+	if err := cleanupOldLogs(l.path, l.maxFiles); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to cleanup old logs: %v\n", err)
+	}
 }
 
 // Close closes the log file
@@ -160,38 +201,41 @@ func (l *RotatingLogger) Close() error {
 
 // compressLogFile compresses a log file with gzip and removes the original
 func compressLogFile(path string) error {
-	// Open source file
 	src, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("failed to open source file: %w", err)
 	}
-	defer func() { _ = src.Close() }()
 
-	// Create compressed file
 	gzPath := path + ".gz"
 	dst, err := os.Create(gzPath)
 	if err != nil {
+		src.Close()
 		return fmt.Errorf("failed to create compressed file: %w", err)
 	}
-	defer func() { _ = dst.Close() }()
 
-	// Create gzip writer
 	gzWriter := gzip.NewWriter(dst)
-	defer func() { _ = gzWriter.Close() }()
 
-	// Copy and compress
-	if _, err := io.Copy(gzWriter, src); err != nil {
-		return fmt.Errorf("failed to compress: %w", err)
+	_, copyErr := io.Copy(gzWriter, src)
+	closeGzErr := gzWriter.Close()
+	dst.Close()
+	src.Close()
+
+	if copyErr != nil {
+		os.Remove(gzPath)
+		return fmt.Errorf("failed to compress: %w", copyErr)
+	}
+	if closeGzErr != nil {
+		os.Remove(gzPath)
+		return fmt.Errorf("failed to close gzip writer: %w", closeGzErr)
 	}
 
-	// Close gzip writer to flush
-	if err := gzWriter.Close(); err != nil {
-		return fmt.Errorf("failed to close gzip writer: %w", err)
-	}
-
-	// Remove original file
+	// Remove original - on Windows this can fail, retry once after a short delay
 	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("failed to remove original file: %w", err)
+		time.Sleep(500 * time.Millisecond)
+		if err := os.Remove(path); err != nil {
+			// Not fatal - the .gz exists, uncompressed file is just wasted space
+			fmt.Fprintf(os.Stderr, "Warning: could not remove %s after compression: %v\n", path, err)
+		}
 	}
 
 	return nil
@@ -202,33 +246,27 @@ func cleanupOldLogs(basePath string, maxFiles int) error {
 	dir := filepath.Dir(basePath)
 	baseName := filepath.Base(basePath)
 
-	// List all rotated logs for this base name
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("failed to read log directory: %w", err)
 	}
 
-	// Filter rotated logs (both .gz and non-compressed)
 	var rotatedLogs []os.DirEntry
 	for _, entry := range entries {
 		name := entry.Name()
-		// Match: basename.TIMESTAMP or basename.TIMESTAMP.gz
 		if strings.HasPrefix(name, baseName+".") && name != baseName {
 			rotatedLogs = append(rotatedLogs, entry)
 		}
 	}
 
-	// If we have fewer files than maxFiles, nothing to clean
 	if len(rotatedLogs) <= maxFiles {
 		return nil
 	}
 
-	// Sort by name (timestamp is in the name, so this sorts by time)
 	sort.Slice(rotatedLogs, func(i, j int) bool {
 		return rotatedLogs[i].Name() < rotatedLogs[j].Name()
 	})
 
-	// Remove oldest files (keep only maxFiles newest)
 	filesToRemove := len(rotatedLogs) - maxFiles
 	for i := 0; i < filesToRemove; i++ {
 		filePath := filepath.Join(dir, rotatedLogs[i].Name())
