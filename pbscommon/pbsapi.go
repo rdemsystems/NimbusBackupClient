@@ -18,6 +18,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cornelk/hashmap"
@@ -282,13 +283,17 @@ func (pbs *PBSClient) CloseFixedIndex(writerid uint64, checksum string, totalsiz
 		fmt.Println("Error making request:", err)
 		return err
 	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp2.Body)
+		return fmt.Errorf("PBS close fixed index failed: HTTP %d - %s", resp2.StatusCode, string(bodyBytes))
+	}
 
 	f := &pbs.Manifest.Files[pbs.WritersManifest[writerid]]
-
 	f.Csum = checksum
 	f.Size = int64(totalsize)
 
-	defer resp2.Body.Close()
 	return nil
 }
 
@@ -465,6 +470,12 @@ func (pbs *PBSClient) AssignDynamicChunks(writerid uint64, digests []string, off
 		return err
 	}
 	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp2.Body)
+		return fmt.Errorf("PBS assign chunks failed: HTTP %d - %s", resp2.StatusCode, string(bodyBytes))
+	}
+
 	return nil
 }
 
@@ -491,13 +502,17 @@ func (pbs *PBSClient) CloseDynamicIndex(writerid uint64, checksum string, totals
 		fmt.Println("Error making request:", err)
 		return err
 	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp2.Body)
+		return fmt.Errorf("PBS close dynamic index failed: HTTP %d - %s", resp2.StatusCode, string(bodyBytes))
+	}
 
 	f := &pbs.Manifest.Files[pbs.WritersManifest[writerid]]
-
 	f.Csum = checksum
 	f.Size = int64(totalsize)
 
-	defer resp2.Body.Close()
 	return nil
 }
 
@@ -522,9 +537,8 @@ func (pbs *PBSClient) UploadBlob(name string, data []byte) error {
 	}
 
 	if resp2.StatusCode != http.StatusOK {
-		resp1, err := io.ReadAll(resp2.Body)
-		fmt.Println("Error making request:", string(resp1), string(resp2.Proto))
-		return err
+		bodyBytes, _ := io.ReadAll(resp2.Body)
+		return fmt.Errorf("PBS upload blob failed: HTTP %d - %s", resp2.StatusCode, string(bodyBytes))
 	}
 
 	pbs.Manifest.Files = append(pbs.Manifest.Files, File{
@@ -669,11 +683,24 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 		pbs.Client.Transport = nil
 	}
 
+	// Track whether DialTLSContext has already been called for this session.
+	// If HTTP/2 tries to reconnect (connection dropped mid-backup), we must
+	// fail rather than silently create a new PBS session with stale writer IDs.
+	var dialCalled atomic.Bool
+
 	// Create completely new client with fresh HTTP/2 transport
 	pbs.Client = http.Client{
 		Transport: &http2.Transport{
 
 			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+
+				// Prevent HTTP/2 auto-reconnect from creating orphaned PBS sessions.
+				// If the connection drops mid-backup, a reconnect would start a new PBS
+				// session with the same backup-time but fresh writer IDs on the server,
+				// while the client still holds stale writer IDs → "writer not registered".
+				if !dialCalled.CompareAndSwap(false, true) {
+					return nil, fmt.Errorf("connection lost: PBS session cannot be resumed (reconnect blocked to prevent orphaned sessions)")
+				}
 
 				//This is one of the trickiest parts, GO http2 library does not support starting with http1 and upgrading to 2 after
 				//So to achieve that the function to create SSL socket has been hijacked here

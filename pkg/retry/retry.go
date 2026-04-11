@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -37,18 +38,14 @@ func DefaultRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
-	// Retry on common transient errors
-	// You can extend this based on specific error types
-	errStr := err.Error()
-	return contains(errStr, "timeout") ||
-		contains(errStr, "connection refused") ||
-		contains(errStr, "connection reset") ||
-		contains(errStr, "temporary failure")
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
-		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr))
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "temporary failure") ||
+		strings.Contains(errStr, "unexpected eof") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "i/o timeout")
 }
 
 // Do executes fn with retry logic
