@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -18,11 +19,15 @@ var (
 
 func init() {
 	// Setup log directory for SERVICE
-	programData := os.Getenv("ProgramData")
-	if programData == "" {
-		programData = "C:\\ProgramData"
+	if runtime.GOOS == "windows" {
+		programData := os.Getenv("ProgramData")
+		if programData == "" {
+			programData = "C:\\ProgramData"
+		}
+		logDir = filepath.Join(programData, "NimbusBackup")
+	} else {
+		logDir = "/var/log/nimbusbackup"
 	}
-	logDir = filepath.Join(programData, "NimbusBackup")
 	// #nosec G703 -- ProgramData is a trusted Windows system environment variable
 	_ = os.MkdirAll(logDir, 0700)
 

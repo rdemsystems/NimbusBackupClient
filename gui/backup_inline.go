@@ -768,6 +768,11 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 		client.SkippedFiles = append(client.SkippedFiles, archive.SkippedFiles...)
 	}
 
+	// Guard: if WriteDir produced 0 data, the backup dir was effectively empty or inaccessible
+	if pxarChunk.pos == 0 && len(pxarChunk.current_chunk) == 0 {
+		return fmt.Errorf("backup produced 0 bytes for %s — directory may be empty, inaccessible, or all files were excluded", backupdir)
+	}
+
 	if err = pxarChunk.Eof(client); err != nil {
 		return err
 	}

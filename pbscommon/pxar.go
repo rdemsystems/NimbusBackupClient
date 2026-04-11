@@ -290,7 +290,11 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 	// Check if directory is a junction point/symlink before reading it
 	fileInfo, err := os.Lstat(path)
 	if err != nil {
-		// Log stat errors but continue backup - don't fail on inaccessible directories
+		if toplevel {
+			// Toplevel directory MUST be accessible — this is a fatal error
+			return CatalogDir{}, fmt.Errorf("cannot stat backup root directory: %s: %w", path, err)
+		}
+		// Sub-directories: skip and continue backup
 		skipMsg := fmt.Sprintf("Cannot stat directory: %s (Error: %v)", path, err)
 		a.SkippedFiles = append(a.SkippedFiles, skipMsg)
 		return CatalogDir{}, nil
@@ -305,7 +309,11 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 
 	files, err := os.ReadDir(path)
 	if err != nil {
-		// Log read errors but continue backup - don't fail on permission denied, locked files, etc.
+		if toplevel {
+			// Toplevel directory MUST be readable — this is a fatal error
+			return CatalogDir{}, fmt.Errorf("cannot read backup root directory: %s: %w", path, err)
+		}
+		// Sub-directories: skip and continue backup
 		skipMsg := fmt.Sprintf("Cannot read directory: %s (Error: %v)", path, err)
 		a.SkippedFiles = append(a.SkippedFiles, skipMsg)
 		return CatalogDir{}, nil
