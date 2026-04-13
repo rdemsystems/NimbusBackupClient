@@ -241,6 +241,29 @@ func compressLogFile(path string) error {
 	return nil
 }
 
+// sanitizeForFilename replaces characters that are unsafe or awkward in filenames.
+// Used to embed a backup-id into a log filename.
+func sanitizeForFilename(s string) string {
+	if s == "" {
+		return "unnamed"
+	}
+	var b []byte
+	for _, c := range []byte(s) {
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+			b = append(b, c)
+		case c == '_' || c == '-' || c == '.':
+			b = append(b, c)
+		default:
+			b = append(b, '_')
+		}
+	}
+	if len(b) == 0 {
+		return "unnamed"
+	}
+	return string(b)
+}
+
 // cleanupOldLogs removes old rotated log files, keeping only maxFiles
 func cleanupOldLogs(basePath string, maxFiles int) error {
 	dir := filepath.Dir(basePath)

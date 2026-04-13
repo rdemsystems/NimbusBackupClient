@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -387,6 +388,19 @@ func formatDuration(d time.Duration) string {
 
 // RunBackupInline performs a backup without external binaries
 func RunBackupInline(opts BackupOptions) (returnErr error) {
+	// Per-run log file: each backup run gets its own dedicated log file.
+	// Must be set up BEFORE any writeBackupLog call so logs land in the right place.
+	runLogID := opts.BackupID
+	if runLogID == "" {
+		if h, err := os.Hostname(); err == nil {
+			runLogID = h
+		} else {
+			runLogID = "backup"
+		}
+	}
+	runLogger := StartBackupRunLog(runLogID)
+	defer EndBackupRunLog(runLogger)
+
 	// CRITICAL: Panic recovery to prevent silent goroutine death (scheduler launches backups in goroutines)
 	defer func() {
 		if r := recover(); r != nil {
@@ -401,7 +415,12 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 	}()
 
 	startTime := time.Now()
-	writeBackupLog("Starting inline backup")
+	userName := "<unknown>"
+	if cu, err := user.Current(); err == nil {
+		userName = cu.Username
+	}
+	writeBackupLog(fmt.Sprintf("==== starting version %s - user %s - %s/%s ====",
+		appVersion, userName, runtime.GOOS, runtime.GOARCH))
 
 	// Validate options
 	writeBackupLog("[DEBUG] Validating backup options")
@@ -655,8 +674,6 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		return fmt.Errorf("%s", errMsg)
 	}
 
-	progress(1.0, "Backup completed")
-
 	// Calculate backup duration and size
 	duration := time.Since(startTime)
 	totalSizeMB := float64(totalSize.Load()) / (1024 * 1024)
@@ -664,18 +681,23 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	// Build completion message with duration, size, and chunk stats
 	failed := failedchunk.Load()
 	partial := len(dirErrors) > 0
-	var completionMsg string
+	var completionMsg, progressMsg string
 	switch {
 	case partial:
 		completionMsg = fmt.Sprintf("⚠️  Backup partiel en %s: %d/%d dossiers OK, %.1f MB (%d new, %d reused chunks)\nErreurs:\n%s",
 			formatDuration(duration), successfulDirs, len(opts.BackupDirs), totalSizeMB, newchunk.Load(), reusechunk.Load(), strings.Join(dirErrors, "\n"))
+		progressMsg = fmt.Sprintf("Backup partiel : %d/%d dossiers OK", successfulDirs, len(opts.BackupDirs))
 	case failed > 0:
 		completionMsg = fmt.Sprintf("⚠️  Backup completed with errors in %s: %.1f MB backed up (%d new, %d reused, %d FAILED chunks)",
 			formatDuration(duration), totalSizeMB, newchunk.Load(), reusechunk.Load(), failed)
+		progressMsg = fmt.Sprintf("Backup completed with %d failed chunks", failed)
 	default:
 		completionMsg = fmt.Sprintf("Backup completed in %s: %.1f MB backed up (%d new, %d reused chunks)",
 			formatDuration(duration), totalSizeMB, newchunk.Load(), reusechunk.Load())
+		progressMsg = "Backup completed"
 	}
+
+	progress(1.0, progressMsg)
 
 	if len(client.SkippedFiles) > 0 {
 		completionMsg += fmt.Sprintf("\n⚠️  %d fichiers/dossiers ignorés (accès refusé ou junction points)", len(client.SkippedFiles))
@@ -695,11 +717,13 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		writeBackupLog("=== END SKIPPED FILES ===")
 	}
 
-	writeBackupLog(fmt.Sprintf("Backup completed: New %d chunks, Reused %d chunks, Skipped %d files",
-		newchunk.Load(), reusechunk.Load(), len(client.SkippedFiles)))
+	writeBackupLog(completionMsg)
 
+	// Partial success is reported as failure so the UI surfaces the errors.
+	// The completionMsg contains both the successes and the failures.
+	success := !partial
 	if opts.OnComplete != nil {
-		opts.OnComplete(true, completionMsg)
+		opts.OnComplete(success, completionMsg)
 	}
 
 	return nil
