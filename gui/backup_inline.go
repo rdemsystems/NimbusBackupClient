@@ -789,6 +789,13 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 		}
 	}
 
+	// NTFS metadata collector: captures ACLs/owner/attrs for every entry during
+	// the walk. Implementation is Windows-only; no-op on other platforms.
+	// The collected data is serialized after the walk and uploaded as a blob
+	// in the same backup session (see below, after Eof).
+	ntfsCollector := NewNTFSMetaCollector(backupdir, hostname)
+	archive.MetaCollector = ntfsCollector
+
 	previousDidx, err := client.DownloadPreviousToBytes(archive.ArchiveName)
 	if err != nil {
 		// This is normal for first backup - no previous backup exists
@@ -854,6 +861,22 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 	}
 	if err = pcat1Chunk.Eof(client); err != nil {
 		return err
+	}
+
+	// Serialize NTFS metadata collected during the walk and upload it as a
+	// blob in the same backup session. The blob is listed in the PBS manifest
+	// alongside backup.pxar.didx and catalog.pcat1.didx so restore tools can
+	// fetch it without extracting the whole archive. Best-effort: a failure
+	// here does NOT fail the backup — the file data is already safe.
+	if aclBytes, aclErr := ntfsCollector.Finalize(); aclErr != nil {
+		writeBackupLog(fmt.Sprintf("WARNING: failed to serialize NTFS metadata: %v", aclErr))
+	} else if len(aclBytes) > 0 {
+		entries, uniqueSDDLs, metaErrs := ntfsCollector.Stats()
+		writeBackupLog(fmt.Sprintf("NTFS metadata: %d entries, %d unique SDDLs, %d errors, %d bytes gzipped",
+			entries, uniqueSDDLs, metaErrs, len(aclBytes)))
+		if upErr := client.UploadBlob(BackupAclsFilename, aclBytes); upErr != nil {
+			writeBackupLog(fmt.Sprintf("WARNING: failed to upload NTFS metadata blob: %v", upErr))
+		}
 	}
 
 	// Upload manifest with retry

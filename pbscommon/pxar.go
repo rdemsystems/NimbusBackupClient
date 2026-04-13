@@ -181,6 +181,19 @@ func ca_make_bst(input []GoodByeItem, output *[]GoodByeItem) {
 
 type PXAROutCB func([]byte) error
 
+// MetaCollector is an optional hook invoked during the PXAR walk for every
+// directory and regular file that is actually being backed up (after skip
+// checks). Implementations capture per-entry metadata that PXAR itself cannot
+// represent — the primary use case is NTFS ACLs/owner/attributes on Windows.
+//
+// The walk is single-threaded, so implementations do not need to be
+// concurrency-safe with respect to the walk itself. Collect errors are logged
+// but never abort the backup: metadata capture is best-effort and must never
+// cause an otherwise-successful backup to fail.
+type MetaCollector interface {
+	Collect(absPath string, info os.FileInfo, isDir bool) error
+}
+
 type PXARArchive struct {
 	//Create(filename string, WriteCB PXAROutCB)
 	//AddFile(filename string)
@@ -197,6 +210,11 @@ type PXARArchive struct {
 	// VirtualFiles are injected at the root of the archive before real files.
 	// Key = filename (e.g. ".nimbus_backup_meta.json"), Value = content bytes.
 	VirtualFiles map[string][]byte
+
+	// MetaCollector, if set, is called for every directory and file that is
+	// actually backed up. Used to capture NTFS ACLs and other per-file metadata
+	// that PXAR cannot represent. Best-effort: errors are logged and ignored.
+	MetaCollector MetaCollector
 }
 
 //This function will flush the internal buffer and update position
@@ -362,6 +380,14 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 
 	if err := a.Flush(); err != nil {
 		return CatalogDir{}, err
+	}
+
+	// Capture per-directory metadata (NTFS ACLs on Windows). Best-effort.
+	if a.MetaCollector != nil {
+		if err := a.MetaCollector.Collect(path, fileInfo, true); err != nil {
+			a.SkippedFiles = append(a.SkippedFiles,
+				fmt.Sprintf("Metadata collect failed for dir %s: %v", path, err))
+		}
 	}
 
 	goodbyteitems := make([]GoodByeItem, 0)
@@ -573,6 +599,14 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
 	}
 
 	defer file.Close()
+
+	// Capture per-file metadata (NTFS ACLs on Windows). Best-effort.
+	if a.MetaCollector != nil {
+		if err := a.MetaCollector.Collect(path, fileInfo, false); err != nil {
+			a.SkippedFiles = append(a.SkippedFiles,
+				fmt.Sprintf("Metadata collect failed for file %s: %v", path, err))
+		}
+	}
 
 	fname_entry := &PXARFilenameEntry{
 		hdr: PXAR_FILENAME,
