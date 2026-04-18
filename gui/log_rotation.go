@@ -45,12 +45,9 @@ func NewRotatingLogger(path string, maxSize int64, maxFiles int) (*RotatingLogge
 		logger.currentSize = info.Size()
 	}
 
-	// Open log file (create if not exists).
-	// O_RDWR (not O_WRONLY) is required so rotateWindows can io.Copy from
-	// this handle into the rotated file. With O_WRONLY on Windows the
-	// handle has no GENERIC_READ right and every ReadFile returns
-	// ERROR_ACCESS_DENIED, so rotation was silently failing in prod.
-	// O_APPEND still forces writes to the end regardless of read offset.
+	// Open log file (create if not exists). O_APPEND guarantees writes
+	// always land at end-of-file even if someone reads from the same
+	// handle; O_RDWR keeps read access available for future tooling.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open log file: %w", err)
@@ -94,9 +91,11 @@ func (l *RotatingLogger) Write(message string) error {
 	return nil
 }
 
-// rotate rotates the log file.
-// On Windows, files must be closed before rename, so we use a copy+truncate
-// strategy to avoid losing the file handle if rename fails.
+// rotate rotates the log file. Both the POSIX and Windows code paths
+// close the current handle, move the old file aside, and reopen a
+// fresh one — simple and symmetric. Windows adds a short retry-on-
+// share-violation backoff after Close to cope with antivirus holding
+// transient handles.
 func (l *RotatingLogger) rotate() error {
 	timestamp := time.Now().Format("20060102-150405")
 	rotatedPath := fmt.Sprintf("%s.%s", l.path, timestamp)
@@ -121,7 +120,7 @@ func (l *RotatingLogger) rotatePosix(rotatedPath string) error {
 	// Start background compression
 	go l.compressAndCleanup(rotatedPath)
 
-	// Open new log file — O_RDWR so future rotations can io.Copy from it.
+	// Open new log file — same mode as NewRotatingLogger.
 	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
 		l.reopenOrDie()
@@ -133,44 +132,55 @@ func (l *RotatingLogger) rotatePosix(rotatedPath string) error {
 	return nil
 }
 
-// rotateWindows uses copy+truncate to avoid Windows file locking issues.
-// The current file is copied to the rotated path, then truncated in place.
-// This avoids Close→Rename→Open which breaks if Rename fails on Windows.
+// rotateWindows rotates by closing the current handle, renaming the
+// file, and reopening a fresh one.
+//
+// The previous copy+truncate approach was broken: O_APPEND under Go on
+// Windows maps to FILE_APPEND_DATA only (not GENERIC_WRITE), and
+// SetEndOfFile — used by os.File.Truncate — requires GENERIC_WRITE. So
+// every Truncate call failed with ERROR_ACCESS_DENIED, rotate() kept
+// returning errors, currentSize was never reset, and every subsequent
+// log line re-triggered rotation. In prod we observed bursts of 10+
+// rotation files produced in < 20 s with byte-identical partial
+// copies. Compression goroutines never got their .gz either because
+// rotate bailed before the `go l.compressAndCleanup(...)` line.
+//
+// Close→Rename→Open also sidesteps the io.Copy-from-write-only-handle
+// bug: no copy is done at all, the file is just atomically moved.
 func (l *RotatingLogger) rotateWindows(rotatedPath string) error {
-	// Sync before copying
 	_ = l.file.Sync()
+	_ = l.file.Close()
+	l.file = nil
 
-	// Seek to beginning for copying
-	if _, err := l.file.Seek(0, 0); err != nil {
-		return fmt.Errorf("failed to seek log file: %w", err)
+	// Short backoff: after Close(), antivirus / Windows Search can
+	// briefly hold a transient handle on the file, which causes
+	// os.Rename to fail with ERROR_SHARING_VIOLATION. A few retries
+	// with small sleeps cover that race without blocking the caller
+	// for long.
+	var renameErr error
+	for _, d := range []time.Duration{0, 50 * time.Millisecond, 200 * time.Millisecond, 500 * time.Millisecond} {
+		if d > 0 {
+			time.Sleep(d)
+		}
+		renameErr = os.Rename(l.path, rotatedPath)
+		if renameErr == nil {
+			break
+		}
+	}
+	if renameErr != nil {
+		l.reopenOrDie()
+		return fmt.Errorf("failed to rename log file for rotation: %w", renameErr)
 	}
 
-	// Copy current content to rotated file
-	dst, err := os.Create(rotatedPath)
+	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
-		// Seek back to end for continued writing
-		_, _ = l.file.Seek(0, 2)
-		return fmt.Errorf("failed to create rotated file: %w", err)
+		l.reopenOrDie()
+		return fmt.Errorf("failed to reopen log file after rotation: %w", err)
 	}
-
-	if _, err := io.Copy(dst, l.file); err != nil {
-		_ = dst.Close()
-		_ = os.Remove(rotatedPath)
-		_, _ = l.file.Seek(0, 2)
-		return fmt.Errorf("failed to copy log content: %w", err)
-	}
-	_ = dst.Close()
-
-	// Truncate the original file (keep the handle open)
-	if err := l.file.Truncate(0); err != nil {
-		return fmt.Errorf("failed to truncate log file: %w", err)
-	}
-	_, _ = l.file.Seek(0, 0)
+	l.file = file
 	l.currentSize = 0
 
-	// Start background compression
 	go l.compressAndCleanup(rotatedPath)
-
 	return nil
 }
 
