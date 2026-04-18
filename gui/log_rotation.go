@@ -45,8 +45,13 @@ func NewRotatingLogger(path string, maxSize int64, maxFiles int) (*RotatingLogge
 		logger.currentSize = info.Size()
 	}
 
-	// Open log file (create if not exists)
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	// Open log file (create if not exists).
+	// O_RDWR (not O_WRONLY) is required so rotateWindows can io.Copy from
+	// this handle into the rotated file. With O_WRONLY on Windows the
+	// handle has no GENERIC_READ right and every ReadFile returns
+	// ERROR_ACCESS_DENIED, so rotation was silently failing in prod.
+	// O_APPEND still forces writes to the end regardless of read offset.
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
@@ -76,10 +81,15 @@ func (l *RotatingLogger) Write(message string) error {
 		return fmt.Errorf("failed to write to log: %w", err)
 	}
 
-	if err := l.file.Sync(); err != nil {
-		return fmt.Errorf("failed to sync log to disk: %w", err)
-	}
-
+	// Do NOT Sync() here. On Windows, Sync maps to FlushFileBuffers,
+	// which can block for seconds (or indefinitely under Defender
+	// realtime scan, locked files, slow disks). Since we hold l.mu the
+	// whole time, a blocked Sync freezes every subsequent log write
+	// while the backup itself keeps running — producing a "silent
+	// client, progressing PBS" state that's very hard to diagnose.
+	// The OS page cache will flush within a few seconds on its own;
+	// explicit Sync happens at Close(), rotation, and compression time
+	// where durability actually matters.
 	l.currentSize += int64(n)
 	return nil
 }
@@ -111,8 +121,8 @@ func (l *RotatingLogger) rotatePosix(rotatedPath string) error {
 	// Start background compression
 	go l.compressAndCleanup(rotatedPath)
 
-	// Open new log file
-	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	// Open new log file — O_RDWR so future rotations can io.Copy from it.
+	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
 		l.reopenOrDie()
 		return fmt.Errorf("failed to create new log file: %w", err)
@@ -167,7 +177,7 @@ func (l *RotatingLogger) rotateWindows(rotatedPath string) error {
 // reopenOrDie tries to reopen the log file after a failed rotation.
 // If it can't, sets l.file to nil (writes will go to stderr).
 func (l *RotatingLogger) reopenOrDie() {
-	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FATAL: Cannot reopen log file %s: %v\n", l.path, err)
 		l.file = nil
@@ -189,15 +199,32 @@ func (l *RotatingLogger) compressAndCleanup(rotatedPath string) {
 	}
 }
 
-// Close closes the log file
+// Close flushes outstanding writes to disk and closes the log file.
+// Since Write() no longer fsyncs on every line, this is the durability
+// boundary for the logger — on a clean shutdown (service stop, end of
+// run), everything we wrote makes it to stable storage.
 func (l *RotatingLogger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.file != nil {
-		return l.file.Close()
+	if l.file == nil {
+		return nil
 	}
-	return nil
+	_ = l.file.Sync()
+	return l.file.Close()
+}
+
+// Flush forces outstanding writes to disk without closing the file.
+// Call this from a slow periodic ticker if you need durability between
+// rotations — not from the hot path, since Sync can block for seconds
+// on Windows.
+func (l *RotatingLogger) Flush() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.file == nil {
+		return nil
+	}
+	return l.file.Sync()
 }
 
 // compressLogFile compresses a log file with gzip and removes the original
