@@ -541,9 +541,23 @@ func (pbs *PBSClient) UploadBlob(name string, data []byte) error {
 		return fmt.Errorf("PBS upload blob failed: HTTP %d - %s", resp2.StatusCode, string(bodyBytes))
 	}
 
+	// Manifest csum must match the SHA-256 of the blob file as stored
+	// on the datastore — i.e. the encoded buffer (magic + crc32 +
+	// payload) we just sent. PBS validates this field on /finish as a
+	// strict 64-char hex string; leaving it empty triggers
+	// "unable to update manifest blob - Invalid string length".
+	//
+	// Historically this never blew up because the only UploadBlob
+	// caller was UploadManifest, which appends the index.json.blob
+	// entry AFTER the manifest JSON has already been serialized — so
+	// the stored manifest never referenced itself with a broken csum.
+	// As soon as another blob (the NTFS ACL side-car) is uploaded
+	// before the manifest is serialized, its broken entry lands in
+	// the persisted JSON and /finish rejects it.
+	sum := sha256.Sum256(out)
 	pbs.Manifest.Files = append(pbs.Manifest.Files, File{
 		CryptMode: "none",
-		Csum:      "",
+		Csum:      hex.EncodeToString(sum[:]),
 		Filename:  name,
 		Size:      int64(len(data)),
 	})
