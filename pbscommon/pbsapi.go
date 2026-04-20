@@ -547,6 +547,12 @@ func (pbs *PBSClient) UploadBlob(name string, data []byte) error {
 	// strict 64-char hex string; leaving it empty triggers
 	// "unable to update manifest blob - Invalid string length".
 	//
+	// Size must match DataBlob::raw_size() used by PBS verify, which
+	// returns raw_data.len() — i.e. the full on-disk file size with
+	// the 12-byte DataBlobHeader, not just the inner payload. Using
+	// len(data) produces "wrong size (len(data) != len(data)+12)" at
+	// verify time even though /finish accepts it.
+	//
 	// Historically this never blew up because the only UploadBlob
 	// caller was UploadManifest, which appends the index.json.blob
 	// entry AFTER the manifest JSON has already been serialized — so
@@ -559,7 +565,7 @@ func (pbs *PBSClient) UploadBlob(name string, data []byte) error {
 		CryptMode: "none",
 		Csum:      hex.EncodeToString(sum[:]),
 		Filename:  name,
-		Size:      int64(len(data)),
+		Size:      int64(len(out)),
 	})
 
 	return nil
