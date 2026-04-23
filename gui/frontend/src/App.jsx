@@ -569,7 +569,8 @@ function App() {
             selectedDrives,
             excludeList.split('\n').filter(l => l.trim()),
             job.backup_id,
-            config.usevss
+            config.usevss,
+            ''
           )
 
           // Wait for completion (simplified - in production, use event polling)
@@ -709,7 +710,8 @@ function App() {
         selectedDrives,
         excludeList.split('\n').filter(l => l.trim()),
         config['backup-id'],
-        config.usevss
+        config.usevss,
+        ''
       )
       // Backup started in background - progress will be shown via events
       showStatus(`⏳ ${t('statusBackupRunning')}`, 'info')

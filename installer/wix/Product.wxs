@@ -6,7 +6,7 @@
        value below for local dev builds. Keep this in sync with
        gui/wails.json on every release. -->
   <?ifndef ProductVersion ?>
-    <?define ProductVersion = "0.2.67" ?>
+    <?define ProductVersion = "0.2.72" ?>
   <?endif ?>
   <?define Manufacturer = "RDEM Systems" ?>
   <?define UpgradeCode = "12345678-1234-1234-1234-123456789012" ?>
