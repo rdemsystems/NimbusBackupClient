@@ -642,9 +642,12 @@ func (pbs *PBSClient) Finish() error {
 		return fmt.Errorf("PBS finish failed: HTTP %d - %s", resp2.StatusCode, string(bodyBytes))
 	}
 
-	// Session committed; drop from the active-session registry so the
-	// shutdown hook doesn't try to Close() a writer that no longer needs it.
-	unregisterActive(pbs)
+	// Session committed. Tear the H2 connection down right away so PBS
+	// drops the worker task and releases the snapshot lock — otherwise
+	// the task UI keeps it active until the process exits or TCP
+	// keepalive reaps the socket (~16 min), which blocks the next
+	// scheduled run with "retry lock error".
+	pbs.Close()
 
 	return nil
 }
