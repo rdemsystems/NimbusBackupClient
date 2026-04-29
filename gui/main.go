@@ -22,6 +22,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"pbscommon"
 	"security"
+	"snapshot"
 
 	"github.com/tizbac/proxmoxbackupclient_go/gui/api"
 )
@@ -214,6 +215,14 @@ func (a *App) startup(ctx context.Context) {
 	if a.mode == api.ModeStandalone {
 		// Cleanup any abandoned "running" jobs from previous session
 		a.CleanupAbandonedJobs()
+
+		// Clear any orphaned VSS shadow copies and reset the VSS service
+		// state from a previously crashed Nimbus process. Without this, the
+		// next backup can fail with "shadow copy creation is already in
+		// progress". No-op on non-Windows platforms.
+		if err := snapshot.VSSCleanup(); err != nil {
+			writeDebugLog(fmt.Sprintf("VSS cleanup at startup reported error: %v", err))
+		}
 
 		// Recalculate stale nextRun values (e.g. after restart or missed window)
 		a.RecalculateNextRuns()

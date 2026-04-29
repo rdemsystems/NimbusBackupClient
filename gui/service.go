@@ -12,6 +12,7 @@ import (
 	"github.com/kardianos/service"
 	"github.com/tizbac/proxmoxbackupclient_go/gui/api"
 	"pbscommon"
+	"snapshot"
 )
 
 // NimbusService wraps the application for Windows Service execution
@@ -57,6 +58,13 @@ func (s *NimbusService) run() {
 
 	// Clean up any abandoned jobs from previous crash
 	s.app.CleanupAbandonedJobs()
+
+	// Clear any orphaned VSS shadow copies and reset the VSS service state
+	// from a previously crashed Nimbus process. Without this, the next backup
+	// can fail with "VSS_START - shadow copy creation is already in progress".
+	if err := snapshot.VSSCleanup(); err != nil {
+		writeDebugLog(fmt.Sprintf("VSS cleanup at startup reported error: %v", err))
+	}
 
 	// Recalculate stale nextRun values (e.g. after service restart or missed window)
 	s.app.RecalculateNextRuns()

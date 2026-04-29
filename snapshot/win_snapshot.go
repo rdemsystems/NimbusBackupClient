@@ -57,6 +57,7 @@ func getAppDataFolder() (string, error) {
 func CreateVSSSnapshot(paths []string, backup_callback func(sn map[string]SnapShot) error) error {
 
 	sn := vss.Snapshotter{}
+	defer sn.Release()
 	snapshots := make(map[string]SnapShot)
 
 	for _, path := range paths {
@@ -70,8 +71,6 @@ func CreateVSSSnapshot(paths []string, backup_callback func(sn map[string]SnapSh
 			fmt.Println("Error:", err)
 			return err
 		}
-
-		defer sn.Release()
 
 		fmt.Print("Creating VSS Snapshot...")
 
@@ -101,6 +100,19 @@ func CreateVSSSnapshot(paths []string, backup_callback func(sn map[string]SnapSh
 		}
 
 		snapshot, err := sn.CreateSnapshot(volName, false, 180)
+		if err != nil && isShadowAlreadyInProgress(err) {
+			// IVssBackupComponents stuck from a previous crashed run.
+			// vssadmin delete shadows alone won't release it — we have to bounce
+			// the VSS service to drop the orphaned context, then retry once.
+			fmt.Printf("⚠️  VSS busy: %v\n", err)
+			fmt.Println("         → Resetting VSS service state and retrying once...")
+			sn.Release()
+			if resetErr := vssForceReset(); resetErr != nil {
+				fmt.Printf("         → VSS reset failed: %v\n", resetErr)
+			}
+			sn = vss.Snapshotter{}
+			snapshot, err = sn.CreateSnapshot(volName, false, 180)
+		}
 		if err != nil {
 			errMsg := err.Error()
 			// Check if error is ONLY due to writer failures (0x80070005 = Access Denied, 0x800423f4 = Non-retryable)
@@ -140,8 +152,10 @@ func CreateVSSSnapshot(paths []string, backup_callback func(sn map[string]SnapSh
 
 }
 
-// VSSCleanup removes all orphaned VSS snapshots
-// This prevents shadow copies from accumulating after crashes or abnormal terminations
+// VSSCleanup removes all orphaned VSS snapshots and resets the VSS service
+// state. This prevents shadow copies from accumulating after crashes or abnormal
+// terminations, and clears any "shadow copy creation already in progress" lock
+// held by a stuck IVssBackupComponents context from a previous run.
 func VSSCleanup() error {
 	// List all shadows first to check if cleanup is needed
 	listCmd := exec.Command("vssadmin", "list", "shadows")
@@ -163,13 +177,73 @@ func VSSCleanup() error {
 		deleteOutput, err := deleteCmd.CombinedOutput()
 		if err != nil {
 			fmt.Printf("Warning: VSS cleanup failed: %v - %s\n", err, string(deleteOutput))
-			return nil // Don't block service startup on cleanup failure
+		} else {
+			fmt.Println("VSS Cleanup: Successfully removed orphaned snapshots")
 		}
-
-		fmt.Println("VSS Cleanup: Successfully removed orphaned snapshots")
 	} else {
 		fmt.Println("VSS Cleanup: No orphaned snapshots found")
 	}
 
+	// Restart the VSS service to drop any stuck IVssBackupComponents context
+	// from a previously crashed Nimbus process. Without this, vssadmin can
+	// report 0 shadows yet the next backup still fails with
+	// "VSS_START - shadow copy creation is already in progress".
+	if err := restartVSSService(); err != nil {
+		fmt.Printf("Warning: VSS service restart failed: %v\n", err)
+	}
+
+	return nil
+}
+
+// isShadowAlreadyInProgress detects the "shadow copy creation is already in
+// progress" error returned by go-vss / Windows VSS when a previous
+// IVssBackupComponents context is still held.
+func isShadowAlreadyInProgress(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	// Windows surfaces this either as VSS_E_BAD_STATE (0x8004230f) or as a
+	// human-readable message containing "already in progress".
+	return strings.Contains(msg, "already in progress") ||
+		strings.Contains(msg, "0x8004230f")
+}
+
+// vssForceReset is the aggressive recovery used mid-backup when a snapshot
+// attempt returns "already in progress". It deletes orphan shadows then
+// bounces the VSS service so the next CreateSnapshot starts from a clean
+// state.
+func vssForceReset() error {
+	deleteCmd := exec.Command("vssadmin", "delete", "shadows", "/all", "/quiet")
+	if out, err := deleteCmd.CombinedOutput(); err != nil {
+		fmt.Printf("VSS reset: delete shadows warning: %v - %s\n", err, string(out))
+	}
+	return restartVSSService()
+}
+
+// restartVSSService bounces the Windows Volume Shadow Copy service. Safe at
+// service startup and during error recovery because Nimbus is the only VSS
+// consumer on backup-dedicated hosts, and stopping VSS just discards any
+// in-flight shadow context (which is exactly what we want when it's stuck).
+func restartVSSService() error {
+	fmt.Println("VSS Cleanup: Restarting VSS service to clear stuck state...")
+	stopCmd := exec.Command("net", "stop", "VSS")
+	if out, err := stopCmd.CombinedOutput(); err != nil {
+		// "service is not started" is fine — we'll start it next.
+		if !strings.Contains(string(out), "not started") &&
+			!strings.Contains(strings.ToLower(string(out)), "n'est pas démarr") {
+			fmt.Printf("VSS service stop warning: %v - %s\n", err, string(out))
+		}
+	}
+	startCmd := exec.Command("net", "start", "VSS")
+	if out, err := startCmd.CombinedOutput(); err != nil {
+		// "already started" is fine.
+		if strings.Contains(string(out), "already been started") ||
+			strings.Contains(strings.ToLower(string(out)), "déjà été démarr") {
+			return nil
+		}
+		return fmt.Errorf("net start VSS failed: %v - %s", err, string(out))
+	}
+	fmt.Println("VSS Cleanup: VSS service restarted")
 	return nil
 }

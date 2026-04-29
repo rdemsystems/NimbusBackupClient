@@ -17,5 +17,6 @@ func CreateVSSSnapshot(paths []string, backup_callback func(sn map[string]SnapSh
 	return backup_callback(ret)
 }
 
-func VSSCleanup() {
+func VSSCleanup() error {
+	return nil
 }
