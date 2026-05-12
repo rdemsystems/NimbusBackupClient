@@ -112,12 +112,12 @@ func calculateDirSize(path string) (uint64, error) {
 
 type ChunkState struct {
 	assignments         []string
-	assignments_offset  []uint64
+	assignmentsOffset  []uint64
 	pos                 uint64
 	wrid                uint64
 	chunkcount          uint64
 	chunkdigests        hash.Hash
-	current_chunk       []byte
+	currentChunk       []byte
 	C                   pbscommon.Chunker
 	newchunk            *atomic.Uint64
 	reusechunk          *atomic.Uint64
@@ -138,11 +138,11 @@ type DidxEntry struct {
 
 func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, failedchunk *atomic.Uint64, knownChunks *hashmap.Map[string, bool], onProgress func(float64, string), totalSize *atomic.Uint64) {
 	c.assignments = make([]string, 0)
-	c.assignments_offset = make([]uint64, 0)
+	c.assignmentsOffset = make([]uint64, 0)
 	c.pos = 0
 	c.chunkcount = 0
 	c.chunkdigests = sha256.New()
-	c.current_chunk = make([]byte, 0)
+	c.currentChunk = make([]byte, 0)
 	c.C = pbscommon.Chunker{}
 	// Chunk size avg = 4MB → max = 16MB (PBS hard limit on chunk size)
 	// Was 8MB (max=32MB) as workaround for "Invalid string length" errors,
@@ -163,23 +163,23 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 	chunkpos := c.C.Scan(b)
 
 	if chunkpos == 0 {
-		c.current_chunk = append(c.current_chunk, b...)
+		c.currentChunk = append(c.currentChunk, b...)
 	} else {
 		for chunkpos > 0 {
-			c.current_chunk = append(c.current_chunk, b[:chunkpos]...)
+			c.currentChunk = append(c.currentChunk, b[:chunkpos]...)
 
 			h := sha256.New()
-			if _, err := h.Write(c.current_chunk); err != nil {
+			if _, err := h.Write(c.currentChunk); err != nil {
 				return fmt.Errorf("failed to hash chunk: %w", err)
 			}
 			bindigest := h.Sum(nil)
 			shahash := hex.EncodeToString(bindigest)
 
 			if _, ok := c.knownChunks.GetOrInsert(shahash, true); !ok {
-				writeBackupLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.current_chunk)))
+				writeBackupLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.currentChunk)))
 
 				// Retry chunk upload with exponential backoff
-				chunkData := c.current_chunk // Capture for closure
+				chunkData := c.currentChunk // Capture for closure
 				retryConfig := retry.DefaultConfig()
 				retryConfig.MaxAttempts = 5 // More retries for chunk uploads
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -208,20 +208,20 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 					c.newchunk.Add(1)
 				}
 			} else {
-				writeBackupLog(fmt.Sprintf("Reuse chunk[%s] %d bytes", shahash, len(c.current_chunk)))
+				writeBackupLog(fmt.Sprintf("Reuse chunk[%s] %d bytes", shahash, len(c.currentChunk)))
 				c.reusechunk.Add(1)
 			}
 
-			if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.current_chunk)))); err != nil {
+			if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.currentChunk)))); err != nil {
 				return fmt.Errorf("failed to write chunk offset: %w", err)
 			}
 			if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
 				return fmt.Errorf("failed to write chunk digest: %w", err)
 			}
 
-			c.assignments_offset = append(c.assignments_offset, c.pos)
+			c.assignmentsOffset = append(c.assignmentsOffset, c.pos)
 			c.assignments = append(c.assignments, shahash)
-			c.pos += uint64(len(c.current_chunk))
+			c.pos += uint64(len(c.currentChunk))
 			c.chunkcount += 1
 
 			// Report progress every 10 MB
@@ -273,24 +273,24 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 				c.onProgress(progress, msg)
 			}
 
-			c.current_chunk = make([]byte, 0)
+			c.currentChunk = make([]byte, 0)
 			b = b[chunkpos:]
 			chunkpos = c.C.Scan(b)
 		}
-		c.current_chunk = append(c.current_chunk, b...)
+		c.currentChunk = append(c.currentChunk, b...)
 	}
 	return nil
 }
 
-func (c *ChunkState) Eof(client *pbscommon.PBSClient) error {
-	if len(c.current_chunk) > 0 {
+func (c *ChunkState) EOF(client *pbscommon.PBSClient) error {
+	if len(c.currentChunk) > 0 {
 		h := sha256.New()
-		if _, err := h.Write(c.current_chunk); err != nil {
+		if _, err := h.Write(c.currentChunk); err != nil {
 			return fmt.Errorf("failed to hash final chunk: %w", err)
 		}
 
 		shahash := hex.EncodeToString(h.Sum(nil))
-		if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.current_chunk)))); err != nil {
+		if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.currentChunk)))); err != nil {
 			return fmt.Errorf("failed to write final chunk offset: %w", err)
 		}
 		if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
@@ -298,10 +298,10 @@ func (c *ChunkState) Eof(client *pbscommon.PBSClient) error {
 		}
 
 		if _, ok := c.knownChunks.GetOrInsert(shahash, true); !ok {
-			writeBackupLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.current_chunk)))
+			writeBackupLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.currentChunk)))
 
 			// Retry final chunk upload with exponential backoff
-			chunkData := c.current_chunk
+			chunkData := c.currentChunk
 			retryConfig := retry.DefaultConfig()
 			retryConfig.MaxAttempts = 5
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -326,12 +326,12 @@ func (c *ChunkState) Eof(client *pbscommon.PBSClient) error {
 				c.newchunk.Add(1)
 			}
 		} else {
-			writeBackupLog(fmt.Sprintf("Reuse chunk[%s] %d bytes", shahash, len(c.current_chunk)))
+			writeBackupLog(fmt.Sprintf("Reuse chunk[%s] %d bytes", shahash, len(c.currentChunk)))
 			c.reusechunk.Add(1)
 		}
-		c.assignments_offset = append(c.assignments_offset, c.pos)
+		c.assignmentsOffset = append(c.assignmentsOffset, c.pos)
 		c.assignments = append(c.assignments, shahash)
-		c.pos += uint64(len(c.current_chunk))
+		c.pos += uint64(len(c.currentChunk))
 		c.chunkcount += 1
 	}
 
@@ -350,7 +350,7 @@ func (c *ChunkState) Eof(client *pbscommon.PBSClient) error {
 		// Capture loop variables for closure
 		batchStart, batchEnd := k, k2
 		assignments := c.assignments[batchStart:batchEnd]
-		offsets := c.assignments_offset[batchStart:batchEnd]
+		offsets := c.assignmentsOffset[batchStart:batchEnd]
 
 		err := retry.DoWithJitter(ctx, retryConfig, retry.DefaultRetryable, func() error {
 			return client.AssignDynamicChunks(c.wrid, assignments, offsets)
@@ -875,14 +875,14 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 	}
 
 	// Guard: if WriteDir produced 0 data, the backup dir was effectively empty or inaccessible
-	if pxarChunk.pos == 0 && len(pxarChunk.current_chunk) == 0 {
+	if pxarChunk.pos == 0 && len(pxarChunk.currentChunk) == 0 {
 		return fmt.Errorf("backup produced 0 bytes for %s — directory may be empty, inaccessible, or all files were excluded", backupdir)
 	}
 
-	if err = pxarChunk.Eof(client); err != nil {
+	if err = pxarChunk.EOF(client); err != nil {
 		return err
 	}
-	if err = pcat1Chunk.Eof(client); err != nil {
+	if err = pcat1Chunk.EOF(client); err != nil {
 		return err
 	}
 
