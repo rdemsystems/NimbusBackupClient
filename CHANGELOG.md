@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.86] - 2026-05-19
+
+### Fixed
+- **Lint ST1005 (staticcheck)** — 4 messages d'erreur du module restore in-place se terminaient par un point, ce que staticcheck refuse (les chaînes d'erreur Go ne portent ni majuscule initiale ni ponctuation finale). Reformulation pour conserver le sens et passer le lint.
+
 ## [0.2.85] - 2026-05-19
 
 ### Fixed

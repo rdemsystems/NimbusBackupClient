@@ -357,13 +357,13 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 	switch mode {
 	case RestoreModeOriginal:
 		if meta == nil {
-			return nil, fmt.Errorf("restauration in-place impossible : ce snapshot n'a pas de métadonnées (.nimbus_backup_meta.json absent). Choisissez « autre emplacement ».")
+			return nil, fmt.Errorf("restauration in-place impossible : ce snapshot n'a pas de métadonnées (.nimbus_backup_meta.json absent), choisissez « autre emplacement »")
 		}
 		if meta.OriginalPath == "" {
-			return nil, fmt.Errorf("restauration in-place impossible : le chemin d'origine n'est pas renseigné dans les métadonnées.")
+			return nil, fmt.Errorf("restauration in-place impossible : le chemin d'origine n'est pas renseigné dans les métadonnées")
 		}
 		if meta.OS != "" && meta.OS != runtime.GOOS {
-			return nil, fmt.Errorf("restauration in-place impossible : sauvegarde faite sur %s, machine actuelle %s.", meta.OS, runtime.GOOS)
+			return nil, fmt.Errorf("restauration in-place impossible : sauvegarde faite sur %s, machine actuelle %s", meta.OS, runtime.GOOS)
 		}
 		if !opts.AllowCrossHost {
 			localHost, err := os.Hostname()
@@ -371,7 +371,7 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 				return nil, fmt.Errorf("impossible de lire le hostname local : %w", err)
 			}
 			if meta.Hostname != "" && !equalHostnames(meta.Hostname, localHost) {
-				return nil, fmt.Errorf("restauration in-place bloquée : sauvegarde de %q, machine actuelle %q. Cochez « forcer cross-host » si l'intention est délibérée.", meta.Hostname, localHost)
+				return nil, fmt.Errorf("restauration in-place bloquée : sauvegarde de %q, machine actuelle %q — cochez « forcer cross-host » si l'intention est délibérée", meta.Hostname, localHost)
 			}
 		}
 		// Materialize the original root once, with native separators.
