@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.88] - 2026-05-20
+
+### Fixed
+- **Lint CI (errcheck)** — `restore_inline.go` ne vérifiait pas la valeur de retour de `f.Close()` sur l'archive assemblée. Enveloppé dans un `defer func() { _ = f.Close() }()` pour aligner sur le `os.Remove` voisin et débloquer le build.
+
 ## [0.2.87] - 2026-05-20
 
 ### Fixed
