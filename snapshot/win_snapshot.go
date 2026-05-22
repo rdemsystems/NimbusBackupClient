@@ -184,14 +184,16 @@ func VSSCleanup() error {
 		fmt.Println("VSS Cleanup: No orphaned snapshots found")
 	}
 
-	// Restart the VSS service to drop any stuck IVssBackupComponents context
-	// from a previously crashed Nimbus process. Without this, vssadmin can
-	// report 0 shadows yet the next backup still fails with
-	// "VSS_START - shadow copy creation is already in progress".
-	if err := restartVSSService(); err != nil {
-		fmt.Printf("Warning: VSS service restart failed: %v\n", err)
-	}
-
+	// NOTE: we deliberately do NOT bounce the Windows VSS service here.
+	// `net stop/start VSS` affects EVERY VSS consumer on the host — on a Domain
+	// Controller, or a machine running third-party backup software (Veritas Backup
+	// Exec, Windows Server Backup, SQL/Exchange agents), restarting VSS can abort
+	// their in-flight snapshots and corrupt their backup state. Doing it on every
+	// service startup is especially hostile and runs even when no backup is due.
+	// A stuck IVssBackupComponents context from a previously crashed run ("shadow
+	// copy creation already in progress") is instead recovered lazily and only when
+	// it actually blocks us, by vssForceReset() on the next CreateSnapshot attempt
+	// — right before our own backup. See CreateVSSSnapshot.
 	return nil
 }
 
