@@ -558,10 +558,19 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 	agg := &BackupStatus{Outcome: OutcomeSuccess, BackupID: opts.BackupID, BackupTime: aggStart.Unix()}
 	var perDirErrors []string
 
+	// Each folder gets a distinct backup-id DERIVED FROM the base id (the caller's
+	// custom backup-id, or the hostname). Deriving it as "<base>_<path>" keeps the
+	// base a substring of every child id, so restore's substring search on the
+	// configured backup-id still discovers all of a multi-folder backup's groups.
+	baseID := opts.BackupID
+	if baseID == "" {
+		baseID = hostname
+	}
+
 	for _, dir := range opts.BackupDirs {
 		dirOpts := opts
 		dirOpts.BackupDirs = []string{dir}
-		dirOpts.BackupID = GenerateBackupID(hostname, dir)
+		dirOpts.BackupID = GenerateBackupID(baseID, dir)
 		dirOpts.OnComplete = nil // suppress per-folder terminal callback; aggregated below
 		var dirStatus *BackupStatus
 		dirOpts.OnResult = func(s *BackupStatus) { dirStatus = s }
@@ -1049,16 +1058,22 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 		return fmt.Errorf("failed to write directory archive: %w", err)
 	}
 
+	// Map VSS shadow-copy paths back to the original logical root so the status
+	// lists are meaningful to the user (no-op for non-VSS backups, where
+	// backupdir == originalPath). Reused for both the aggregate status and sidecar.
+	logicalSkipped := toLogicalPaths(archive.SkippedFiles, backupdir, originalPath)
+	logicalExcluded := toLogicalPaths(archive.ExcludedFiles, backupdir, originalPath)
+
 	// Collect skipped files from archive
-	if len(archive.SkippedFiles) > 0 {
-		writeBackupLog(fmt.Sprintf("Backup completed with %d skipped files/directories", len(archive.SkippedFiles)))
-		client.SkippedFiles = append(client.SkippedFiles, archive.SkippedFiles...)
+	if len(logicalSkipped) > 0 {
+		writeBackupLog(fmt.Sprintf("Backup completed with %d skipped files/directories", len(logicalSkipped)))
+		client.SkippedFiles = append(client.SkippedFiles, logicalSkipped...)
 	}
 
 	// Collect files excluded by user policy (H-04), kept distinct from errors.
-	if len(archive.ExcludedFiles) > 0 {
-		writeBackupLog(fmt.Sprintf("%d files/directories excluded by user policy", len(archive.ExcludedFiles)))
-		client.ExcludedFiles = append(client.ExcludedFiles, archive.ExcludedFiles...)
+	if len(logicalExcluded) > 0 {
+		writeBackupLog(fmt.Sprintf("%d files/directories excluded by user policy", len(logicalExcluded)))
+		client.ExcludedFiles = append(client.ExcludedFiles, logicalExcluded...)
 	}
 
 	// Guard: if WriteDir produced 0 data, the backup dir was effectively empty or inaccessible
@@ -1095,10 +1110,10 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 	sidecar := &BackupSidecar{
 		FormatVersion:    1,
 		BackupID:         client.Manifest.BackupID,
-		Directory:        backupdir,
+		Directory:        originalPath,
 		GeneratedAt:      time.Now().Unix(),
-		ExcludedByPolicy: excludedToIssues(archive.ExcludedFiles),
-		SkippedReadError: skippedToIssues(archive.SkippedFiles),
+		ExcludedByPolicy: excludedToIssues(logicalExcluded),
+		SkippedReadError: skippedToIssues(logicalSkipped),
 	}
 	if sidecarBytes, sErr := json.Marshal(sidecar); sErr != nil {
 		writeBackupLog(fmt.Sprintf("WARNING: failed to serialize status sidecar: %v", sErr))

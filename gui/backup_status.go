@@ -1,5 +1,7 @@
 package main
 
+import "strings"
+
 // Backup result + live-progress types shared across the backup engine, the GUI,
 // the local API and the scheduler. BackupStatus is the single source of truth for
 // "what happened in a backup run": it is (a) returned by the engine, (b) carried to
@@ -92,6 +94,21 @@ func skippedToIssues(skipped []string) []FileIssue {
 		issues = append(issues, FileIssue{Reason: s})
 	}
 	return issues
+}
+
+// toLogicalPaths replaces the VSS shadow-copy root (from) with the original
+// logical root (to) in each path/description, so excluded/skipped status lists
+// show user-meaningful paths instead of \\?\GLOBALROOT\... shadow paths. No-op
+// when from==to or from is empty (non-VSS backups).
+func toLogicalPaths(items []string, from, to string) []string {
+	if from == to || from == "" || len(items) == 0 {
+		return items
+	}
+	out := make([]string, len(items))
+	for i, s := range items {
+		out[i] = strings.ReplaceAll(s, from, to)
+	}
+	return out
 }
 
 // excludedToIssues wraps the list of policy-excluded paths (H-04) into FileIssue.
