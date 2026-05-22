@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.89] - 2026-05-22
+
+### Fixed
+- **Corruption d'archive sur fichier modifié pendant le backup (intégrité — critique)** — `PXARArchive.WriteFile` déclarait la taille du payload PXAR depuis le `Lstat` (`fileInfo.Size()`) puis streamait les octets *réellement lus*, sans réconciliation. Un fichier qui changeait de taille entre le stat et la fin de lecture — cas courant d'un fichier en cours d'utilisation **sans VSS** (logs, `.pst`, `.mdf` SQL, `.evtx`) — produisait un en-tête `PXAR_PAYLOAD` mensonger, désynchronisant le flux pxar et corrompant **toutes les entrées suivantes** de l'archive, donc une restauration cassée, silencieusement. Désormais on émet **exactement** la taille déclarée : lectures plafonnées à `declaredSize`, et tout déficit (fichier rétréci / lecture courte) est complété par des zéros et signalé dans la liste des fichiers ignorés (« content may be inconsistent »). Le bug `(n>0, io.EOF)` de la boucle de lecture (qui pouvait faire échouer un fichier lu en une passe) est corrigé au passage.
+- **Pinning de certificat TLS inopérant (sécurité)** — dans `PBSClient.Connect`, la fonction `VerifyPeerCertificate` (posée uniquement quand une empreinte est configurée, avec `InsecureSkipVerify=true`) gardait sa comparaison d'empreinte derrière `&& !pbs.Insecure`, condition **toujours fausse** à cet endroit. Résultat : l'empreinte n'était jamais vérifiée et **n'importe quel certificat était accepté** (MITM possible), alors que l'utilisateur croyait épingler son serveur. La comparaison est désormais réellement appliquée (insensible à la casse) et un écart d'empreinte est une erreur dure.
+- **Redémarrage du service VSS au démarrage (casse les autres logiciels de backup)** — `VSSCleanup`, exécuté à chaque démarrage du service, faisait `net stop/start VSS`, ce qui impacte **tous** les consommateurs VSS de la machine. Sur un contrôleur de domaine ou un hôte faisant tourner un autre logiciel de sauvegarde (Veritas Backup Exec, Windows Server Backup, agents SQL/Exchange), cela pouvait avorter leurs snapshots en cours et corrompre leur état. Le bounce inconditionnel au démarrage est supprimé ; le nettoyage des shadows orphelins est conservé. La récupération d'un contexte `IVssBackupComponents` resté bloqué (« shadow copy creation already in progress ») se fait désormais **paresseusement**, uniquement quand elle nous bloque réellement, via `vssForceReset()` au prochain `CreateSnapshot` — juste avant notre propre backup.
+
 ## [0.2.88] - 2026-05-20
 
 ### Fixed
