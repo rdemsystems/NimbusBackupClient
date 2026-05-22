@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.103] - 2026-05-22
+
+### Fixed
+- **Recherche/listing de fichiers : lecture du catalogue compact au lieu de toute l'archive de données (rapport client : ~6h pour ~800 Go sur une fenêtre de 3 jours)** — `SearchFilesInline`, `ListSnapshotContentsInline` et `ReadSnapshotMetaInline` ouvraient `backup.pxar.didx` (l'archive de données complète) et parcouraient **tout** le flux PXAR juste pour énumérer les noms de fichiers. Comme les en-têtes d'entrée sont entrelacés avec les payloads, cela retéléchargeait la quasi-totalité des chunks — par snapshot, sans réutilisation de cache d'un snapshot à l'autre — d'où des recherches de plusieurs heures. Le listing lit désormais le `catalog.pcat1.didx` compact (quelques Mo : arbre des fichiers seul) que la sauvegarde téléverse déjà, via un nouveau parseur du format `pcat1` (`pbscommon/catalog_reader.go`, durci contre les catalogues malformés). Le sidecar meta reste lu en tête de l'archive de données (parcours early-stop). Repli sur l'ancien parcours PXAR uniquement pour les snapshots legacy sans catalogue. Gain : ~heures → secondes par snapshot.
+
 ## [0.2.102] - 2026-05-22
 
 ### Fixed
