@@ -3,6 +3,7 @@ package security
 import (
 	"crypto/subtle"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -47,6 +48,19 @@ func SanitizeURL(rawURL string) string {
 	return parsed.String()
 }
 
+// isLoopbackHost reports whether host (a URL hostname, no port) is an exact
+// loopback target: "localhost", a 127.0.0.0/8 IPv4, or ::1. Used to allow plain
+// HTTP only for true loopback — never for "localhost.<something>" hostnames.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
 // ValidateURL ensures URL is safe and uses HTTPS
 func ValidateURL(rawURL string) error {
 	if rawURL == "" {
@@ -58,11 +72,13 @@ func ValidateURL(rawURL string) error {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
 
-	// Require HTTPS unless explicitly localhost for testing
-	if parsed.Scheme != "https" {
-		if !strings.Contains(parsed.Host, "localhost") && !strings.Contains(parsed.Host, "127.0.0.1") {
-			return fmt.Errorf("only HTTPS URLs allowed (got %s)", parsed.Scheme)
-		}
+	// Require HTTPS unless the host is a TRUE loopback target. A substring check
+	// (strings.Contains host "localhost"/"127.0.0.1") let hosts like
+	// "localhost.attacker.tld" or "127.0.0.1.evil.tld" pass the HTTP exemption and
+	// receive the PBS token in cleartext (audit v2-H-07). Match on the parsed
+	// hostname only.
+	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname())) {
+		return fmt.Errorf("only HTTPS URLs allowed (got %s)", parsed.Scheme)
 	}
 
 	// Check for valid hostname
