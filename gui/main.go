@@ -694,6 +694,7 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 		BackupType:      "host", // "host" for directory, would be "vm" for machine
 		UseVSS:          useVSS,
 		Compression:     compression,
+		ExcludeList:     excludeList,
 		OnProgress: func(percent float64, message string) {
 			writeDebugLog(fmt.Sprintf("Progress: %.1f%% - %s", percent*100, message))
 

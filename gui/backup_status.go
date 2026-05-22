@@ -9,6 +9,24 @@ package main
 // sidecar. The ExcludedByPolicy and Corrupted buckets are defined now but stay empty
 // until Group 1 (user exclusions H-04 and mode-B corruption) fills them.
 
+// BackupStatusFilename is the PBS blob name for the per-snapshot status sidecar.
+// PBS requires a bare basename (no leading dot) ending in ".blob"; the payload is
+// plain JSON. Listed in the manifest so the GUI can read it without a full restore.
+const BackupStatusFilename = "nimbus-status.json.blob"
+
+// BackupSidecar is the per-snapshot status persisted as a manifest blob: the files
+// excluded by policy and the files skipped on read errors for THIS directory's
+// snapshot. It lets the GUI show "in this backup, files X/Y were excluded/skipped"
+// without restoring the archive.
+type BackupSidecar struct {
+	FormatVersion    int         `json:"format_version"`
+	BackupID         string      `json:"backup_id"`
+	Directory        string      `json:"directory"`
+	GeneratedAt      int64       `json:"generated_at"`
+	ExcludedByPolicy []FileIssue `json:"excluded_by_policy,omitempty"`
+	SkippedReadError []FileIssue `json:"skipped_read_error,omitempty"`
+}
+
 // BackupOutcome is the three-state result of a backup run.
 type BackupOutcome string
 
@@ -72,6 +90,18 @@ func skippedToIssues(skipped []string) []FileIssue {
 	issues := make([]FileIssue, 0, len(skipped))
 	for _, s := range skipped {
 		issues = append(issues, FileIssue{Reason: s})
+	}
+	return issues
+}
+
+// excludedToIssues wraps the list of policy-excluded paths (H-04) into FileIssue.
+func excludedToIssues(excluded []string) []FileIssue {
+	if len(excluded) == 0 {
+		return nil
+	}
+	issues := make([]FileIssue, 0, len(excluded))
+	for _, p := range excluded {
+		issues = append(issues, FileIssue{Path: p, Reason: "excluded by user policy"})
 	}
 	return issues
 }

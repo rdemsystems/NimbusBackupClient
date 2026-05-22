@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"hash"
 	"os"
@@ -37,6 +38,7 @@ type BackupOptions struct {
 	BackupType      string // "host" for directory, "vm" for machine
 	UseVSS          bool
 	Compression     string   // Compression level: "fastest", "default", "better", "best"
+	ExcludeList     []string // User-configured exclusion patterns applied by the PXAR writer (H-04)
 	OnProgress      func(percent float64, message string)
 	OnComplete      func(success bool, message string)
 	// OnResult delivers the full structured result (Group 0 contract). It is
@@ -664,7 +666,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		// PBS dedupes chunks, so retrying is cheap for the already-uploaded data.
 		var err error
 		for attempt := 1; attempt <= maxDirAttempts; attempt++ {
-			err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats)
+			err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
 			if err == nil {
 				break
 			}
@@ -738,6 +740,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 			ReusedChunks:     reusechunk.Load(),
 			FailedChunks:     failedchunk.Load(),
 			Directories:      dirResults,
+			ExcludedByPolicy: excludedToIssues(client.ExcludedFiles),
 			SkippedReadError: skippedToIssues(client.SkippedFiles),
 			Message:          errMsg,
 		}
@@ -819,6 +822,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		ReusedChunks:     reusechunk.Load(),
 		FailedChunks:     failed,
 		Directories:      dirResults,
+		ExcludedByPolicy: excludedToIssues(client.ExcludedFiles),
 		SkippedReadError: skippedToIssues(client.SkippedFiles),
 		Message:          completionMsg,
 	}
@@ -841,7 +845,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	return nil
 }
 
-func backupDirectory(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, usevss bool, progress func(float64, string), onStats func(*BackupProgressStats)) error {
+func backupDirectory(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, usevss bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) error {
 	writeBackupLog(fmt.Sprintf("Starting backup of %s", backupdir))
 	originalPath := backupdir
 
@@ -851,14 +855,14 @@ func backupDirectory(client *pbscommon.PBSClient, newchunk, reusechunk, failedch
 				backupdir = snap.FullPath
 				break
 			}
-			return backupReal(client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress)
+			return backupReal(client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress, onStats, excludeList)
 		})
 	}
 
-	return backupReal(client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress)
+	return backupReal(client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress, onStats, excludeList)
 }
 
-func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, originalPath string, vssUsed bool, progress func(float64, string)) (returnErr error) {
+func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, originalPath string, vssUsed bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) (returnErr error) {
 	// Panic recovery - critical to prevent silent crashes during backup
 	defer func() {
 		if r := recover(); r != nil {
@@ -889,6 +893,8 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 
 	archive := &pbscommon.PXARArchive{}
 	archive.ArchiveName = "backup.pxar.didx"
+	archive.ExcludeList = excludeList
+	archive.ExcludeRoot = originalPath // logical root for VSS-safe absolute-pattern matching
 
 	// Inject backup metadata into the PXAR archive root
 	hostname, _ := os.Hostname()
@@ -963,6 +969,12 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 		client.SkippedFiles = append(client.SkippedFiles, archive.SkippedFiles...)
 	}
 
+	// Collect files excluded by user policy (H-04), kept distinct from errors.
+	if len(archive.ExcludedFiles) > 0 {
+		writeBackupLog(fmt.Sprintf("%d files/directories excluded by user policy", len(archive.ExcludedFiles)))
+		client.ExcludedFiles = append(client.ExcludedFiles, archive.ExcludedFiles...)
+	}
+
 	// Guard: if WriteDir produced 0 data, the backup dir was effectively empty or inaccessible
 	if pxarChunk.pos == 0 && len(pxarChunk.currentChunk) == 0 {
 		return fmt.Errorf("backup produced 0 bytes for %s — directory may be empty, inaccessible, or all files were excluded", backupdir)
@@ -989,6 +1001,23 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 		if upErr := client.UploadBlob(BackupAclsFilename, aclBytes); upErr != nil {
 			writeBackupLog(fmt.Sprintf("WARNING: failed to upload NTFS metadata blob: %v", upErr))
 		}
+	}
+
+	// Persist a per-snapshot status sidecar (files excluded by policy + files
+	// skipped on read errors) as a manifest blob, so the GUI can list them without
+	// restoring the archive. Best-effort: a failure here does NOT fail the backup.
+	sidecar := &BackupSidecar{
+		FormatVersion:    1,
+		BackupID:         client.Manifest.BackupID,
+		Directory:        backupdir,
+		GeneratedAt:      time.Now().Unix(),
+		ExcludedByPolicy: excludedToIssues(archive.ExcludedFiles),
+		SkippedReadError: skippedToIssues(archive.SkippedFiles),
+	}
+	if sidecarBytes, sErr := json.Marshal(sidecar); sErr != nil {
+		writeBackupLog(fmt.Sprintf("WARNING: failed to serialize status sidecar: %v", sErr))
+	} else if upErr := client.UploadBlob(BackupStatusFilename, sidecarBytes); upErr != nil {
+		writeBackupLog(fmt.Sprintf("WARNING: failed to upload status sidecar: %v", upErr))
 	}
 
 	// Upload manifest with retry

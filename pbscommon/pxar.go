@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/bits"
 	"os"
+	"path"
 	"sort"
 	"strings"
 
@@ -73,6 +74,84 @@ func shouldSkipSystemFolder(name string) bool {
 func shouldSkipSystemFile(name string) bool {
 	for _, excluded := range excludedSystemFiles {
 		if strings.EqualFold(name, excluded) {
+			return true
+		}
+	}
+	return false
+}
+
+// normExcludePath lowercases, converts backslashes to forward slashes and trims a
+// trailing slash so Windows/Unix paths and patterns compare uniformly.
+func normExcludePath(s string) string {
+	s = strings.ReplaceAll(s, "\\", "/")
+	s = strings.TrimSuffix(s, "/")
+	return strings.ToLower(s)
+}
+
+// relExcludePath returns full relative to root (both normalized). If full is not
+// under root it returns the normalized full path unchanged. Used both to make a
+// walked entry relative to the walked root and to make an absolute exclusion
+// pattern relative to the original (logical) backup root.
+func relExcludePath(root, full string) string {
+	r := normExcludePath(root)
+	f := normExcludePath(full)
+	if r != "" && strings.HasPrefix(f, r+"/") {
+		return f[len(r)+1:]
+	}
+	if f == r {
+		return ""
+	}
+	return f
+}
+
+// isExcluded reports whether an entry matches any user exclusion pattern.
+//   - A glob without a separator matches the entry basename anywhere in the tree
+//     ("*.tmp", "node_modules") — basename match ANYWHERE in the tree.
+//   - A pattern containing a separator is ANCHORED to the backup root (absolute
+//     patterns via excludeRoot, e.g. "C:\\Users\\Alice\\Temp" -> "temp" when the
+//     root is "C:\\Users\\Alice") and matched against the entry's relative path as
+//     a path glob via path.Match ("logs/*.tmp"), or as an exact match / subtree
+//     prefix. It is never a basename-anywhere match, so an anchored pattern that
+//     reduces to a single component (e.g. "temp") does not match a nested "x/temp".
+//
+// path.Match (always '/') is used rather than filepath.Match because paths are
+// pre-normalized to forward slashes, so matching must not depend on the host OS.
+func isExcluded(rel, name, excludeRoot string, patterns []string) bool {
+	relN := normExcludePath(rel)
+	nameN := strings.ToLower(name)
+	for _, pat := range patterns {
+		if strings.TrimSpace(pat) == "" {
+			continue
+		}
+		hasGlob := strings.ContainsAny(pat, "*?[")
+		hasSep := strings.ContainsAny(pat, "/\\")
+
+		if !hasSep {
+			// Separatorless pattern: match the basename anywhere in the tree.
+			bn := normExcludePath(pat)
+			if hasGlob {
+				if ok, _ := path.Match(bn, nameN); ok {
+					return true
+				}
+			} else if nameN == bn {
+				return true
+			}
+			continue
+		}
+
+		// Pattern has a separator: anchor it to the backup root and match the
+		// entry's relative path. Never a basename-anywhere match.
+		p := relExcludePath(excludeRoot, pat)
+		if p == "" {
+			continue
+		}
+		if hasGlob {
+			if ok, _ := path.Match(p, relN); ok {
+				return true
+			}
+			continue
+		}
+		if relN == p || strings.HasPrefix(relN, p+"/") {
 			return true
 		}
 	}
@@ -208,6 +287,23 @@ type PXARArchive struct {
 	catalog_pos  uint64
 	SkippedFiles []string // Track files/directories skipped due to access errors
 
+	// ExcludeList holds user-configured exclusion patterns (H-04). Patterns are
+	// matched against each child entry; matches are pruned from the archive and
+	// recorded in ExcludedFiles. Set by the caller before WriteDir.
+	ExcludeList []string
+	// ExcludedFiles records the full paths excluded by ExcludeList (policy, not an
+	// error) so they can be surfaced distinctly from SkippedFiles in the status.
+	ExcludedFiles []string
+	// ExcludeRoot is the ORIGINAL logical backup root (e.g. "C:\\Users\\Alice"),
+	// set by the caller. Absolute exclusion patterns are relativized against it so
+	// "C:\\Users\\Alice\\Temp" matches when backing up "C:\\Users\\Alice". Under VSS
+	// the walked path differs from this, which is why pattern and entry are both
+	// reduced to paths relative to their respective roots before comparison.
+	ExcludeRoot string
+	// root is the toplevel WALKED path, captured on the first WriteDir call, used to
+	// compute each entry's path relative to the (possibly VSS shadow-copy) root.
+	root string
+
 	// VirtualFiles are injected at the root of the archive before real files.
 	// Key = filename (e.g. ".nimbus_backup_meta.json"), Value = content bytes.
 	VirtualFiles map[string][]byte
@@ -305,6 +401,12 @@ func append_u64_7bit(a []byte, v uint64) []byte {
 
 func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (CatalogDir, error) {
 	//fmt.Printf("Write dir %s at %d\n", path, a.pos)
+
+	// Capture the backup root so exclusion patterns can be matched against the
+	// path relative to it (VSS-safe — see relExcludePath/isExcluded).
+	if toplevel {
+		a.root = path
+	}
 
 	// Check if directory is a junction point/symlink before reading it
 	fileInfo, err := os.Lstat(path)
@@ -422,6 +524,17 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 
 	for _, file := range files {
 		startpos := a.pos
+
+		// User-configured exclusions (H-04): prune the entry (and its subtree for
+		// directories) before it enters the archive, recorded as policy not error.
+		if len(a.ExcludeList) > 0 {
+			childPath := filepath.Join(path, file.Name())
+			if isExcluded(relExcludePath(a.root, childPath), file.Name(), a.ExcludeRoot, a.ExcludeList) {
+				a.ExcludedFiles = append(a.ExcludedFiles, childPath)
+				continue
+			}
+		}
+
 		if file.IsDir() {
 			// Skip Windows system folders (VSS snapshots, recycle bin, etc.)
 			if shouldSkipSystemFolder(file.Name()) {
