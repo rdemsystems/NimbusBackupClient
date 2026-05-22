@@ -33,7 +33,7 @@ func (a *App) applyConfiguredSplit(analysis *BackupAnalysis) uint64 {
 func (a *App) AnalyzeBackup(backupDirs []string) (map[string]interface{}, error) {
 	writeBackupLog(fmt.Sprintf("AnalyzeBackup called for %d directories", len(backupDirs)))
 
-	analysis, err := AnalyzeBackupDirs(backupDirs)
+	analysis, err := AnalyzeBackupDirs(backupDirs, nil)
 	if err != nil {
 		writeBackupLog(fmt.Sprintf("AnalyzeBackup failed: %v", err))
 		return nil, err
@@ -70,7 +70,7 @@ func (a *App) AnalyzeBackup(backupDirs []string) (map[string]interface{}, error)
 func (a *App) CreateBackupSplitPlan(backupDirs []string, backupID string) ([]map[string]interface{}, error) {
 	writeBackupLog(fmt.Sprintf("CreateBackupSplitPlan called for backup ID: %s", backupID))
 
-	analysis, err := AnalyzeBackupDirs(backupDirs)
+	analysis, err := AnalyzeBackupDirs(backupDirs, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -86,13 +86,14 @@ func (a *App) CreateBackupSplitPlan(backupDirs []string, backupID string) ([]map
 	result := make([]map[string]interface{}, len(splitJobs))
 	for i, job := range splitJobs {
 		result[i] = map[string]interface{}{
-			"index":       job.Index,
-			"total_jobs":  job.TotalJobs,
-			"folders":     job.Folders,
-			"total_size":  job.TotalSize,
-			"size_fmt":    FormatSize(job.TotalSize),
-			"backup_id":   job.BackupID,
-			"parent_id":   job.ParentID,
+			"index":        job.Index,
+			"total_jobs":   job.TotalJobs,
+			"folders":      job.Folders,
+			"total_size":   job.TotalSize,
+			"size_fmt":     FormatSize(job.TotalSize),
+			"backup_id":    job.BackupID,
+			"parent_id":    job.ParentID,
+			"exclude_list": job.ExcludeList, // v2-H-01: remainder job's subfolder exclusions
 		}
 	}
 

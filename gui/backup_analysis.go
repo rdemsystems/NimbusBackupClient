@@ -78,16 +78,33 @@ type FolderInfo struct {
 
 // BackupAnalysis contains the analysis of directories to backup
 type BackupAnalysis struct {
-	TotalSize     uint64       `json:"total_size"`
-	Folders       []FolderInfo `json:"folders"`
-	ShouldSplit   bool         `json:"should_split"`
-	SuggestedJobs int          `json:"suggested_jobs"`
+	TotalSize      uint64       `json:"total_size"`
+	Folders        []FolderInfo `json:"folders"`
+	ShouldSplit    bool         `json:"should_split"`
+	SuggestedJobs  int          `json:"suggested_jobs"`
+	RootsWithFiles []string     `json:"roots_with_files,omitempty"` // selected roots that contain direct files (need a remainder job when split — v2-H-01)
 }
 
-// AnalyzeBackupDirs analyzes the top-level folders in the backup directories
-func AnalyzeBackupDirs(backupDirs []string) (*BackupAnalysis, error) {
+// cleanKey normalizes a path for exact-path comparison (clean + lowercase) so
+// exclusions and folder paths compare uniformly across separators/case (Windows).
+func cleanKey(p string) string {
+	return strings.ToLower(filepath.Clean(p))
+}
+
+// AnalyzeBackupDirs analyzes the top-level folders in the backup directories.
+// excludes are absolute folder paths to skip from the split plan (so an excluded
+// subfolder is neither sized nor turned into a job — keeps the size estimate and
+// the root-remainder job correct; v2-H-01).
+func AnalyzeBackupDirs(backupDirs []string, excludes []string) (*BackupAnalysis, error) {
 	analysis := &BackupAnalysis{
 		Folders: make([]FolderInfo, 0),
+	}
+
+	excludeSet := make(map[string]bool, len(excludes))
+	for _, e := range excludes {
+		if e = strings.TrimSpace(e); e != "" {
+			excludeSet[cleanKey(e)] = true
+		}
 	}
 
 	for _, dir := range backupDirs {
@@ -104,25 +121,39 @@ func AnalyzeBackupDirs(backupDirs []string) (*BackupAnalysis, error) {
 			return nil, fmt.Errorf("cannot read directory %s: %w", dir, err)
 		}
 
+		hasDirectFiles := false
 		for _, entry := range entries {
-			if entry.IsDir() {
-				folderPath := filepath.Join(dir, entry.Name())
-				size, err := calculateDirSize(folderPath)
-
-				folderInfo := FolderInfo{
-					Path: folderPath,
-					Name: entry.Name(),
-					Size: size,
-				}
-
-				if err != nil && strings.Contains(err.Error(), "access denied") {
-					folderInfo.AccessDenied = true
-					folderInfo.Size = 500 * 1024 * 1024 * 1024 // Estimate 500GB
-				}
-
-				analysis.Folders = append(analysis.Folders, folderInfo)
-				analysis.TotalSize += folderInfo.Size
+			if entry.Type().IsRegular() {
+				// A regular file sitting directly in the root belongs to no subfolder
+				// job; the root needs a remainder job so a split backup does not drop it.
+				hasDirectFiles = true
+				continue
 			}
+			if !entry.IsDir() {
+				continue // symlink/device/junction — WriteDir handles or skips these
+			}
+			folderPath := filepath.Join(dir, entry.Name())
+			if excludeSet[cleanKey(folderPath)] {
+				continue // excluded folder: don't size it or make a job for it
+			}
+			size, err := calculateDirSize(folderPath)
+
+			folderInfo := FolderInfo{
+				Path: folderPath,
+				Name: entry.Name(),
+				Size: size,
+			}
+
+			if err != nil && strings.Contains(err.Error(), "access denied") {
+				folderInfo.AccessDenied = true
+				folderInfo.Size = 500 * 1024 * 1024 * 1024 // Estimate 500GB
+			}
+
+			analysis.Folders = append(analysis.Folders, folderInfo)
+			analysis.TotalSize += folderInfo.Size
+		}
+		if hasDirectFiles {
+			analysis.RootsWithFiles = append(analysis.RootsWithFiles, dir)
 		}
 	}
 
@@ -147,12 +178,13 @@ func AnalyzeBackupDirs(backupDirs []string) (*BackupAnalysis, error) {
 
 // SplitJob represents a backup job (one or more folders grouped together)
 type SplitJob struct {
-	Index     int      `json:"index"`
-	TotalJobs int      `json:"total_jobs"`
-	Folders   []string `json:"folders"`
-	TotalSize uint64   `json:"total_size"`
-	BackupID  string   `json:"backup_id"`
-	ParentID  string   `json:"parent_id"`
+	Index       int      `json:"index"`
+	TotalJobs   int      `json:"total_jobs"`
+	Folders     []string `json:"folders"`
+	TotalSize   uint64   `json:"total_size"`
+	BackupID    string   `json:"backup_id"`
+	ParentID    string   `json:"parent_id"`
+	ExcludeList []string `json:"exclude_list,omitempty"` // exclusions for this job (root remainder job excludes already-covered subfolders — v2-H-01)
 }
 
 // CreateSplitJobs groups folders into bins of ~BinTargetSize using first-fit decreasing.
@@ -249,6 +281,26 @@ func CreateSplitJobs(analysis *BackupAnalysis, baseBackupID string, hostname str
 			TotalSize: totalSize,
 			BackupID:  binID,
 			ParentID:  baseBackupID,
+		})
+	}
+
+	// Root remainder jobs (v2-H-01): files directly in a selected root belong to no
+	// subfolder job, so without this they are silently dropped from a split backup.
+	// For each root that has direct files, back up the root with all its subfolders
+	// (already covered above) excluded — capturing only the root-level files.
+	for _, root := range analysis.RootsWithFiles {
+		var subExcludes []string
+		rootKey := cleanKey(root)
+		for _, f := range analysis.Folders {
+			if cleanKey(filepath.Dir(f.Path)) == rootKey {
+				subExcludes = append(subExcludes, f.Path)
+			}
+		}
+		jobs = append(jobs, SplitJob{
+			Folders:     []string{root},
+			ExcludeList: subExcludes,
+			BackupID:    GenerateBackupID(hostname, root) + "_rootfiles",
+			ParentID:    baseBackupID,
 		})
 	}
 

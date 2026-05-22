@@ -474,7 +474,7 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 	// Auto-split: Analyze directories and split if > 100GB
 	// BUT: Check which folders already have backups (skip those with existing snapshots)
 	writeBackupLog("[Auto-Split] Analyzing backup directories for automatic splitting...")
-	analysis, err := AnalyzeBackupDirs(opts.BackupDirs)
+	analysis, err := AnalyzeBackupDirs(opts.BackupDirs, opts.ExcludeList)
 	if err != nil {
 		writeBackupLog(fmt.Sprintf("[Auto-Split] Analysis failed: %v - continuing without split", err))
 	} else {
@@ -508,6 +508,14 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 				splitOpts := opts
 				splitOpts.BackupDirs = job.Folders
 				splitOpts.BackupID = job.BackupID
+				// Merge the user's exclusions with the job's own (a root remainder job
+				// excludes the subfolders already covered by other jobs — v2-H-01).
+				if len(job.ExcludeList) > 0 {
+					merged := make([]string, 0, len(opts.ExcludeList)+len(job.ExcludeList))
+					merged = append(merged, opts.ExcludeList...)
+					merged = append(merged, job.ExcludeList...)
+					splitOpts.ExcludeList = merged
+				}
 
 				// Recursive call for each split (will acquire lock individually)
 				if err := runBackupInlineInternal(splitOpts); err != nil {

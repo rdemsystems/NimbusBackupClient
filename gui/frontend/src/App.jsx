@@ -671,7 +671,9 @@ function App() {
             backupType,
             job.folders,
             selectedDrives,
-            excludeList.split('\n').filter(l => l.trim()),
+            // Merge user exclusions with this job's own (a root-remainder job
+            // excludes the subfolders already covered by other jobs — v2-H-01).
+            [...excludeList.split('\n').filter(l => l.trim()), ...(job.exclude_list || [])],
             job.backup_id,
             config.usevss,
             ''
