@@ -135,27 +135,24 @@ func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFing
 	return result, nil
 }
 
-// assembleSnapshotToFile downloads + reassembles a snapshot archive into a temp
-// file and returns its path and size. The archive is streamed chunk-by-chunk to
-// disk so memory stays bounded regardless of archive size — a 100 GB split no
-// longer OOM-kills the process.
-//
-// The caller owns the returned temp file and MUST os.Remove it when done. The
-// optional progress callback receives (done, total) chunk counts for UI; chunk
-// progress is also logged here every 32 chunks. Caller is responsible for the
-// PBS client lifecycle being independent of this one.
-func assembleSnapshotToFile(opts RestoreOptions, archiveName, logTag string, progress func(done, total int)) (string, int64, error) {
+// withSnapshotReader opens a snapshot archive over a LAZY chunk-backed reader and
+// hands it to fn. Chunks are fetched from PBS on demand (with an LRU cache) as fn
+// reads, instead of downloading and reassembling the whole archive into a temp
+// file first. This removes the "free %TEMP% space == archive size" requirement
+// and lets selective restore skip the chunks of files the caller did not select.
+// The PBS reader session stays open for the duration of fn.
+func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progress func(done, total int), fn func(*pbscommon.PXARReader) error) error {
 	if archiveName == "" {
 		archiveName = "backup.pxar.didx"
 	}
 	if opts.BaseURL == "" || opts.AuthID == "" || opts.Secret == "" {
-		return "", 0, fmt.Errorf("PBS connection parameters required")
+		return fmt.Errorf("PBS connection parameters required")
 	}
 	if opts.BackupID == "" {
-		return "", 0, fmt.Errorf("backup ID required")
+		return fmt.Errorf("backup ID required")
 	}
 	if opts.Datastore == "" {
-		return "", 0, fmt.Errorf("datastore required")
+		return fmt.Errorf("datastore required")
 	}
 
 	client := &pbscommon.PBSClient{
@@ -175,39 +172,20 @@ func assembleSnapshotToFile(opts RestoreOptions, archiveName, logTag string, pro
 	client.Connect(true, "host")
 	defer client.Close()
 
-	path, size, err := client.AssembleDIDXToFile(archiveName, 8, func(done, total int) {
-		if done == total || done%32 == 0 {
-			writeBackupLog(fmt.Sprintf("%s: assembled %d/%d chunks of %s", logTag, done, total, archiveName))
+	ra, size, err := client.NewDIDXReaderAt(archiveName, 64, func(fetched, total int) {
+		if fetched == total || fetched%32 == 0 {
+			writeBackupLog(fmt.Sprintf("%s: fetched %d/%d chunks of %s", logTag, fetched, total, archiveName))
 		}
 		if progress != nil {
-			progress(done, total)
+			progress(fetched, total)
 		}
 	})
 	if err != nil {
-		writeBackupLog(fmt.Sprintf("Failed to assemble PXAR (%s): %v", logTag, err))
-		return "", 0, fmt.Errorf("failed to assemble archive: %v", err)
+		writeBackupLog(fmt.Sprintf("Failed to open snapshot reader (%s): %v", logTag, err))
+		return fmt.Errorf("failed to open snapshot archive: %w", err)
 	}
-	return path, size, nil
-}
 
-// withSnapshotReader assembles a snapshot archive to a temp file, opens a
-// file-backed PXAR reader over it, and hands it to fn. The temp file is removed
-// and the handle closed once fn returns, so callers never have to manage the
-// archive lifecycle themselves.
-func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progress func(done, total int), fn func(*pbscommon.PXARReader) error) error {
-	path, size, err := assembleSnapshotToFile(opts, archiveName, logTag, progress)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(path) }()
-
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open assembled archive: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	return fn(pbscommon.NewPXARReaderAt(f, size))
+	return fn(pbscommon.NewPXARReaderAt(ra, size))
 }
 
 // buildSnapshotCacheKey is the canonical cache key for a given snapshot.
