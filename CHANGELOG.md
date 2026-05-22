@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.101] - 2026-05-22
+
+### Fixed
+- **Backups en échec « PBS connection parameters required » en mode service avec une config multi-PBS (rapport client)** — le binaire service construisait les options de backup depuis les champs PBS legacy (`baseurl`/`authid`/`secret`/`datastore`), **vides** quand la configuration n'utilise que `pbs_servers` + `default_pbs_id`. Comme le chemin GUI standalone, il résout désormais le serveur PBS effectif via `EffectivePBS()`. Affectait le scheduler **et** les backups manuels en mode service. (Audit M-01/M-04 — divergence service/GUI.)
+
 ## [0.2.100] - 2026-05-22
 
 Finitions audit v2 (2 correctifs, 1 release).
