@@ -207,7 +207,7 @@ func (a *App) startup(ctx context.Context) {
 	writeDebugLog("App.startup() called")
 
 	// Detect execution mode (Service vs Standalone)
-	detector := api.NewModeDetector()
+	detector := api.NewModeDetector(getAPITokenPath())
 	a.mode = detector.DetectMode()
 	writeDebugLog(fmt.Sprintf("Execution mode: %s", a.mode.String()))
 

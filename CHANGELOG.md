@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.97] - 2026-05-22
+
+Durcissement sécurité (Groupe 4 — 5 correctifs, 1 release).
+
+### Security
+- **Token PBS masqué dans les logs (L-01)** — `CreateDynamicIndex` ne journalise plus le header `Authorization` en clair (redaction).
+- **Pinning TLS sur tous les clients PBS (H-02)** — `ListSnapshots`/`TestConnection` posaient `InsecureSkipVerify` sans vérifier le fingerprint (seule la session backup l'épinglait), et `TestConnection` sautait même toute vérification sans fingerprint. La config TLS est centralisée (`buildTLSConfig`) : fingerprint configuré → pin SHA-256, sinon validation CA.
+- **Secrets non exposés au frontend (M-04/M-05)** — les méthodes Wails (`GetConfig`, `GetConfigWithHostname`, `ListPBSServers`, `GetPBSServer`) renvoyaient les tokens PBS/SMTP à la webview. Elles renvoient désormais des copies **sanitisées** (secret retiré + marqueur `*_set`) ; la sauvegarde conserve le secret existant si le champ est laissé vide, et `TestConnection` s'appuie sur le secret stocké.
+- **Bypass de validation d'URL (v2-H-07)** — `http://localhost.attacker.tld` passait la dérogation HTTP (test par sous-chaîne) et aurait reçu le token en clair. L'HTTP n'est désormais autorisé que pour un **vrai loopback** (hostname parsé + `net.ParseIP().IsLoopback()`).
+- **API locale du service authentifiée (H-01 / v2-H-06)** — l'API loopback privilégiée (`127.0.0.1:18765`) n'avait **aucune authentification** : tout process local (voire une page web via POST) pouvait déclencher un backup ou lire la config. Elle exige désormais un **token local partagé** (`X-Nimbus-Token`, comparé en temps constant), **rejette les requêtes avec en-tête `Origin`** (vecteur navigateur/CSRF) et **borne la taille du corps**. Le token est généré par le service dans un fichier partagé. *(Durcissement restant, non testable hors Windows : ACL stricte sur le fichier-token pour bloquer aussi un process local hostile qui lirait le fichier.)*
+
+### Tests
+- Tests unitaires `ValidateURL` (loopback) et matcher d'exclusion (`isExcluded`).
+
 ## [0.2.96] - 2026-05-22
 
 Correctifs suite à la revue Codex des commits du jour.

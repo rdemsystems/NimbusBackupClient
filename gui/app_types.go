@@ -30,7 +30,7 @@ func NewApp() *App {
 	return &App{
 		config:        LoadConfig(),
 		stopScheduler: make(chan struct{}),
-		apiClient:     api.NewClient(),
+		apiClient:     api.NewClient(getAPITokenPath()),
 		callbacksMap:  make(map[string]*progressCallbacks),
 	}
 }
@@ -41,7 +41,7 @@ func NewAppForService(ctx context.Context) *App {
 		ctx:              ctx,
 		config:           LoadConfig(),
 		stopScheduler:    make(chan struct{}),
-		apiClient:        api.NewClient(),
+		apiClient:        api.NewClient(getAPITokenPath()),
 		mode:             api.ModeStandalone, // Service executes directly
 		callbacksMap:     make(map[string]*progressCallbacks),
 		isServiceProcess: true, // Prevent mode re-detection

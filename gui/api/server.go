@@ -20,6 +20,7 @@ var jobIDSeq atomic.Uint64
 type Server struct {
 	addr            string
 	app             BackupHandler
+	token           string // shared local-auth token required on every route (H-01)
 	mux             *http.ServeMux
 	backupProgress  map[string]*BackupProgress
 	progressMutex   sync.RWMutex
@@ -36,11 +37,13 @@ type BackupHandler interface {
 	DeleteScheduledJobFromMap(jobID string) error
 }
 
-// NewServer creates a new API server
-func NewServer(addr string, handler BackupHandler) *Server {
+// NewServer creates a new API server. token is the shared local-auth secret that
+// every request must present in the X-Nimbus-Token header (H-01).
+func NewServer(addr string, handler BackupHandler, token string) *Server {
 	s := &Server{
 		addr:           addr,
 		app:            handler,
+		token:          token,
 		mux:            http.NewServeMux(),
 		backupProgress: make(map[string]*BackupProgress),
 	}
@@ -62,7 +65,7 @@ func (s *Server) setupRoutes() {
 // Start starts the HTTP server
 func (s *Server) Start() error {
 	log.Printf("Starting API server on %s", s.addr)
-	return http.ListenAndServe(s.addr, s.mux)
+	return http.ListenAndServe(s.addr, s.authMiddleware(s.mux))
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

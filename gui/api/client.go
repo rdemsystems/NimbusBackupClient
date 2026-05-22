@@ -22,11 +22,12 @@ type Client struct {
 }
 
 // NewClient creates a new API client
-func NewClient() *Client {
+func NewClient(tokenPath string) *Client {
 	return &Client{
 		baseURL: DefaultServiceURL,
 		httpClient: &http.Client{
-			Timeout: RequestTimeout,
+			Timeout:   RequestTimeout,
+			Transport: &tokenTransport{tokenPath: tokenPath, base: http.DefaultTransport},
 		},
 	}
 }
@@ -34,7 +35,8 @@ func NewClient() *Client {
 // IsServiceAvailable checks if the local service is running
 func (c *Client) IsServiceAvailable() bool {
 	client := &http.Client{
-		Timeout: ConnectionTimeout,
+		Timeout:   ConnectionTimeout,
+		Transport: c.httpClient.Transport, // reuse the token-injecting transport
 	}
 
 	resp, err := client.Get(c.baseURL + "/status")

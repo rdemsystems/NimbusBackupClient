@@ -19,10 +19,11 @@ type ModeDetector struct {
 	client *Client
 }
 
-// NewModeDetector creates a new mode detector
-func NewModeDetector() *ModeDetector {
+// NewModeDetector creates a new mode detector. tokenPath is the shared local-API
+// token file so the detector's /status probe is authenticated (H-01).
+func NewModeDetector(tokenPath string) *ModeDetector {
 	return &ModeDetector{
-		client: NewClient(),
+		client: NewClient(tokenPath),
 	}
 }
 

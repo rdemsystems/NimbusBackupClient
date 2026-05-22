@@ -40,7 +40,7 @@ func (s *NimbusService) run() {
 		ctx:              context.Background(),
 		config:           LoadConfig(),
 		stopScheduler:    make(chan struct{}),
-		apiClient:        api.NewClient(),
+		apiClient:        api.NewClient(getAPITokenPath()),
 		mode:             api.ModeStandalone, // Service executes directly, doesn't use API
 		callbacksMap:     make(map[string]*progressCallbacks),
 		isServiceProcess: true, // Prevent mode re-detection (would cause infinite loop)
@@ -72,8 +72,14 @@ func (s *NimbusService) run() {
 	// Start the scheduler
 	s.app.StartScheduler()
 
-	// Start HTTP API server for GUI communication
-	s.apiServer = api.NewServer("127.0.0.1:18765", s.app)
+	// Start HTTP API server for GUI communication (token-authenticated — H-01).
+	// If token init fails the server keeps an empty token and rejects every
+	// request (fail closed) rather than exposing the privileged API unauthenticated.
+	apiToken, tokErr := api.EnsureToken(getAPITokenPath())
+	if tokErr != nil {
+		writeDebugLog(fmt.Sprintf("API token init failed (API will reject all requests): %v", tokErr))
+	}
+	s.apiServer = api.NewServer("127.0.0.1:18765", s.app, apiToken)
 	writeDebugLog("Starting HTTP API server on 127.0.0.1:18765")
 
 	go func() {

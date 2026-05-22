@@ -72,6 +72,16 @@ func (c *Config) SplitSizeBytes() uint64 {
 	return uint64(gb) * 1024 * 1024 * 1024
 }
 
+// getAPITokenPath is the shared local-API auth token file (H-01), placed next to
+// config.json so the GUI and the privileged service resolve the same path.
+func getAPITokenPath() string {
+	dir, err := getConfigDir()
+	if err != nil || dir == "" {
+		return "nimbus-api-token"
+	}
+	return filepath.Join(dir, "api-token")
+}
+
 // getConfigDir returns the application's data directory, creating it if needed.
 // On Windows it lives under ProgramData (shared GUI/Service); on Unix it's
 // ~/.proxmox-backup-guardian. Used as the parent for config.json, the restore
