@@ -518,8 +518,84 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 		}
 	}
 
-	// No split needed, continue with normal backup
-	return runBackupInlineInternal(opts)
+	// No size-based split. Each selected directory is its OWN backup group (its own
+	// backup-id), so PBS retention treats successive runs of the same folder as one
+	// series. Previously all selected folders shared one backup-id (derived from the
+	// first), landing as separate snapshots in a single group — which makes prune
+	// keep/drop the wrong folders. A single selected directory keeps the caller's
+	// backup-id (which may have been set explicitly, e.g. by a scheduled job).
+	if len(opts.BackupDirs) <= 1 {
+		return runBackupInlineInternal(opts)
+	}
+
+	// Each folder runs as its own internal backup, but the per-folder terminal
+	// callbacks are SUPPRESSED and aggregated into a single OnComplete/OnResult for
+	// the whole multi-folder run. Otherwise the first folder's OnComplete would
+	// finalize (and, in API mode, tear down) the job before the rest ran — losing
+	// later folders' status and breaking the honest-result contract. Live progress
+	// (OnProgress/OnStats) still flows per folder.
+	worst := func(a, b BackupOutcome) BackupOutcome {
+		if a == OutcomeFailed || b == OutcomeFailed {
+			return OutcomeFailed
+		}
+		if a == OutcomePartial || b == OutcomePartial {
+			return OutcomePartial
+		}
+		return OutcomeSuccess
+	}
+
+	aggStart := time.Now()
+	agg := &BackupStatus{Outcome: OutcomeSuccess, BackupID: opts.BackupID, BackupTime: aggStart.Unix()}
+	var perDirErrors []string
+
+	for _, dir := range opts.BackupDirs {
+		dirOpts := opts
+		dirOpts.BackupDirs = []string{dir}
+		dirOpts.BackupID = GenerateBackupID(hostname, dir)
+		dirOpts.OnComplete = nil // suppress per-folder terminal callback; aggregated below
+		var dirStatus *BackupStatus
+		dirOpts.OnResult = func(s *BackupStatus) { dirStatus = s }
+
+		writeBackupLog(fmt.Sprintf("[Grouping] Backing up %s as its own group %s", dir, dirOpts.BackupID))
+		derr := runBackupInlineInternal(dirOpts)
+
+		if dirStatus != nil {
+			agg.Outcome = worst(agg.Outcome, dirStatus.Outcome)
+			agg.NewChunks += dirStatus.NewChunks
+			agg.ReusedChunks += dirStatus.ReusedChunks
+			agg.FailedChunks += dirStatus.FailedChunks
+			agg.TotalBytes += dirStatus.TotalBytes
+			agg.Directories = append(agg.Directories, dirStatus.Directories...)
+			agg.ExcludedByPolicy = append(agg.ExcludedByPolicy, dirStatus.ExcludedByPolicy...)
+			agg.SkippedReadError = append(agg.SkippedReadError, dirStatus.SkippedReadError...)
+		} else if derr != nil {
+			agg.Outcome = OutcomeFailed
+		}
+		if derr != nil {
+			errMsg := fmt.Sprintf("backup of %s failed: %v", dir, derr)
+			writeBackupLog(errMsg)
+			perDirErrors = append(perDirErrors, errMsg)
+			// Continue with the remaining folders — one bad folder must not skip the rest.
+		}
+	}
+
+	agg.DurationSec = time.Since(aggStart).Seconds()
+	if len(perDirErrors) > 0 {
+		agg.Message = fmt.Sprintf("%d/%d dossiers en échec:\n%s", len(perDirErrors), len(opts.BackupDirs), strings.Join(perDirErrors, "\n"))
+	} else {
+		agg.Message = fmt.Sprintf("Backup de %d dossiers terminé (%d new, %d reused chunks)", len(opts.BackupDirs), agg.NewChunks, agg.ReusedChunks)
+	}
+
+	if opts.OnComplete != nil {
+		opts.OnComplete(agg.Success(), agg.Message)
+	}
+	if opts.OnResult != nil {
+		opts.OnResult(agg)
+	}
+	if len(perDirErrors) > 0 {
+		return fmt.Errorf("%s", agg.Message)
+	}
+	return nil
 }
 
 // runBackupInlineInternal is the actual backup implementation (called by RunBackupInline)
