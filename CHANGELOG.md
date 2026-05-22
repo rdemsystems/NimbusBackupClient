@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.92] - 2026-05-22
+
+Exclusions utilisateur (audit H-04) + sidecar de statut, et correctif du build cassé en 0.2.91.
+
+### Fixed
+- **Build cassé en 0.2.91 (`undefined: onStats`)** — le paramètre `onStats` ajouté en 0.2.91 avait été placé sur le wrapper `backupDirectory` mais utilisé dans `backupReal`, qui ne le recevait pas → `go build` échouait. `onStats` (et la nouvelle liste d'exclusions) sont désormais threadés jusqu'à `backupReal`.
+
+### Added
+- **Exclusions utilisateur réellement appliquées (audit H-04 — critique)** — la liste « fichiers à exclure » de la GUI était acceptée, persistée et décodée mais **jamais transmise au writer PXAR** ; les motifs n'avaient donc aucun effet sur le contenu sauvegardé. Elle est désormais propagée (`BackupOptions.ExcludeList`) et appliquée pendant le parcours : motifs glob sur nom de base (`*.tmp`, `node_modules`) appliqués partout dans l'arbre, motifs avec séparateur **ancrés à la racine de sauvegarde** (`C:\Users\Alice\Temp` n'exclut que ce sous-arbre, pas un `…\other\temp` imbriqué), correspondance insensible à la casse et résistante à VSS (comparaison relative à la racine logique). Les entrées exclues sont élaguées de l'archive et tracées comme « exclues par politique », distinctes des fichiers ignorés sur erreur de lecture.
+- **Sidecar de statut par snapshot** — un blob `nimbus-status.json.blob` est ajouté au manifest de chaque snapshot, listant les fichiers exclus par politique et ignorés sur erreur, lisible par la GUI sans restaurer l'archive. Réutilise le `BackupStatus` structuré introduit en 0.2.91.
+
 ## [0.2.91] - 2026-05-22
 
 Contrat de résultat de backup honnête (audit H-03) et avancement structuré dans la GUI.
