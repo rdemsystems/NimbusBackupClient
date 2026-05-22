@@ -394,8 +394,14 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 		// critical for in-place restore, where a mid-copy failure must not leave
 		// the original truncated. os.Rename replaces the target on both Unix and
 		// Windows (MOVEFILE_REPLACE_EXISTING).
-		tmpPath := fullPath + ".nimbus-part"
-		out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(e.Mode&0777))
+		//
+		// Use a RANDOM, exclusive temp name via os.CreateTemp (which opens with
+		// O_EXCL) instead of the predictable "<file>.nimbus-part" opened with
+		// O_TRUNC: a local attacker could otherwise pre-create/guess that path
+		// (v2-H-08). NOTE: a symlink/reparse point in the destination's PARENT chain
+		// can still redirect the write — confining the parent chain (no-follow /
+		// Windows reparse handling) is a separate hardening.
+		out, err := os.CreateTemp(filepath.Dir(fullPath), filepath.Base(fullPath)+".nimbus-*.part")
 		if err != nil {
 			extracted = append(extracted, PXARExtractedFile{
 				Path: fullPath, Size: e.Size,
@@ -403,6 +409,8 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 			})
 			return nil
 		}
+		tmpPath := out.Name()
+		_ = out.Chmod(os.FileMode(e.Mode & 0777))
 		_, copyErr := io.Copy(out, payload)
 		closeErr := out.Close()
 		if copyErr != nil {
