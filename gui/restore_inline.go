@@ -237,14 +237,28 @@ func listSnapshotViaCatalog(opts RestoreOptions) (entries []SnapshotEntry, meta 
 	}
 
 	entries = make([]SnapshotEntry, 0, len(catEntries))
+	metaPresent := false
 	for _, e := range catEntries {
 		entries = append(entries, SnapshotEntry{Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: e.ModTime})
+		// The catalog lists the sidecar as a root-level file (no slash in path)
+		// iff the archive actually contains it.
+		if !e.IsDir && e.Path == BackupMetaFilename {
+			metaPresent = true
+		}
 	}
 
-	// The meta sidecar is injected as a virtual file at the very start of the
-	// data archive, so reading it stops after the first chunk(s) — cheap. A
-	// missing or malformed sidecar (legacy snapshots) just yields nil meta.
-	meta = readSnapshotMetaCheap(opts)
+	// Read the meta sidecar ONLY when the catalog says it is present. The sidecar
+	// is a root-level virtual file injected at the very start of the data archive,
+	// so when present the read stops after the first chunk(s) — cheap. But on a
+	// split data part (e.g. *_D_DATA_*) the sidecar lives only in the top-level
+	// archive, not the data part: without this guard ReadVirtualFile would walk
+	// the ENTIRE multi-GB archive looking for a file that isn't there, fetching
+	// metadata chunks across the whole stream — the reported search hang at ~96%.
+	// The catalog is built from the same tree (pxar.go appends the virtual file to
+	// catalog_files), so its presence here is authoritative; absence => nil meta.
+	if metaPresent {
+		meta = readSnapshotMetaCheap(opts)
+	}
 
 	writeBackupLog(fmt.Sprintf("Catalog listing for %s@%d: %d entries via fast path (%d catalog bytes)",
 		opts.BackupID, opts.SnapshotTime.Unix(), len(entries), size))
