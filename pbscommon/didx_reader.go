@@ -4,11 +4,17 @@ import (
 	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"sync"
 )
+
+// ErrReadCancelled is returned by a DIDXReaderAt read once its cancel predicate
+// reports true, so a long lazy walk (e.g. a cross-snapshot search) can be
+// aborted between chunk fetches instead of running to completion.
+var ErrReadCancelled = errors.New("read cancelled")
 
 // DIDXReaderAt is an io.ReaderAt over a PBS dynamic-index archive that fetches
 // referenced chunks from the server ON DEMAND, with a small LRU cache, instead
@@ -29,10 +35,17 @@ type DIDXReaderAt struct {
 	idx      *didxIndex
 	cache    *chunkCache
 	progress func(fetched, total int)
+	cancel   func() bool // optional; when it returns true, reads abort with ErrReadCancelled
 
 	mu      sync.Mutex // serializes fetch bookkeeping (fetched counter)
 	fetched int
 }
+
+// SetCancelCheck installs a predicate polled before each read and chunk fetch;
+// once it returns true the reader aborts with ErrReadCancelled. Pass nil to
+// disable. Set it immediately after construction and before the first read —
+// it is read without locking and is not safe to change concurrently with reads.
+func (r *DIDXReaderAt) SetCancelCheck(fn func() bool) { r.cancel = fn }
 
 // NewDIDXReaderAt downloads and parses the .didx index for archiveName and
 // returns a lazy reader over the reconstructed stream plus its total size. The
@@ -68,6 +81,9 @@ func (r *DIDXReaderAt) chunkIndexAt(pos uint64) int {
 // chunkAt returns the decompressed bytes of chunk ci, from cache or by fetching
 // it from the server (verifying size and SHA-256 against the index digest).
 func (r *DIDXReaderAt) chunkAt(ci int) ([]byte, error) {
+	if r.cancel != nil && r.cancel() {
+		return nil, ErrReadCancelled
+	}
 	if data, ok := r.cache.get(ci); ok {
 		return data, nil
 	}
@@ -103,6 +119,9 @@ func (r *DIDXReaderAt) chunkAt(ci int) ([]byte, error) {
 // it fills p fully unless it reaches the end of the stream, in which case it
 // returns the bytes read and io.EOF.
 func (r *DIDXReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if r.cancel != nil && r.cancel() {
+		return 0, ErrReadCancelled
+	}
 	if off < 0 {
 		return 0, fmt.Errorf("didx readerat: negative offset %d", off)
 	}

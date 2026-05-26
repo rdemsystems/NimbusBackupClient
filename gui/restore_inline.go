@@ -142,7 +142,7 @@ func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFing
 // file first. This removes the "free %TEMP% space == archive size" requirement
 // and lets selective restore skip the chunks of files the caller did not select.
 // The PBS reader session stays open for the duration of fn.
-func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progress func(done, total int), fn func(*pbscommon.PXARReader) error) error {
+func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progress func(done, total int), cancel func() bool, fn func(*pbscommon.PXARReader) error) error {
 	if archiveName == "" {
 		archiveName = "backup.pxar.didx"
 	}
@@ -185,6 +185,9 @@ func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progres
 		writeBackupLog(fmt.Sprintf("Failed to open snapshot reader (%s): %v", logTag, err))
 		return fmt.Errorf("failed to open snapshot archive: %w", err)
 	}
+	if cancel != nil {
+		ra.SetCancelCheck(cancel)
+	}
 
 	return fn(pbscommon.NewPXARReaderAt(ra, size))
 }
@@ -199,7 +202,7 @@ func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progres
 // (legacy snapshots predating catalog upload, or a parse failure) so the caller
 // can fall back to the PXAR walk. meta is read separately and cheaply from the
 // start of the data archive; it is best-effort and may be nil.
-func listSnapshotViaCatalog(opts RestoreOptions) (entries []SnapshotEntry, meta *BackupMeta, ok bool) {
+func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []SnapshotEntry, meta *BackupMeta, ok bool) {
 	client := &pbscommon.PBSClient{
 		BaseURL:          opts.BaseURL,
 		CertFingerPrint:  opts.CertFingerprint,
@@ -222,6 +225,9 @@ func listSnapshotViaCatalog(opts RestoreOptions) (entries []SnapshotEntry, meta 
 		writeBackupLog(fmt.Sprintf("Catalog unavailable for %s@%d (%v), falling back to data-archive walk",
 			opts.BackupID, opts.SnapshotTime.Unix(), err))
 		return nil, nil, false
+	}
+	if cancel != nil {
+		ra.SetCancelCheck(cancel)
 	}
 
 	buf := make([]byte, size)
@@ -257,7 +263,7 @@ func listSnapshotViaCatalog(opts RestoreOptions) (entries []SnapshotEntry, meta 
 	// The catalog is built from the same tree (pxar.go appends the virtual file to
 	// catalog_files), so its presence here is authoritative; absence => nil meta.
 	if metaPresent {
-		meta = readSnapshotMetaCheap(opts)
+		meta = readSnapshotMetaCheap(opts, cancel)
 	}
 
 	writeBackupLog(fmt.Sprintf("Catalog listing for %s@%d: %d entries via fast path (%d catalog bytes)",
@@ -269,9 +275,9 @@ func listSnapshotViaCatalog(opts RestoreOptions) (entries []SnapshotEntry, meta 
 // PXARReader.ReadVirtualFile stops walking as soon as the root-level sidecar is
 // found, and since it is written before any real file content the walk fetches
 // just the first chunk(s). Best-effort: any failure returns nil.
-func readSnapshotMetaCheap(opts RestoreOptions) *BackupMeta {
+func readSnapshotMetaCheap(opts RestoreOptions, cancel func() bool) *BackupMeta {
 	var meta *BackupMeta
-	err := withSnapshotReader(opts, "backup.pxar.didx", "MetaCheap", nil, func(reader *pbscommon.PXARReader) error {
+	err := withSnapshotReader(opts, "backup.pxar.didx", "MetaCheap", nil, cancel, func(reader *pbscommon.PXARReader) error {
 		meta = tryReadBackupMeta(reader)
 		return nil
 	})
@@ -290,19 +296,24 @@ func readSnapshotMetaCheap(opts RestoreOptions) *BackupMeta {
 // The catalog only describes the default data archive (backup.pxar.didx), so
 // the fast path is taken only for that archive; any other archiveName goes
 // straight to the walk.
-func assembleSnapshotTree(opts RestoreOptions, archiveName, logTag string) ([]SnapshotEntry, *BackupMeta, error) {
+func assembleSnapshotTree(opts RestoreOptions, archiveName, logTag string, cancel func() bool) ([]SnapshotEntry, *BackupMeta, error) {
 	if archiveName == "" {
 		archiveName = "backup.pxar.didx"
 	}
 	if archiveName == "backup.pxar.didx" {
-		if entries, meta, ok := listSnapshotViaCatalog(opts); ok {
+		if entries, meta, ok := listSnapshotViaCatalog(opts, cancel); ok {
 			return entries, meta, nil
+		}
+		// A cancelled catalog read surfaces as ok=false (treated as "no catalog").
+		// Bail before the expensive data-archive walk instead of falling back.
+		if cancel != nil && cancel() {
+			return nil, nil, pbscommon.ErrReadCancelled
 		}
 	}
 
 	var entries []SnapshotEntry
 	var meta *BackupMeta
-	err := withSnapshotReader(opts, archiveName, logTag, nil, func(reader *pbscommon.PXARReader) error {
+	err := withSnapshotReader(opts, archiveName, logTag, nil, cancel, func(reader *pbscommon.PXARReader) error {
 		es, lerr := reader.ListEntries()
 		if lerr != nil {
 			return fmt.Errorf("failed to parse archive: %v", lerr)
@@ -360,7 +371,7 @@ func ListSnapshotContentsInline(opts RestoreOptions, archiveName string, forceRe
 		}
 	}
 
-	result, meta, err := assembleSnapshotTree(opts, archiveName, "Listing")
+	result, meta, err := assembleSnapshotTree(opts, archiveName, "Listing", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -433,7 +444,7 @@ func ReadSnapshotMetaInline(opts RestoreOptions, forceRefresh bool) (*BackupMeta
 
 	// Assemble via the catalog fast path when possible; this also returns the
 	// tree, so refresh the full listing cache while we have it.
-	entries, meta, err := assembleSnapshotTree(opts, "backup.pxar.didx", "Meta")
+	entries, meta, err := assembleSnapshotTree(opts, "backup.pxar.didx", "Meta", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +685,7 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		}
 		pct := 0.20 + 0.60*(float64(done)/float64(total))
 		progress(pct, fmt.Sprintf("Downloading archive (%d/%d chunks)", done, total))
-	}, func(reader *pbscommon.PXARReader) error {
+	}, nil, func(reader *pbscommon.PXARReader) error {
 		progress(0.85, "Extracting files...")
 		var eerr error
 		extracted, eerr = reader.ExtractWithRewriter(rewriter, opts.IncludePaths, opts.Overwrite)

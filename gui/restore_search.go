@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"pbscommon"
 )
 
 // maxSearchHits caps how many matches we collect before stopping, so a loose
@@ -226,16 +229,27 @@ func SearchFilesInline(opts SearchOptions) (*SearchResult, error) {
 			fromCache = true
 			result.SnapshotsSearched++
 		} else if opts.AssembleMissing {
-			es, m, aerr := assembleSnapshotTree(ropts, "backup.pxar.didx", "Search")
+			es, m, aerr := assembleSnapshotTree(ropts, "backup.pxar.didx", "Search", searchCancelled.Load)
 			if aerr != nil {
+				// Cancellation aborts the in-flight assembly mid-snapshot; treat it
+				// as a user cancel, not a failed snapshot to skip past.
+				if errors.Is(aerr, pbscommon.ErrReadCancelled) || searchCancelled.Load() {
+					result.Cancelled = true
+					writeBackupLog("Search: cancelled by user during snapshot assembly")
+					break
+				}
 				writeBackupLog(fmt.Sprintf("Search: assemble %s@%d failed: %v", tg.backupID, tg.at.Unix(), aerr))
 				result.SnapshotsSkipped++
 				continue
 			}
 			entries = es
 			meta = m
-			if serr := saveSnapshotTreeCache(cacheKey, entries, meta); serr != nil {
-				writeBackupLog(fmt.Sprintf("Search: cache write failed for %s: %v", tg.backupID, serr))
+			// Don't persist a partially-read snapshot if a cancel landed during the
+			// cheap meta read (meta may be nil) — let the next search re-assemble.
+			if !searchCancelled.Load() {
+				if serr := saveSnapshotTreeCache(cacheKey, entries, meta); serr != nil {
+					writeBackupLog(fmt.Sprintf("Search: cache write failed for %s: %v", tg.backupID, serr))
+				}
 			}
 			result.SnapshotsSearched++
 			result.SnapshotsAssembled++
