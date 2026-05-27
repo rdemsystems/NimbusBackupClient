@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.107] - 2026-05-27
+
+> Release d'outillage : déterminisme du build et nettoyage des notes de release. Aucun changement de comportement de l'application.
+
 ### Changed
-- **Toolchain de build déterministe restauré** — la CLI Wails est épinglée sur `v2.12.0` (la version exacte que `@latest` résolvait lors du build 0.2.106, donc octets identiques), au lieu du tag flottant `@latest`. La CLI orchestrant le bundling frontend et l'embed des assets avant le `go build`, une CLI flottante rendait même l'exe non strictement reproductible. *(L'alignement de la librairie `go.mod` sur une v2.x récente reste une tâche dédiée à tester.)*
+- **Toolchain de build déterministe** — la CLI Wails est épinglée sur `v2.12.0` (la version exacte que `@latest` résolvait lors du build 0.2.106, donc octets identiques), au lieu du tag flottant `@latest`. La CLI orchestrant le bundling frontend et l'embed des assets avant le `go build`, une CLI flottante rendait même l'exe non strictement reproductible. *(L'alignement de la librairie `go.mod` sur une v2.x récente reste une tâche dédiée à tester.)*
+- **Notes de release** (`RELEASE_NOTES.md`) réécrites en page de statut pérenne : suppression du changelog par version gelé à v0.2.12 (redondant avec ce fichier et la section « Changes since » auto-générée) et du pied de version périmé ; correction de faits obsolètes (interface désormais **FR + EN**, support **multi-PBS**).
+- **Liens VirusTotal** : le binaire soumis porte le nom de fichier versionné (`NimbusBackup-vX.Y.Z.msi`), affiché tel quel sur le rapport VirusTotal.
 
 ## [0.2.106] - 2026-05-27
 
