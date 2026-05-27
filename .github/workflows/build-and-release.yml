@@ -285,6 +285,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write      # mint the Sigstore OIDC token for attestation
+      attestations: write  # store the build-provenance attestation
 
     steps:
       - uses: actions/checkout@v4
@@ -329,12 +331,28 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # Free, OSS-friendly cryptographic provenance: attests that these exact
+      # binaries were produced by THIS workflow, from THIS commit. Verifiable
+      # with `gh attestation verify <file> --repo rdemsystems/NimbusBackupClient`.
+      # A strong trust signal for a sysadmin audience while signing is pending.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release/NimbusBackup*.exe
+            release/NimbusBackup*.msi
+            release/*.zip
+            release/*.tar.gz
+
       # Best-effort: submit the Windows binaries to VirusTotal so the release
       # page can link a live multi-engine report (transparency while the
       # Authenticode certificate is pending). Skips cleanly if the secret is
       # absent and never fails the release. The GUI report URL is just the
-      # file's SHA-256, so the link is valid once VT finishes analysing.
-      - name: Submit to VirusTotal (best-effort)
+      # file's SHA-256. We GATE the link on a clean result: a fresh hash can
+      # show transient heuristic hits, and we must not publish a link to a
+      # "2/70 detected" report as if it were proof of safety — so we poll the
+      # analysis and only emit the link when malicious+suspicious == 0.
+      - name: Submit to VirusTotal (best-effort, gated on 0 detections)
         continue-on-error: true
         env:
           VT_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
@@ -343,22 +361,46 @@ jobs:
             echo "VIRUSTOTAL_API_KEY not set — skipping VirusTotal submission."
             exit 0
           fi
-          {
-            echo ""
-            echo "### 🛡️ VirusTotal reports"
-            echo ""
-          } > vt-section.md
+          : > vt-section.md
+          emitted=0
           for f in release/NimbusBackup.exe release/NimbusBackup.msi; do
             [ -f "$f" ] || continue
             name=$(basename "$f")
-            # Free public API: files must be <32MB (ours are); 4 req/min limit.
-            curl -s --max-time 180 -X POST https://www.virustotal.com/api/v3/files \
-              -H "x-apikey: $VT_KEY" --form file=@"$f" > /dev/null || true
             sha=$(sha256sum "$f" | awk '{print $1}')
-            echo "- [\`$name\`](https://www.virustotal.com/gui/file/$sha)" >> vt-section.md
-            sleep 20
+            # Free public API: files must be <32MB (ours are); 4 req/min limit.
+            resp=$(curl -sS --max-time 180 -X POST https://www.virustotal.com/api/v3/files \
+              -H "x-apikey: $VT_KEY" --form file=@"$f" || true)
+            aid=$(jq -r '.data.id // empty' <<<"$resp" 2>/dev/null || true)
+            if [ -z "$aid" ]; then
+              echo "WARN: VirusTotal submission failed for $name — omitting link."
+              sleep 20; continue
+            fi
+            status=""; mal=0; susp=0
+            for _ in $(seq 1 10); do
+              sleep 20
+              ar=$(curl -sS --max-time 60 -H "x-apikey: $VT_KEY" "https://www.virustotal.com/api/v3/analyses/$aid" || true)
+              status=$(jq -r '.data.attributes.status // empty' <<<"$ar" 2>/dev/null || true)
+              if [ "$status" = "completed" ]; then
+                mal=$(jq  -r '(.data.attributes.stats.malicious  // 0) | tonumber? // 0' <<<"$ar" 2>/dev/null || echo 0)
+                susp=$(jq -r '(.data.attributes.stats.suspicious // 0) | tonumber? // 0' <<<"$ar" 2>/dev/null || echo 0)
+                break
+              fi
+            done
+            if [ "$status" != "completed" ]; then
+              echo "WARN: VirusTotal analysis not completed in time for $name — omitting link."
+              continue
+            fi
+            if [ "$((mal + susp))" -gt 0 ]; then
+              echo "WARN: VirusTotal reports $mal malicious / $susp suspicious for $name ($sha) — omitting link to avoid publishing a non-clean report."
+              continue
+            fi
+            if [ "$emitted" -eq 0 ]; then
+              { echo ""; echo "### 🛡️ VirusTotal reports — 0 detections"; echo ""; } >> vt-section.md
+              emitted=1
+            fi
+            echo "- [\`$name\`](https://www.virustotal.com/gui/file/$sha) — clean" >> vt-section.md
           done
-          cat vt-section.md
+          if [ -s vt-section.md ]; then cat vt-section.md; else echo "No clean VirusTotal links to publish."; fi
 
       - name: Generate release notes
         id: notes
