@@ -124,12 +124,13 @@
 
     <!-- Add/Remove Programs metadata: publisher trust signals shown in
          "Programs and Features". Purely informational, no behavioral or
-         upgrade impact. ARPNOMODIFY hides the unused "Modify" button. -->
+         upgrade impact. NOTE: do NOT set ARPNOMODIFY here — WixUI_InstallDir
+         already defines it, and a second definition is a duplicate-symbol
+         build error (LGHT0091). -->
     <Property Id="ARPURLINFOABOUT" Value="https://nimbus.rdem-systems.com/" />
     <Property Id="ARPHELPLINK" Value="https://nimbus.rdem-systems.com/" />
     <Property Id="ARPURLUPDATEINFO" Value="https://github.com/rdemsystems/NimbusBackupClient/releases" />
     <Property Id="ARPCONTACT" Value="contact@rdem-systems.com" />
-    <Property Id="ARPNOMODIFY" Value="1" />
 
     <!-- UI -->
     <UIRef Id="WixUI_InstallDir" />
