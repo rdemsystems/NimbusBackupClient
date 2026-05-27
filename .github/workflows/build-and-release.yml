@@ -351,6 +351,17 @@ jobs:
             echo "" >> RELEASE_BODY.md
           fi
 
+          # Publish the SHA-256 checksums on the release page itself so users
+          # can verify integrity without downloading SHA256SUMS.txt first.
+          echo "" >> RELEASE_BODY.md
+          echo "### 🔐 SHA-256 checksums" >> RELEASE_BODY.md
+          echo "" >> RELEASE_BODY.md
+          echo "Verify with \`Get-FileHash <file> -Algorithm SHA256\` (PowerShell) or \`sha256sum -c SHA256SUMS.txt\`." >> RELEASE_BODY.md
+          echo "" >> RELEASE_BODY.md
+          echo '```' >> RELEASE_BODY.md
+          cat release/SHA256SUMS.txt >> RELEASE_BODY.md
+          echo '```' >> RELEASE_BODY.md
+
           # Add full status from RELEASE_NOTES.md
           echo "" >> RELEASE_BODY.md
           echo "---" >> RELEASE_BODY.md
