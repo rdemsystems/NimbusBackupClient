@@ -24,6 +24,11 @@ Don't want to self-host PBS? Use our managed service:
 
 Windows binaries are code-signed by [SignPath Foundation](https://signpath.org).
 
+> ⚠️ **Windows says "virus detected" or shows a SmartScreen warning?**
+> This is a known **false positive** for Go/Wails applications — it is *not* a virus.
+> Read [why this happens and how to verify the download is safe](https://nimbus.rdem-systems.com/en/antivirus-false-positive)
+> ([🇫🇷 version française](https://nimbus.rdem-systems.com/faux-positif-antivirus)).
+
 ## 📚 Documentation
 
 - **Complete Proxmox Backup Guide** — PBS deployment best practices ([🇬🇧 EN](https://nimbus.rdem-systems.com/en/blog/complete-proxmox-backup-guide/?utm_source=github&utm_campaign=gui-client) / [🇫🇷 FR](https://nimbus.rdem-systems.com/blog/guide-complet-backup-proxmox/?utm_source=github&utm_campaign=gui-client))
