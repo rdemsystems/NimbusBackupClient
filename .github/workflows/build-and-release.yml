@@ -368,7 +368,10 @@ jobs:
           fi
           : > vt-section.md
           emitted=0
-          for f in release/NimbusBackup.exe release/NimbusBackup.msi; do
+          VER="${{ steps.version.outputs.VERSION }}"
+          # Use the version-stamped copies so the published label reads
+          # "NimbusBackup-v0.2.106.msi" (identical bytes → same VT report).
+          for f in "release/NimbusBackup-${VER}.exe" "release/NimbusBackup-${VER}.msi"; do
             [ -f "$f" ] || continue
             name=$(basename "$f")
             sha=$(sha256sum "$f" | awk '{print $1}')
