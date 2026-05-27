@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.106] - 2026-05-27
+
+> Release d'outillage de distribution : aucun changement de comportement de l'application, uniquement des mesures contre les faux positifs antivirus et de transparence sur les téléchargements Windows.
+
+### Added
+- **Empreintes SHA-256 publiées avec chaque release** — un fichier `SHA256SUMS.txt` est joint aux artefacts et le tableau des empreintes est affiché directement dans les notes de release, pour vérifier l'intégrité d'un téléchargement (`Get-FileHash <fichier> -Algorithm SHA256` ou `sha256sum -c SHA256SUMS.txt`).
+- **Soumission VirusTotal automatique (best-effort)** — le pipeline de release soumet `NimbusBackup.exe` et `NimbusBackup.msi` à VirusTotal et insère les liens des rapports multi-moteurs dans les notes, par transparence en attendant le certificat de signature de code. Le lien n'est publié **que si le rapport est propre (0 détection)** : l'analyse est attendue puis vérifiée, pour ne jamais pointer vers un rapport à charge. Étape non bloquante, activée par le secret `VIRUSTOTAL_API_KEY` (ignorée s'il est absent).
+- **Attestation de provenance de build** (`actions/attest-build-provenance`) — chaque artefact est accompagné d'une attestation cryptographique « ce binaire vient de ce workflow, de ce commit », vérifiable avec `gh attestation verify`. Signal de confiance gratuit et auditable pour un public sysadmin, en attendant la signature de code.
+
+### Changed
+- **Métadonnées d'éditeur Windows ajoutées au binaire de service** — `NimbusBackupSVC.exe` était compilé sans aucune information de version, un signal fort de faux positif antivirus (heuristique/ML). Il embarque désormais éditeur (RDEM Systems), nom de produit, description et version, générés via `goversioninfo` entre le build de la GUI et celui du service.
+- **Versions d'outils de build épinglées** — la CLI Wails (`v2.8.0`, alignée sur `go.mod`) et `goversioninfo` (`v1.4.0`) sont épinglées au lieu de `@latest`, pour des builds reproductibles.
+- **Documentation des faux positifs antivirus** — lien depuis le README et les notes de release vers une page d'explication dédiée bilingue (« détecté comme virus ? » [FR](https://nimbus.rdem-systems.com/faux-positif-antivirus) / [EN](https://nimbus.rdem-systems.com/en/antivirus-false-positive)), en plus de la mention de la signature SignPath Foundation.
+
 ## [0.2.105] - 2026-05-26
 
 ### Fixed
