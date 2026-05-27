@@ -1285,7 +1285,7 @@ function App() {
                     <br/>
                     <strong>📦 {t('noPBSYet')}</strong><br/>
                     <a
-                      href={`https://nimbus.rdem-systems.com/choisir-mon-backup/?utm_source=NimbusGui&utm_medium=tooling&utm_campaign=version-${appVersion}&utm_content=first-setup`}
+                      href={`${t('chooseBackupUrl')}?utm_source=NimbusGui&utm_medium=tooling&utm_campaign=version-${appVersion}&utm_content=first-setup`}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{color: '#667eea', fontWeight: 'bold', textDecoration: 'underline'}}
@@ -2551,7 +2551,7 @@ function App() {
             {/* Upsell CTA */}
             <div style={{margin: '20px 0'}}>
               <a
-                href={`https://nimbus.rdem-systems.com/choisir-mon-backup/?utm_source=NimbusGui&utm_medium=tooling&utm_campaign=version-${appVersion}&utm_content=version-${appVersion}`}
+                href={`${t('chooseBackupUrl')}?utm_source=NimbusGui&utm_medium=tooling&utm_campaign=version-${appVersion}&utm_content=version-${appVersion}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{
