@@ -35,6 +35,7 @@ type BackupHandler interface {
 	SaveScheduledJobFromMap(job map[string]interface{}) error
 	UpdateScheduledJobFromMap(job map[string]interface{}) error
 	DeleteScheduledJobFromMap(jobID string) error
+	PinServerFingerprint(id, fingerprint string) error
 }
 
 // NewServer creates a new API server. token is the shared local-auth secret that
@@ -60,6 +61,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/jobs/create", s.handleJobCreate)
 	s.mux.HandleFunc("/jobs/update", s.handleJobUpdate)
 	s.mux.HandleFunc("/jobs/delete/", s.handleJobDelete)
+	s.mux.HandleFunc("/pbs/fingerprint", s.handlePinFingerprint)
 }
 
 // Start starts the HTTP server
@@ -354,6 +356,39 @@ func (s *Server) handleJobDelete(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"success": true,
 		"message": "Job deleted successfully",
+	}
+	s.writeJSON(w, resp, http.StatusOK)
+}
+
+// handlePinFingerprint lets the unprivileged GUI delegate a TOFU certificate pin to
+// the privileged service, which is the single writer of config.json.
+func (s *Server) handlePinFingerprint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID          string `json:"id"`
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+	if req.ID == "" || req.Fingerprint == "" {
+		s.writeError(w, "id and fingerprint are required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.app.PinServerFingerprint(req.ID, req.Fingerprint); err != nil {
+		s.writeError(w, fmt.Sprintf("Failed to pin fingerprint: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	resp := map[string]interface{}{
+		"success": true,
+		"message": "Fingerprint pinned successfully",
 	}
 	s.writeJSON(w, resp, http.StatusOK)
 }

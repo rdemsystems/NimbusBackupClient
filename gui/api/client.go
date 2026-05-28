@@ -175,6 +175,33 @@ func (c *Client) CreateJob(job map[string]interface{}) error {
 	return nil
 }
 
+// PinFingerprint asks the service to persist a pinned certificate fingerprint for
+// a PBS server. The service is the single privileged writer of config.json, so the
+// unprivileged GUI delegates this write instead of failing to overwrite the file.
+func (c *Client) PinFingerprint(id, fingerprint string) error {
+	body, err := json.Marshal(map[string]string{"id": id, "fingerprint": fingerprint})
+	if err != nil {
+		return fmt.Errorf("failed to encode request: %w", err)
+	}
+
+	resp, err := c.httpClient.Post(
+		c.baseURL+"/pbs/fingerprint",
+		"application/json",
+		bytes.NewBuffer(body),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to send fingerprint request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to pin fingerprint: %s", string(respBody))
+	}
+
+	return nil
+}
+
 // UpdateJob updates an existing scheduled job
 func (c *Client) UpdateJob(job map[string]interface{}) error {
 	body, err := json.Marshal(job)

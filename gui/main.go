@@ -575,12 +575,24 @@ func (a *App) PinPBSServerFingerprint(id, fingerprint string) error {
 	if err := security.ValidateFingerprint(fingerprint); err != nil {
 		return fmt.Errorf("empreinte certificat invalide: %w", err)
 	}
-	pbs, err := a.config.GetPBSServer(id)
-	if err != nil {
-		return err
+	// config.json lives under ProgramData and is owned by whichever process wrote it
+	// first. When the privileged service is running it owns the file, so the
+	// unprivileged GUI cannot overwrite it: its Save() rename fails and TOFU pinning
+	// silently never persists (the connection test keeps reporting offline). Route the
+	// write through the service in that case so a single privileged writer owns the
+	// file; standalone GUIs (no service) write directly as before.
+	if !a.isServiceProcess && a.mode == api.ModeService && a.apiClient != nil {
+		writeDebugLog(fmt.Sprintf("PinPBSServerFingerprint(%s): delegating write to service", id))
+		if err := a.apiClient.PinFingerprint(id, fingerprint); err != nil {
+			writeDebugLog(fmt.Sprintf("PinPBSServerFingerprint: service-side pin failed: %v", err))
+			return err
+		}
+		// Refresh our in-memory copy so a follow-up TestPBSConnection in this process
+		// sees the fingerprint the service just wrote to disk.
+		a.ReloadConfig()
+		return nil
 	}
-	pbs.CertFingerprint = fingerprint
-	return a.config.UpdatePBSServer(pbs)
+	return a.pinFingerprintLocal(id, fingerprint)
 }
 
 // ==================== END MULTI-PBS MANAGEMENT ====================

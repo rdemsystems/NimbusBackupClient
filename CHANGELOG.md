@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.110] - 2026-05-28
+
+### Fixed
+- **Certificate trust-on-first-use (TOFU) now persists when running as a service** — when the app runs as a privileged Windows service alongside an unprivileged GUI, `config.json` (under `ProgramData`) is owned by the service, so the GUI could not overwrite it: clicking **OK** on the self-signed-certificate fingerprint dialog appeared to do nothing and the connection test kept reporting the server offline. The GUI now delegates the fingerprint write to the service over the existing authenticated local API, so the service — the single privileged writer of `config.json` — persists the pinned fingerprint. Standalone installs (no service) keep writing directly. The pin now also logs a disk read-back so any future write failure is unambiguous in the service log.
+
 ## [0.2.109] - 2026-05-28
 
 ### Changed
