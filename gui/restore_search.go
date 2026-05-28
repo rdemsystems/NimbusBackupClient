@@ -29,7 +29,8 @@ const (
 	// base name (the last path segment). The intuitive default.
 	SearchModeName SearchMatchMode = "name"
 	// SearchModeRegex matches a Go regular expression against the base name.
-	// Use (?i) in the pattern for case-insensitivity.
+	// Case-insensitive by default (to match Windows expectations); add (?-i) in
+	// the pattern to force case-sensitive matching.
 	SearchModeRegex SearchMatchMode = "regex"
 	// SearchModePath matches a case-insensitive substring against the whole
 	// archive-relative path (directories included).
@@ -132,7 +133,9 @@ func buildMatcher(mode SearchMatchMode, query string) (entryMatcher, error) {
 
 	switch mode {
 	case SearchModeRegex:
-		re, err := regexp.Compile(query)
+		// Prepend (?i) so matching is case-insensitive like the other modes;
+		// a user who explicitly wants case-sensitivity can override with (?-i).
+		re, err := regexp.Compile("(?i)" + query)
 		if err != nil {
 			return nil, fmt.Errorf("expression régulière invalide: %v", err)
 		}

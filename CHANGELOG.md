@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.109] - 2026-05-28
+
+### Changed
+- **Regex file search is now case-insensitive by default** — the "regular expression" search mode was the only mode that respected case, so a query like `prix` would miss `Prix.pdf` while the name/path/glob modes already ignored case. The pattern is now compiled with a leading `(?i)` flag to match Windows expectations and the other modes; an advanced user who wants case-sensitive matching can still force it with `(?-i)` in the pattern.
+
 ## [0.2.108] - 2026-05-27
 
 > Restore fixes from a tester's field report on v0.2.107 (service+GUI mode): wildcard search, folder picker, and path display.
