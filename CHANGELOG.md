@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.111] - 2026-06-02
+
+### Fixed
+- **A whole-drive backup (e.g. `C:\`) no longer stalls on "Analyse de la taille…" and never starts** — before launching a one-shot directory backup the app sizes the selected folders to decide whether to auto-split. On a system-drive root this meant recursively walking the entire `C:\Windows`/`C:\Users` tree, which on a server (where antivirus scans every file open) effectively never returned, so the backup never began — the analysis just hung with no message. The size scan is now bounded by a deadline and can no longer block a backup: the backend caps the whole analysis at 30s, and the GUI caps the call at 45s, both falling back to a normal single (unsplit) backup. A timed-out, partial size estimate is treated as "incomplete" and never triggers a split. The size scan also no longer descends into directory junctions / reparse points (e.g. `C:\ProgramData\Application Data` → `C:\ProgramData`), matching what the archive writer already skips.
+
 ## [0.2.110] - 2026-05-28
 
 ### Fixed

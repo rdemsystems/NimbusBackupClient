@@ -16,7 +16,7 @@ func (a *App) applyConfiguredSplit(analysis *BackupAnalysis) uint64 {
 		binSize = a.config.SplitSizeBytes()
 		disable = a.config.DisableSplit
 	}
-	analysis.ShouldSplit = !disable && analysis.TotalSize > binSize
+	analysis.ShouldSplit = !disable && !analysis.Incomplete && analysis.TotalSize > binSize
 	if analysis.ShouldSplit {
 		analysis.SuggestedJobs = int((analysis.TotalSize + binSize - 1) / binSize)
 		if analysis.SuggestedJobs < 2 {

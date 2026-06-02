@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"os"
@@ -87,17 +88,33 @@ func getBackupLock(baseURL, datastore string) *sync.Mutex {
 	return backupLocks[key]
 }
 
-// calculateDirSize scans a directory recursively and returns total size in bytes
-// Returns size and error if access was denied (needs VSS)
-func calculateDirSize(path string) (uint64, error) {
+// calculateDirSizeCtx scans a directory recursively and returns total size in bytes.
+//
+// It is hardened for whole-drive roots like C:\ in two ways:
+//   - It never descends into directory junctions / reparse points. On a system
+//     drive these loop (e.g. C:\ProgramData\Application Data -> C:\ProgramData,
+//     C:\Documents and Settings -> C:\Users), which can make a naive walk run
+//     effectively forever. The pxar writer already skips them (pxar.go WriteDir),
+//     so they don't belong in the size estimate either.
+//   - It honors ctx, so a pathologically large or slow drive (e.g. one where
+//     antivirus scans every file open) can't stall the caller indefinitely; on
+//     deadline it returns the partial size gathered so far.
+//
+// Returns size and error if access was denied at the root (needs VSS) or if ctx
+// fired (partial size is still returned alongside the context error).
+func calculateDirSizeCtx(ctx context.Context, path string) (uint64, error) {
 	var totalSize uint64
 	var accessDenied bool
 
-	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(path, func(filePath string, d os.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			// Deadline/cancel: stop walking and report what we have so far.
+			return ctx.Err()
+		}
 		if err != nil {
 			// Check if it's an access denied error
 			if strings.Contains(err.Error(), "Access is denied") ||
-			   strings.Contains(err.Error(), "permission denied") {
+				strings.Contains(err.Error(), "permission denied") {
 				accessDenied = true
 				// Stop walking this path, but continue with others
 				if filePath == path {
@@ -108,17 +125,42 @@ func calculateDirSize(path string) (uint64, error) {
 			}
 			return nil // Skip other errors
 		}
-		if !info.IsDir() {
+		// Never follow junctions / symlinks (see doc comment): on Windows
+		// ReadDir reports mount points with ModeSymlink, so skip the whole
+		// subtree rather than recursing into a loop.
+		if d.Type()&os.ModeSymlink != 0 {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return nil // file vanished or became unreadable: ignore for sizing
+			}
 			totalSize += uint64(info.Size())
 		}
 		return nil
 	})
 
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		// Partial size is still useful for the split heuristic.
+		return totalSize, err
+	}
 	if accessDenied && totalSize == 0 {
 		return 0, fmt.Errorf("access denied: %s", path)
 	}
 
 	return totalSize, err
+}
+
+// calculateDirSize is the unbounded variant, used by the in-backup background
+// size estimator (progress %), which may legitimately run as long as the backup
+// itself. Callers that must not stall (e.g. pre-backup analysis) should use
+// calculateDirSizeCtx with a deadline instead.
+func calculateDirSize(path string) (uint64, error) {
+	return calculateDirSizeCtx(context.Background(), path)
 }
 
 type ChunkState struct {
@@ -501,7 +543,7 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 		if splitThreshold == 0 {
 			splitThreshold = SplitThreshold
 		}
-		analysis.ShouldSplit = !opts.DisableSplit && analysis.TotalSize > splitThreshold
+		analysis.ShouldSplit = !opts.DisableSplit && !analysis.Incomplete && analysis.TotalSize > splitThreshold
 
 		writeBackupLog(fmt.Sprintf("[Auto-Split] Total size: %s, Should split: %v", FormatSize(analysis.TotalSize), analysis.ShouldSplit))
 

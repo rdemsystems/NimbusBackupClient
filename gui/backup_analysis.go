@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -8,7 +9,15 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
+
+// analysisSizeBudget bounds the total time the pre-backup size scan may spend
+// across all selected folders. Sizing is only an optimization (to offer auto-
+// split), so when a whole-drive root makes it slow we stop and proceed with an
+// approximate estimate rather than blocking the backup. Kept below the frontend
+// analysis timeout so the backend returns a (partial) result first.
+const analysisSizeBudget = 30 * time.Second
 
 const (
 	// DefaultSplitSizeGB is the default auto-split threshold and per-bin target,
@@ -83,6 +92,7 @@ type BackupAnalysis struct {
 	ShouldSplit    bool         `json:"should_split"`
 	SuggestedJobs  int          `json:"suggested_jobs"`
 	RootsWithFiles []string     `json:"roots_with_files,omitempty"` // selected roots that contain direct files (need a remainder job when split — v2-H-01)
+	Incomplete     bool         `json:"incomplete,omitempty"`       // the size scan hit its deadline; TotalSize is a partial undercount, so split decisions must not trust it
 }
 
 // cleanKey normalizes a path for exact-path comparison (clean + lowercase) so
@@ -99,6 +109,11 @@ func AnalyzeBackupDirs(backupDirs []string, excludes []string) (*BackupAnalysis,
 	analysis := &BackupAnalysis{
 		Folders: make([]FolderInfo, 0),
 	}
+
+	// Shared deadline across all folder size scans so the whole analysis is
+	// bounded (a slow C:\ can otherwise leave the caller awaiting forever).
+	ctx, cancel := context.WithTimeout(context.Background(), analysisSizeBudget)
+	defer cancel()
 
 	excludeSet := make(map[string]bool, len(excludes))
 	for _, e := range excludes {
@@ -136,7 +151,7 @@ func AnalyzeBackupDirs(backupDirs []string, excludes []string) (*BackupAnalysis,
 			if excludeSet[cleanKey(folderPath)] {
 				continue // excluded folder: don't size it or make a job for it
 			}
-			size, err := calculateDirSize(folderPath)
+			size, err := calculateDirSizeCtx(ctx, folderPath)
 
 			folderInfo := FolderInfo{
 				Path: folderPath,
@@ -157,12 +172,18 @@ func AnalyzeBackupDirs(backupDirs []string, excludes []string) (*BackupAnalysis,
 		}
 	}
 
+	// If the shared deadline fired, TotalSize is a partial undercount and some
+	// folders were sized as 0 — never offer a split on numbers we don't trust.
+	if ctx.Err() != nil {
+		analysis.Incomplete = true
+	}
+
 	// Sort folders by size (largest first) for better bin-packing
 	sort.Slice(analysis.Folders, func(i, j int) bool {
 		return analysis.Folders[i].Size > analysis.Folders[j].Size
 	})
 
-	analysis.ShouldSplit = analysis.TotalSize > SplitThreshold
+	analysis.ShouldSplit = !analysis.Incomplete && analysis.TotalSize > SplitThreshold
 
 	if analysis.ShouldSplit {
 		analysis.SuggestedJobs = int((analysis.TotalSize + BinTargetSize - 1) / BinTargetSize)

@@ -778,11 +778,21 @@ function App() {
       return
     }
 
-    // Analyze backup size for auto-split (only for directory backups in oneshot mode)
+    // Analyze backup size for auto-split (only for directory backups in oneshot mode).
+    // This is a best-effort optimization to OFFER splitting large backups; it must
+    // never block the backup itself. Sizing a whole-drive root (e.g. C:\) can be very
+    // slow (antivirus scans every file open), so cap it and fall back to a normal
+    // single-job backup on timeout/error rather than leaving the UI stuck on "Analyse…".
     if (backupType === 'directory' && backupMode === 'oneshot' && window.go && window.go.main.App.AnalyzeBackup) {
       try {
         showStatus('📊 Analyse de la taille du backup...', 'info')
-        const analysis = await window.go.main.App.AnalyzeBackup(dirList)
+        const ANALYSIS_TIMEOUT_MS = 45000
+        const analysis = await Promise.race([
+          window.go.main.App.AnalyzeBackup(dirList),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('analysis-timeout')), ANALYSIS_TIMEOUT_MS)
+          ),
+        ])
 
         if (analysis.should_split) {
           const confirmSplit = window.confirm(
@@ -804,8 +814,8 @@ function App() {
           // User declined - continue with normal backup below
         }
       } catch (err) {
-        // Analysis failed - continue with normal backup
-        console.warn('Backup analysis failed:', err)
+        // Analysis failed or timed out - continue with a normal (unsplit) backup.
+        console.warn('Backup analysis skipped:', err)
       }
     }
 
