@@ -127,9 +127,13 @@ type MailCtx struct {
 	ReusedChunks uint64
 	Datastore    string
 	Error        error
-	Hostname     string
-	StartTime    time.Time
-	EndTime      time.Time
+	// ReadErrors holds files/directories that could not be read and were
+	// skipped. A run with read errors committed a snapshot but its contents
+	// are incomplete, so it is reported as "Partial", never "Success".
+	ReadErrors []string
+	Hostname   string
+	StartTime  time.Time
+	EndTime    time.Time
 }
 
 func (m *MailCtx) Duration() time.Duration {
@@ -147,15 +151,27 @@ func (m *MailCtx) ErrorStr() string {
 	return ""
 }
 
+func (m *MailCtx) ReadErrorCount() int {
+	return len(m.ReadErrors)
+}
+
+// Partial reports a run that committed a snapshot but skipped unreadable files.
+func (m *MailCtx) Partial() bool {
+	return m.Error == nil && len(m.ReadErrors) > 0
+}
+
 func (m *MailCtx) Success() bool {
-	return m.Error == nil
+	return m.Error == nil && len(m.ReadErrors) == 0
 }
 
 func (m *MailCtx) Status() string {
-	if m.Success() {
-		return "Success"
+	if m.Error != nil {
+		return "Failed"
 	}
-	return "Failed"
+	if len(m.ReadErrors) > 0 {
+		return "Partial"
+	}
+	return "Success"
 }
 
 func (m *MailCtx) BuildStr(txt string) (string, error) {

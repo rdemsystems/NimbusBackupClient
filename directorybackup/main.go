@@ -24,6 +24,8 @@ import (
 
 var defaultMailSubjectTemplate = "Backup {{.Status}}"
 var defaultMailBodyTemplate = `{{if .Success}}Backup complete ({{.FromattedDuration}})
+Chunks New {{.NewChunks}}, Reused {{.ReusedChunks}}.{{else if .Partial}}Backup completed WITH ERRORS ({{.FromattedDuration}})
+{{.ReadErrorCount}} file(s) could not be read and were skipped; the snapshot is incomplete.
 Chunks New {{.NewChunks}}, Reused {{.ReusedChunks}}.{{else}}Error occurred while working, backup may be not completed.
 Last error is: {{.ErrorStr}}{{end}}`
 
@@ -219,8 +221,9 @@ func main() {
 	}
 
 	begin := time.Now()
+	var readErrors []string
 	if cfg.BackupSourceDir != "" {
-		err = backup(client, newchunk, reusechunk, cfg.PxarOut, cfg.BackupSourceDir, cfg.UseVSS)
+		readErrors, err = backup(client, newchunk, reusechunk, cfg.PxarOut, cfg.BackupSourceDir, cfg.UseVSS)
 	} else if cfg.BackupStreamName != "" {
 		sn := cfg.BackupStreamName
 		if !strings.HasSuffix(sn, ".didx") {
@@ -239,6 +242,7 @@ func main() {
 		NewChunks:    newchunk.Load(),
 		ReusedChunks: reusechunk.Load(),
 		Error:        err,
+		ReadErrors:   readErrors,
 		Hostname:     hostname,
 		Datastore:    cfg.Datastore,
 		StartTime:    begin,
@@ -273,7 +277,7 @@ func main() {
 		subject, err = mailCtx.BuildStr(mailSubjectTemplate)
 		if err != nil {
 			fmt.Println("Cannot use custom mail subject: " + err.Error())
-			msg, err = mailCtx.BuildStr(defaultMailSubjectTemplate)
+			subject, err = mailCtx.BuildStr(defaultMailSubjectTemplate)
 			if err != nil {
 				// this should never happen
 				panic(err)
@@ -292,6 +296,18 @@ func main() {
 				os.Exit(1)
 			}
 		}
+	}
+
+	// Exit non-zero so schedulers never read a failed or incomplete backup as
+	// success. mailCtx.Error is the fatal error; ReadErrors means the snapshot
+	// committed but is missing unreadable files.
+	if mailCtx.Error != nil {
+		fmt.Fprintln(os.Stderr, "backup failed:", mailCtx.Error)
+		os.Exit(1)
+	}
+	if len(readErrors) > 0 {
+		fmt.Fprintf(os.Stderr, "backup completed with %d read error(s); snapshot is incomplete\n", len(readErrors))
+		os.Exit(3)
 	}
 
 }
@@ -334,8 +350,7 @@ func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uin
 	}
 	B := make([]byte, 65536)
 	for {
-
-		n, err := stream.Read(B)
+		n, rerr := stream.Read(B)
 
 		b := B[:n]
 
@@ -343,17 +358,18 @@ func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uin
 			return fmt.Errorf("failed to handle stream data: %w", err)
 		}
 
-		if err == io.EOF {
-			break
+		if rerr != nil {
+			if rerr == io.EOF {
+				break
+			}
+			return fmt.Errorf("failed to read stream: %w", rerr)
 		}
 	}
 
+	// Eof() already closes the dynamic index; closing it again fails the request
+	// and aborts the snapshot before UploadManifest/Finish.
 	if err := streamChunk.Eof(client); err != nil {
 		return fmt.Errorf("failed to finalize stream: %w", err)
-	}
-
-	if err := client.CloseDynamicIndex(streamChunk.wrid, hex.EncodeToString(streamChunk.chunkdigests.Sum(nil)), streamChunk.pos, streamChunk.chunkcount); err != nil {
-		return fmt.Errorf("failed to close stream index: %w", err)
 	}
 
 	err = client.UploadManifest()
@@ -364,7 +380,7 @@ func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uin
 	return client.Finish()
 }
 
-func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string) error {
+func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string) ([]string, error) {
 	client.Connect(false, "host")
 	knownChunks := hashmap.New[string, bool]()
 
@@ -373,7 +389,7 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
 
 	previousDidx, err := client.DownloadPreviousToBytes(archive.ArchiveName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	fmt.Printf("Downloaded previous DIDX: %d bytes\n", len(previousDidx))
@@ -410,7 +426,7 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
 	if pxarOut != "" {
 		f, err = os.Create(pxarOut)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer f.Close()
 	}
@@ -424,11 +440,11 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
 
 	pxarChunk.wrid, err = client.CreateDynamicIndex(archive.ArchiveName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	pcat1Chunk.wrid, err = client.CreateDynamicIndex("catalog.pcat1.didx")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	archive.WriteCB = func(b []byte) error {
@@ -454,27 +470,30 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
 	//Data to be hashed and eventuall uploaded
 
 	if _, err = archive.WriteDir(backupdir, "", true); err != nil {
-		return fmt.Errorf("failed to write directory archive: %w", err)
+		return nil, fmt.Errorf("failed to write directory archive: %w", err)
 	}
 
 	if err = pxarChunk.Eof(client); err != nil {
-		return err
+		return nil, err
 	}
 	if err = pcat1Chunk.Eof(client); err != nil {
-		return err
+		return nil, err
 	}
 
 	err = client.UploadManifest()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	// archive.ReadErrors lists files that could not be read and were skipped:
+	// the snapshot committed but is incomplete. Surfaced as a partial result.
+	return archive.ReadErrors, nil
 }
 
-func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, usevss bool) error {
+func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, usevss bool) ([]string, error) {
 
 	fmt.Printf("Starting backup of %s\n", backupdir)
 	var err error
+	var readErrors []string
 	if usevss {
 		err = snapshot.CreateVSSSnapshot(([]string{backupdir}), func(snaps map[string]snapshot.SnapShot) error {
 			// Get first snapshot from map (Go 1.22 compatible)
@@ -483,16 +502,20 @@ func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, px
 				break
 			}
 			//Remove VSS snapshot on windows, on linux for now NOP
-			return backup_real(client, newchunk, reusechunk, pxarOut, backupdir)
+			var e error
+			readErrors, e = backup_real(client, newchunk, reusechunk, pxarOut, backupdir)
+			return e
 
 		})
 	} else {
-		err = backup_real(client, newchunk, reusechunk, pxarOut, backupdir)
+		readErrors, err = backup_real(client, newchunk, reusechunk, pxarOut, backupdir)
 	}
 
 	if err != nil {
-		return err
+		return readErrors, err
 	}
 
-	return client.Finish()
+	// Commit the snapshot even on a partial (read-error) run so the data that
+	// was readable is retained; the partial status is reported via readErrors.
+	return readErrors, client.Finish()
 }
