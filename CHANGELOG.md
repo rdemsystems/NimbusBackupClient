@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.117] - 2026-06-12
+
+### Fixed
+- **CI build/release restored** — the new non-GUI module test job (added in 0.2.116) failed because `pbscommon` imports a dependency it doesn't list in its own `go.mod` (resolved only via the workspace), so a standalone test build couldn't find it. The job now runs `go mod tidy` first, like the GUI test job. 0.2.116 produced no binaries because this job gates the build; 0.2.117 carries the same fixes plus this CI repair.
+
+(Includes the 0.2.116 change below: opt-in split no longer backs up excluded top-level folders.)
+
 ## [0.2.116] - 2026-06-12
 
 ### Fixed
