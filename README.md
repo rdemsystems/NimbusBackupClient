@@ -42,6 +42,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite 
 
 - ✅ From €12/TB/month
 - ✅ 1 TB free trial
+- ✅ A ready-made [offsite target for your PBS](https://nimbus.rdem-systems.com/en/offsite-proxmox-backup/?utm_source=github) — air-gapped, immutable datastores
 - ✅ [NimbusBackup — Managed PBS hosting in France](https://nimbus.rdem-systems.com/en/?utm_source=github)
 
 ## 📚 Documentation

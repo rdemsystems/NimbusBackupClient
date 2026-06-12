@@ -42,6 +42,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
 
 - ✅ À partir de 12 €/To/mois
 - ✅ 1 To d'essai gratuit
+- ✅ Une [cible de sauvegarde externalisée pour votre PBS](https://nimbus.rdem-systems.com/sauvegarde-proxmox-externalisee/?utm_source=github) — datastores immuables et isolés
 - ✅ [NimbusBackup — hébergement PBS infogéré en France](https://nimbus.rdem-systems.com/?utm_source=github)
 
 ## 📚 Documentation
