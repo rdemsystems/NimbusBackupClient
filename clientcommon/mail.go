@@ -4,9 +4,9 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"html/template"
 	"net/smtp"
 	"strings"
+	"text/template"
 	"time"
 )
 
@@ -62,13 +62,14 @@ func SetupMailClient(host, port, username, password string, allowInsecure bool) 
 			return nil, err
 		}
 		if port == "587" {
-			c.StartTLS(tlsconfig)
+			if err := c.StartTLS(tlsconfig); err != nil {
+				return nil, fmt.Errorf("starttls failed: %w", err)
+			}
 		}
 	}
 
 	// Auth
 	if err = c.Auth(auth); err != nil {
-		fmt.Println("here", err)
 		return nil, err
 	}
 
@@ -99,8 +100,16 @@ func SendMail(from, to, subject, body string, c *smtp.Client) error {
 		return err
 	}
 
-	if err := c.Rcpt(strings.Join(recipientsStr, ",")); err != nil {
-		return err
+	// SMTP requires one RCPT TO per recipient; a single comma-joined RCPT is
+	// rejected by compliant servers, breaking multi-recipient notifications.
+	for _, r := range recipients {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if err := c.Rcpt(r); err != nil {
+			return err
+		}
 	}
 
 	// Data
