@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.113] - 2026-06-12
+
+Reliability and result-honesty hardening from a full code audit. No behaviour change to a healthy backup/restore — these fixes are about not silently losing scheduled runs, not reporting a failed or incomplete job as success, and not crashing on damaged data.
+
+### Fixed
+- **Scheduled backups no longer stop running after the machine sleeps, hibernates, or misses a window** — the scheduler used a 2-minute fire window, so a tick delayed past it (laptop lid closed, heavy load) left the job permanently stuck until the service was restarted. Missed runs are now caught up on the next tick, and the startup recovery no longer pushes an overdue run forward (which silently skipped the backup a rebooted/off machine had missed).
+- **The Windows service now picks up configuration changes without a restart** — a rotated PBS token, a changed default PBS server, or a fingerprint pinned from a standalone GUI were ignored because the service ran on the config it loaded at startup. It now reloads the config before each backup.
+- **A transient read error can no longer wipe all scheduled jobs or truncate the job history** — a failed read while updating `scheduled_jobs.json` / `job_history.json` previously caused the file to be rewritten empty. The update is now skipped if the existing state cannot be read.
+- **A restore that intentionally leaves existing files in place no longer reports as failed** — with overwrite disabled, untouched files were counted as errors and the restore showed a red result. Only genuine write failures now fail a restore.
+- **Browsing, searching or restoring a damaged snapshot no longer crashes or hangs the app** — malformed archive headers and corrupt chunk indexes are now rejected with an error instead of panicking or looping; directory entries from archives written by the official `proxmox-backup-client` are also classified correctly.
+
+### Fixed (command-line tools)
+- **`directorybackup` now exits non-zero and reports a partial result honestly** — a failed backup could exit `0` (so schedulers saw success) when no mail server was configured, and read-skipped files were reported as a full success. Failures now exit non-zero; runs that skipped unreadable files are reported as "Partial". Stream (`-backupstream`) backups no longer abort before committing the snapshot (a double index-close), and a non-EOF read error no longer loops forever.
+- **Whole-machine (`machinebackup`) backups are correct on more disk layouts** — fixed volume-to-drive-letter mapping (a folder-mounted volume could be backed up as the wrong volume), backups of disks with two or more mounted volumes (the VSS snapshotter was reused and always failed the second volume), and a VSS partition read that panicked when the shadow size equalled the partition.
+- **Mail notifications** — deliver to multiple recipients (one `RCPT` per address), surface STARTTLS failures instead of silently continuing in plaintext, and stop crashing when `-mail-subject-template` / `-mail-body-template` are passed without a config-file template.
+
 ## [0.2.112] - 2026-06-03
 
 ### Changed
