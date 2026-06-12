@@ -745,7 +745,24 @@ function App() {
 
       showStatus(`🔄 Lancement de ${splitPlan.length} backups partiels...`, 'info')
 
-      // Execute split jobs sequentially
+      // Arm a one-shot listener for the next backup:complete BEFORE starting a
+      // part, so a fast completion can't be missed. The backend emits this event
+      // in both standalone (OnComplete) and service mode (pollBackupProgress),
+      // so awaiting it gives the part's REAL outcome instead of guessing success.
+      const armBackupCompletion = () => {
+        let unsub
+        const promise = new Promise((resolve) => {
+          unsub = EventsOn('backup:complete', (data) => {
+            if (typeof unsub === 'function') unsub()
+            resolve(data || { success: false, message: 'completion sans données' })
+          })
+        })
+        return { promise, cancel: () => { if (typeof unsub === 'function') unsub() } }
+      }
+
+      // Execute split jobs sequentially, waiting for each part's real outcome.
+      let succeeded = 0
+      const failures = []
       for (let i = 0; i < splitPlan.length; i++) {
         const job = splitPlan[i]
         showStatus(
@@ -753,6 +770,7 @@ function App() {
           'info'
         )
 
+        const completion = armBackupCompletion()
         try {
           await StartBackup(
             backupType,
@@ -765,35 +783,51 @@ function App() {
             config.usevss,
             ''
           )
-
-          // Wait for completion (simplified - in production, use event polling)
-          showStatus(
-            `✅ Backup ${job.index}/${job.total_jobs} terminé`,
-            'success'
-          )
         } catch (err) {
+          // The part never started (validation / dispatch error): no completion
+          // event will arrive, so cancel the wait and offer a retry.
+          completion.cancel()
+          const retry = window.confirm(
+            `Le backup ${job.index}/${job.total_jobs} n'a pas pu démarrer:\n${err}\n\n` +
+            `Réessayer cette partie ?`
+          )
+          if (retry) { i--; continue }
+          failures.push(`Partie ${job.index}: démarrage impossible (${err})`)
+          continue
+        }
+
+        // Wait for THIS part to actually finish before starting the next one.
+        const result = await completion.promise
+        if (result.success) {
+          succeeded++
+          showStatus(`✅ Backup ${job.index}/${job.total_jobs} terminé`, 'success')
+        } else {
           showStatus(
-            `❌ Backup ${job.index}/${job.total_jobs} échoué: ${err}`,
+            `❌ Backup ${job.index}/${job.total_jobs} échoué: ${result.message || ''}`,
             'error'
           )
-
           const retry = window.confirm(
-            `Le backup ${job.index}/${job.total_jobs} a échoué.\n\n` +
-            `Voulez-vous réessayer ce backup avant de continuer?`
+            `Le backup ${job.index}/${job.total_jobs} a échoué:\n${result.message || ''}\n\n` +
+            `Réessayer cette partie avant de continuer ?`
           )
-
-          if (retry) {
-            i-- // Retry same job
-          } else {
-            throw new Error(`Split backup ${job.index} failed`)
-          }
+          if (retry) { i--; continue }
+          failures.push(`Partie ${job.index}: ${result.message || 'échec'}`)
         }
       }
 
-      showStatus(
-        `🎉 Tous les backups partiels terminés avec succès (${splitPlan.length}/${splitPlan.length})`,
-        'success'
-      )
+      // Honest aggregate: only claim success when EVERY part actually succeeded.
+      if (failures.length === 0) {
+        showStatus(
+          `🎉 Tous les backups partiels terminés avec succès (${succeeded}/${splitPlan.length})`,
+          'success'
+        )
+      } else {
+        showStatus(
+          `⚠️ Backup partiel: ${succeeded}/${splitPlan.length} OK, ${failures.length} échec(s) :\n` +
+          failures.join('\n'),
+          'error'
+        )
+      }
     } catch (err) {
       showStatus(`❌ Erreur split backup: ${err}`, 'error')
     }
