@@ -58,6 +58,19 @@ func (pbs *PBSClient) downloadDIDXIndex(archiveName string) (*didxIndex, error) 
 		base := i * didxEntrySize
 		idx.offsets[i] = binary.LittleEndian.Uint64(entries[base : base+8])
 		idx.digests[i] = hex.EncodeToString(entries[base+8 : base+40])
+		// Offsets are cumulative END offsets and must be strictly ascending (each
+		// chunk has non-zero length): chunkIndexAt (sort.Search) and chunkRange
+		// rely on it. A corrupt or hostile index with a non-monotonic offset would
+		// otherwise yield an out-of-range chunk index and panic on chunk[pos-start:]
+		// in ReadAt (uint64 underflow), reachable from listing/search.
+		prev := uint64(0)
+		if i > 0 {
+			prev = idx.offsets[i-1]
+		}
+		if idx.offsets[i] <= prev {
+			return nil, fmt.Errorf("index %q: non-monotonic offset at entry %d (%d <= %d)",
+				archiveName, i, idx.offsets[i], prev)
+		}
 	}
 	if chunkCount > 0 {
 		idx.total = idx.offsets[chunkCount-1]

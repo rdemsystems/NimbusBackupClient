@@ -134,6 +134,16 @@ func (pr *PXARReader) walk(cb walkCallback) error {
 		if header.Size < 16 {
 			return fmt.Errorf("invalid header size %d at offset %d", header.Size, pr.offset)
 		}
+		// header.Size is controlled by the archive bytes (corruption or a hostile
+		// snapshot). Bound it to the bytes remaining, compared in uint64 to avoid
+		// the int64 overflow that turns a huge size negative: otherwise contentSize
+		// goes negative and a later make([]byte, n) panics, or a negative skip
+		// rewinds the cursor into an infinite loop. Listing/search walk this
+		// without a recover(), so an unbounded value here can crash or hang the GUI.
+		remaining := uint64(pr.size - pr.offset)
+		if header.Size > remaining {
+			return fmt.Errorf("header size %d exceeds %d remaining bytes at offset %d", header.Size, remaining, pr.offset)
+		}
 		contentSize := int64(header.Size) - 16
 
 		switch header.Type {
@@ -162,7 +172,7 @@ func (pr *PXARReader) walk(cb walkCallback) error {
 				mtimeSecs = binary.LittleEndian.Uint64(data[24:32])
 			}
 
-			if (mode & IFDIR) != 0 {
+			if mode&IFMT == IFDIR {
 				// Directory entry. The first ENTRY in the archive is the root
 				// (no preceding FILENAME) and is not emitted as its own entry.
 				if !rootSeen {
