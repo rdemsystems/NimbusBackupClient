@@ -19,6 +19,29 @@ const (
 	didxEntrySize  = 40 // 8 bytes cumulative end-offset (uint64 LE) + 32 bytes SHA-256 digest
 )
 
+// ParsePreviousDIDXChunkDigests extracts the hex chunk digests from a previously
+// downloaded .didx body so a caller can seed a known-chunks set for dedup. It is
+// deliberately defensive: a body that is missing, shorter than the 4096-byte
+// header, has the wrong magic, or whose entry section is not a whole number of
+// 40-byte records returns nil instead of panicking — the caller then simply
+// re-uploads all chunks (correct, just without dedup). This replaces the ad-hoc
+// previousDidx[4096:] slicing that panicked on a truncated or odd-length transfer
+// (and on a sub-8-byte 404 body).
+func ParsePreviousDIDXChunkDigests(previousDidx []byte) []string {
+	if len(previousDidx) < didxHeaderSize || !bytes.HasPrefix(previousDidx, didxMagic) {
+		return nil
+	}
+	entries := previousDidx[didxHeaderSize:]
+	if len(entries)%didxEntrySize != 0 {
+		return nil
+	}
+	digests := make([]string, 0, len(entries)/didxEntrySize)
+	for base := 0; base < len(entries); base += didxEntrySize {
+		digests = append(digests, hex.EncodeToString(entries[base+8:base+40]))
+	}
+	return digests
+}
+
 // didxIndex is the parsed contents of a .didx dynamic-index file: the ordered
 // list of chunk digests and their cumulative end-offsets in the reconstructed
 // stream. offsets[i] is the byte offset one past the end of chunk i.

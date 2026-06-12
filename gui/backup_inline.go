@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -52,8 +51,6 @@ type BackupOptions struct {
 	// statistics instead of parsing them out of the progress message string.
 	OnStats func(*BackupProgressStats)
 }
-
-var didxMagic = []byte{28, 145, 78, 165, 25, 186, 179, 205}
 
 // isFatalSessionError returns true for errors that make the current PBS session
 // unusable. These indicate the H2 connection was lost; the session state on the
@@ -176,11 +173,6 @@ type ChunkState struct {
 	totalSize           *atomic.Uint64     // Total size, updated by background scan
 	uploadErrors        []string           // Collect upload errors to report at the end
 	errorsMutex         sync.Mutex         // Protect uploadErrors slice
-}
-
-type DidxEntry struct {
-	offset uint64
-	digest []byte
 }
 
 func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, failedchunk *atomic.Uint64, knownChunks *hashmap.Map[string, bool], onProgress func(float64, string), totalSize *atomic.Uint64, onStats func(*BackupProgressStats), currentDir string) {
@@ -1047,15 +1039,8 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 		writeBackupLog(fmt.Sprintf("Downloaded previous DIDX: %d bytes", len(previousDidx)))
 	}
 
-	if bytes.HasPrefix(previousDidx, didxMagic) {
-		previousDidx = previousDidx[4096:]
-		for i := 0; i*40 < len(previousDidx); i += 1 {
-			e := DidxEntry{}
-			e.offset = binary.LittleEndian.Uint64(previousDidx[i*40 : i*40+8])
-			e.digest = previousDidx[i*40+8 : i*40+40]
-			shahash := hex.EncodeToString(e.digest)
-			knownChunks.Set(shahash, true)
-		}
+	for _, shahash := range pbscommon.ParsePreviousDIDXChunkDigests(previousDidx) {
+		knownChunks.Set(shahash, true)
 	}
 
 	writeBackupLog(fmt.Sprintf("Known chunks: %d", knownChunks.Len()))

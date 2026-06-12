@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"clientcommon"
 	"crypto/sha256"
 	"encoding/binary"
@@ -29,8 +28,6 @@ Chunks New {{.NewChunks}}, Reused {{.ReusedChunks}}.{{else if .Partial}}Backup c
 Chunks New {{.NewChunks}}, Reused {{.ReusedChunks}}.{{else}}Error occurred while working, backup may be not completed.
 Last error is: {{.ErrorStr}}{{end}}`
 
-var didxMagic = []byte{28, 145, 78, 165, 25, 186, 179, 205}
-
 type ChunkState struct {
 	assignments        []string
 	assignments_offset []uint64
@@ -45,10 +42,6 @@ type ChunkState struct {
 	knownChunks        *hashmap.Map[string, bool]
 }
 
-type DidxEntry struct {
-	offset uint64
-	digest []byte
-}
 
 func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, knownChunks *hashmap.Map[string, bool]) {
 	c.assignments = make([]string, 0)
@@ -322,21 +315,14 @@ func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uin
 
 	fmt.Printf("Downloaded previous DIDX: %d bytes\n", len(previousDidx))
 
-	if !bytes.HasPrefix(previousDidx, didxMagic) {
-		fmt.Printf("Previous index has wrong magic (%s)!\n", previousDidx[:8])
-
-	} else {
-		//Header as per proxmox documentation is fixed size of 4096 bytes,
-		//then offset of type uint64 and sha256 digests follow , so 40 byte each record until EOF
-		previousDidx = previousDidx[4096:]
-		for i := 0; i*40 < len(previousDidx); i += 1 {
-			e := DidxEntry{}
-			e.offset = binary.LittleEndian.Uint64(previousDidx[i*40 : i*40+8])
-			e.digest = previousDidx[i*40+8 : i*40+40]
-			shahash := hex.EncodeToString(e.digest)
-			fmt.Printf("Previous: %s\n", shahash)
-			knownChunks.Set(shahash, true)
-		}
+	// Defensive parse: a truncated/short/odd-length previous index (or a sub-8-byte
+	// error body) must not panic — fall back to no dedup (re-upload everything).
+	prevDigests := pbscommon.ParsePreviousDIDXChunkDigests(previousDidx)
+	if len(prevDigests) == 0 {
+		fmt.Printf("Previous index unusable or empty (%d bytes), uploading all chunks\n", len(previousDidx))
+	}
+	for _, shahash := range prevDigests {
+		knownChunks.Set(shahash, true)
 	}
 
 	fmt.Printf("Known chunks: %d!\n", knownChunks.Len())
@@ -404,21 +390,14 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
 		we are going to upload to avoid unnecessary traffic and compression cpu usage
 	*/
 
-	if !bytes.HasPrefix(previousDidx, didxMagic) {
-		fmt.Printf("Previous index has wrong magic (%s)!\n", previousDidx[:8])
-
-	} else {
-		//Header as per proxmox documentation is fixed size of 4096 bytes,
-		//then offset of type uint64 and sha256 digests follow , so 40 byte each record until EOF
-		previousDidx = previousDidx[4096:]
-		for i := 0; i*40 < len(previousDidx); i += 1 {
-			e := DidxEntry{}
-			e.offset = binary.LittleEndian.Uint64(previousDidx[i*40 : i*40+8])
-			e.digest = previousDidx[i*40+8 : i*40+40]
-			shahash := hex.EncodeToString(e.digest)
-			fmt.Printf("Previous: %s\n", shahash)
-			knownChunks.Set(shahash, true)
-		}
+	// Defensive parse: a truncated/short/odd-length previous index (or a sub-8-byte
+	// error body) must not panic — fall back to no dedup (re-upload everything).
+	prevDigests := pbscommon.ParsePreviousDIDXChunkDigests(previousDidx)
+	if len(prevDigests) == 0 {
+		fmt.Printf("Previous index unusable or empty (%d bytes), uploading all chunks\n", len(previousDidx))
+	}
+	for _, shahash := range prevDigests {
+		knownChunks.Set(shahash, true)
 	}
 
 	fmt.Printf("Known chunks: %d!\n", knownChunks.Len())
