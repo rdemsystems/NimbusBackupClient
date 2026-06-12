@@ -751,11 +751,17 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		// On session-lost we wait for PBS to release the group lock, then retry once.
 		// PBS dedupes chunks, so retrying is cheap for the already-uploaded data.
 		var err error
+		var dirBytes uint64
 		for attempt := 1; attempt <= maxDirAttempts; attempt++ {
-			err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
+			dirBytes, err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
 			if err == nil {
 				break
 			}
+			// Tear down the abandoned PBS session before retrying or moving to the
+			// next directory: leaving it open holds the backup-group lock (~16 min
+			// until TCP keepalive reaps it) so every later directory in this run
+			// then fails with "locked backup group". [B-4]
+			client.Close()
 			if !isFatalSessionError(err) {
 				// Non-recoverable error (e.g. access denied) — don't retry
 				break
@@ -807,6 +813,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		})
 		finishCancel()
 		if finishErr != nil {
+			client.Close() // release the session/group lock on a failed finalize too [B-4]
 			errMsg := fmt.Sprintf("Failed to finalize backup for %s: %v", dir, finishErr)
 			writeBackupLog(errMsg)
 			dirErrors = append(dirErrors, errMsg)
@@ -814,6 +821,9 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 			continue
 		}
 		writeBackupLog(fmt.Sprintf("Directory %d/%d finalized: %s", idx+1, len(opts.BackupDirs), dir))
+		// Accumulate the real archived byte count so TotalBytes / "X MB backed up"
+		// and the [RESULT] support line are no longer always zero. [B-3]
+		totalSize.Add(dirBytes)
 		dirResults = append(dirResults, DirResult{Path: dir, OK: true})
 		successfulDirs++
 	}
@@ -950,24 +960,28 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	return nil
 }
 
-func backupDirectory(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, usevss bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) error {
+func backupDirectory(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, usevss bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) (uint64, error) {
 	writeBackupLog(fmt.Sprintf("Starting backup of %s", backupdir))
 	originalPath := backupdir
 
 	if usevss {
-		return snapshot.CreateVSSSnapshot([]string{backupdir}, func(snaps map[string]snapshot.SnapShot) error {
+		var bytesArchived uint64
+		err := snapshot.CreateVSSSnapshot([]string{backupdir}, func(snaps map[string]snapshot.SnapShot) error {
 			for _, snap := range snaps {
 				backupdir = snap.FullPath
 				break
 			}
-			return backupReal(client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress, onStats, excludeList)
+			var e error
+			bytesArchived, e = backupReal(client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress, onStats, excludeList)
+			return e
 		})
+		return bytesArchived, err
 	}
 
 	return backupReal(client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress, onStats, excludeList)
 }
 
-func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, originalPath string, vssUsed bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) (returnErr error) {
+func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, originalPath string, vssUsed bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) (returnBytes uint64, returnErr error) {
 	// Panic recovery - critical to prevent silent crashes during backup
 	defer func() {
 		if r := recover(); r != nil {
@@ -1054,11 +1068,11 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 
 	pxarChunk.wrid, err = client.CreateDynamicIndex(archive.ArchiveName)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	pcat1Chunk.wrid, err = client.CreateDynamicIndex("catalog.pcat1.didx")
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	archive.WriteCB = func(b []byte) error {
@@ -1070,7 +1084,7 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 	}
 
 	if _, err = archive.WriteDir(backupdir, "", true); err != nil {
-		return fmt.Errorf("failed to write directory archive: %w", err)
+		return 0, fmt.Errorf("failed to write directory archive: %w", err)
 	}
 
 	// Map VSS shadow-copy paths back to the original logical root so the status
@@ -1099,14 +1113,14 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 
 	// Guard: if WriteDir produced 0 data, the backup dir was effectively empty or inaccessible
 	if pxarChunk.pos == 0 && len(pxarChunk.currentChunk) == 0 {
-		return fmt.Errorf("backup produced 0 bytes for %s — directory may be empty, inaccessible, or all files were excluded", backupdir)
+		return 0, fmt.Errorf("backup produced 0 bytes for %s — directory may be empty, inaccessible, or all files were excluded", backupdir)
 	}
 
 	if err = pxarChunk.EOF(client); err != nil {
-		return err
+		return 0, err
 	}
 	if err = pcat1Chunk.EOF(client); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Serialize NTFS metadata collected during the walk and upload it as a
@@ -1152,8 +1166,10 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 		return client.UploadManifest()
 	})
 	if err != nil {
-		return fmt.Errorf("failed to upload manifest after retries: %w", err)
+		return 0, fmt.Errorf("failed to upload manifest after retries: %w", err)
 	}
 
-	return nil
+	// pxarChunk.pos is the true archived byte count for this directory (more
+	// accurate than the background size estimate, which only drives the %).
+	return pxarChunk.pos, nil
 }
