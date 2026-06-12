@@ -32,10 +32,25 @@ func (a *App) GetConfigWithHostname() map[string]interface{} {
 // emitAnalysisProgress is a no-op in the service process (no GUI event sink).
 func (a *App) emitAnalysisProgress(done, total int, scannedBytes uint64) {}
 
+// ReloadConfig reloads configuration from disk. The long-running service loads
+// config once at startup (service.go), so without this it never sees changes
+// made afterwards — a rotated PBS token, a new default PBS, or a fingerprint
+// pinned from a standalone GUI — until the service is restarted. The GUI build's
+// equivalent lives in main.go; both satisfy the optional ReloadConfig interface
+// the API server probes after a config-changing request.
+func (a *App) ReloadConfig() {
+	a.config = LoadConfig()
+	writeDebugLog("Config reloaded from disk")
+}
+
 // StartBackup starts a backup job
 // Service implementation using RunBackupInline
 func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeList []string, backupID string, useVSS bool, compression string) error {
 	writeDebugLog(fmt.Sprintf("[Service] StartBackup called: type=%s, dirs=%v, id=%s, vss=%v, compression=%s", backupType, backupDirs, backupID, useVSS, compression))
+
+	// Re-read config from disk so this run uses the current token / default PBS /
+	// pinned fingerprint rather than the snapshot loaded when the service started.
+	a.ReloadConfig()
 
 	if a.config == nil {
 		return fmt.Errorf("configuration not loaded")
