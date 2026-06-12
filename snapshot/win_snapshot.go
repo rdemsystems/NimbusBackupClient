@@ -72,8 +72,17 @@ func getAppDataFolder() (string, error) {
 
 func CreateVSSSnapshot(paths []string, backup_callback func(sn map[string]SnapShot) error) error {
 
-	sn := vss.Snapshotter{}
-	defer sn.Release()
+	// One Snapshotter per volume: go-vss rejects reuse of a single Snapshotter
+	// for a second volume ("snapshotter is already in use"), which made every
+	// whole-machine backup of a disk with >= 2 mounted volumes fail. Each
+	// successful snapshot is held until the backup callback has consumed them,
+	// then released together.
+	snapshotters := make([]*vss.Snapshotter, 0, len(paths))
+	defer func() {
+		for _, s := range snapshotters {
+			s.Release()
+		}
+	}()
 	snapshots := make(map[string]SnapShot)
 
 	for _, path := range paths {
@@ -115,18 +124,27 @@ func CreateVSSSnapshot(paths []string, backup_callback func(sn map[string]SnapSh
 			fmt.Println("         → File-level backup will work normally")
 		}
 
+		sn := &vss.Snapshotter{}
 		snapshot, err := sn.CreateSnapshot(volName, false, 180)
 		if err != nil && isShadowAlreadyInProgress(err) {
 			// IVssBackupComponents stuck from a previous crashed run.
 			// vssadmin delete shadows alone won't release it — we have to bounce
 			// the VSS service to drop the orphaned context, then retry once.
+			if len(snapshotters) > 0 {
+				// We already hold shadows for earlier volumes in this set, and
+				// vssForceReset deletes shadows / bounces the VSS service, which
+				// would destroy them. Fail instead of self-sabotaging the set.
+				return fmt.Errorf("VSS busy while building a multi-volume snapshot set: %w", err)
+			}
 			fmt.Printf("⚠️  VSS busy: %v\n", err)
 			fmt.Println("         → Resetting VSS service state and retrying once...")
-			sn.Release()
+			// Do NOT Release the failed Snapshotter: go-vss already aborted and
+			// released its components on the failed CreateSnapshot (without
+			// nil-ing them), so a second Release would touch freed COM state.
 			if resetErr := vssForceReset(); resetErr != nil {
 				fmt.Printf("         → VSS reset failed: %v\n", resetErr)
 			}
-			sn = vss.Snapshotter{}
+			sn = &vss.Snapshotter{}
 			snapshot, err = sn.CreateSnapshot(volName, false, 180)
 		}
 		if err != nil {
@@ -148,6 +166,9 @@ func CreateVSSSnapshot(paths []string, backup_callback func(sn map[string]SnapSh
 		if snapshot == nil || snapshot.Id == "" {
 			return fmt.Errorf("VSS snapshot creation failed: no valid snapshot created")
 		}
+
+		// Snapshot is valid: track it so it is released after the backup callback.
+		snapshotters = append(snapshotters, sn)
 
 		fmt.Printf("✓ Snapshot created: %s\n", snapshot.Id)
 		if hasWriterWarnings {
