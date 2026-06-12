@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.114] - 2026-06-12
+
+Second wave of audit fixes — backup reliability and diagnostics.
+
+### Fixed
+- **The completion message and history now report the real backed-up size** — "X MB backed up", the result sidecar and the machine-readable `[RESULT]` support line always showed `0` because the byte counter was only ever written to a per-directory local. They now reflect the actual archived bytes.
+- **A failed folder no longer drags down the rest of a multi-folder backup** — when one directory failed, its PBS session was left open and kept the backup-group lock (until the server reaped it ~16 min later), so every remaining directory then failed with "locked backup group". The session is now closed on error before moving on.
+- **Backing up no longer crashes on a damaged previous-backup index** — a truncated or odd-length previous index (or a tiny error response) could panic the chunk-dedup step (a hard crash in the command-line tool, a "backup panic" in the GUI). It now safely falls back to re-uploading all chunks.
+- **More transient failures are retried instead of aborting** — a chunk upload killed by a request deadline, or a busy/proxied PBS returning 502/503/504/429, is now retried within the existing budget rather than being treated as fatal.
+
 ## [0.2.113] - 2026-06-12
 
 Reliability and result-honesty hardening from a full code audit. No behaviour change to a healthy backup/restore — these fixes are about not silently losing scheduled runs, not reporting a failed or incomplete job as success, and not crashing on damaged data.
