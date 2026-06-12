@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.118] - 2026-06-12
+
+### Fixed
+- **Release build restored** — the module-test CI job (0.2.116/0.2.117) blocked the build because some library modules don't build standalone under `GOWORK=off`. It is now informational (non-blocking) while that is finished, so the build completes and ships the fixes again — including B-1 (opt-in split honours your exclusions), which 0.2.116/0.2.117 never produced a binary for.
+
 ## [0.2.117] - 2026-06-12
 
 ### Fixed
