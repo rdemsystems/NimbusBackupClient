@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.119] - 2026-06-12
+
+### Internal
+- Fixed the new non-GUI module CI tests so they pass: the chunker test measured chunk size from a field that the chunker resets on every cut (it always read 0); and the unused `pkg/logger` module (a no-op `sync.Once` logger imported nowhere) was removed. No change to the shipped application versus 0.2.118.
+
 ## [0.2.118] - 2026-06-12
 
 ### Fixed
