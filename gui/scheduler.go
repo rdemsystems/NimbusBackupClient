@@ -104,7 +104,9 @@ func (a *App) SaveScheduledJob(job ScheduledJob) error {
 	// Load existing jobs
 	jobs, err := a.GetScheduledJobs()
 	if err != nil {
-		writeDebugLog(fmt.Sprintf("Error loading existing jobs: %v", err))
+		// Refuse to continue: appending to an empty list and writing it back
+		// would delete every existing job if the read/parse failed transiently.
+		return fmt.Errorf("failed to load existing jobs (refusing to overwrite): %w", err)
 	}
 
 	// Set enabled by default
@@ -295,7 +297,9 @@ func (a *App) GetJobHistory() ([]JobHistory, error) {
 func (a *App) AddJobHistory(entry JobHistory) error {
 	history, err := a.GetJobHistory()
 	if err != nil {
-		writeDebugLog(fmt.Sprintf("Error loading history: %v", err))
+		// Refuse to overwrite the history file with just this entry when the
+		// existing history could not be read — that would destroy the record.
+		return fmt.Errorf("failed to load job history (refusing to overwrite): %w", err)
 	}
 
 	// Add new entry at the beginning
@@ -631,20 +635,39 @@ func (a *App) executeScheduledJob(job ScheduledJob) {
 		writeDebugLog(fmt.Sprintf("Warning: Failed to add job history: %v", err))
 	}
 
-	// Update job's last run and calculate next run
-	// Re-read from file to pick up any changes made by the GUI while backup was running
-	jobs, _ := a.GetScheduledJobs()
+	// Update job's last run and calculate next run.
+	// Re-read from file to pick up any changes made by the GUI while backup was running.
+	jobs, err := a.GetScheduledJobs()
+	if err != nil {
+		// Never rewrite the jobs file from a failed read — it would wipe every job.
+		writeDebugLog(fmt.Sprintf("Warning: skipping LastRun/NextRun update, could not load jobs: %v", err))
+		return
+	}
+	found := false
 	for i, j := range jobs {
 		if j.ID == job.ID {
 			jobs[i].LastRun = time.Now().Format(time.RFC3339)
 			jobs[i].NextRun = calculateNextRun(j.ScheduleTime)
+			found = true
 			break
 		}
 	}
+	if !found {
+		// Job was deleted while running; nothing to update.
+		return
+	}
 
 	// Save updated jobs
-	jobsPath, _ := getScheduledJobsPath()
-	data, _ := json.MarshalIndent(jobs, "", "  ")
+	jobsPath, err := getScheduledJobsPath()
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("Warning: cannot resolve jobs path: %v", err))
+		return
+	}
+	data, err := json.MarshalIndent(jobs, "", "  ")
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("Warning: cannot marshal jobs: %v", err))
+		return
+	}
 	if err := atomicWriteFile(jobsPath, data, 0600); err != nil {
 		writeDebugLog(fmt.Sprintf("Warning: Failed to save updated jobs: %v", err))
 	}
