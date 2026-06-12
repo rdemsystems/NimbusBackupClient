@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.115] - 2026-06-12
+
+Third wave of audit fixes — split-backup honesty and service/scheduler hygiene.
+
+### Fixed
+- **A split backup now reports the real result of each part** — the parts are run one after another and the app waits for each one to actually finish before starting the next. Previously every part was launched at once and the app announced "all parts completed successfully" without checking, so a failed part could still show success. You now get a per-part result, a retry prompt on failure, and an honest "X/N OK" summary when something fails.
+- **Scheduled times are correct across daylight-saving changes** — the next run is computed by calendar day instead of adding 24 hours, so a job at e.g. 02:30 no longer drifts to 01:30/03:30 on the switch day.
+- **Service status is accurate and stable over time** — the service now reports its real version and active-job count (instead of a hardcoded value), the internal progress table is cleaned up after each backup so it can't grow indefinitely on a long-running service, and a status read can no longer race with a backup updating it.
+
+### Removed
+- Dead, unused internal code paths (legacy job manager and external-process backup runner) that also carried secret-handling footguns; hardened a bounds check in catalog parsing.
+
 ## [0.2.114] - 2026-06-12
 
 Second wave of audit fixes — backup reliability and diagnostics.
