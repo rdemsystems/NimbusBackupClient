@@ -38,14 +38,33 @@ func DefaultRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
+	// A request killed by its own context deadline is transient — retry it.
+	// (The string match below also covers wrapped errors that lost the sentinel.)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
 	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "connection refused") ||
-		strings.Contains(errStr, "connection reset") ||
-		strings.Contains(errStr, "temporary failure") ||
-		strings.Contains(errStr, "unexpected eof") ||
-		strings.Contains(errStr, "broken pipe") ||
-		strings.Contains(errStr, "i/o timeout")
+	for _, s := range []string{
+		"timeout",
+		"deadline exceeded",
+		"connection refused",
+		"connection reset",
+		"temporary failure",
+		"unexpected eof",
+		"broken pipe",
+		"i/o timeout",
+		// Transient HTTP responses from PBS or a proxy in front of it. Matched in
+		// both formats pbsapi emits ("HTTP 503 - ..." and "HTTP error: 503 - ...").
+		// 500 is intentionally excluded — it is often a permanent server rejection.
+		"service unavailable", "bad gateway", "gateway timeout", "too many requests",
+		"http 502", "http 503", "http 504", "http 429",
+		"http error: 502", "http error: 503", "http error: 504", "http error: 429",
+	} {
+		if strings.Contains(errStr, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // Do executes fn with retry logic
@@ -103,9 +122,13 @@ func Do(ctx context.Context, cfg Config, isRetryable IsRetryable, fn func() erro
 func DoWithJitter(ctx context.Context, cfg Config, isRetryable IsRetryable, fn func() error) error {
 	originalDelay := cfg.InitialDelay
 
-	// Add up to 20% jitter
+	// Add up to 20% jitter. Guard against a zero (or negative) InitialDelay:
+	// math.Mod(x, 0) is NaN and time.Duration(NaN) yields a garbage (huge
+	// negative) delay, so every retry would fire back-to-back with no backoff.
 	jitter := float64(originalDelay) * 0.2
-	cfg.InitialDelay = time.Duration(float64(originalDelay) + (math.Mod(float64(time.Now().UnixNano()), jitter)))
+	if jitter > 0 {
+		cfg.InitialDelay = time.Duration(float64(originalDelay) + math.Mod(float64(time.Now().UnixNano()), jitter))
+	}
 
 	return Do(ctx, cfg, isRetryable, fn)
 }

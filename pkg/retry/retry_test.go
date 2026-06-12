@@ -202,6 +202,11 @@ func TestDefaultRetryable(t *testing.T) {
 		{"temporary failure", errors.New("temporary failure in name resolution"), true},
 		{"permanent error", errors.New("invalid credentials"), false},
 		{"not found", errors.New("404 not found"), false},
+		{"http 503", errors.New("PBS assign chunks failed: HTTP 503 - busy"), true},
+		{"http error 502", errors.New("HTTP error: 502 - bad gateway"), true},
+		{"too many requests", errors.New("HTTP 429 - slow down"), true},
+		{"deadline exceeded sentinel", context.DeadlineExceeded, true},
+		{"http 500 not retried", errors.New("HTTP 500 - internal server error"), false},
 	}
 
 	for _, tt := range tests {
