@@ -290,9 +290,10 @@ func chunkData(t *testing.T, data []byte, avgSize uint64) []uint64 {
 			break
 		}
 
-		// Chunk boundary found
-		chunkSize := c.chunk_size
-		chunks = append(chunks, chunkSize)
+		// Chunk boundary found. The chunk size is `pos` (the number of bytes
+		// consumed from `remaining` up to the break) — NOT c.chunk_size, which
+		// Scan resets to 0 the moment it breaks, so reading it here always gave 0.
+		chunks = append(chunks, pos)
 		offset += int(pos)
 
 		// Reset state for next chunk (this happens in Scan internally)
