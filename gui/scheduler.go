@@ -341,9 +341,12 @@ func calculateNextRun(scheduleTime string) string {
 	// Schedule for today at the specified time
 	nextRun := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, now.Location())
 
-	// If time has already passed today, schedule for tomorrow
+	// If time has already passed today, schedule for tomorrow. Use AddDate (a
+	// calendar day) rather than Add(24h): across a DST transition 24h of absolute
+	// duration lands an hour off the intended wall-clock time, so a job at "02:30"
+	// would fire at 01:30 or 03:30 on the switch day.
 	if nextRun.Before(now) {
-		nextRun = nextRun.Add(24 * time.Hour)
+		nextRun = nextRun.AddDate(0, 0, 1)
 	}
 
 	return nextRun.Format(time.RFC3339)
