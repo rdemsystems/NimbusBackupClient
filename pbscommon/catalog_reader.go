@@ -123,7 +123,10 @@ func parseCatalogTable(data []byte, tableStart uint64) ([]catalogDirRef, []catal
 		return nil, nil, err
 	}
 	end := pos + tableLen
-	if end < pos || end > uint64(len(data)) {
+	// Bound to the region before the trailing 8-byte root pointer so a table can
+	// never overlap (and thus alias) the root pointer. len(data) >= 16 is checked
+	// by the only caller chain (ParseCatalog), so len-8 cannot underflow here.
+	if end < pos || end > uint64(len(data))-8 {
 		return nil, nil, fmt.Errorf("table at %d overruns buffer (len %d)", tableStart, tableLen)
 	}
 
