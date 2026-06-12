@@ -79,7 +79,7 @@ func (s *NimbusService) run() {
 	if tokErr != nil {
 		writeDebugLog(fmt.Sprintf("API token init failed (API will reject all requests): %v", tokErr))
 	}
-	s.apiServer = api.NewServer("127.0.0.1:18765", s.app, apiToken)
+	s.apiServer = api.NewServer("127.0.0.1:18765", s.app, apiToken, appVersion)
 	writeDebugLog("Starting HTTP API server on 127.0.0.1:18765")
 
 	go func() {

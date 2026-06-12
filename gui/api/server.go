@@ -18,12 +18,13 @@ var jobIDSeq atomic.Uint64
 
 // Server handles HTTP API requests from the GUI
 type Server struct {
-	addr            string
-	app             BackupHandler
-	token           string // shared local-auth token required on every route (H-01)
-	mux             *http.ServeMux
-	backupProgress  map[string]*BackupProgress
-	progressMutex   sync.RWMutex
+	addr           string
+	app            BackupHandler
+	token          string // shared local-auth token required on every route (H-01)
+	version        string // build version reported by /status
+	mux            *http.ServeMux
+	backupProgress map[string]*BackupProgress
+	progressMutex  sync.RWMutex
 }
 
 // BackupHandler interface that the service must implement
@@ -40,11 +41,15 @@ type BackupHandler interface {
 
 // NewServer creates a new API server. token is the shared local-auth secret that
 // every request must present in the X-Nimbus-Token header (H-01).
-func NewServer(addr string, handler BackupHandler, token string) *Server {
+func NewServer(addr string, handler BackupHandler, token, version string) *Server {
+	if version == "" {
+		version = "dev"
+	}
 	s := &Server{
 		addr:           addr,
 		app:            handler,
 		token:          token,
+		version:        version,
 		mux:            http.NewServeMux(),
 		backupProgress: make(map[string]*BackupProgress),
 	}
@@ -78,10 +83,19 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	config := s.app.GetConfigWithHostname()
 
+	s.progressMutex.RLock()
+	activeJobs := 0
+	for _, p := range s.backupProgress {
+		if p.Running {
+			activeJobs++
+		}
+	}
+	s.progressMutex.RUnlock()
+
 	status := StatusResponse{
 		Running:       true,
-		Version:       "0.1.92", // TODO: get from build
-		ActiveJobs:    0,         // TODO: track active jobs
+		Version:       s.version,
+		ActiveJobs:    activeJobs,
 		Configuration: config,
 	}
 
@@ -206,6 +220,11 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		s.progressMutex.Unlock()
+
+		// The backup is finished; evict its progress entry after a grace period so
+		// the GUI (polling every 3s, stopping on Complete) still reads the final
+		// status, while the map can't grow unbounded over the service's lifetime.
+		s.scheduleEviction(jobID)
 	}()
 
 	// Return immediately with job ID
@@ -216,6 +235,16 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, resp, http.StatusOK)
+}
+
+// scheduleEviction removes a finished job's progress entry after a grace period,
+// bounding the backupProgress map over the long-lived service process.
+func (s *Server) scheduleEviction(jobID string) {
+	time.AfterFunc(10*time.Minute, func() {
+		s.progressMutex.Lock()
+		delete(s.backupProgress, jobID)
+		s.progressMutex.Unlock()
+	})
 }
 
 func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
@@ -234,6 +263,12 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 
 	s.progressMutex.RLock()
 	progress, exists := s.backupProgress[jobID]
+	// Copy the struct under the lock: the backup goroutine mutates the pointee
+	// concurrently, so marshaling the pointer outside the lock is a data race.
+	var snapshot BackupProgress
+	if exists {
+		snapshot = *progress
+	}
 	totalJobs := len(s.backupProgress)
 	s.progressMutex.RUnlock()
 
@@ -253,7 +288,7 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, progress, http.StatusOK)
+	s.writeJSON(w, &snapshot, http.StatusOK)
 }
 
 func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
