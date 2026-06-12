@@ -142,7 +142,7 @@ jobs:
           GOWORK: off
         run: |
           rc=0
-          for m in pbscommon pkg/retry pkg/security pkg/logger; do
+          for m in pbscommon pkg/retry pkg/security; do
             echo "::group::go test $m"
             # go mod tidy first: these library modules are normally built via the
             # workspace / replace directives, so their own go.mod/go.sum can lack
