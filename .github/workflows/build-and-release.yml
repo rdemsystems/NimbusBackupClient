@@ -139,7 +139,11 @@ jobs:
           set -e
           for m in pbscommon pkg/retry pkg/security pkg/logger; do
             echo "::group::go test $m"
-            ( cd "$m" && go test ./... )
+            # go mod tidy first: these library modules are normally built via the
+            # workspace / replace directives, so their own go.mod/go.sum can lack
+            # imports (e.g. pbscommon -> cornelk/hashmap) that a GOWORK=off build
+            # needs. Mirrors the gui "test" job.
+            ( cd "$m" && go mod tidy && go test ./... )
             echo "::endgroup::"
           done
 
@@ -151,7 +155,7 @@ jobs:
         run: |
           set -e
           echo "::group::go test snapshot"
-          ( cd snapshot && go test ./... )
+          ( cd snapshot && go mod tidy && go test ./... )
           echo "::endgroup::"
 
   # Build CLI for all platforms
