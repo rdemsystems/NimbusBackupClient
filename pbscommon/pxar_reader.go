@@ -52,6 +52,10 @@ type PXARExtractedFile struct {
 	Data       []byte
 	Skipped    bool
 	SkipReason string
+	// Expected marks a deliberate, non-error skip (e.g. a file left untouched
+	// because overwrite was disabled). Error skips (open/write/rename/mkdir
+	// failures) leave this false so they still fail the restore.
+	Expected bool
 }
 
 // NewPXARReader creates a new PXAR reader from an in-memory byte slice. Kept for
@@ -393,7 +397,7 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 			if _, err := os.Stat(fullPath); err == nil {
 				extracted = append(extracted, PXARExtractedFile{
 					Path: fullPath, Size: e.Size,
-					Skipped: true, SkipReason: "already exists",
+					Skipped: true, Expected: true, SkipReason: "already exists",
 				})
 				return nil
 			}

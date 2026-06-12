@@ -700,12 +700,18 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	}
 
 	successCount := 0
-	skipCount := 0
+	skipCount := 0      // deliberate skips (e.g. already exists with overwrite off)
+	errorSkipCount := 0 // genuine failures (open/write/rename/mkdir)
 	dirCount := 0
 	for _, f := range extracted {
 		if f.Skipped {
-			skipCount++
-			writeBackupLog(fmt.Sprintf("SKIPPED: %s - %s", f.Path, f.SkipReason))
+			if f.Expected {
+				skipCount++
+				writeBackupLog(fmt.Sprintf("SKIPPED (expected): %s - %s", f.Path, f.SkipReason))
+			} else {
+				errorSkipCount++
+				writeBackupLog(fmt.Sprintf("SKIPPED (error): %s - %s", f.Path, f.SkipReason))
+			}
 		} else if f.IsDir {
 			dirCount++
 		} else {
@@ -713,8 +719,8 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		}
 	}
 
-	writeBackupLog(fmt.Sprintf("Extraction complete: %d files, %d dirs, %d skipped",
-		successCount, dirCount, skipCount))
+	writeBackupLog(fmt.Sprintf("Extraction complete: %d files, %d dirs, %d skipped (expected), %d failed",
+		successCount, dirCount, skipCount, errorSkipCount))
 	progress(0.95, fmt.Sprintf("Extracted %d files", successCount))
 
 	if opts.RestoreACLs || opts.RestoreADS {
@@ -755,8 +761,10 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 				strings.Join(opts.IncludePaths, ", "))
 		}
 	}
-	if skipCount > 0 {
-		return fmt.Errorf("restore completed with %d skipped files (see logs)", skipCount)
+	// Only genuine failures fail the restore. Files left in place because
+	// overwrite was disabled are the requested behaviour, not an error.
+	if errorSkipCount > 0 {
+		return fmt.Errorf("restore completed with %d failed files (see logs)", errorSkipCount)
 	}
 	return nil
 }
