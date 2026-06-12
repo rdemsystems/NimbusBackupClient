@@ -538,14 +538,20 @@ func (a *App) checkAndRunScheduledJobs() {
 			continue
 		}
 
-		shouldRun := now.After(nextRun) && now.Before(nextRun.Add(2*time.Minute))
+		// Fire as soon as we are at or past NextRun, with NO upper bound. The old
+		// 2-minute window meant a missed tick (machine asleep/hibernating, heavy
+		// load, the process not running at NextRun) left now permanently past the
+		// window, so the job never ran again until the next process restart —
+		// silent loss of scheduled protection. A late run is caught up instead.
+		// Repeated firing is prevented by the runningJobs guard and by
+		// executeScheduledJob advancing NextRun on completion.
+		shouldRun := now.After(nextRun)
 
 		if verbose {
 			writeDebugLog(fmt.Sprintf("[Scheduler] Job %s: NextRun=%s, Now=%s, ShouldRun=%v",
 				job.Name, nextRun.Format("15:04:05"), now.Format("15:04:05"), shouldRun))
 		}
 
-		// Check if it's time to run (within 2 minute window to avoid missing)
 		if shouldRun {
 			writeDebugLog(fmt.Sprintf("[Scheduler] Executing scheduled job: %s", job.Name))
 			go a.executeScheduledJob(job)
