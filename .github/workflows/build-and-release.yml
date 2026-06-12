@@ -113,6 +113,47 @@ jobs:
         with:
           files: ./gui/coverage.out
 
+  # Run the unit tests that live OUTSIDE the gui module (pbscommon, pkg/*, snapshot).
+  # The "test" job above only covers gui/; these modules previously had zero CI
+  # coverage despite shipping the chunker, catalog/didx readers, retry logic and
+  # VSS helpers. Matrixed so Windows-only code (snapshot) is exercised too. [audit Q-9]
+  test-modules:
+    name: Test non-GUI modules (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Test cross-platform modules
+        shell: bash
+        env:
+          GOWORK: off
+        run: |
+          set -e
+          for m in pbscommon pkg/retry pkg/security pkg/logger; do
+            echo "::group::go test $m"
+            ( cd "$m" && go test ./... )
+            echo "::endgroup::"
+          done
+
+      - name: Test Windows-only modules
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          GOWORK: off
+        run: |
+          set -e
+          echo "::group::go test snapshot"
+          ( cd snapshot && go test ./... )
+          echo "::endgroup::"
+
   # Build CLI for all platforms
   build-cli:
     name: Build CLI
