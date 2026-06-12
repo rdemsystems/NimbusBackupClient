@@ -30,10 +30,12 @@ func (a *App) applyConfiguredSplit(analysis *BackupAnalysis) uint64 {
 
 // AnalyzeBackup analyzes backup directories and determines if split is needed
 // Returns analysis with total size, folder breakdown, and split recommendation
-func (a *App) AnalyzeBackup(backupDirs []string) (map[string]interface{}, error) {
+func (a *App) AnalyzeBackup(backupDirs []string, excludeList []string) (map[string]interface{}, error) {
 	writeBackupLog(fmt.Sprintf("AnalyzeBackup called for %d directories", len(backupDirs)))
 
-	analysis, err := AnalyzeBackupDirs(backupDirs, nil, nil)
+	// Pass the user's exclusions so an excluded top-level folder is neither sized
+	// nor turned into its own job (B-1).
+	analysis, err := AnalyzeBackupDirs(backupDirs, excludeList, nil)
 	if err != nil {
 		writeBackupLog(fmt.Sprintf("AnalyzeBackup failed: %v", err))
 		return nil, err
@@ -67,12 +69,14 @@ func (a *App) AnalyzeBackup(backupDirs []string) (map[string]interface{}, error)
 
 // CreateBackupSplitPlan creates a plan for splitting a large backup
 // Returns the split jobs that will be created
-func (a *App) CreateBackupSplitPlan(backupDirs []string, backupID string) ([]map[string]interface{}, error) {
+func (a *App) CreateBackupSplitPlan(backupDirs []string, backupID string, excludeList []string) ([]map[string]interface{}, error) {
 	writeBackupLog(fmt.Sprintf("CreateBackupSplitPlan called for backup ID: %s", backupID))
 
 	// Report folder-by-folder sizing progress to the GUI (the user opted into the
-	// split and may wait several minutes on a large volume).
-	analysis, err := AnalyzeBackupDirs(backupDirs, nil, a.emitAnalysisProgress)
+	// split and may wait several minutes on a large volume). Pass the user's
+	// exclusions so an excluded top-level folder is not sized or turned into its
+	// own split job (which would back it up despite the exclusion — B-1).
+	analysis, err := AnalyzeBackupDirs(backupDirs, excludeList, a.emitAnalysisProgress)
 	if err != nil {
 		return nil, err
 	}

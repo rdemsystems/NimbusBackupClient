@@ -719,7 +719,8 @@ function App() {
       showStatus(`📊 ${t('splitAnalyzing')}`, 'info')
       const splitPlan = await window.go.main.App.CreateBackupSplitPlan(
         dirList,
-        config['backup-id'] || hostname
+        config['backup-id'] || hostname,
+        excludeList.split('\n').filter(l => l.trim())
       )
 
       // If the analysis didn't yield a real split (volume below threshold, scan
