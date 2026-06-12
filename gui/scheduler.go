@@ -349,10 +349,13 @@ func calculateNextRun(scheduleTime string) string {
 	return nextRun.Format(time.RFC3339)
 }
 
-// RecalculateNextRuns recalculates nextRun for all jobs whose nextRun is stale (in the past).
-// This prevents jobs from being permanently stuck after a service restart or missed window.
+// RecalculateNextRuns repairs jobs whose nextRun is MISSING or unparseable by
+// giving them a valid future run time. It deliberately leaves an overdue but
+// valid nextRun in the past: the scheduler now catches missed runs up on its
+// next tick (see checkAndRunScheduledJobs). Pushing overdue runs forward here —
+// as this used to — silently dropped the run a rebooted/off machine had missed.
 func (a *App) RecalculateNextRuns() {
-	writeDebugLog("RecalculateNextRuns called - fixing stale nextRun values")
+	writeDebugLog("RecalculateNextRuns called - repairing missing/invalid nextRun values")
 
 	jobs, err := a.GetScheduledJobs()
 	if err != nil {
@@ -360,28 +363,26 @@ func (a *App) RecalculateNextRuns() {
 		return
 	}
 
-	now := time.Now()
 	modified := false
 
 	for i, job := range jobs {
-		if !job.Enabled || job.NextRun == "" || job.ScheduleTime == "" {
+		if !job.Enabled || job.ScheduleTime == "" {
 			continue
 		}
 
-		nextRun, err := time.Parse(time.RFC3339, job.NextRun)
-		if err != nil {
-			writeDebugLog(fmt.Sprintf("Error parsing nextRun for %s: %v", job.Name, err))
-			continue
+		// A present, parseable nextRun is left alone — even if it is in the past,
+		// so the scheduler's catch-up can run the missed backup.
+		if job.NextRun != "" {
+			if _, perr := time.Parse(time.RFC3339, job.NextRun); perr == nil {
+				continue
+			}
 		}
 
-		// If nextRun is more than 2 minutes in the past, recalculate it
-		if now.After(nextRun.Add(2 * time.Minute)) {
-			newNextRun := calculateNextRun(job.ScheduleTime)
-			writeDebugLog(fmt.Sprintf("[RecalculateNextRuns] Job %s: nextRun was stale (%s), recalculated to %s",
-				job.Name, job.NextRun, newNextRun))
-			jobs[i].NextRun = newNextRun
-			modified = true
-		}
+		newNextRun := calculateNextRun(job.ScheduleTime)
+		writeDebugLog(fmt.Sprintf("[RecalculateNextRuns] Job %s: nextRun was missing/invalid (%q), set to %s",
+			job.Name, job.NextRun, newNextRun))
+		jobs[i].NextRun = newNextRun
+		modified = true
 	}
 
 	if modified {
