@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.116] - 2026-06-12
+
+### Fixed
+- **An opt-in split backup no longer backs up folders you excluded** — when you split a large backup, a top-level folder on your exclusion list was still sized, turned into its own part, and uploaded in full (exclusion patterns only apply to files *inside* the backup root, not to the root itself). Your exclusions are now applied to the split analysis, so an excluded top-level folder is neither counted nor backed up.
+
+### Internal
+- Added CI unit-test coverage for the non-GUI modules (chunker, catalog/index readers, retry, security, VSS helpers) on both Linux and Windows; these previously ran no tests in CI. Failing module tests now block the build and release.
+
 ## [0.2.115] - 2026-06-12
 
 Third wave of audit fixes — split-backup honesty and service/scheduler hygiene.
