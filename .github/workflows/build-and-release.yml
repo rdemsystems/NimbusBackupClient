@@ -157,7 +157,7 @@ jobs:
   # Build CLI for all platforms
   build-cli:
     name: Build CLI
-    needs: [security, test]
+    needs: [security, test, test-modules]
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -184,7 +184,7 @@ jobs:
   # Build GUI (Windows only for now)
   build-gui:
     name: Build GUI
-    needs: [security, test]
+    needs: [security, test, test-modules]
     runs-on: windows-latest
 
     steps:
