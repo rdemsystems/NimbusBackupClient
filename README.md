@@ -106,6 +106,8 @@ Two paths, both covered by ready-to-use examples in
   the `NimbusBackup` service: jobs are reconciled idempotently and `nextRun` is
   computed for you. No timestamp math in your Jinja2 template.
 
+📖 Full walkthrough: [Automate Windows backup to PBS with Ansible](https://nimbus.rdem-systems.com/en/blog/unattended-windows-backup-ansible?utm_source=github).
+
 ## 🚀 Quick start
 
 1. Download `NimbusBackup.exe` (or the `.msi`) from releases
@@ -161,7 +163,7 @@ GPLv3 — see the [LICENSE](LICENSE) file.
 
 ## About RDEM Systems
 
-NimbusBackupClient is developed and maintained by [RDEM Systems](https://www.rdem-systems.com/), a French infrastructure provider specialized in Proxmox VE/PBS managed services and NTP/NTS infrastructure. We operate [11 public NTS servers](https://github.com/jauderho/nts-servers) listed in the community reference, and provide [fully managed PBS hosting](https://nimbus.rdem-systems.com/en/?utm_source=github) for users who don't want to self-host.
+NimbusBackupClient is developed and maintained by [RDEM Systems](https://www.rdem-systems.com/), a French infrastructure provider specialized in Proxmox VE/PBS managed services and NTP/NTS infrastructure. We operate [11 public NTS servers](https://ntp.rdem-systems.com/en/nts.php?utm_source=github) ([live status](https://ntp.rdem-systems.com/en/status.php?utm_source=github), also in the [community reference](https://github.com/jauderho/nts-servers)), and provide [fully managed PBS hosting](https://nimbus.rdem-systems.com/en/?utm_source=github) for users who don't want to self-host.
 
 ---
 

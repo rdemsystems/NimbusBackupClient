@@ -107,6 +107,8 @@ dans [`examples/automation/`](examples/automation/) :
   façon idempotente et le `nextRun` est calculé pour vous. Aucun calcul de
   timestamp dans votre template Jinja2.
 
+📖 Tutoriel complet : [Déployer une sauvegarde Windows vers PBS avec Ansible](https://nimbus.rdem-systems.com/blog/deploiement-automatise-sauvegarde-windows-ansible?utm_source=github).
+
 ## 🚀 Démarrage rapide
 
 1. Téléchargez `NimbusBackup.exe` (ou le `.msi`) depuis les releases
@@ -162,7 +164,7 @@ GPLv3 — voir le fichier [LICENSE](LICENSE).
 
 ## À propos de RDEM Systems
 
-NimbusBackupClient est développé et maintenu par [RDEM Systems](https://www.rdem-systems.com/), un fournisseur d'infrastructure français spécialisé dans l'infogérance Proxmox VE/PBS et l'infrastructure NTP/NTS. Nous exploitons [11 serveurs NTS publics](https://github.com/jauderho/nts-servers) listés dans la référence communautaire, et proposons un [hébergement PBS entièrement infogéré](https://nimbus.rdem-systems.com/?utm_source=github) pour ceux qui ne veulent pas auto-héberger.
+NimbusBackupClient est développé et maintenu par [RDEM Systems](https://www.rdem-systems.com/), un fournisseur d'infrastructure français spécialisé dans l'infogérance Proxmox VE/PBS et l'infrastructure NTP/NTS. Nous exploitons [11 serveurs NTS publics](https://ntp.rdem-systems.com/nts.php?utm_source=github) ([statut en direct](https://ntp.rdem-systems.com/status.php?utm_source=github), également dans la [référence communautaire](https://github.com/jauderho/nts-servers)), et proposons un [hébergement PBS entièrement infogéré](https://nimbus.rdem-systems.com/?utm_source=github) pour ceux qui ne veulent pas auto-héberger.
 
 ---
 
