@@ -225,6 +225,10 @@ func (a *App) startup(ctx context.Context) {
 			writeDebugLog(fmt.Sprintf("VSS cleanup at startup reported error: %v", err))
 		}
 
+		// Apply any schedule declared inline in config.json (single-file /
+		// unattended deployment) into the scheduler store before we compute runs.
+		a.ReconcileProvisionedJobs()
+
 		// Recalculate stale nextRun values (e.g. after restart or missed window)
 		a.RecalculateNextRuns()
 

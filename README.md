@@ -91,6 +91,21 @@ When backing up an entire drive (e.g. `D:\`), Nimbus Backup automatically exclud
 - Retry logic with exponential backoff
 - Comprehensive error handling and tests, 100% lint compliance
 
+## 🤖 Unattended deployment (Ansible & IaC)
+
+Nimbus Backup installs and configures entirely from files — no interactive setup.
+Two paths, both covered by ready-to-use examples in
+[`examples/automation/`](examples/automation/):
+
+- **Command line** — one JSON file per host carries the whole backup
+  (`directorybackup.exe --config file.json`); schedule via the Windows Task
+  Scheduler. Reliable exit codes (`0` OK, `1` fatal, `2` locked, `3` partial) so
+  your orchestrator detects failures. Best for pure infrastructure-as-code.
+- **GUI/service (MSI)** — a **single `config.json`** carries the PBS connection,
+  backup settings **and** the schedule (`scheduled_jobs`). Push the file, restart
+  the `NimbusBackup` service: jobs are reconciled idempotently and `nextRun` is
+  computed for you. No timestamp math in your Jinja2 template.
+
 ## 🚀 Quick start
 
 1. Download `NimbusBackup.exe` (or the `.msi`) from releases

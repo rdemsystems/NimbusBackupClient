@@ -1,0 +1,60 @@
+---
+# Unattended deployment — command-line path (directorybackup.exe).
+# One JSON config carries the whole job; scheduling is delegated to the Windows
+# Task Scheduler (idempotent). Recommended for infrastructure-as-code.
+#
+# Run:  ansible-playbook -i inventory deploy-cli.yml
+# Per-host secrets belong in Ansible Vault (see group_vars/*/vault.yml).
+
+- name: Deploy NimbusBackup CLI backup
+  hosts: windows_servers
+  gather_facts: false
+
+  vars:
+    nimbus_dir: 'C:\Program Files\NimbusBackup'
+    nimbus_cfg_dir: 'C:\ProgramData\NimbusBackup'
+    # Override these per host/group (Vault for the secret).
+    pbs_baseurl: 'https://pbs.example.net:8007'
+    pbs_fingerprint: 'AA:BB:CC:...'
+    pbs_authid: 'ansible@pbs!deploy'
+    pbs_secret: '{{ vault_pbs_secret }}'
+    pbs_datastore: 'myDatastore'
+    pbs_namespace: 'clients/{{ inventory_hostname }}'
+    backup_dir: 'C:'
+    schedule_time: '02:30'
+
+  tasks:
+    - name: Ensure install and config directories exist
+      ansible.windows.win_file:
+        path: '{{ item }}'
+        state: directory
+      loop:
+        - '{{ nimbus_dir }}'
+        - '{{ nimbus_cfg_dir }}'
+
+    - name: Copy directorybackup.exe
+      ansible.windows.win_copy:
+        src: files/directorybackup.exe
+        dest: '{{ nimbus_dir }}\directorybackup.exe'
+
+    # Render cli-single-config.json.j2 from the vars above. Any field may also be
+    # overridden on the command line — CLI flags win over the file.
+    - name: Render backup config
+      ansible.windows.win_template:
+        src: cli-single-config.json.j2
+        dest: '{{ nimbus_cfg_dir }}\backup.json'
+
+    - name: Schedule the daily backup (Task Scheduler)
+      community.windows.win_scheduled_task:
+        name: NimbusBackup-Daily
+        description: Daily backup to Proxmox Backup Server
+        actions:
+          - path: '{{ nimbus_dir }}\directorybackup.exe'
+            arguments: '--config "{{ nimbus_cfg_dir }}\backup.json"'
+        triggers:
+          - type: daily
+            start_boundary: '2026-01-01T{{ schedule_time }}:00'
+        username: SYSTEM
+        run_level: highest   # required for VSS
+        state: present
+        enabled: true

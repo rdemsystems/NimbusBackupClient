@@ -1,5 +1,32 @@
 # Nimbus Backup - TODO
 
+## 🎯 JALON v0.3.0 — Déploiement sans surveillance (Ansible / IaC)
+
+> Déclencheur : demande client **Vincent, LaNetCie Grand Ouest** (2026-07) —
+> pouvoir « pousser » un fichier de config unique (connexion + token + empreinte
+> SSL + datastore + namespace **+ planification**) via Ansible/Jinja2.
+
+### ✅ Fait (0.3.0)
+- [x] Champ `scheduled_jobs` dans `config.json` (GUI/service) → un seul fichier
+      porte connexion + réglages + planning (`gui/config.go`)
+- [x] `ReconcileProvisionedJobs` au démarrage (standalone + service), upsert par
+      `id`, idempotent, non destructif (`gui/scheduler.go`, `main.go`, `service.go`)
+- [x] `nextRun` auto-calculé si absent (déjà via `RecalculateNextRuns`, couvre
+      désormais le fichier poussé) + tests unitaires (`scheduler_provision_test.go`)
+- [x] Exemples + guide : `examples/automation/` (CLI, GUI/service, playbooks +
+      templates Ansible, table des codes de retour)
+- [x] Section « Déploiement sans surveillance » dans README.md / README.fr.md
+
+### ⏳ Suites possibles (post-0.3.0)
+- [ ] Reconciliation **déclarative** optionnelle (supprimer du store les jobs
+      provisionnés retirés du fichier) — aujourd'hui on n'ajoute/màj que
+- [ ] Watch de `config.json` pour prise en compte à chaud sans restart de service
+- [ ] Répondre à Vincent + fournir un rôle Ansible packagé si intérêt
+- [ ] Bugs d'affichage signalés : icône tray intermittente (`gui/tray.go`) +
+      zone de progression qui « saute » pendant un backup (frontend)
+
+---
+
 ## ✅ RÉCEMMENT COMPLÉTÉES (v0.1.78-v0.1.92)
 
 ### ~~Fix Bug Config Service~~ ✅ RÉSOLU (v0.1.81)

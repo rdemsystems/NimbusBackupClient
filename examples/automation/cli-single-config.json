@@ -1,0 +1,21 @@
+{
+  "baseurl": "https://pbs.example.net:8007",
+  "certfingerprint": "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99",
+  "authid": "ansible@pbs!deploy",
+  "secret": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "datastore": "myDatastore",
+  "namespace": "clients/acme",
+  "backup-id": "srv-files",
+  "backupdir": "C:",
+  "usevss": true,
+  "smtp": {
+    "host": "smtp.example.com",
+    "port": "465",
+    "username": "backup@example.com",
+    "password": "smtp-password",
+    "insecure": false,
+    "mails": [
+      { "from": "backup@example.com", "to": "ops@example.com" }
+    ]
+  }
+}

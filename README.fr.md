@@ -91,6 +91,22 @@ Lors de la sauvegarde d'un disque entier (ex. `D:\`), Nimbus Backup exclut autom
 - Logique de réessai avec backoff exponentiel
 - Gestion d'erreurs complète et tests, conformité lint à 100 %
 
+## 🤖 Déploiement sans surveillance (Ansible & IaC)
+
+Nimbus Backup s'installe et se configure entièrement par fichiers — aucune étape
+interactive. Deux voies, toutes deux couvertes par des exemples prêts à l'emploi
+dans [`examples/automation/`](examples/automation/) :
+
+- **Ligne de commande** — un fichier JSON par hôte porte toute la sauvegarde
+  (`directorybackup.exe --config fichier.json`) ; planification via le
+  Planificateur de tâches Windows. Codes de retour fiables (`0` OK, `1` fatal,
+  `2` verrou, `3` partiel) pour détecter les échecs. Idéal pour l'IaC pure.
+- **Service/GUI (MSI)** — un **unique `config.json`** porte la connexion PBS, les
+  réglages de sauvegarde **et** la planification (`scheduled_jobs`). Poussez le
+  fichier, redémarrez le service `NimbusBackup` : les jobs sont réconciliés de
+  façon idempotente et le `nextRun` est calculé pour vous. Aucun calcul de
+  timestamp dans votre template Jinja2.
+
 ## 🚀 Démarrage rapide
 
 1. Téléchargez `NimbusBackup.exe` (ou le `.msi`) depuis les releases

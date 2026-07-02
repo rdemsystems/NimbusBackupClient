@@ -1,0 +1,31 @@
+{
+  "pbs_servers": {
+    "default": {
+      "id": "default",
+      "name": "PBS Production",
+      "baseurl": "https://pbs.example.net:8007",
+      "certfingerprint": "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99",
+      "authid": "ansible@pbs!deploy",
+      "secret": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "datastore": "myDatastore",
+      "namespace": "clients/acme"
+    }
+  },
+  "default_pbs_id": "default",
+  "usevss": true,
+  "scheduled_jobs": [
+    {
+      "id": "nightly-c",
+      "name": "Nightly C:",
+      "scheduleTime": "02:30",
+      "enabled": true,
+      "runAtStartup": false,
+      "backupType": "host",
+      "backupDirs": ["C:"],
+      "backupId": "srv-files",
+      "useVSS": true,
+      "compression": "fastest",
+      "excludeList": ["C:\\pagefile.sys", "C:\\Windows\\Temp"]
+    }
+  ]
+}

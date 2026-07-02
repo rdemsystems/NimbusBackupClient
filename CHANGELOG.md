@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-02
+
+Minor-version milestone: **unattended deployment**. Nimbus Backup can now be
+installed and fully configured from files, with no interactive setup — built for
+Ansible (or any config-management tool). This is the headline of the 0.2 → 0.3
+series; nothing in a normal interactive workflow changes.
+
+### Added
+- **Single-file, unattended configuration for the GUI/service.** `config.json`
+  can now carry the whole deployment — PBS connection, backup settings **and** the
+  schedule — via a new optional `scheduled_jobs` array. On (re)start the service
+  reconciles those jobs into its store (`ReconcileProvisionedJobs`): matching is
+  **by `id`**, so re-pushing the same config **upserts** rather than duplicating,
+  an unchanged schedule is **not** re-fired (a still-valid `nextRun` is kept), the
+  job's `LastRun` history is preserved, and jobs you created in the GUI are left
+  untouched. A missing `id` is derived deterministically from the job name.
+- **`nextRun` is optional in a provisioned/hand-authored schedule** — the service
+  computes it on startup, so an Ansible/Jinja2 template never has to compute
+  RFC3339 timestamps. (This already applied to standalone mode; it now also covers
+  the pushed-config path.)
+- **Automation examples and guide** — `examples/automation/`: ready-to-use
+  command-line and GUI/service config files, Ansible playbooks and Jinja2
+  templates for both paths, a field reference and the CLI exit-code table.
+
+### Notes
+- The command-line tool (`directorybackup.exe --config file.json`) already
+  supported single-file configuration and now-reliable exit codes (`0` success,
+  `1` fatal, `2` locked, `3` partial); it is the recommended path for pure
+  infrastructure-as-code, with scheduling delegated to the Windows Task Scheduler.
+- No database or schema change; existing `config.json` / `scheduled_jobs.json`
+  files keep working unchanged.
+
 ## [0.2.119] - 2026-06-12
 
 ### Internal

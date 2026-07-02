@@ -352,6 +352,126 @@ func calculateNextRun(scheduleTime string) string {
 	return nextRun.Format(time.RFC3339)
 }
 
+// validRFC3339 reports whether s is a parseable RFC3339 timestamp.
+func validRFC3339(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, err := time.Parse(time.RFC3339, s)
+	return err == nil
+}
+
+// slugifyJobID derives a stable, filename-safe ID from a job name, used when a
+// provisioned job (from config.json) omits an explicit ID. Deterministic so
+// re-provisioning the same config upserts the same job instead of duplicating it.
+func slugifyJobID(name string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash && b.Len() > 0 {
+				b.WriteByte('-')
+				prevDash = true
+			}
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		return "job"
+	}
+	return "provisioned-" + slug
+}
+
+// mergeProvisionedJobs upserts the config-declared jobs into the existing
+// scheduler store, keyed by ID. Semantics (chosen for Ansible idempotency):
+//   - A provisioned job whose ID is not in the store is appended.
+//   - A provisioned job whose ID matches an existing one replaces it, but keeps
+//     the existing LastRun history and — when the schedule time is unchanged and
+//     the stored nextRun is still valid — keeps that nextRun, so re-pushing the
+//     same config does NOT reset the clock or trigger an extra run.
+//   - Jobs already in the store whose IDs are not provisioned are left untouched
+//     (a GUI-created job survives provisioning).
+//
+// It never mutates its inputs; the returned slice is safe to persist.
+func mergeProvisionedJobs(existing, provisioned []ScheduledJob) []ScheduledJob {
+	out := make([]ScheduledJob, len(existing))
+	copy(out, existing)
+
+	byID := make(map[string]int, len(out))
+	for i, j := range out {
+		byID[j.ID] = i
+	}
+
+	for _, pj := range provisioned {
+		if pj.ID == "" {
+			pj.ID = slugifyJobID(pj.Name)
+		}
+		if idx, ok := byID[pj.ID]; ok {
+			prev := out[idx]
+			pj.LastRun = prev.LastRun
+			// Preserve a still-valid nextRun when the schedule is unchanged so
+			// idempotent re-provisioning doesn't move or re-fire the job.
+			if pj.ScheduleTime == prev.ScheduleTime && validRFC3339(prev.NextRun) {
+				pj.NextRun = prev.NextRun
+			} else if pj.Enabled && pj.ScheduleTime != "" && !validRFC3339(pj.NextRun) {
+				pj.NextRun = calculateNextRun(pj.ScheduleTime)
+			}
+			out[idx] = pj
+		} else {
+			if pj.Enabled && pj.ScheduleTime != "" && !validRFC3339(pj.NextRun) {
+				pj.NextRun = calculateNextRun(pj.ScheduleTime)
+			}
+			byID[pj.ID] = len(out)
+			out = append(out, pj)
+		}
+	}
+	return out
+}
+
+// ReconcileProvisionedJobs applies any jobs declared in config.json's
+// "scheduled_jobs" into scheduled_jobs.json. This is what makes a single pushed
+// config file carry the whole deployment (connection + backup + schedule): drop
+// the file, (re)start the service, and the scheduler picks the jobs up. It is
+// idempotent and non-destructive (see mergeProvisionedJobs) and is a no-op when
+// no jobs are declared. Called at startup, before RecalculateNextRuns.
+func (a *App) ReconcileProvisionedJobs() {
+	cfg := LoadConfig()
+	if len(cfg.ScheduledJobs) == 0 {
+		return
+	}
+	writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: %d job(s) declared in config.json", len(cfg.ScheduledJobs)))
+
+	existing, err := a.GetScheduledJobs()
+	if err != nil {
+		// Never overwrite the jobs file from a failed read — that would wipe every
+		// existing job. Skip provisioning this cycle instead.
+		writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: skipping, could not read existing jobs: %v", err))
+		return
+	}
+
+	merged := mergeProvisionedJobs(existing, cfg.ScheduledJobs)
+
+	jobsPath, err := getScheduledJobsPath()
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: cannot resolve jobs path: %v", err))
+		return
+	}
+	data, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: marshal failed: %v", err))
+		return
+	}
+	if err := atomicWriteFile(jobsPath, data, 0600); err != nil {
+		writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: write failed: %v", err))
+		return
+	}
+	writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: %d job(s) now in store", len(merged)))
+}
+
 // RecalculateNextRuns repairs jobs whose nextRun is MISSING or unparseable by
 // giving them a valid future run time. It deliberately leaves an overdue but
 // valid nextRun in the past: the scheduler now catches missed runs up on its

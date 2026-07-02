@@ -1,0 +1,49 @@
+---
+# Unattended deployment — GUI/service path (Nimbus Backup MSI).
+# A SINGLE config.json carries the PBS connection, backup settings AND the
+# schedule (the "scheduled_jobs" array). On (re)start the service reconciles
+# those jobs into its store and auto-computes each nextRun — no timestamp math
+# needed in your template.
+#
+# Run:  ansible-playbook -i inventory deploy-gui-service.yml
+
+- name: Deploy NimbusBackup service (single-file config)
+  hosts: windows_servers
+  gather_facts: false
+
+  vars:
+    nimbus_cfg_dir: 'C:\ProgramData\NimbusBackup'
+    msi_url: 'https://github.com/rdemsystems/NimbusBackupClient/releases/latest/download/NimbusBackup.msi'
+    pbs_baseurl: 'https://pbs.example.net:8007'
+    pbs_fingerprint: 'AA:BB:CC:...'
+    pbs_authid: 'ansible@pbs!deploy'
+    pbs_secret: '{{ vault_pbs_secret }}'
+    pbs_datastore: 'myDatastore'
+    pbs_namespace: 'clients/{{ inventory_hostname }}'
+    schedule_time: '02:30'
+
+  tasks:
+    - name: Install Nimbus Backup (MSI, includes the Windows service)
+      ansible.windows.win_package:
+        path: '{{ msi_url }}'
+        state: present
+
+    - name: Ensure config directory exists
+      ansible.windows.win_file:
+        path: '{{ nimbus_cfg_dir }}'
+        state: directory
+
+    # One file: connection + backup + schedule. nextRun is left out on purpose —
+    # the service computes it on startup (ReconcileProvisionedJobs).
+    - name: Render unified config.json (connection + schedule)
+      ansible.windows.win_template:
+        src: gui-service-config.json.j2
+        dest: '{{ nimbus_cfg_dir }}\config.json'
+      notify: Restart NimbusBackup
+
+  handlers:
+    # A restart makes the service pick up config.json and reconcile the schedule.
+    - name: Restart NimbusBackup
+      ansible.windows.win_service:
+        name: NimbusBackup
+        state: restarted

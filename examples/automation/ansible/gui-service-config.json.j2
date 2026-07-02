@@ -1,0 +1,29 @@
+{
+  "pbs_servers": {
+    "default": {
+      "id": "default",
+      "name": "PBS Production",
+      "baseurl": "{{ pbs_baseurl }}",
+      "certfingerprint": "{{ pbs_fingerprint }}",
+      "authid": "{{ pbs_authid }}",
+      "secret": "{{ pbs_secret }}",
+      "datastore": "{{ pbs_datastore }}",
+      "namespace": "{{ pbs_namespace }}"
+    }
+  },
+  "default_pbs_id": "default",
+  "usevss": true,
+  "scheduled_jobs": [
+    {
+      "id": "nightly-c",
+      "name": "Nightly C:",
+      "scheduleTime": "{{ schedule_time }}",
+      "enabled": true,
+      "backupType": "host",
+      "backupDirs": ["C:"],
+      "backupId": "{{ inventory_hostname }}",
+      "useVSS": true,
+      "compression": "fastest"
+    }
+  ]
+}

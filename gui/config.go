@@ -44,6 +44,15 @@ type Config struct {
 	SMTPPassword string `json:"smtp_password,omitempty"`
 	EmailFrom    string `json:"email_from,omitempty"`
 	EmailTo      string `json:"email_to,omitempty"`
+
+	// ==================== PROVISIONED SCHEDULE (unattended deployment) ====================
+	// Optional list of scheduled backup jobs declared directly in config.json so a
+	// single file (dropped by Ansible/any config-management tool) can carry the PBS
+	// connection, the backup settings AND the schedule. At startup these are
+	// reconciled (upsert by ID, non-destructively) into scheduled_jobs.json — see
+	// App.ReconcileProvisionedJobs. Jobs created interactively in the GUI (whose IDs
+	// are not listed here) are left untouched.
+	ScheduledJobs []ScheduledJob `json:"scheduled_jobs,omitempty"`
 }
 
 // sanitized returns a copy of the config with all secrets stripped (legacy PBS

@@ -66,6 +66,10 @@ func (s *NimbusService) run() {
 		writeDebugLog(fmt.Sprintf("VSS cleanup at startup reported error: %v", err))
 	}
 
+	// Apply any schedule declared inline in config.json (single-file /
+	// unattended deployment) into the scheduler store before computing runs.
+	s.app.ReconcileProvisionedJobs()
+
 	// Recalculate stale nextRun values (e.g. after service restart or missed window)
 	s.app.RecalculateNextRuns()
 
