@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from './i18n/i18nContext'
 import LanguageSwitcher from './components/LanguageSwitcher'
 
@@ -204,7 +204,7 @@ function App() {
       const now = Date.now()
       const percent = Math.round(data.percent)
       setProgress(percent)
-      showStatus(`🔄 ${data.message}`, 'info')
+      showStatus(`🔄 ${data.message}`, 'info', false)
 
       // Calculate speed and ETA
       setBackupStats(prev => {
@@ -281,7 +281,7 @@ function App() {
     if (!EventsOn) return
     const unsubP = EventsOn('restore:progress', (data) => {
       setRestoreProgress(Math.round((data.percent || 0) * 100))
-      showStatus(`🔄 ${data.message || ''}`, 'info')
+      showStatus(`🔄 ${data.message || ''}`, 'info', false)
     })
     const unsubC = EventsOn('restore:complete', (data) => {
       setRestoreLoading(false)
@@ -311,7 +311,7 @@ function App() {
       const done = data.done || 0
       const total = data.total || 0
       const gb = ((data.bytes || 0) / (1024 * 1024 * 1024)).toFixed(1)
-      showStatus(`📊 ${t('splitAnalyzing')} ${done}/${total} (${gb} GB)`, 'info')
+      showStatus(`📊 ${t('splitAnalyzing')} ${done}/${total} (${gb} GB)`, 'info', false)
     })
     return () => { if (unsub) unsub() }
   }, [])
@@ -430,11 +430,25 @@ function App() {
     loadPBSServers()
   }, [])
 
-  const showStatus = (message, type) => {
+  // Single shared auto-hide timer for the status bar. Progress events fire
+  // continuously during a backup/restore; without coalescing, every call queued
+  // its own 5s timeout and a stale one would hide the bar mid-run (the bar
+  // "jumping" in and out at the bottom of the page). We now clear the previous
+  // timer on each call, and callers pass autoHide=false for continuous progress
+  // so the bar stays put until it is replaced or the operation completes.
+  const statusTimerRef = useRef(null)
+  const showStatus = (message, type, autoHide = true) => {
+    if (statusTimerRef.current) {
+      clearTimeout(statusTimerRef.current)
+      statusTimerRef.current = null
+    }
     setStatus({ message, type, visible: true })
-    setTimeout(() => {
-      setStatus(s => ({ ...s, visible: false }))
-    }, 5000)
+    if (autoHide) {
+      statusTimerRef.current = setTimeout(() => {
+        setStatus(s => ({ ...s, visible: false }))
+        statusTimerRef.current = null
+      }, 5000)
+    }
   }
 
   // ==================== MULTI-PBS HANDLERS ====================
