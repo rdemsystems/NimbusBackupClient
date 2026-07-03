@@ -27,6 +27,53 @@
 
 ---
 
+## 🎯 Filtres de sélection avancés — parité Burp Backup
+
+> Déclencheur : demande prospect **Jacky FROMONT** (2026-07, migre depuis
+> **Burp Backup**). Veut la même flexibilité de sélection include/exclude.
+> Répondre à Jacky une fois le périmètre arbitré.
+
+**Ce qui EXISTE déjà (H-04, ≥ v0.2.92 — `pbscommon/pxar.go isExcluded`) :**
+- [x] Exclure un **répertoire par nom** n'importe où dans l'arbo → motif sans
+      séparateur, ex. `ImapMail` (match du basename, insensible à la casse).
+- [x] Exclure des **extensions** → glob sans séparateur, ex. `*.tmp`, `*.pst`.
+- [x] Exclure un **chemin ancré** à la racine du backup → motif avec séparateur.
+- [x] **Classes de caractères** glob supportées (`path.Match`), ex. `[A-Z]` — donc
+      un exclude multi-lecteurs simple est déjà possible côté motif.
+- [x] **Saisie GUI + persistance par job** : champ « Fichiers à exclure (un par
+      ligne) » (`gui/frontend/src/App.jsx:1857`, textarea), stocké dans le job
+      planifié (`gui/scheduler.go:27 ExcludeList`) et poussé jusqu'au writer PXAR.
+      → Donc utilisable **dès aujourd'hui** par un utilisateur, pas seulement en interne.
+- ⚠️ Reste à exposer/documenter les exclusions dans le **fichier de config
+      provisionnable** (jalon 0.3.0) pour l'IaC, et à ajouter une aide/validation
+      de motifs dans la GUI (aujourd'hui c'est une zone de texte libre, sans hint).
+
+**Ce qui MANQUE pour la parité Burp :**
+- [ ] **`include_glob` — sélection de sources par motif** (le vrai gros morceau).
+      Ex. `D:/Users/*/Desktop`, `D:/Users/*/Documents` → sauvegarder le même
+      sous-dossier de tous les utilisateurs sans lister chaque profil. Aujourd'hui
+      la sélection est **par dossier explicite**, pas par glob. Impacte : parsing
+      config, expansion des motifs au démarrage du job (par volume/VSS), et la
+      logique de groupes/split (chaque expansion = quelle backup-id ?).
+- [ ] **`exclude_regex` — vraies regex** (pas seulement du glob). Burp exemple :
+      `[A-Z]:/Users/Administrateur`, `[A-Z]:/Users/Default User`, `\/*ImapMail*\/`.
+      Le glob couvre une partie ; une regex complète (alternances, ancrage
+      multi-lecteurs, `.*` arbitraire) demande un moteur `regexp` distinct du
+      `path.Match` actuel. Décider : garder glob par défaut + préfixe `re:` pour
+      opt-in regex ? (évite de casser les motifs existants + limite le coût perf).
+- [ ] **Exposer include/exclude dans le fichier de config provisionnable** (par job)
+      + dans la **GUI** (édition + validation des motifs), pour que ce soit
+      utilisable sans passer par la CLI.
+- [ ] Doc + exemples de mapping Burp → Nimbus (`examples/automation/`), pour
+      faciliter la migration des prospects Burp.
+
+**À arbitrer avant dev :** (1) glob-only étendu vs. moteur regex opt-in ;
+(2) `include_glob` = expansion au démarrage (statique, un job = N chemins) ou
+motif vivant réévalué à chaque run ; (3) interaction avec le split/groupes PBS
+(une expansion large → beaucoup de groupes → cf. discussion orphelins/split).
+
+---
+
 ## ✅ RÉCEMMENT COMPLÉTÉES (v0.1.78-v0.1.92)
 
 ### ~~Fix Bug Config Service~~ ✅ RÉSOLU (v0.1.81)

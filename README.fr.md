@@ -33,7 +33,7 @@ gh attestation verify .\NimbusBackup.exe --repo rdemsystems/NimbusBackupClient
 [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
 [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
 
-> ℹ️ **Signature de code :** les binaires Windows ne sont **pas encore signés Authenticode** (un certificat OSS via [SignPath Foundation](https://signpath.org) est en attente). En attendant, la provenance est établie via l'attestation et les empreintes ci-dessus.
+> ℹ️ **Signature de code :** les binaires Windows ne sont **pas encore signés Authenticode**, ce qui déclenche les alertes SmartScreen / `!ml` ci-dessus. Le projet est développé sur du temps bénévole ; un certificat Authenticode payant n'est pas financé de ma poche à ce stade. Une demande de certificat OSS gratuit a été faite auprès de la [SignPath Foundation](https://signpath.org), restée **sans réponse**. Un certificat de signature sera acheté dès que le projet le permettra commercialement — via les [revenus du PBS infogéré](https://nimbus.rdem-systems.com/choose-backup/?utm_source=github) ou du sponsoring. En attendant, la provenance est établie via l'attestation de build et les empreintes ci-dessus.
 
 ## ☁️ PBS infogéré (déporté & immuable)
 
