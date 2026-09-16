@@ -35,6 +35,12 @@ gh attestation verify .\NimbusBackup.exe --repo rdemsystems/NimbusBackupClient
 
 > ℹ️ **Code signing:** Windows binaries are **not yet Authenticode-signed**, which is what triggers the SmartScreen / `!ml` warnings above. This project is developed on volunteered time; a paid Authenticode certificate isn't funded out of pocket yet. We applied for a free OSS certificate via the [SignPath Foundation](https://signpath.org) but have had **no reply**. A signing certificate will be purchased as soon as the project sustains it commercially — either through [managed PBS revenue](https://nimbus.rdem-systems.com/en/choose-backup/?utm_source=github) or sponsorship. Until then, provenance is established via the build-provenance attestation and checksums above.
 
+### 🐧 On Linux? Use the official client
+
+Nimbus Backup is Windows-only. On Linux, use Proxmox's own `proxmox-backup-client` — we package it for the distributions Proxmox doesn't cover:
+
+👉 **[rdemsystems/unofficial-proxmox-backup-client](https://github.com/rdemsystems/unofficial-proxmox-backup-client)** — signed package repositories for Debian/Ubuntu, Fedora/RHEL/Rocky/AlmaLinux, Arch and Alpine (amd64 & arm64). Proxmox's official static binary, repackaged unchanged — not patched, not recompiled.
+
 ## ☁️ Managed PBS (offsite & immutable)
 
 Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite immutable** PBS datastores:
@@ -163,7 +169,7 @@ GPLv3 — see the [LICENSE](LICENSE) file.
 
 ## About RDEM Systems
 
-NimbusBackupClient is developed and maintained by [RDEM Systems](https://www.rdem-systems.com/), a French infrastructure provider specialized in Proxmox VE/PBS managed services and NTP/NTS infrastructure. We operate [11 public NTS servers](https://ntp.rdem-systems.com/en/nts.php?utm_source=github) ([live status](https://ntp.rdem-systems.com/en/status.php?utm_source=github), also in the [community reference](https://github.com/jauderho/nts-servers)), and provide [fully managed PBS hosting](https://nimbus.rdem-systems.com/en/?utm_source=github) for users who don't want to self-host.
+NimbusBackupClient is developed and maintained by [RDEM Systems](https://www.rdem-systems.com/), a French infrastructure provider specialized in Proxmox VE/PBS managed services and NTP/NTS infrastructure. We operate [11 public NTS servers](https://ntp.rdem-systems.com/en/nts.php?utm_source=github) ([live status](https://ntp.rdem-systems.com/en/status.php?utm_source=github), also in the [community reference](https://github.com/jauderho/nts-servers)), and provide [fully managed PBS hosting](https://nimbus.rdem-systems.com/en/?utm_source=github) for users who don't want to self-host. We also maintain [unofficial-proxmox-backup-client](https://github.com/rdemsystems/unofficial-proxmox-backup-client), signed `proxmox-backup-client` packages for Linux distributions Proxmox doesn't officially support.
 
 ---
 
