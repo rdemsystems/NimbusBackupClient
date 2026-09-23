@@ -585,7 +585,9 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 	// first), landing as separate snapshots in a single group — which makes prune
 	// keep/drop the wrong folders. A single selected directory keeps the caller's
 	// backup-id (which may have been set explicitly, e.g. by a scheduled job).
-	if len(opts.BackupObjects) <= 1 {
+	// Machine backups are never split: all selected disks belong to ONE "vm"
+	// snapshot whose backup-id is the numeric VM ID (see machinebackuplib).
+	if len(opts.BackupObjects) <= 1 || opts.Kind == "machine" {
 		return runBackupInlineInternal(opts)
 	}
 

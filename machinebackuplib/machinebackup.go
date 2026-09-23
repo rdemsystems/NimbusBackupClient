@@ -99,10 +99,14 @@ func BytesToString(b int64) string {
 
 // uploadWorker streams fixed-size chunks from ch into a PBS fixed index and
 // commits it (assign + close) when all data has been processed. readErrCh,
-// when non-nil, carries the reader's terminal error (buffered, exactly one
-// send): a reader failure or user cancellation makes uploadWorker abort
+// when non-nil, carries the reader's terminal error: the reader MUST send
+// exactly once (nil on success) into a buffered channel, after closing ch.
+// uploadWorker is its ONLY consumer and waits for it once ch is drained: a
+// reader failure or user cancellation makes uploadWorker return that error
 // WITHOUT committing the index, so a cancelled/partial run never ends up as a
-// "complete" backup on the server.
+// "complete" backup on the server. Callers must not read readErrCh themselves
+// (a second receive would block forever; a racing one would let a partial
+// index be committed) — the reader error is uploadWorker's return value.
 func uploadWorker(client *pbscommon.PBSClient, filename string, total_size uint64, ch chan []byte, readErrCh <-chan error) error {
 	var newchunk *atomic.Uint64 = new(atomic.Uint64)
 	var reusechunk *atomic.Uint64 = new(atomic.Uint64)
@@ -127,9 +131,6 @@ func uploadWorker(client *pbscommon.PBSClient, filename string, total_size uint6
 
 	var assignment_mutex sync.Mutex
 
-	errch := make(chan error)
-	digests := make(map[int64][]byte)
-
 	type PosSeg struct {
 		Pos  uint64
 		Data []byte
@@ -137,86 +138,113 @@ func uploadWorker(client *pbscommon.PBSClient, filename string, total_size uint6
 
 	ch2 := make(chan PosSeg)
 
-	workerfn := func() {
-		for seg := range ch2 {
-			h := sha256.New()
-			if _, err := h.Write(seg.Data); err != nil {
-				errch <- fmt.Errorf("failed to hash chunk at position %d: %w", seg.Pos, err)
-				break
-			}
-
-			shahash := hex.EncodeToString(h.Sum(nil))
-			//binary.Write(CS.chunkdigests, binary.LittleEndian, (CS.pos + uint64(nread)))
-
-			assignment_mutex.Lock()
-			CS.index_hash_data[seg.Pos] = h.Sum(nil)
-			digests[int64(seg.Pos)] = h.Sum(nil)
-
-			_, exists := knownChunks.GetOrSet(shahash, true)
-			assignment_mutex.Unlock()
-
-			if exists {
-				reusechunk.Add(1)
-			} else {
-				err = client.UploadFixedCompressedChunk(wrid, shahash, seg.Data)
-				if err != nil {
-					errch <- fmt.Errorf("failed to upload chunk %s: %w", shahash, err)
-					break
-				}
-
-			}
-			assignment_mutex.Lock()
-			CS.assignments = append(CS.assignments, shahash)
-			CS.assignments_offset = append(CS.assignments_offset, seg.Pos)
-			CS.processed_size += uint64(len(seg.Data))
-			CS.chunkcount++
-			if CS.processed_size > total_size {
-				errch <- fmt.Errorf("Fatal: tried to backup more data than specified size!")
-				break
-			}
-			percentage := float64(CS.processed_size) / float64(total_size) * 100
-fmt.Printf("Chunk %d/%d/%d - Progress: %.2f%%\n", CS.chunkcount, int(math.Ceil(float64(total_size)/float64(pbscommon.PBS_FIXED_CHUNK_SIZE))), reusechunk.Load(), percentage)
-			
-			assignment_mutex.Unlock()
-
-		}
-		errch <- nil
+	// First failure wins: it is recorded once and closes `failed`, which stops
+	// the dispatcher (posfn) so ch2 gets closed and every worker exits. The
+	// reader is then released by the caller closing uploadDone once we return.
+	failed := make(chan struct{})
+	var failOnce sync.Once
+	var firstErr error
+	fail := func(e error) {
+		failOnce.Do(func() {
+			firstErr = e
+			close(failed)
+		})
 	}
 
-	posfn := func() {
-		pos := uint64(0)
-		for block := range ch {
+	// processSeg hashes, dedups/uploads and records one chunk. All errors are
+	// local to the calling worker (no shared err variable across goroutines)
+	// and the assignment mutex is never left locked.
+	processSeg := func(seg PosSeg) error {
+		h := sha256.New()
+		if _, err := h.Write(seg.Data); err != nil {
+			return fmt.Errorf("failed to hash chunk at position %d: %w", seg.Pos, err)
+		}
+		sum := h.Sum(nil)
+		shahash := hex.EncodeToString(sum)
 
-			ch2 <- PosSeg{
-				Pos:  pos,
-				Data: block,
+		assignment_mutex.Lock()
+		CS.index_hash_data[seg.Pos] = sum
+		_, exists := knownChunks.GetOrSet(shahash, true)
+		assignment_mutex.Unlock()
+
+		if exists {
+			reusechunk.Add(1)
+		} else if err := client.UploadFixedCompressedChunk(wrid, shahash, seg.Data); err != nil {
+			return fmt.Errorf("failed to upload chunk %s: %w", shahash, err)
+		}
+
+		assignment_mutex.Lock()
+		defer assignment_mutex.Unlock()
+		CS.assignments = append(CS.assignments, shahash)
+		CS.assignments_offset = append(CS.assignments_offset, seg.Pos)
+		CS.processed_size += uint64(len(seg.Data))
+		CS.chunkcount++
+		if CS.processed_size > total_size {
+			return fmt.Errorf("tried to back up more data than the specified size (%d > %d)", CS.processed_size, total_size)
+		}
+		percentage := float64(CS.processed_size) / float64(total_size) * 100
+		fmt.Printf("Chunk %d/%d/%d - Progress: %.2f%%\n", CS.chunkcount, int(math.Ceil(float64(total_size)/float64(pbscommon.PBS_FIXED_CHUNK_SIZE))), reusechunk.Load(), percentage)
+		return nil
+	}
+
+	var workers sync.WaitGroup
+	workerfn := func() {
+		defer workers.Done()
+		for seg := range ch2 {
+			if err := processSeg(seg); err != nil {
+				fail(err)
+				return
+			}
+		}
+	}
+
+	// posfn forwards blocks to the workers until ch is closed or a worker
+	// fails. On failure it stops reading ch; the reader, blocked on its send,
+	// is released by uploadDone (closed by the caller once we return).
+	posfn := func() {
+		defer close(ch2)
+		pos := uint64(0)
+		for {
+			// Wait for the next block OR a worker failure: a stalled reader
+			// must not keep the failure path (and thus uploadDone) from
+			// completing.
+			var block []byte
+			var ok bool
+			select {
+			case block, ok = <-ch:
+				if !ok {
+					return
+				}
+			case <-failed:
+				return
+			}
+			select {
+			case ch2 <- PosSeg{Pos: pos, Data: block}:
+			case <-failed:
+				return
 			}
 			pos += uint64(len(block))
 		}
-		close(ch2)
 	}
 
 	go posfn()
 
 	for i := 0; i < 8; i++ {
+		workers.Add(1)
 		go workerfn()
 	}
-	for i := 0; i < 8; i++ {
-		err := <-errch
-		if err != nil {
-			return err
-		}
+	workers.Wait()
+	if firstErr != nil {
+		return firstErr
 	}
 
 	// The reader reported an error (or the user cancelled): the data in this
 	// fixed index is partial, so leave it unclosed instead of committing it.
 	if readErrCh != nil {
-		select {
-		case rerr := <-readErrCh:
-			if rerr != nil {
-				return rerr
-			}
-		default:
+		// ch is closed and drained here, so the reader has sent (or is about to
+		// send) its single terminal result: a blocking receive cannot hang.
+		if rerr := <-readErrCh; rerr != nil {
+			return rerr
 		}
 	}
 
@@ -286,12 +314,16 @@ func BackupFileDevice(client *pbscommon.PBSClient, filename string, progressCall
 	}
 	ch := make(chan []byte)
 	errCh := make(chan error, 1)
+	uploadDone := make(chan struct{})
 	go func() {
-		defer close(ch)
 		var rerr error
+		// Exactly one terminal send, after ch is closed (uploadWorker contract).
+		defer func() {
+			close(ch)
+			errCh <- rerr
+		}()
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			rerr = fmt.Errorf("failed to seek to start: %w", err)
-			errCh <- rerr
 			return
 		}
 		for {
@@ -304,7 +336,12 @@ func BackupFileDevice(client *pbscommon.PBSClient, filename string, progressCall
 				break
 			}
 
-			ch <- block[:nread]
+			select {
+			case ch <- block[:nread]:
+			case <-uploadDone: // uploader gave up: stop reading instead of blocking forever
+				rerr = fmt.Errorf("upload aborted")
+				return
+			}
 			totread = totread + int64(nread)
 			// Returning true stops the backup (user pressed Stop).
 			if progressCallback != nil &&
@@ -314,17 +351,12 @@ func BackupFileDevice(client *pbscommon.PBSClient, filename string, progressCall
 			}
 			b++
 		}
-		if rerr == nil {
-			errCh <- nil
-		}
 	}()
 
-	uploadErr := uploadWorker(client, slug+".fidx", uint64(size), ch, errCh)
-	readErr := <-errCh
-	if readErr != nil {
-		return readErr
-	}
-	return uploadErr
+	// uploadWorker consumes errCh and returns the reader's error, if any.
+	err = uploadWorker(client, slug+".fidx", uint64(size), ch, errCh)
+	close(uploadDone)
+	return err
 }
 
 type BackupDisk struct {
@@ -342,6 +374,14 @@ func Backup(cfg *Config, progressCallback ProgressCallback) (*BackupResult, erro
 	// Validate configuration
 	if !cfg.Valid() {
 		return nil, fmt.Errorf("invalid configuration")
+	}
+	// A "vm" snapshot's backup-id is the VM ID written into the generated
+	// qemu-server config below, so it must be numeric. Check it now rather
+	// than after every disk has been uploaded.
+	if cfg.BackupType == "vm" {
+		if _, err := strconv.ParseInt(cfg.BackupID, 10, 32); err != nil {
+			return nil, fmt.Errorf("machine backup needs a numeric backup ID (PBS VM ID), got %q", cfg.BackupID)
+		}
 	}
 
 	client := &pbscommon.PBSClient{

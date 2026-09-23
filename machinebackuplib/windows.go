@@ -627,18 +627,11 @@ func BackupWindowsDisk(client *pbscommon.PBSClient, index int, progressCallback 
 			}
 		}()
 
-		var uploadErr error
-		go func() {
-			defer close(uploadDone)
-			uploadErr = uploadWorker(client, fmt.Sprintf("drive-sata%d.img.fidx", index), uint64(total), ch, errCh)
-		}()
-
-		readErr := <-errCh
-		<-uploadDone
-		if uploadErr != nil {
-			return uploadErr
-		}
-		return readErr
+		// uploadWorker is the only consumer of errCh (see its contract) and
+		// returns the reader's error when the reader failed or was cancelled.
+		upErr := uploadWorker(client, fmt.Sprintf("drive-sata%d.img.fidx", index), uint64(total), ch, errCh)
+		close(uploadDone)
+		return upErr
 	})
 }
 
