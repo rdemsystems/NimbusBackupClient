@@ -129,7 +129,7 @@ func RunAsService() {
 	writeDebugLog("Attempting to run as Windows Service")
 
 	svcConfig := &service.Config{
-		Name:        "ProxmoxBackupClient",
+		Name:        serviceNameFromExecutable(),
 		DisplayName: "Proxmox Backup Client Service",
 		Description: "Executes scheduled backups to Proxmox Backup Server with VSS support",
 	}

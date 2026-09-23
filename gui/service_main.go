@@ -20,7 +20,7 @@ func main() {
 
 	// Service configuration
 	svcConfig := &service.Config{
-		Name:        "ProxmoxBackupClient",
+		Name:        serviceNameFromExecutable(),
 		DisplayName: "Proxmox Backup Client SVC",
 		Description: "Executes scheduled backups to Proxmox Backup Server with VSS support",
 	}

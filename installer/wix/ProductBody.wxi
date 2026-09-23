@@ -58,11 +58,15 @@
               Source="../../gui/build/bin/$(var.ServiceExeName).exe"
               KeyPath="yes" />
 
-        <!-- Service installation -->
+        <!-- Service installation. The SCM name is the brand's ExeName (e.g.
+             "NimbusBackup"), NOT the service exe name: it is the name every
+             Nimbus MSI up to 0.3.0 registered (scripts/monitoring target it),
+             and gui/service_name.go derives the same name from the running
+             $(var.ServiceExeName).exe by stripping its "SVC" suffix. -->
         <ServiceInstall
           Id="BackupService"
           Type="ownProcess"
-          Name="$(var.ServiceExeName)"
+          Name="$(var.ExeName)"
           DisplayName="$(var.ProductName) Service"
           Description="Executes scheduled backups to Proxmox Backup Server with VSS support"
           Start="auto"
@@ -74,7 +78,7 @@
 
         <ServiceControl
           Id="ControlBackupService"
-          Name="$(var.ServiceExeName)"
+          Name="$(var.ExeName)"
           Start="install"
           Stop="both"
           Wait="yes"
