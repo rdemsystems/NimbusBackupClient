@@ -1027,7 +1027,11 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 	go func() {
 		var err error
 		if backupType == "machine" {
-			// For machine backups, we need to set the backup type to "vm" for the inline backup function
+			// For machine backups, we need to set the backup type to "vm" for the inline backup function.
+			// Kind routes RunBackupInline to the block-device path; without it the
+			// devices (e.g. \\.\PhysicalDrive0) were walked as directories — this
+			// is the path scheduled machine jobs take (executeScheduledJob → StartBackup).
+			opts.Kind = "machine"
 			opts.BackupType = "vm"
 			err = RunBackupInline(opts)
 		} else {
