@@ -2,9 +2,14 @@
 name: Release Automation
 
 on:
-  push:
-    tags:
-      - "*" # triggers when pushing a new tag like `0.8.4`
+  # Fork patch: upstream publishes its releases with goreleaser on every tag.
+  # In the Nimbus fork, build-and-release.yml creates the release for v* tags;
+  # letting both run would race to create/alter the same GitHub release.
+  # Manual runs only.
+  # push:
+  #   tags:
+  #     - "*" # triggers when pushing a new tag like `0.8.4`
+  workflow_dispatch:
 
 concurrency: ci-release-automation
 
