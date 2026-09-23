@@ -56,20 +56,33 @@ var brandCatalog = map[string]Brand{
 			"contact": "https://github.com/tizbac/proxmoxbackupclient_go",
 		},
 	},
+	// Nimbus Backup — RDEM Systems fork (github.com/rdemsystems/NimbusBackupClient).
 	"nimbusbackup": {
-		Name:           "nimbusbackup",
-		Title:          "Nimbus Backup",
-		Logo:           "/brands/nimbus.svg",
-		Accent:         "#22c55e",
-		AccentHover:    "#16a34a",
-		BrandURL:       "https://nimbus.example/",
-		BuyStorageURL:  "https://store.nimbus.example/backup",
-		BuyStorageText: "Get Nimbus storage",
+		Name:        "nimbusbackup",
+		Title:       "Nimbus Backup",
+		Logo:        "/brands/nimbus.svg",
+		Accent:      "#667eea",
+		AccentHover: "#5a67d8",
+		BrandURL:    "https://nimbus.rdem-systems.com/en/?utm_source=NimbusGui&utm_medium=tooling",
+
+		// English landing page by default, French one for the French UI.
+		BuyStorageURL: "https://nimbus.rdem-systems.com/en/choose-backup/?utm_source=NimbusGui&utm_medium=tooling",
+
+		BuyStorageURLs: map[string]string{
+			"fr": "https://nimbus.rdem-systems.com/choisir-mon-backup/?utm_source=NimbusGui&utm_medium=tooling",
+		},
+
+		BuyStorageText: "Order Nimbus Backup storage",
+
+		BuyStorageTexts: map[string]string{
+			"fr": "Commander du stockage Nimbus Backup",
+		},
+
 		Urls: map[string]string{
-			"about":   "https://nimbus.example/",
-			"help":    "https://nimbus.example/help",
-			"updates": "https://nimbus.example/releases",
-			"contact": "https://nimbus.example/contact",
+			"about":   "https://nimbus.rdem-systems.com/en/?utm_source=NimbusGui&utm_medium=tooling",
+			"help":    "https://github.com/rdemsystems/NimbusBackupClient#readme",
+			"updates": "https://github.com/rdemsystems/NimbusBackupClient/releases",
+			"contact": "mailto:contact@rdem-systems.com",
 		},
 	},
 	"acmebackup": {
