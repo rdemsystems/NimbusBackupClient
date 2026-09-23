@@ -225,9 +225,14 @@ func main() {
 		machinebackuplib.SysTraySetup()
 	}
 
-	machinebackuplib.Backup(cfg, func(percentage float64, message string) bool {
+	if _, err := machinebackuplib.Backup(cfg, func(percentage float64, message string) bool {
 		return false
-	})
+	}); err != nil {
+		// Exit non-zero so schedulers/RMM see the failure (audit V-1). os.Exit
+		// skips defers, so release the process lock explicitly first.
+		L.ReleaseProcessLock()
+		fatalError("backup failed", err)
+	}
 
 	
 
