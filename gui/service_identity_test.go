@@ -52,12 +52,15 @@ func wixEntries(t *testing.T) map[string][2]string {
 
 func TestServiceNameMatchesWiXServiceInstall(t *testing.T) {
 	for file, entry := range wixEntries(t) {
+		// ProductBody.wxi registers the service as $(var.ExeName), which is
+		// ServiceExeName without its "SVC" suffix (see the test below).
 		serviceExeName := entry[0]
+		registered := strings.TrimSuffix(serviceExeName, "SVC")
 		name, _ := serviceIdentityForExeBase(serviceExeName)
-		if name != serviceExeName {
+		if name != registered {
 			t.Errorf("%s.wxs registers service %q but the binary would dispatch %q: "+
 				"SCM would reject the start with error 1061",
-				file, serviceExeName, name)
+				file, registered, name)
 		}
 	}
 }
