@@ -158,10 +158,13 @@
                   Impersonate="no"
                   Return="ignore" />
 
-    <!-- Custom action to delete config directory -->
+    <!-- Custom action to delete config directory. The data directory is
+         brand-independent (gui/config.go getConfigDir: ProgramData\ProxmoxBackupClient);
+         ProgramData\NimbusBackup is the pre-0.3 folder that
+         gui/legacy_datadir.go copies from and deliberately leaves behind. -->
     <CustomAction Id="DeleteConfigFolder"
                   Directory="TARGETDIR"
-                  ExeCommand='cmd.exe /c "if exist "%ProgramData%\$(var.ExeName)" rmdir /s /q "%ProgramData%\$(var.ExeName)""'
+                  ExeCommand='cmd.exe /c "(if exist "%ProgramData%\ProxmoxBackupClient" rmdir /s /q "%ProgramData%\ProxmoxBackupClient") &amp; (if exist "%ProgramData%\NimbusBackup" rmdir /s /q "%ProgramData%\NimbusBackup")"'
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore" />
@@ -188,12 +191,12 @@
         </Control>
 
         <Control Id="ConfigInfo" Type="Text" X="25" Y="60" Width="320" Height="60" Transparent="yes" NoPrefix="yes">
-          <Text>The configuration is stored in:\nC:\ProgramData\$(var.ExeName)\
+          <Text>The configuration is stored in:\nC:\ProgramData\ProxmoxBackupClient\
 
 This includes:
 • config.json (PBS servers, credentials)
-• jobs.json (scheduled jobs)
-• debug-gui.log and debug-service.log
+• scheduled_jobs.json and job_history.json (scheduled jobs)
+• the GUI and service logs (*-gui.log, *-service.log)
           </Text>
         </Control>
 
