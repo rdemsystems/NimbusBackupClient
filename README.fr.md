@@ -9,7 +9,7 @@
 **Nimbus Backup est un client de sauvegarde Windows open-source (GPL-3.0) pour Proxmox Backup Server (PBS).**
 Une interface graphique moderne pour sauvegarder serveurs et postes Windows vers PBS — snapshots cohérents via VSS, tâches planifiées, modes fichier et disque, navigation/restauration de snapshots, support multi-PBS et mode service Windows. Besoin d'un stockage PBS **déporté et immuable** sans auto-héberger ? Voir le [service infogéré](#️-pbs-infogéré-déporté--immuable) ci-dessous.
 
-> Mots-clés : client proxmox backup windows · client PBS · sauvegarde Windows VSS · sauvegarde déportée immuable · interface Proxmox Backup Server.
+📖 **Documentation complète, guide d'installation et hébergement PBS :** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/blog/sauvegarder-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
 
 ## 📦 Téléchargement
 
