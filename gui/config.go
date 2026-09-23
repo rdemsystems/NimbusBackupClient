@@ -163,6 +163,9 @@ func getConfigDir() (string, error) {
 		return "", err
 	}
 
+	// Upgrades from Nimbus Backup <= 0.3.0 keep their data in ProgramData\NimbusBackup.
+	migrateLegacyDataDir(configDir)
+
 	return configDir, nil
 }
 
