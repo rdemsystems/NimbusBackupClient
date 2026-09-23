@@ -1,18 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <!-- Shared installer body. Included by a brand entry file (see Product.wxs /
      NimbusBackup.wxs / AcmeBackup.wxs) that supplies the brand identity via
-     !define BEFORE the include. All identity is driven by $(var.*):
+     !define BEFORE the include. All identity is driven by these preprocessor variables:
        ProductName, ExeName, ServiceExeName, VendorKey, Manufacturer,
        UpgradeCode, ProductVersion, ArpUrlAbout, ArpHelpLink,
        ArpUrlUpdateInfo, ArpContact.
      The exe is installed under the SAME name as the installer (ExeName); the
      GUI resolves its brand from the exe base name at runtime (gui/brand.go),
      so the installed exe name == installer name == brand key. -->
+<!-- WiX 3 requires an included file to have an Include root element. -->
+<Include xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
            Name="$(var.ProductName)"
            Language="1033"
            Version="$(var.ProductVersion)"
            Manufacturer="$(var.Manufacturer)"
-           Icon="AppIcon"
            UpgradeCode="$(var.UpgradeCode)">
 
     <Package InstallerVersion="200"
@@ -29,7 +31,10 @@
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Application icon, selected from installer/icons/ by the ExeName -->
-    <Icon Id="AppIcon" SourceFile="../icons/$(var.ExeName).ico" />
+    <Icon Id="AppIcon.ico" SourceFile="../icons/$(var.ExeName).ico" />
+    <!-- Programs & Features icon. WiX 3 has no Product/@Icon attribute
+         (candle rejects it); ARPPRODUCTICON is the supported way. -->
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
 
     <!-- Installation directory -->
     <Directory Id="TARGETDIR" Name="SourceDir">
@@ -62,7 +67,7 @@
              "NimbusBackup"), NOT the service exe name: it is the name every
              Nimbus MSI up to 0.3.0 registered (scripts/monitoring target it),
              and gui/service_name.go derives the same name from the running
-             $(var.ServiceExeName).exe by stripping its "SVC" suffix. -->
+             <ServiceExeName>.exe by stripping its "SVC" suffix. -->
         <ServiceInstall
           Id="BackupService"
           Type="ownProcess"
@@ -92,7 +97,7 @@
         <Shortcut Id="ApplicationStartMenuShortcut"
                   Name="$(var.ProductName)"
                   Description="Backup client for Proxmox Backup Server"
-                  Icon="AppIcon"
+                  Icon="AppIcon.ico"
                   Target="[INSTALLFOLDER]$(var.ExeName).exe"
                   WorkingDirectory="INSTALLFOLDER"/>
         <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
@@ -228,3 +233,4 @@ This includes:
     </UI>
 
   </Product>
+</Include>
