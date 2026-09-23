@@ -608,9 +608,19 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 		baseID = hostname
 	}
 
-	for _, dir := range opts.BackupObjects {
+	for i, dir := range opts.BackupObjects {
 		if opts.Ctx != nil && opts.Ctx.Err() != nil {
-			writeBackupLog("Cancellation requested — skipping remaining folders")
+			// A cancelled run must never be reported as a success: the skipped
+			// folders were not backed up. Partial when some folders completed.
+			skipped := len(opts.BackupObjects) - i
+			errMsg := fmt.Sprintf("backup cancelled: %d/%d folder(s) not backed up", skipped, len(opts.BackupObjects))
+			writeBackupLog("Cancellation requested — skipping remaining folders (" + errMsg + ")")
+			perDirErrors = append(perDirErrors, errMsg)
+			if i == 0 {
+				agg.Outcome = OutcomeFailed
+			} else if outcomeRank(agg.Outcome) > outcomeRank(OutcomePartial) {
+				agg.Outcome = OutcomePartial
+			}
 			break
 		}
 		dirOpts := opts
