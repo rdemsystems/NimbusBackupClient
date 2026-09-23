@@ -21,7 +21,10 @@
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Application icon, selected from installer/icons/ by the ExeName -->
-    <Icon Id="AppIcon" SourceFile="../icons/$(var.ExeName).ico" />
+    <Icon Id="AppIcon.ico" SourceFile="../icons/$(var.ExeName).ico" />
+    <!-- Programs & Features icon. WiX 3 has no Product/@Icon attribute
+         (candle rejects it); ARPPRODUCTICON is the supported way. -->
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
 
     <!-- Installation directory -->
     <Directory Id="TARGETDIR" Name="SourceDir">
@@ -84,7 +87,7 @@
         <Shortcut Id="ApplicationStartMenuShortcut"
                   Name="$(var.ProductName)"
                   Description="Backup client for Proxmox Backup Server"
-                  Icon="AppIcon"
+                  Icon="AppIcon.ico"
                   Target="[INSTALLFOLDER]$(var.ExeName).exe"
                   WorkingDirectory="INSTALLFOLDER"/>
         <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
