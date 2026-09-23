@@ -150,7 +150,8 @@ func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progres
 	if archiveName == "" {
 		archiveName = "backup.pxar.didx"
 	}
-	if opts.BaseURL == "" || !((opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "") {
+	hasCreds := (opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "" // API token or u/p ticket
+	if opts.BaseURL == "" || !hasCreds {
 		return fmt.Errorf("PBS connection parameters required")
 	}
 	if opts.BackupID == "" {
@@ -636,7 +637,8 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		}
 	}
 
-	if opts.BaseURL == "" || !((opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "") {
+	hasCreds := (opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "" // API token or u/p ticket
+	if opts.BaseURL == "" || !hasCreds {
 		return fmt.Errorf("PBS connection parameters required")
 	}
 	if opts.BackupID == "" {

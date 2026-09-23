@@ -1056,7 +1056,7 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 	// Validate backup devices
 	for _, device := range backupDevices {
 		if device == "" {
-			return fmt.Errorf("One or more devices are empty")
+			return fmt.Errorf("one or more devices are empty")
 		}
 	}
 

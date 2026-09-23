@@ -193,7 +193,8 @@ func joinOriginPath(meta *BackupMeta, archivePath string) string {
 // listings are searched for free; uncached snapshots are assembled only when
 // AssembleMissing is set. Results are newest-snapshot-first.
 func SearchFilesInline(opts SearchOptions) (*SearchResult, error) {
-	if opts.BaseURL == "" || !((opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "") {
+	hasCreds := (opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "" // API token or u/p ticket
+	if opts.BaseURL == "" || !hasCreds {
 		return nil, fmt.Errorf("paramètres de connexion PBS requis")
 	}
 	if opts.Datastore == "" {
