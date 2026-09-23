@@ -19,6 +19,13 @@ type Brand struct {
 	BrandURL       string `json:"brand_url"`        // brand home page; also the fallback for Urls["about"]
 	BuyStorageURL  string `json:"buy_storage_url"`  // "" = buy-storage CTA hidden (falls back to the PBS download link)
 	BuyStorageText string `json:"buy_storage_text"` // CTA label; "" = use the i18n orderStorageCTA
+
+	// Optional per-UI-language overrides of the two fields above, keyed by the
+	// i18n language code ("fr", "en", ...). Lets a brand send each locale to its
+	// own landing page; languages not listed fall back to BuyStorageURL/Text.
+	BuyStorageURLs  map[string]string `json:"buy_storage_urls,omitempty"`
+	BuyStorageTexts map[string]string `json:"buy_storage_texts,omitempty"`
+
 	// Urls holds the About-tab / support links for this brand. Keys:
 	// "about", "help", "updates", "contact". Any key may be omitted; the
 	// frontend falls back to the upstream Proxmox destinations. These are the

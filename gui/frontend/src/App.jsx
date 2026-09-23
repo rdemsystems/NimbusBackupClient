@@ -55,15 +55,17 @@ if (window.runtime) {
 }
 
 function App() {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const [activeTab, setActiveTab] = useState('servers')
   const [hostname, setHostname] = useState('')
   const [appVersion, setAppVersion] = useState('dev')
   const [brand, setBrand] = useState({ name: 'proxmoxbackupclient', title: 'Proxmox Backup Client', logo: '', accent: '#e87003', accent_hover: '#d46100', buy_storage_url: '', buy_storage_text: '', is_default: true })
   // Buy-storage CTA: brand-specific when provided, otherwise the PBS download page.
+  // Per-language overrides (buy_storage_urls / buy_storage_texts) win over the defaults.
+  const brandBuyUrl = (brand.buy_storage_urls && brand.buy_storage_urls[language]) || brand.buy_storage_url
   const buyStorage = {
-    url: brand.buy_storage_url || 'https://www.proxmox.com/en/downloads.php#download-proxmox-backup-server',
-    text: brand.buy_storage_text || t('orderStorageCTA')
+    url: brandBuyUrl || 'https://www.proxmox.com/en/downloads.php#download-proxmox-backup-server',
+    text: (brand.buy_storage_texts && brand.buy_storage_texts[language]) || brand.buy_storage_text || t('orderStorageCTA')
   }
   const [systemInfo, setSystemInfo] = useState({ mode: 'Standalone', is_admin: false, service_available: false, os: '' })
   const [config, setConfig] = useState({
@@ -1615,9 +1617,9 @@ function App() {
                   <>
                     <br/>
                     <strong>📦 {t('noPBSYet')}</strong><br/>
-                    {brand.buy_storage_url ? (
+                    {brandBuyUrl ? (
                     <a
-                      href={brand.buy_storage_url}
+                      href={brandBuyUrl}
                       target="_blank"
                       data-external="true"
                       rel="noopener noreferrer"
