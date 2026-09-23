@@ -1,0 +1,37 @@
+From df363dae5cfeaf4e28a849a194198fb1ab924654 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:04:27 +0200
+Subject: [PATCH 06/15] machinebackup: exit non-zero when the backup fails
+
+main() discarded the error returned by machinebackuplib.Backup, so a
+failed device upload, manifest upload or finish still exited 0 and
+schedulers/RMM reported success (fork audit V-1). Report it on stderr
+and exit 1, releasing the process lock first since os.Exit skips defers.
+---
+ machinebackup/main.go | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/machinebackup/main.go b/machinebackup/main.go
+index 4d5c2e6..1ee449d 100644
+--- a/machinebackup/main.go
++++ b/machinebackup/main.go
+@@ -225,9 +225,14 @@ func main() {
+ 		machinebackuplib.SysTraySetup()
+ 	}
+ 
+-	machinebackuplib.Backup(cfg, func(percentage float64, message string) bool {
++	if _, err := machinebackuplib.Backup(cfg, func(percentage float64, message string) bool {
+ 		return false
+-	})
++	}); err != nil {
++		// Exit non-zero so schedulers/RMM see the failure (audit V-1). os.Exit
++		// skips defers, so release the process lock explicitly first.
++		L.ReleaseProcessLock()
++		fatalError("backup failed", err)
++	}
+ 
+ 	
+ 
+-- 
+2.47.3
+

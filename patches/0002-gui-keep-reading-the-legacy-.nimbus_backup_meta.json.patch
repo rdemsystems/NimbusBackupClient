@@ -1,0 +1,100 @@
+From 98510369e2d4de97865c22aa5d8be2e531b86e65 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:02:14 +0200
+Subject: [PATCH 02/15] gui: keep reading the legacy .nimbus_backup_meta.json
+ sidecar
+
+The metadata sidecar was renamed to .proxmox_backup_client_meta.json and
+only that name was read, so every snapshot taken by Nimbus Backup <= 0.3.0
+lost "restore to original location" (the in-place restore refuses when
+the sidecar is missing).
+
+Accept the legacy name as a fallback. PXARReader.ReadVirtualFile now takes
+several names and matches any of them in a single pass, since a miss walks
+the whole archive.
+---
+ gui/backup_meta.go       |  4 ++++
+ gui/restore_inline.go    |  4 ++--
+ pbscommon/pxar_reader.go | 11 +++++++----
+ 3 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/gui/backup_meta.go b/gui/backup_meta.go
+index 7c3e68f..2c37f3b 100644
+--- a/gui/backup_meta.go
++++ b/gui/backup_meta.go
+@@ -10,6 +10,10 @@ import (
+ 
+ const (
+ 	BackupMetaFilename  = ".proxmox_backup_client_meta.json"
++	// LegacyBackupMetaFilename is the sidecar name written by Nimbus Backup
++	// <= 0.3.0. Snapshots taken by those releases must stay restorable to their
++	// original location, so readers accept it as a fallback.
++	LegacyBackupMetaFilename = ".nimbus_backup_meta.json"
+ 	// BackupAclsFilename is the PBS blob name. It must match the PBS
+ 	// file-name regex: bare basename, no leading dot, and end in ".blob".
+ 	// The payload is still gzipped JSON — the ".blob" suffix is the PBS
+diff --git a/gui/restore_inline.go b/gui/restore_inline.go
+index e8a4356..bf33d74 100644
+--- a/gui/restore_inline.go
++++ b/gui/restore_inline.go
+@@ -252,7 +252,7 @@ func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []
+ 		entries = append(entries, SnapshotEntry{Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: e.ModTime})
+ 		// The catalog lists the sidecar as a root-level file (no slash in path)
+ 		// iff the archive actually contains it.
+-		if !e.IsDir && e.Path == BackupMetaFilename {
++		if !e.IsDir && (e.Path == BackupMetaFilename || e.Path == LegacyBackupMetaFilename) {
+ 			metaPresent = true
+ 		}
+ 	}
+@@ -395,7 +395,7 @@ func ListSnapshotContentsInline(opts RestoreOptions, archiveName string, forceRe
+ // already-parsed archive. Returns nil on any failure (legacy snapshots,
+ // corrupted JSON, missing file) — meta is informational, never fatal.
+ func tryReadBackupMeta(reader *pbscommon.PXARReader) *BackupMeta {
+-	raw, err := reader.ReadVirtualFile(BackupMetaFilename)
++	raw, err := reader.ReadVirtualFile(BackupMetaFilename, LegacyBackupMetaFilename)
+ 	if err != nil {
+ 		// os.ErrNotExist is expected for legacy snapshots created before the
+ 		// sidecar shipped — log at debug volume only.
+diff --git a/pbscommon/pxar_reader.go b/pbscommon/pxar_reader.go
+index 7f5691c..da82970 100644
+--- a/pbscommon/pxar_reader.go
++++ b/pbscommon/pxar_reader.go
+@@ -8,6 +8,7 @@ import (
+ 	"io"
+ 	"os"
+ 	"path/filepath"
++	"slices"
+ 	"strings"
+ 	"time"
+ )
+@@ -257,13 +258,15 @@ func joinArchivePath(parent, child string) string {
+ }
+ 
+ // ReadVirtualFile returns the payload of a file located at the archive root,
+-// matched by its exact name (e.g. ".proxmox_backup_client_meta.json"). Returns
+-// os.ErrNotExist if no such root-level file is present.
++// matched by its exact name (e.g. ".proxmox_backup_client_meta.json"). Several
++// names may be given (e.g. current + legacy sidecar name): the first root-level
++// file matching ANY of them is returned, in a single pass over the archive.
++// Returns os.ErrNotExist if no such root-level file is present.
+ //
+ // Only root-level entries are considered — nested files of the same name are
+ // ignored. This matches how the writer injects sidecar files (always at root).
+ // Sidecar files are small, so reading the payload fully into memory is fine.
+-func (pr *PXARReader) ReadVirtualFile(name string) ([]byte, error) {
++func (pr *PXARReader) ReadVirtualFile(names ...string) ([]byte, error) {
+ 	var found []byte
+ 	stopErr := errors.New("pxar: virtual file found")
+ 	err := pr.walk(func(e PXARTreeEntry, payload *io.SectionReader) error {
+@@ -274,7 +277,7 @@ func (pr *PXARReader) ReadVirtualFile(name string) ([]byte, error) {
+ 		if strings.Contains(e.Path, "/") {
+ 			return nil
+ 		}
+-		if e.Path == name {
++		if slices.Contains(names, e.Path) {
+ 			data, rerr := io.ReadAll(payload)
+ 			if rerr != nil {
+ 				return rerr
+-- 
+2.47.3
+

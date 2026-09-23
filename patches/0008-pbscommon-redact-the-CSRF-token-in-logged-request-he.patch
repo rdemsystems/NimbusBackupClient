@@ -1,0 +1,39 @@
+From c42f68b488d80db9135f2dd5990983a8da7fb19f Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:05:03 +0200
+Subject: [PATCH 08/15] pbscommon: redact the CSRF token in logged request
+ headers
+
+setAuth stores the header via Header.Set, which canonicalizes
+"CSRFPreventionToken" to "Csrfpreventiontoken"; redactedHeaders matched
+the non-canonical spelling, so the token was printed in clear in the
+request dumps. Compare canonical header keys.
+---
+ pbscommon/pbsapi.go | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/pbscommon/pbsapi.go b/pbscommon/pbsapi.go
+index 7629096..c1d042a 100644
+--- a/pbscommon/pbsapi.go
++++ b/pbscommon/pbsapi.go
+@@ -568,12 +568,15 @@ func (pbs *PBSClient) CloseFixedIndex(writerid uint64, checksum string, totalsiz
+ func redactedHeaders(h http.Header) http.Header {
+ 	out := make(http.Header, len(h))
+ 	for k, v := range h {
+-		switch k {
++		// Header.Set canonicalizes keys ("CSRFPreventionToken" is stored as
++		// "Csrfpreventiontoken"), so compare canonical forms or the CSRF token
++		// would be printed in clear.
++		switch http.CanonicalHeaderKey(k) {
+ 		case "Authorization":
+ 			out[k] = []string{"PBSAPIToken=<redacted>"}
+ 		case "Cookie":
+ 			out[k] = []string{"PBSAuthCookie=<redacted>"}
+-		case "CSRFPreventionToken":
++		case http.CanonicalHeaderKey("CSRFPreventionToken"):
+ 			out[k] = []string{"<redacted>"}
+ 		default:
+ 			out[k] = v
+-- 
+2.47.3
+

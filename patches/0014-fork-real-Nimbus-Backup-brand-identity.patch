@@ -1,0 +1,113 @@
+From 03874f7484761acf6d64df05aac3ce6857e83bdc Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:07:03 +0200
+Subject: [PATCH 14/15] fork: real Nimbus Backup brand identity
+
+- gui/brand.go: replace the nimbus.example placeholders with the real
+  Nimbus site (EN by default, FR landing page for the French UI, utm
+  tagged as the pre-merge GUI was), the NimbusBackupClient repo and the
+  RDEM Systems contact.
+- NimbusBackup.wxs: keep the UpgradeCode every Nimbus MSI shipped with
+  (12345678-...), so the new MSI upgrades existing installs instead of
+  installing next to them; Manufacturer RDEM Systems; VendorKey matching
+  the old HKCU key; real ARP links.
+---
+ gui/brand.go                   | 37 +++++++++++++++++++++++-----------
+ installer/wix/NimbusBackup.wxs | 28 ++++++++++++-------------
+ 2 files changed, 39 insertions(+), 26 deletions(-)
+
+diff --git a/gui/brand.go b/gui/brand.go
+index 26e0f03..d207a80 100644
+--- a/gui/brand.go
++++ b/gui/brand.go
+@@ -56,20 +56,33 @@ var brandCatalog = map[string]Brand{
+ 			"contact": "https://github.com/tizbac/proxmoxbackupclient_go",
+ 		},
+ 	},
++	// Nimbus Backup — RDEM Systems fork (github.com/rdemsystems/NimbusBackupClient).
+ 	"nimbusbackup": {
+-		Name:           "nimbusbackup",
+-		Title:          "Nimbus Backup",
+-		Logo:           "/brands/nimbus.svg",
+-		Accent:         "#22c55e",
+-		AccentHover:    "#16a34a",
+-		BrandURL:       "https://nimbus.example/",
+-		BuyStorageURL:  "https://store.nimbus.example/backup",
+-		BuyStorageText: "Get Nimbus storage",
++		Name:        "nimbusbackup",
++		Title:       "Nimbus Backup",
++		Logo:        "/brands/nimbus.svg",
++		Accent:      "#667eea",
++		AccentHover: "#5a67d8",
++		BrandURL:    "https://nimbus.rdem-systems.com/en/?utm_source=NimbusGui&utm_medium=tooling",
++
++		// English landing page by default, French one for the French UI.
++		BuyStorageURL: "https://nimbus.rdem-systems.com/en/choose-backup/?utm_source=NimbusGui&utm_medium=tooling",
++
++		BuyStorageURLs: map[string]string{
++			"fr": "https://nimbus.rdem-systems.com/choisir-mon-backup/?utm_source=NimbusGui&utm_medium=tooling",
++		},
++
++		BuyStorageText: "Order Nimbus Backup storage",
++
++		BuyStorageTexts: map[string]string{
++			"fr": "Commander du stockage Nimbus Backup",
++		},
++
+ 		Urls: map[string]string{
+-			"about":   "https://nimbus.example/",
+-			"help":    "https://nimbus.example/help",
+-			"updates": "https://nimbus.example/releases",
+-			"contact": "https://nimbus.example/contact",
++			"about":   "https://nimbus.rdem-systems.com/en/?utm_source=NimbusGui&utm_medium=tooling",
++			"help":    "https://github.com/rdemsystems/NimbusBackupClient#readme",
++			"updates": "https://github.com/rdemsystems/NimbusBackupClient/releases",
++			"contact": "mailto:contact@rdem-systems.com",
+ 		},
+ 	},
+ 	"acmebackup": {
+diff --git a/installer/wix/NimbusBackup.wxs b/installer/wix/NimbusBackup.wxs
+index 50955a3..894c1e4 100644
+--- a/installer/wix/NimbusBackup.wxs
++++ b/installer/wix/NimbusBackup.wxs
+@@ -1,23 +1,23 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+ <!-- ===================================================================== -->
+-<!-- EXAMPLE brand installer entry: "Nimbus Backup".                        -->
+-<!-- Copy of the Product.wxs pattern with a different brand identity.        -->
+-<!-- To activate: drop NimbusBackup.ico into installer/icons/, build the      -->
+-<!-- NimbusBackup.exe + NimbusBackupSVC.exe under those names, then light     -->
+-<!-- THIS file to NimbusBackup.msi. The GUI auto-brands as "nimbusbackup"     -->
+-<!-- at runtime (gui/brand.go). Replace the URLs/icon below with real ones.   -->
++<!-- Nimbus Backup (RDEM Systems fork) brand installer entry.              -->
++<!-- Built by the fork's CI into NimbusBackup.msi from NimbusBackup.exe +    -->
++<!-- NimbusBackupSVC.exe; the GUI auto-brands as "nimbusbackup" at runtime   -->
++<!-- (gui/brand.go). Keep these URLs in sync with the brand catalog.         -->
+ <!-- ===================================================================== -->
+ <?define ProductName = "Nimbus Backup" ?>
+ <?define ExeName = "NimbusBackup" ?>
+ <?define ServiceExeName = "NimbusBackupSVC" ?>
+-<?define VendorKey = "Nimbus" ?>
+-<?define Manufacturer = "Nimbus" ?>
+-<!-- Each brand MUST have its own UpgradeCode (distinct from Product.wxs). -->
+-<?define UpgradeCode = "3f7c9a1e-6b2d-4e8f-9a5c-1b0d2f3e4a5b" ?>
+-<?define ArpUrlAbout = "https://nimbus.example/" ?>
+-<?define ArpHelpLink = "https://nimbus.example/help" ?>
+-<?define ArpUrlUpdateInfo = "https://nimbus.example/releases" ?>
+-<?define ArpContact = "https://nimbus.example/contact" ?>
++<?define VendorKey = "RDEMSystems" ?> <!-- same HKCU key as the <= 0.3.0 MSIs -->
++<?define Manufacturer = "RDEM Systems" ?>
++<!-- Nimbus Backup fork: MUST stay the UpgradeCode every Nimbus MSI shipped
++     with (<= 0.3.0 used Product.wxs with this code), otherwise the new MSI
++     installs next to the old one instead of upgrading it. -->
++<?define UpgradeCode = "12345678-1234-1234-1234-123456789012" ?>
++<?define ArpUrlAbout = "https://nimbus.rdem-systems.com/" ?>
++<?define ArpHelpLink = "https://github.com/rdemsystems/NimbusBackupClient#readme" ?>
++<?define ArpUrlUpdateInfo = "https://github.com/rdemsystems/NimbusBackupClient/releases" ?>
++<?define ArpContact = "contact@rdem-systems.com" ?>
+ 
+ <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+   <?ifndef ProductVersion ?>
+-- 
+2.47.3
+

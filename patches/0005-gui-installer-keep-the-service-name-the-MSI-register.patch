@@ -1,0 +1,132 @@
+From 5aedcc70883a64e8b0fc891cca2f7cf9384fecfe Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:04:13 +0200
+Subject: [PATCH 05/15] gui, installer: keep the service name the MSI registers
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The MSI registered the service under $(var.ServiceExeName) (e.g.
+NimbusBackupSVC) while the Go side hard-coded "ProxmoxBackupClient", so
+`<svc>.exe -service start|stop|uninstall` targeted a service that does not
+exist, and upgraded Nimbus installs would also have lost the "NimbusBackup"
+service name scripts and monitoring rely on.
+
+Register the service under the brand's ExeName (NimbusBackup,
+ProxmoxBackupClient — the latter is what upstream's Go code already used)
+and derive the same name in Go from the running "<ExeName>SVC.exe" by
+stripping the "SVC" suffix.
+---
+ gui/service.go                |  2 +-
+ gui/service_main.go           |  2 +-
+ gui/service_name.go           | 40 +++++++++++++++++++++++++++++++++++
+ installer/wix/ProductBody.wxi | 10 ++++++---
+ 4 files changed, 49 insertions(+), 5 deletions(-)
+ create mode 100644 gui/service_name.go
+
+diff --git a/gui/service.go b/gui/service.go
+index 9658298..116c354 100644
+--- a/gui/service.go
++++ b/gui/service.go
+@@ -129,7 +129,7 @@ func RunAsService() {
+ 	writeDebugLog("Attempting to run as Windows Service")
+ 
+ 	svcConfig := &service.Config{
+-		Name:        "ProxmoxBackupClient",
++		Name:        serviceNameFromExecutable(),
+ 		DisplayName: "Proxmox Backup Client Service",
+ 		Description: "Executes scheduled backups to Proxmox Backup Server with VSS support",
+ 	}
+diff --git a/gui/service_main.go b/gui/service_main.go
+index 840b2f9..d804f47 100644
+--- a/gui/service_main.go
++++ b/gui/service_main.go
+@@ -20,7 +20,7 @@ func main() {
+ 
+ 	// Service configuration
+ 	svcConfig := &service.Config{
+-		Name:        "ProxmoxBackupClient",
++		Name:        serviceNameFromExecutable(),
+ 		DisplayName: "Proxmox Backup Client SVC",
+ 		Description: "Executes scheduled backups to Proxmox Backup Server with VSS support",
+ 	}
+diff --git a/gui/service_name.go b/gui/service_name.go
+new file mode 100644
+index 0000000..925ca32
+--- /dev/null
++++ b/gui/service_name.go
+@@ -0,0 +1,40 @@
++//go:build windows || service
++
++package main
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++)
++
++// defaultServiceName is the SCM name used when the executable name cannot be
++// resolved. It matches the default brand's installer (Product.wxs ExeName).
++const defaultServiceName = "ProxmoxBackupClient"
++
++// serviceExeSuffix is appended to the brand's ExeName to name the service
++// binary ($(var.ServiceExeName) = "<ExeName>SVC" in installer/wix).
++const serviceExeSuffix = "SVC"
++
++// serviceNameFromExecutable returns the Windows service name for this binary.
++// The MSI registers the service under the brand's ExeName (ProductBody.wxi:
++// ServiceInstall Name="$(var.ExeName)", e.g. "NimbusBackup" — the name every
++// Nimbus install has used), and the service binary is "<ExeName>SVC.exe". So
++// strip the extension and the "SVC" suffix from os.Executable, which keeps
++// `-service start|stop|uninstall` pointed at the service the installer
++// actually registered, whatever the brand.
++func serviceNameFromExecutable() string {
++	exe, err := os.Executable()
++	if err != nil {
++		return defaultServiceName
++	}
++	base := filepath.Base(exe)
++	name := strings.TrimSuffix(base, filepath.Ext(base))
++	if len(name) > len(serviceExeSuffix) && strings.EqualFold(name[len(name)-len(serviceExeSuffix):], serviceExeSuffix) {
++		name = name[:len(name)-len(serviceExeSuffix)]
++	}
++	if name == "" {
++		return defaultServiceName
++	}
++	return name
++}
+diff --git a/installer/wix/ProductBody.wxi b/installer/wix/ProductBody.wxi
+index 4aa5995..d0a2c0c 100644
+--- a/installer/wix/ProductBody.wxi
++++ b/installer/wix/ProductBody.wxi
+@@ -58,11 +58,15 @@
+               Source="../../gui/build/bin/$(var.ServiceExeName).exe"
+               KeyPath="yes" />
+ 
+-        <!-- Service installation -->
++        <!-- Service installation. The SCM name is the brand's ExeName (e.g.
++             "NimbusBackup"), NOT the service exe name: it is the name every
++             Nimbus MSI up to 0.3.0 registered (scripts/monitoring target it),
++             and gui/service_name.go derives the same name from the running
++             $(var.ServiceExeName).exe by stripping its "SVC" suffix. -->
+         <ServiceInstall
+           Id="BackupService"
+           Type="ownProcess"
+-          Name="$(var.ServiceExeName)"
++          Name="$(var.ExeName)"
+           DisplayName="$(var.ProductName) Service"
+           Description="Executes scheduled backups to Proxmox Backup Server with VSS support"
+           Start="auto"
+@@ -74,7 +78,7 @@
+ 
+         <ServiceControl
+           Id="ControlBackupService"
+-          Name="$(var.ServiceExeName)"
++          Name="$(var.ExeName)"
+           Start="install"
+           Stop="both"
+           Wait="yes"
+-- 
+2.47.3
+

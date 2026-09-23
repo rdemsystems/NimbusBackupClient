@@ -1,0 +1,55 @@
+From 03c63f25c118f43ce62fce28f1aed355c6c9ab7c Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:05:19 +0200
+Subject: [PATCH 09/15] installer: delete the real data directory on "delete
+ configuration"
+
+The uninstall cleanup removed %ProgramData%\$(var.ExeName) (e.g.
+NimbusBackup) while the application stores everything in the
+brand-independent %ProgramData%\ProxmoxBackupClient, so choosing
+"Delete configuration" left config.json (credentials included) behind.
+Remove ProxmoxBackupClient plus the pre-0.3 NimbusBackup folder, and fix
+the path and file names shown in the uninstall dialog.
+---
+ installer/wix/ProductBody.wxi | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/installer/wix/ProductBody.wxi b/installer/wix/ProductBody.wxi
+index d0a2c0c..bce0436 100644
+--- a/installer/wix/ProductBody.wxi
++++ b/installer/wix/ProductBody.wxi
+@@ -158,10 +158,13 @@
+                   Impersonate="no"
+                   Return="ignore" />
+ 
+-    <!-- Custom action to delete config directory -->
++    <!-- Custom action to delete config directory. The data directory is
++         brand-independent (gui/config.go getConfigDir: ProgramData\ProxmoxBackupClient);
++         ProgramData\NimbusBackup is the pre-0.3 folder that
++         gui/legacy_datadir.go copies from and deliberately leaves behind. -->
+     <CustomAction Id="DeleteConfigFolder"
+                   Directory="TARGETDIR"
+-                  ExeCommand='cmd.exe /c "if exist "%ProgramData%\$(var.ExeName)" rmdir /s /q "%ProgramData%\$(var.ExeName)""'
++                  ExeCommand='cmd.exe /c "(if exist "%ProgramData%\ProxmoxBackupClient" rmdir /s /q "%ProgramData%\ProxmoxBackupClient") &amp; (if exist "%ProgramData%\NimbusBackup" rmdir /s /q "%ProgramData%\NimbusBackup")"'
+                   Execute="deferred"
+                   Impersonate="no"
+                   Return="ignore" />
+@@ -188,12 +191,12 @@
+         </Control>
+ 
+         <Control Id="ConfigInfo" Type="Text" X="25" Y="60" Width="320" Height="60" Transparent="yes" NoPrefix="yes">
+-          <Text>The configuration is stored in:\nC:\ProgramData\$(var.ExeName)\
++          <Text>The configuration is stored in:\nC:\ProgramData\ProxmoxBackupClient\
+ 
+ This includes:
+ • config.json (PBS servers, credentials)
+-• jobs.json (scheduled jobs)
+-• debug-gui.log and debug-service.log
++• scheduled_jobs.json and job_history.json (scheduled jobs)
++• the GUI and service logs (*-gui.log, *-service.log)
+           </Text>
+         </Control>
+ 
+-- 
+2.47.3
+
