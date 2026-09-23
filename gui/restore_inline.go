@@ -252,7 +252,7 @@ func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []
 		entries = append(entries, SnapshotEntry{Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: e.ModTime})
 		// The catalog lists the sidecar as a root-level file (no slash in path)
 		// iff the archive actually contains it.
-		if !e.IsDir && e.Path == BackupMetaFilename {
+		if !e.IsDir && (e.Path == BackupMetaFilename || e.Path == LegacyBackupMetaFilename) {
 			metaPresent = true
 		}
 	}
@@ -395,7 +395,7 @@ func ListSnapshotContentsInline(opts RestoreOptions, archiveName string, forceRe
 // already-parsed archive. Returns nil on any failure (legacy snapshots,
 // corrupted JSON, missing file) — meta is informational, never fatal.
 func tryReadBackupMeta(reader *pbscommon.PXARReader) *BackupMeta {
-	raw, err := reader.ReadVirtualFile(BackupMetaFilename)
+	raw, err := reader.ReadVirtualFile(BackupMetaFilename, LegacyBackupMetaFilename)
 	if err != nil {
 		// os.ErrNotExist is expected for legacy snapshots created before the
 		// sidecar shipped — log at debug volume only.

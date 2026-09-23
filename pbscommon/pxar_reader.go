@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -257,13 +258,15 @@ func joinArchivePath(parent, child string) string {
 }
 
 // ReadVirtualFile returns the payload of a file located at the archive root,
-// matched by its exact name (e.g. ".proxmox_backup_client_meta.json"). Returns
-// os.ErrNotExist if no such root-level file is present.
+// matched by its exact name (e.g. ".proxmox_backup_client_meta.json"). Several
+// names may be given (e.g. current + legacy sidecar name): the first root-level
+// file matching ANY of them is returned, in a single pass over the archive.
+// Returns os.ErrNotExist if no such root-level file is present.
 //
 // Only root-level entries are considered — nested files of the same name are
 // ignored. This matches how the writer injects sidecar files (always at root).
 // Sidecar files are small, so reading the payload fully into memory is fine.
-func (pr *PXARReader) ReadVirtualFile(name string) ([]byte, error) {
+func (pr *PXARReader) ReadVirtualFile(names ...string) ([]byte, error) {
 	var found []byte
 	stopErr := errors.New("pxar: virtual file found")
 	err := pr.walk(func(e PXARTreeEntry, payload *io.SectionReader) error {
@@ -274,7 +277,7 @@ func (pr *PXARReader) ReadVirtualFile(name string) ([]byte, error) {
 		if strings.Contains(e.Path, "/") {
 			return nil
 		}
-		if e.Path == name {
+		if slices.Contains(names, e.Path) {
 			data, rerr := io.ReadAll(payload)
 			if rerr != nil {
 				return rerr

@@ -10,6 +10,10 @@ import (
 
 const (
 	BackupMetaFilename  = ".proxmox_backup_client_meta.json"
+	// LegacyBackupMetaFilename is the sidecar name written by Nimbus Backup
+	// <= 0.3.0. Snapshots taken by those releases must stay restorable to their
+	// original location, so readers accept it as a fallback.
+	LegacyBackupMetaFilename = ".nimbus_backup_meta.json"
 	// BackupAclsFilename is the PBS blob name. It must match the PBS
 	// file-name regex: bare basename, no leading dot, and end in ".blob".
 	// The payload is still gzipped JSON — the ".blob" suffix is the PBS
