@@ -568,12 +568,15 @@ func (pbs *PBSClient) CloseFixedIndex(writerid uint64, checksum string, totalsiz
 func redactedHeaders(h http.Header) http.Header {
 	out := make(http.Header, len(h))
 	for k, v := range h {
-		switch k {
+		// Header.Set canonicalizes keys ("CSRFPreventionToken" is stored as
+		// "Csrfpreventiontoken"), so compare canonical forms or the CSRF token
+		// would be printed in clear.
+		switch http.CanonicalHeaderKey(k) {
 		case "Authorization":
 			out[k] = []string{"PBSAPIToken=<redacted>"}
 		case "Cookie":
 			out[k] = []string{"PBSAuthCookie=<redacted>"}
-		case "CSRFPreventionToken":
+		case http.CanonicalHeaderKey("CSRFPreventionToken"):
 			out[k] = []string{"<redacted>"}
 		default:
 			out[k] = v
