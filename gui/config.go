@@ -73,18 +73,23 @@ func migrateStandaloneFromProgramData() {
 	if src == "" || dst == "" || src == dst {
 		return
 	}
+	// Nimbus Backup <= 0.3.0 kept its data in ProgramData\NimbusBackup (see
+	// legacy_datadir.go): fall back to it for files the service dir lacks.
+	sources := []string{src, filepath.Join(filepath.Dir(src), legacyDataDirName)}
 	for _, name := range []string{"config.json", "scheduled_jobs.json", "job_history.json"} {
-		srcFile := filepath.Join(src, name)
 		dstFile := filepath.Join(dst, name)
 		if _, err := os.Stat(dstFile); err == nil {
 			continue // home copy already exists: never clobber it
 		}
-		data, err := os.ReadFile(srcFile)
-		if err != nil {
-			continue // not readable (e.g. SYSTEM-only ACL): skip
+		for _, dir := range sources {
+			data, err := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- fixed names under the trusted ProgramData folder
+			if err != nil {
+				continue // missing or not readable (e.g. SYSTEM-only ACL)
+			}
+			_ = os.MkdirAll(dst, 0755)
+			_ = atomicWriteFile(dstFile, data, 0600)
+			break
 		}
-		_ = os.MkdirAll(dst, 0755)
-		_ = atomicWriteFile(dstFile, data, 0600)
 	}
 }
 
@@ -265,6 +270,9 @@ func getConfigDir() (string, error) {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return "", err
 	}
+
+	// Upgrades from Nimbus Backup <= 0.3.0 keep their data in ProgramData\NimbusBackup.
+	migrateLegacyDataDir(configDir)
 
 	return configDir, nil
 }
