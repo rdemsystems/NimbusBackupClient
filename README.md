@@ -169,7 +169,7 @@ GPLv3 — see the [LICENSE](LICENSE) file.
 
 ## About RDEM Systems
 
-NimbusBackupClient is developed and maintained by [RDEM Systems](https://www.rdem-systems.com/), a French infrastructure provider specialized in Proxmox VE/PBS managed services and NTP/NTS infrastructure. We operate [11 public NTS servers](https://ntp.rdem-systems.com/en/nts.php?utm_source=github) ([live status](https://ntp.rdem-systems.com/en/status.php?utm_source=github), also in the [community reference](https://github.com/jauderho/nts-servers)), and provide [fully managed PBS hosting](https://nimbus.rdem-systems.com/en/?utm_source=github) for users who don't want to self-host. We also maintain [unofficial-proxmox-backup-client](https://github.com/rdemsystems/unofficial-proxmox-backup-client), signed `proxmox-backup-client` packages for Linux distributions Proxmox doesn't officially support.
+NimbusBackupClient is developed and maintained by [RDEM Systems](https://www.rdem-systems.com/), a French infrastructure provider specialized in Proxmox VE/PBS managed services and NTP/NTS infrastructure. We operate [16 public NTS servers](https://ntp.rdem-systems.com/en/nts.php?utm_source=github) ([live status](https://ntp.rdem-systems.com/en/status.php?utm_source=github); 11 of them are listed in the [community reference](https://github.com/jauderho/nts-servers)), and provide [fully managed PBS hosting](https://nimbus.rdem-systems.com/en/?utm_source=github) for users who don't want to self-host. We also maintain [unofficial-proxmox-backup-client](https://github.com/rdemsystems/unofficial-proxmox-backup-client), signed `proxmox-backup-client` packages for Linux distributions Proxmox doesn't officially support.
 
 ---
 
