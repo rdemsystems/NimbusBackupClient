@@ -21,11 +21,12 @@ type ScheduledJob struct {
 	ScheduleTime string   `json:"scheduleTime"` // HH:MM format
 	RunAtStartup bool     `json:"runAtStartup"`
 	BackupDirs   []string `json:"backupDirs"`
+	DriveLetters []string `json:"driveLetters"` // physical disks for machine backups
 	BackupID     string   `json:"backupId"`
 	UseVSS       bool     `json:"useVSS"`
 	BackupType   string   `json:"backupType"`
 	ExcludeList  []string `json:"excludeList"`
-	Compression  string   `json:"compression"` // "fastest", "default", "better", "best"
+	Compression  string   `json:"compression"`       // "fastest", "default", "better", "best"
 	LastRun      string   `json:"lastRun,omitempty"` // ISO timestamp
 	NextRun      string   `json:"nextRun,omitempty"` // ISO timestamp
 	Enabled      bool     `json:"enabled"`
@@ -48,11 +49,11 @@ func getScheduledJobsPath() (string, error) {
 	var configDir string
 
 	if programData := os.Getenv("ProgramData"); programData != "" {
-		// Windows: C:\ProgramData\NimbusBackup
-		configDir = filepath.Join(programData, "NimbusBackup")
+		// Windows: C:\ProgramData\ProxmoxBackupClient
+		configDir = filepath.Join(programData, "ProxmoxBackupClient")
 	} else if systemDrive := os.Getenv("SystemDrive"); systemDrive != "" {
 		// Windows fallback: if ProgramData not set, use C:\ProgramData hardcoded
-		configDir = filepath.Join(systemDrive, "ProgramData", "NimbusBackup")
+		configDir = filepath.Join(systemDrive, "ProgramData", "ProxmoxBackupClient")
 	} else {
 		// Unix-like: use ~/.proxmox-backup-guardian
 		homeDir, err := os.UserHomeDir()
@@ -75,11 +76,11 @@ func getJobHistoryPath() (string, error) {
 	var configDir string
 
 	if programData := os.Getenv("ProgramData"); programData != "" {
-		// Windows: C:\ProgramData\NimbusBackup
-		configDir = filepath.Join(programData, "NimbusBackup")
+		// Windows: C:\ProgramData\ProxmoxBackupClient
+		configDir = filepath.Join(programData, "ProxmoxBackupClient")
 	} else if systemDrive := os.Getenv("SystemDrive"); systemDrive != "" {
 		// Windows fallback: if ProgramData not set, use C:\ProgramData hardcoded
-		configDir = filepath.Join(systemDrive, "ProgramData", "NimbusBackup")
+		configDir = filepath.Join(systemDrive, "ProgramData", "ProxmoxBackupClient")
 	} else {
 		// Unix-like: use ~/.proxmox-backup-guardian
 		homeDir, err := os.UserHomeDir()
@@ -136,7 +137,7 @@ func (a *App) SaveScheduledJob(job ScheduledJob) error {
 	writeDebugLog(fmt.Sprintf("Scheduled job saved: %s (next run: %s)", job.Name, job.NextRun))
 
 	// Note: For automatic execution after reboot, use the MSI installer
-	// which installs NimbusBackup as a Windows Service
+	// which installs Proxmox Backup Client as a Windows Service
 
 	return nil
 }
@@ -720,10 +721,18 @@ func (a *App) executeScheduledJob(job ScheduledJob) {
 		compression = "fastest"
 	}
 
+	// driveLetters carries the physical disks for machine backups (empty for
+	// directory backups); it is persisted on the job so a scheduled run restores
+	// the exact same selection.
+	driveLetters := job.DriveLetters
+	if len(driveLetters) == 0 {
+		driveLetters = []string{}
+	}
+
 	err := a.StartBackup(
 		job.BackupType,
 		job.BackupDirs,
-		[]string{}, // driveLetters - empty for directory backups
+		driveLetters,
 		job.ExcludeList,
 		job.BackupID,
 		job.UseVSS,
@@ -796,4 +805,3 @@ func (a *App) executeScheduledJob(job ScheduledJob) {
 		writeDebugLog(fmt.Sprintf("Warning: Failed to save updated jobs: %v", err))
 	}
 }
-

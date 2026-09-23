@@ -1,0 +1,18 @@
+Package: pbsgo
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Proxmox Backup Client contributors
+Homepage: https://github.com/tizbac/proxmoxbackupclient_go
+Section: admin
+Priority: optional
+Depends: @DEPENDS@
+Description: Backup client for Proxmox Backup Server (CLI + GUI)
+ Go-based backup client for Proxmox Backup Server:
+  - pbsgo: directory and stream backup with deduplication
+  - pbsgo-machine: whole-machine (raw disk) backup, using VSS on
+    Windows and block-level snapshotting on Linux
+  - pbsgo-nbd: mount fidx images as read-only NBD block devices
+  - pbsgo-gui: graphical interface; machine (whole-disk) backup
+    requires root, use the pbsgo-gui-root launcher for that
+ The GUI frontend is embedded in the binary, no Node.js is needed at
+ runtime.

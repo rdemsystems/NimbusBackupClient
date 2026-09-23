@@ -23,6 +23,17 @@ type Config struct {
 	CertFingerprint string `json:"certfingerprint,omitempty"`
 	AuthID          string `json:"authid,omitempty"`
 	Secret          string `json:"secret,omitempty"`
+	// Username/password authentication. Runtime-only here: the source of truth
+	// is the PBSServer entry (which persists both), promoted onto this Config by
+	// EffectivePBS()/ToConfig(). A FRESH PBS ticket is minted from these at the
+	// start of every operation (PBS tickets expire, so we never persist one).
+	Username string `json:"-"`
+	Password string `json:"-"`
+	// PBS session ticket + CSRF for the in-flight operation. Never persisted;
+	// set by App.withAuth (fresh per operation) just before a PBSClient is built,
+	// so it authenticates via the PBSAuthCookie.
+	Ticket    string `json:"-"`
+	CSRFToken string `json:"-"`
 	Datastore       string `json:"datastore,omitempty"`
 	Namespace       string `json:"namespace,omitempty"`
 
@@ -62,6 +73,10 @@ func (c *Config) sanitized() *Config {
 	cp := *c
 	cp.Secret = ""
 	cp.SMTPPassword = ""
+	cp.Username = "" // runtime credentials, never to the frontend
+	cp.Password = ""
+	cp.Ticket = "" // runtime credential, never to the frontend
+	cp.CSRFToken = ""
 	if c.PBSServers != nil {
 		cp.PBSServers = make(map[string]*PBSServer, len(c.PBSServers))
 		for k, v := range c.PBSServers {
@@ -116,7 +131,7 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 func getAPITokenPath() string {
 	dir, err := getConfigDir()
 	if err != nil || dir == "" {
-		return "nimbus-api-token"
+		return "proxmox-client-api-token"
 	}
 	return filepath.Join(dir, "api-token")
 }
@@ -129,12 +144,12 @@ func getConfigDir() (string, error) {
 	var configDir string
 
 	if programData := os.Getenv("ProgramData"); programData != "" {
-		// Windows: C:\ProgramData\NimbusBackup (accessible by both user and LocalSystem)
-		configDir = filepath.Join(programData, "NimbusBackup")
+		// Windows: C:\ProgramData\ProxmoxBackupClient (accessible by both user and LocalSystem)
+		configDir = filepath.Join(programData, "ProxmoxBackupClient")
 	} else if systemDrive := os.Getenv("SystemDrive"); systemDrive != "" {
 		// Windows fallback: if ProgramData not set, use C:\ProgramData hardcoded
 		// This ensures service config is accessible even if env var is missing
-		configDir = filepath.Join(systemDrive, "ProgramData", "NimbusBackup")
+		configDir = filepath.Join(systemDrive, "ProgramData", "ProxmoxBackupClient")
 	} else {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -240,17 +255,17 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("URL invalide: %w", err)
 	}
 
-	// Validate AuthID
-	if c.AuthID == "" {
-		return fmt.Errorf("authentication ID requis")
-	}
-	if err := security.ValidateAuthID(c.AuthID); err != nil {
-		return fmt.Errorf("authentication ID invalide: %w", err)
-	}
-
-	// Validate Secret (non-empty check)
-	if c.Secret == "" {
-		return fmt.Errorf("secret requis")
+	// Auth: an API token (AuthID+Secret), a stored username/password (a fresh
+	// ticket is minted per operation by App.withAuth), or an in-flight ticket.
+	if c.AuthID != "" {
+		if err := security.ValidateAuthID(c.AuthID); err != nil {
+			return fmt.Errorf("authentication ID invalide: %w", err)
+		}
+		if c.Secret == "" {
+			return fmt.Errorf("secret requis")
+		}
+	} else if c.Ticket == "" && (c.Username == "" || c.Password == "") {
+		return fmt.Errorf("authentification requise (API token ou utilisateur/mot de passe)")
 	}
 
 	// Validate Datastore
@@ -305,6 +320,8 @@ func (c *Config) EffectivePBS() *Config {
 	cp.CertFingerprint = pbs.CertFingerprint
 	cp.AuthID = pbs.AuthID
 	cp.Secret = pbs.Secret
+	cp.Username = pbs.Username
+	cp.Password = pbs.Password
 	cp.Datastore = pbs.Datastore
 	cp.Namespace = pbs.Namespace
 	return &cp
@@ -344,6 +361,14 @@ func (c *Config) AddPBSServer(pbs *PBSServer) error {
 		return err
 	}
 
+	// A server authenticates with EITHER a token OR user/password, never both.
+	if pbs.AuthID != "" {
+		pbs.Username = ""
+		pbs.Password = ""
+	} else if pbs.Username != "" && pbs.Password == "" {
+		return fmt.Errorf("mot de passe requis pour la connexion utilisateur/mot de passe")
+	}
+
 	if c.PBSServers == nil {
 		c.PBSServers = make(map[string]*PBSServer)
 	}
@@ -369,8 +394,19 @@ func (c *Config) UpdatePBSServer(pbs *PBSServer) error {
 		return err
 	}
 
-	if _, exists := c.PBSServers[pbs.ID]; !exists {
+	existing, exists := c.PBSServers[pbs.ID]
+	if !exists {
 		return fmt.Errorf("serveur PBS '%s' introuvable", pbs.ID)
+	}
+
+	// A server authenticates with EITHER a token OR user/password, never both.
+	if pbs.AuthID != "" {
+		pbs.Username = ""
+		pbs.Password = ""
+	} else if pbs.Username != "" && pbs.Password == "" && existing.Password != "" {
+		// Empty password on a user/pass edit means "keep the stored one": the
+		// frontend never receives the password, so it cannot echo it back.
+		pbs.Password = existing.Password
 	}
 
 	c.PBSServers[pbs.ID] = pbs

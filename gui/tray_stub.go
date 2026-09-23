@@ -2,6 +2,13 @@
 
 package main
 
+// preventCloseToTray reports whether closing the main window should be
+// intercepted and turned into a hide-to-tray. There is no tray off-Windows, so
+// closing the window must let the app actually quit.
+func (a *App) preventCloseToTray() bool {
+	return false
+}
+
 // SetupSystemTray is not supported on non-Windows platforms yet
 func (a *App) SetupSystemTray() {
 	writeDebugLog("System tray is only supported on Windows")

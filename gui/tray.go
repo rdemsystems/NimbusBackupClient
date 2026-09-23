@@ -17,6 +17,13 @@ var (
 	menuQuit        *systray.MenuItem
 )
 
+// preventCloseToTray reports whether closing the main window should be
+// intercepted and turned into a hide-to-tray. On Windows the tray keeps the
+// app alive, so we swallow the close.
+func (a *App) preventCloseToTray() bool {
+	return true
+}
+
 // SetupSystemTray initializes the system tray icon and menu
 func (a *App) SetupSystemTray() {
 	if trayInitialized {
@@ -37,18 +44,18 @@ func onReady(a *App) func() {
 	return func() {
 		// Set tray icon from embedded PNG data (icon.go)
 		systray.SetIcon(TrayIconData)
-		systray.SetTitle("Nimbus Backup")
-		systray.SetTooltip("Nimbus Backup - Backups planifiés actifs")
+		systray.SetTitle("Proxmox Backup Client")
+		systray.SetTooltip("Proxmox Backup Client - Scheduled backups active")
 
 		// Add menu items
-		menuShow = systray.AddMenuItem("🖥️ Afficher la fenêtre", "Ouvrir l'interface Nimbus Backup")
+		menuShow = systray.AddMenuItem("🖥️ Show window", "Open the Proxmox Backup Client interface")
 		systray.AddSeparator()
 
-		menuStatus := systray.AddMenuItem("📊 État des backups", "Voir l'état des backups planifiés")
+		menuStatus := systray.AddMenuItem("📊 Backup status", "See scheduled backup status")
 		menuStatus.Disable() // For display only
 
 		systray.AddSeparator()
-		menuQuit = systray.AddMenuItem("❌ Quitter", "Fermer Nimbus Backup")
+		menuQuit = systray.AddMenuItem("❌ Quit", "Close Proxmox Backup Client")
 
 		// Handle menu item clicks
 		go func() {
@@ -101,5 +108,5 @@ func (a *App) UpdateTrayTooltip(message string) {
 	if !trayInitialized {
 		return
 	}
-	systray.SetTooltip(fmt.Sprintf("Nimbus Backup - %s", message))
+	systray.SetTooltip(fmt.Sprintf("Proxmox Backup Client - %s", message))
 }

@@ -1,7 +1,7 @@
 # Nimbus Backup - Unified Build System
 # Builds both CLI and GUI applications
 
-.PHONY: all cli gui clean test help install-deps
+.PHONY: all cli gui deb pkgarch pkgfedora clean test help install-deps
 
 # Version from wails.json
 VERSION := $(shell grep '"productVersion"' gui/wails.json | cut -d'"' -f4)
@@ -35,6 +35,9 @@ help:
 	@echo "  cli          - Build all CLI tools"
 	@echo "  gui          - Build GUI application"
 	@echo "  service      - Build Windows Service (NimbusBackupSVC.exe)"
+	@echo "  deb          - Build the Debian package (pbsgo, Linux)"
+	@echo "  pkgarch      - Build the Arch package (pbsgo, on Arch)"
+	@echo "  pkgfedora    - Build the Fedora RPM (docker fedora:44)"
 	@echo "  test         - Run all tests"
 	@echo "  clean        - Remove build artifacts"
 	@echo "  install-deps - Install build dependencies"
@@ -97,6 +100,18 @@ service:
 	@cp gui/build/bin/$(SERVICE_BIN)$(shell go env GOEXE) $(BUILD_DIR)/ || true
 	@echo "✅ Built: gui/build/bin/$(SERVICE_BIN) (for MSI)"
 	@echo "✅ Built: $(BUILD_DIR)/$(SERVICE_BIN)"
+
+# Debian package (Linux)
+deb:
+	@sh packaging/debian/build-deb.sh $(BUILD_DIR)
+
+# Arch Linux package (run on Arch, see packaging/arch/PKGBUILD)
+pkgarch:
+	@cd packaging/arch && makepkg -f -d
+
+# Fedora RPM (built in a fedora:44 Docker container)
+pkgfedora:
+	@sh packaging/fedora/build-rpm.sh $(BUILD_DIR)
 
 # GUI Build
 gui:
