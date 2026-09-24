@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-24
+
+Minor-version milestone: **re-merge with upstream** (tizbac/proxmoxbackupclient_go).
+Upstream merged our GUI and made it brand-neutral ("Proxmox Backup Client");
+Nimbus Backup is now built from that shared code base plus a small fork patch
+series (see `patches/README.md`). Existing installs upgrade in place.
+
+### Changed
+- **Configuration folder merge (upgrade from <= 0.3.0).** The data directory
+  moves from `ProgramData\NimbusBackup` to the shared
+  `ProgramData\ProxmoxBackupClient`. On first start the GUI/service copies
+  `config.json`, `scheduled_jobs.json`, `job_history.json` and `api-token` from
+  the old folder — once, never overwriting a file that already exists in the new
+  folder, retried on the next start if interrupted. The old folder is kept (so a
+  downgrade still works) and marked with `COPIED-TO-ProxmoxBackupClient.txt`.
+  Logs and the restore cache are not copied. The MSI keeps the same UpgradeCode,
+  service name (`NimbusBackup`) and exe name, and "delete configuration" on
+  uninstall now removes the real data folder.
+- Snapshots taken by <= 0.3.0 (legacy `.nimbus_backup_meta.json` sidecar) can
+  still be restored to their original location.
+
+### Fixed
+- `-tags service` build and machine backups via the service (`/backup/machine`
+  was not routed; scheduled machine jobs treated `\\.\PhysicalDriveN` as a folder).
+- Username/password PBS servers could list snapshots but not browse/restore them.
+- `machinebackup` exited 0 on failure (audit V-1).
+- A cancelled multi-folder backup was reported as completed.
+- The CSRF token was logged in clear in request headers.
+- Raw file/device backups could hang after success; a reader error could commit
+  a partial index; multi-disk machine backups got non-numeric backup IDs.
+
+### Known issues
+- **Code signing still pending.** Binaries are still unsigned (expect the usual
+  Windows Defender/SmartScreen false positive). The Azure account needed for
+  signing (Azure Trusted Signing) could not be created yet — we are waiting on
+  Azure. Signed builds are targeted for **0.4.1**, if Azure answers / the account
+  gets created in time.
+
 ## [0.3.0] - 2026-07-02
 
 Minor-version milestone: **unattended deployment**. Nimbus Backup can now be

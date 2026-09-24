@@ -502,7 +502,7 @@ jobs:
           cat > RELEASE_BODY.md << 'EOFNOTES'
           # 🚀 Nimbus Backup ${{ steps.version.outputs.VERSION }}
 
-          > ⚠️ **Windows flagged the download as a virus?** This is a known false positive (unsigned Go/Wails binary) — *not* a virus. See [why this happens and how to verify the download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/) · [🇫🇷 FR](https://nimbus.rdem-systems.com/faux-positif-antivirus/). A code-signing certificate (SignPath Foundation) is on the way.
+          > ⚠️ **Windows flagged the download as a virus?** This is a known false positive (unsigned Go/Wails binary) — *not* a virus. See [why this happens and how to verify the download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/) · [🇫🇷 FR](https://nimbus.rdem-systems.com/faux-positif-antivirus/). Code signing: the Azure (Trusted Signing) account creation is still blocked on Azure's side — signed builds are targeted for 0.4.1.
 
           ## 📝 What's in this release
 

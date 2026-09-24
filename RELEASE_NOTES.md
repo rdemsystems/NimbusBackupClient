@@ -4,13 +4,13 @@
 
 ## 📦 Available builds
 
-### ProxmoxBackupClient.msi (installer — recommended for production)
+### NimbusBackup.msi (installer — recommended for production)
 - ✅ **Windows service**: starts automatically at system boot
 - ✅ **Persistent admin privileges**: the service runs as LocalSystem (VSS guaranteed)
 - ✅ **Scheduled backups**: run automatically, even after a reboot
 - ✅ **Clean uninstall**: full cleanup via Control Panel
 
-### ProxmoxBackupClient.exe (standalone)
+### NimbusBackup.exe (standalone)
 - ✅ **Manual and scheduled backups**: work as long as the app is running
 - ❌ **No persistence across reboots**: no service → prefer the MSI in production
 - 💡 **Use case**: one-off backups or testing
@@ -33,5 +33,7 @@
 - PBS configuration with connection test, **certificate fingerprint pinning (TOFU)** and namespaces
 
 ## 📌 Known issues
+- ⚠️ **Unsigned binaries**: Windows may flag the download (false positive). Creating the Azure account for code signing (Azure Trusted Signing) is blocked on Azure's side; signed builds are targeted for **0.4.1** if Azure answers / the account is created.
+- ℹ️ **Upgrading from <= 0.3.0**: the configuration folder is merged from `ProgramData\NimbusBackup` into `ProgramData\ProxmoxBackupClient` on first start (copied once, nothing overwritten, old folder kept).
 - ⚠️ The **standalone .exe** does not persist across reboots → use the **MSI** in production.
 - ⚠️ The exclusion format is not validated on input.
