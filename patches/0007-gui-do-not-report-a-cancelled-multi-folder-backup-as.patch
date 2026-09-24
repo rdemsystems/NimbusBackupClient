@@ -1,0 +1,44 @@
+From de8645b2947c35c0d549a18e328d434ac9c04870 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:04:54 +0200
+Subject: [PATCH 07/15] gui: do not report a cancelled multi-folder backup as a
+ success
+
+Cancelling between folders only broke out of the loop: with no earlier
+per-folder error the run announced "Backup of N folders completed" and
+returned nil although the remaining folders were skipped. Record the
+cancellation as a per-folder error and downgrade the outcome (failed if
+nothing ran, partial otherwise).
+---
+ gui/backup_inline.go | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/gui/backup_inline.go b/gui/backup_inline.go
+index f864910..35779c9 100644
+--- a/gui/backup_inline.go
++++ b/gui/backup_inline.go
+@@ -608,9 +608,19 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
+ 		baseID = hostname
+ 	}
+ 
+-	for _, dir := range opts.BackupObjects {
++	for i, dir := range opts.BackupObjects {
+ 		if opts.Ctx != nil && opts.Ctx.Err() != nil {
+-			writeBackupLog("Cancellation requested — skipping remaining folders")
++			// A cancelled run must never be reported as a success: the skipped
++			// folders were not backed up. Partial when some folders completed.
++			skipped := len(opts.BackupObjects) - i
++			errMsg := fmt.Sprintf("backup cancelled: %d/%d folder(s) not backed up", skipped, len(opts.BackupObjects))
++			writeBackupLog("Cancellation requested — skipping remaining folders (" + errMsg + ")")
++			perDirErrors = append(perDirErrors, errMsg)
++			if i == 0 {
++				agg.Outcome = OutcomeFailed
++			} else if outcomeRank(agg.Outcome) > outcomeRank(OutcomePartial) {
++				agg.Outcome = OutcomePartial
++			}
+ 			break
+ 		}
+ 		dirOpts := opts
+-- 
+2.47.3
+

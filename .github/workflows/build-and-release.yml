@@ -2,7 +2,9 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main, develop, github-release ]
+    # merge-upstream-*: fork branches re-merging tizbac/master (see
+    # patches/README.md) get the full build + tests; releases stay tag-only.
+    branches: [ main, develop, github-release, 'merge-upstream-*' ]
     tags:
       - 'v*'
   pull_request:
@@ -211,14 +213,13 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Wails
-        # Pinned to v2.12.0 — the exact version @latest resolved to in the
-        # green v0.2.106 build, so we ship identical bytes while keeping a
-        # DETERMINISTIC build toolchain (the CLI orchestrates frontend bundling
-        # + asset embedding before `go build`, so a floating CLI would make
-        # even the .exe non-reproducible). Do NOT pin to the library version in
-        # gui/go.mod (v2.8.0): that CLI tag fails to build under Go 1.25.
-        # Bumping the library to match is a separate, tested task.
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+        # Pinned to the wails library version in gui/go.mod (v2.13.0, bumped by
+        # upstream so the GUI builds on Debian 13 / webkit2gtk-4.1). A floating
+        # CLI would make the build non-reproducible (the CLI orchestrates
+        # frontend bundling + asset embedding before `go build`); a CLI older
+        # than the library prints a version-mismatch warning and may miss
+        # template changes. Bump both together.
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
 
       - name: Install Frontend Dependencies
         working-directory: gui/frontend
@@ -250,6 +251,25 @@ jobs:
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
           echo "VERSION_MSI=$version_msi" >> $env:GITHUB_OUTPUT
           echo "Building version: $version (MSI: $version_msi)"
+
+      # Fork patch: upstream's wails.json carries the neutral "Proxmox Backup
+      # Client" identity. Stamp the Nimbus Backup name/company into it before
+      # the build so the GUI exe is NimbusBackup.exe (ProductBody.wxi installs
+      # $(var.ExeName).exe; gui/brand.go picks the brand from that exe name)
+      # with Nimbus version-info resources. Version is left untouched.
+      - name: Apply Nimbus Backup brand to wails.json
+        shell: pwsh
+        run: |
+          $w = Get-Content gui/wails.json -Raw | ConvertFrom-Json
+          $w.name = "NimbusBackup"
+          $w.outputfilename = "NimbusBackup"
+          $w.author.name = "RDEM Systems"
+          $w.author.email = "contact@rdem-systems.com"
+          $w.info.companyName = "RDEM Systems"
+          $w.info.productName = "Nimbus Backup"
+          $w.info.copyright = "© 2024-2026 RDEM Systems and Proxmox Backup Client GO contributors."
+          $w.info.comments = "Backup client for Proxmox Backup Server"
+          $w | ConvertTo-Json -Depth 10 | Set-Content gui/wails.json -Encoding utf8
 
       - name: Build GUI
         working-directory: gui
@@ -322,8 +342,11 @@ jobs:
         run: |
           # Pass the resolved version to the WiX preprocessor so MSI
           # metadata matches the tag / ldflags version.
-          candle.exe "-dProductVersion=${{ steps.version.outputs.VERSION_MSI }}" Product.wxs -ext WixUIExtension -ext WixUtilExtension
-          light.exe Product.wixobj -ext WixUIExtension -ext WixUtilExtension -out NimbusBackup.msi
+          # Fork patch: build the Nimbus brand entry (NimbusBackup.wxs keeps the
+          # UpgradeCode of every Nimbus MSI shipped so far), not upstream's
+          # default Product.wxs.
+          candle.exe "-dProductVersion=${{ steps.version.outputs.VERSION_MSI }}" NimbusBackup.wxs -ext WixUIExtension -ext WixUtilExtension
+          light.exe NimbusBackup.wixobj -ext WixUIExtension -ext WixUtilExtension -out NimbusBackup.msi
           Copy-Item NimbusBackup.msi ../../dist/
         shell: pwsh
 

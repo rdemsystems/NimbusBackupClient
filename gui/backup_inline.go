@@ -18,7 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cornelk/hashmap"
+	"github.com/alphadose/haxmap"
+	"machinebackuplib"
 	"pbscommon"
 	"retry"
 	"security"
@@ -27,15 +28,19 @@ import (
 
 // BackupOptions contains all parameters for a backup operation
 type BackupOptions struct {
+	Ctx             context.Context // Cancel to request a graceful stop between backup steps
 	BaseURL         string
 	AuthID          string
 	Secret          string
+	Ticket          string // PBS session ticket (u/p login); preferred over AuthID/Secret when set
+	CSRFToken       string
 	Datastore       string
 	Namespace       string
 	CertFingerprint string
-	BackupDirs      []string // Multiple directories or drives to backup
+	BackupObjects      []string // Multiple directories or drives to backup
 	BackupID        string
 	BackupType      string // "host" for directory, "vm" for machine
+	Kind            string // "disk", "directory", or "machine"
 	UseVSS          bool
 	Compression     string   // Compression level: "fastest", "default", "better", "best"
 	ExcludeList     []string // User-configured exclusion patterns applied by the PXAR writer (H-04)
@@ -72,6 +77,50 @@ var (
 	backupLocks      = make(map[string]*sync.Mutex)
 	backupLocksMutex sync.Mutex
 )
+
+// Current in-flight backup cancellation. The GUI's Stop button calls
+// CancelBackup() which cancels this context at a safe point (between
+// directories / between retries), so the running backup aborts gracefully
+// without committing a partial snapshot.
+var (
+	currentBackupCancelMutex sync.Mutex
+	currentBackupCancel      context.CancelFunc
+)
+
+// CancelBackup requests a graceful stop of the currently running backup.
+// It is exported to the GUI and returns false if no backup is running.
+func (a *App) CancelBackup() error {
+	currentBackupCancelMutex.Lock()
+	defer currentBackupCancelMutex.Unlock()
+	if currentBackupCancel != nil {
+		currentBackupCancel()
+		writeDebugLog("CancelBackup: cancellation requested for running backup")
+	}
+	writeDebugLog("CancelBackup: no backup running (or already cancelled)")
+	return nil
+}
+
+// newBackupContext returns a fresh cancellable context and registers its
+// cancel function as the current in-flight backup. Callers should not defer
+// Cancel() (that would also cancel the shared token); instead call
+// doneBackupContext() when the run finishes.
+func newBackupContext() (context.Context, context.CancelFunc) {
+	currentBackupCancelMutex.Lock()
+	defer currentBackupCancelMutex.Unlock()
+	if currentBackupCancel != nil {
+		currentBackupCancel() // cancel any previous run before replacing
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	currentBackupCancel = cancel
+	return ctx, cancel
+}
+
+// doneBackupContext clears the shared cancellation token when a run finishes.
+func doneBackupContext() {
+	currentBackupCancelMutex.Lock()
+	defer currentBackupCancelMutex.Unlock()
+	currentBackupCancel = nil
+}
 
 // getBackupLock returns a mutex for the given backup destination
 func getBackupLock(baseURL, datastore string) *sync.Mutex {
@@ -164,7 +213,7 @@ type ChunkState struct {
 	newchunk            *atomic.Uint64
 	reusechunk          *atomic.Uint64
 	failedchunk         *atomic.Uint64     // Track failed chunk uploads
-	knownChunks         *hashmap.Map[string, bool]
+	knownChunks         *haxmap.Map[string, bool]
 	onProgress          func(float64, string)
 	onStats             func(*BackupProgressStats) // Structured live stats for the GUI (nil for the catalog stream)
 	currentDir          string                     // Directory currently being archived, for the stats payload
@@ -175,7 +224,7 @@ type ChunkState struct {
 	errorsMutex         sync.Mutex         // Protect uploadErrors slice
 }
 
-func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, failedchunk *atomic.Uint64, knownChunks *hashmap.Map[string, bool], onProgress func(float64, string), totalSize *atomic.Uint64, onStats func(*BackupProgressStats), currentDir string) {
+func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, failedchunk *atomic.Uint64, knownChunks *haxmap.Map[string, bool], onProgress func(float64, string), totalSize *atomic.Uint64, onStats func(*BackupProgressStats), currentDir string) {
 	c.assignments = make([]string, 0)
 	c.assignmentsOffset = make([]uint64, 0)
 	c.pos = 0
@@ -459,6 +508,15 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 	runLogger := StartBackupRunLog(runLogID)
 	defer EndBackupRunLog(runLogger)
 
+	// Wire a shared, user-cancellable context for this run (Stop button).
+	ctx, cancel := newBackupContext()
+	defer doneBackupContext()
+	// Callers may supply their own context; otherwise use the shared one.
+	if opts.Ctx == nil {
+		opts.Ctx = ctx
+	}
+	_ = cancel
+
 	// CRITICAL: Panic recovery to prevent silent goroutine death (scheduler launches backups in goroutines)
 	defer func() {
 		if r := recover(); r != nil {
@@ -484,17 +542,16 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 	// prod report showed only "Validating backup options" then nothing because an
 	// empty multi-PBS resolution failed here silently.
 	writeBackupLog(fmt.Sprintf("[DEBUG] Validating backup options: target=%q datastore=%q ns=%q authid=%q secret=%v dirs=%d backupID=%q",
-		opts.BaseURL, opts.Datastore, opts.Namespace, opts.AuthID, opts.Secret != "", len(opts.BackupDirs), opts.BackupID))
-	if opts.BaseURL == "" || opts.AuthID == "" || opts.Secret == "" {
+		opts.BaseURL, opts.Datastore, opts.Namespace, opts.AuthID, opts.Secret != "", len(opts.BackupObjects), opts.BackupID))
+	hasToken := opts.AuthID != "" && opts.Secret != ""
+	hasTicket := opts.Ticket != ""
+	if opts.BaseURL == "" || (!hasToken && !hasTicket) {
 		var missing []string
 		if opts.BaseURL == "" {
 			missing = append(missing, "BaseURL")
 		}
-		if opts.AuthID == "" {
-			missing = append(missing, "AuthID")
-		}
-		if opts.Secret == "" {
-			missing = append(missing, "Secret")
+		if !hasToken && !hasTicket {
+			missing = append(missing, "API token (AuthID+Secret) or session ticket")
 		}
 		errMsg := fmt.Sprintf("PBS connection parameters required (missing: %s) — check the selected/default PBS server in the config",
 			strings.Join(missing, ", "))
@@ -503,7 +560,7 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 	}
 	writeBackupLog("[DEBUG] Options validated")
 
-	if len(opts.BackupDirs) == 0 {
+	if len(opts.BackupObjects) == 0 {
 		return fmt.Errorf("at least one backup directory or drive required")
 	}
 
@@ -528,7 +585,9 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 	// first), landing as separate snapshots in a single group — which makes prune
 	// keep/drop the wrong folders. A single selected directory keeps the caller's
 	// backup-id (which may have been set explicitly, e.g. by a scheduled job).
-	if len(opts.BackupDirs) <= 1 {
+	// Machine backups are never split: all selected disks belong to ONE "vm"
+	// snapshot whose backup-id is the numeric VM ID (see machinebackuplib).
+	if len(opts.BackupObjects) <= 1 || opts.Kind == "machine" {
 		return runBackupInlineInternal(opts)
 	}
 
@@ -551,9 +610,23 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 		baseID = hostname
 	}
 
-	for _, dir := range opts.BackupDirs {
+	for i, dir := range opts.BackupObjects {
+		if opts.Ctx != nil && opts.Ctx.Err() != nil {
+			// A cancelled run must never be reported as a success: the skipped
+			// folders were not backed up. Partial when some folders completed.
+			skipped := len(opts.BackupObjects) - i
+			errMsg := fmt.Sprintf("backup cancelled: %d/%d folder(s) not backed up", skipped, len(opts.BackupObjects))
+			writeBackupLog("Cancellation requested — skipping remaining folders (" + errMsg + ")")
+			perDirErrors = append(perDirErrors, errMsg)
+			if i == 0 {
+				agg.Outcome = OutcomeFailed
+			} else if outcomeRank(agg.Outcome) > outcomeRank(OutcomePartial) {
+				agg.Outcome = OutcomePartial
+			}
+			break
+		}
 		dirOpts := opts
-		dirOpts.BackupDirs = []string{dir}
+		dirOpts.BackupObjects = []string{dir}
 		dirOpts.BackupID = GenerateBackupID(baseID, dir)
 		dirOpts.OnComplete = nil // suppress per-folder terminal callback; aggregated below
 		var dirStatus *BackupStatus
@@ -577,9 +650,9 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 
 	agg.DurationSec = time.Since(aggStart).Seconds()
 	if len(perDirErrors) > 0 {
-		agg.Message = fmt.Sprintf("%d/%d dossiers en échec:\n%s", len(perDirErrors), len(opts.BackupDirs), strings.Join(perDirErrors, "\n"))
+		agg.Message = fmt.Sprintf("%d/%d dossiers en échec:\n%s", len(perDirErrors), len(opts.BackupObjects), strings.Join(perDirErrors, "\n"))
 	} else {
-		agg.Message = fmt.Sprintf("Backup de %d dossiers terminé (%d new, %d reused chunks)", len(opts.BackupDirs), agg.NewChunks, agg.ReusedChunks)
+		agg.Message = fmt.Sprintf("Backup de %d dossiers terminé (%d new, %d reused chunks)", len(opts.BackupObjects), agg.NewChunks, agg.ReusedChunks)
 	}
 
 	if opts.OnComplete != nil {
@@ -609,6 +682,14 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		}
 	}()
 
+	// Handle machine backup type (new Kind field)
+	if opts.Kind == "machine" {
+		return runMachineBackupInline(opts)
+	}
+	
+	// Default to directory backup for "disk" or "directory" kinds
+	// (existing logic handles these cases)
+
 	startTime := time.Now()
 
 	// Acquire backup lock for this destination to prevent concurrent backups
@@ -636,8 +717,8 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		}
 
 		// Generate backup-id from first directory path: hostname_DRIVE_PATH
-		if len(opts.BackupDirs) > 0 {
-			opts.BackupID = GenerateBackupID(hostname, opts.BackupDirs[0])
+		if len(opts.BackupObjects) > 0 {
+			opts.BackupID = GenerateBackupID(hostname, opts.BackupObjects[0])
 		} else {
 			opts.BackupID = hostname
 		}
@@ -658,9 +739,9 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	}
 
 	// Check if all backup directories exist
-	writeBackupLog(fmt.Sprintf("[DEBUG] Checking %d backup directories exist", len(opts.BackupDirs)))
-	for idx, dir := range opts.BackupDirs {
-		writeBackupLog(fmt.Sprintf("[DEBUG] Checking directory %d/%d: %s", idx+1, len(opts.BackupDirs), dir))
+	writeBackupLog(fmt.Sprintf("[DEBUG] Checking %d backup directories exist", len(opts.BackupObjects)))
+	for idx, dir := range opts.BackupObjects {
+		writeBackupLog(fmt.Sprintf("[DEBUG] Checking directory %d/%d: %s", idx+1, len(opts.BackupObjects), dir))
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			errMsg := fmt.Sprintf("Backup directory does not exist: %s", dir)
 			writeBackupLog(errMsg)
@@ -703,6 +784,8 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		CertFingerPrint:  opts.CertFingerprint,
 		AuthID:           opts.AuthID,
 		Secret:           opts.Secret,
+		Ticket:           opts.Ticket,
+		CSRFToken:        opts.CSRFToken,
 		Datastore:        opts.Datastore,
 		Namespace:        opts.Namespace,
 		Insecure:         opts.CertFingerprint != "",
@@ -736,8 +819,15 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	const maxDirAttempts = 2
 	const sessionLostRetryWait = 25 * time.Minute
 
-	for idx, dir := range opts.BackupDirs {
-		writeBackupLog(fmt.Sprintf("Starting backup of directory %d/%d: %s", idx+1, len(opts.BackupDirs), dir))
+	for idx, dir := range opts.BackupObjects {
+		if opts.Ctx != nil && opts.Ctx.Err() != nil {
+			writeBackupLog(fmt.Sprintf("Cancellation requested — stopping before backup of %s", dir))
+			if opts.OnComplete != nil {
+				opts.OnComplete(false, "Backup annulé par l'utilisateur")
+			}
+			return fmt.Errorf("backup cancelled by user")
+		}
+		writeBackupLog(fmt.Sprintf("Starting backup of directory %d/%d: %s", idx+1, len(opts.BackupObjects), dir))
 
 		// Each directory becomes its own PBS session (Connect → upload → Finish).
 		// On session-lost we wait for PBS to release the group lock, then retry once.
@@ -766,6 +856,13 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 
 				waitUntil := time.Now().Add(sessionLostRetryWait)
 				for {
+					if opts.Ctx != nil && opts.Ctx.Err() != nil {
+						writeBackupLog("Cancellation requested during session-lost wait — aborting")
+						if opts.OnComplete != nil {
+							opts.OnComplete(false, "Backup annulé par l'utilisateur")
+						}
+						return fmt.Errorf("backup cancelled by user")
+					}
 					remaining := time.Until(waitUntil)
 					if remaining <= 0 {
 						break
@@ -812,7 +909,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 			dirResults = append(dirResults, DirResult{Path: dir, OK: false, Error: finishErr.Error()})
 			continue
 		}
-		writeBackupLog(fmt.Sprintf("Directory %d/%d finalized: %s", idx+1, len(opts.BackupDirs), dir))
+		writeBackupLog(fmt.Sprintf("Directory %d/%d finalized: %s", idx+1, len(opts.BackupObjects), dir))
 		// Accumulate the real archived byte count so TotalBytes / "X MB backed up"
 		// and the [RESULT] support line are no longer always zero. [B-3]
 		totalSize.Add(dirBytes)
@@ -822,7 +919,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 
 	// If NO directory was backed up successfully, fail the whole backup
 	if successfulDirs == 0 {
-		errMsg := fmt.Sprintf("All %d directories failed:\n%s", len(opts.BackupDirs), strings.Join(dirErrors, "\n"))
+		errMsg := fmt.Sprintf("All %d directories failed:\n%s", len(opts.BackupObjects), strings.Join(dirErrors, "\n"))
 		writeBackupLog(errMsg)
 		status := &BackupStatus{
 			Outcome:          OutcomeFailed,
@@ -858,8 +955,8 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	switch {
 	case partial:
 		completionMsg = fmt.Sprintf("⚠️  Backup partiel en %s: %d/%d dossiers OK, %.1f MB (%d new, %d reused chunks)\nErreurs:\n%s",
-			formatDuration(duration), successfulDirs, len(opts.BackupDirs), totalSizeMB, newchunk.Load(), reusechunk.Load(), strings.Join(dirErrors, "\n"))
-		progressMsg = fmt.Sprintf("Backup partiel : %d/%d dossiers OK", successfulDirs, len(opts.BackupDirs))
+			formatDuration(duration), successfulDirs, len(opts.BackupObjects), totalSizeMB, newchunk.Load(), reusechunk.Load(), strings.Join(dirErrors, "\n"))
+		progressMsg = fmt.Sprintf("Backup partiel : %d/%d dossiers OK", successfulDirs, len(opts.BackupObjects))
 	case failed > 0:
 		completionMsg = fmt.Sprintf("⚠️  Backup completed with errors in %s: %.1f MB backed up (%d new, %d reused, %d FAILED chunks)",
 			formatDuration(duration), totalSizeMB, newchunk.Load(), reusechunk.Load(), failed)
@@ -931,7 +1028,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	// One machine-greppable result line for support (pairs with the start-of-run
 	// target log): outcome label + the structured counters behind completionMsg.
 	writeBackupLog(fmt.Sprintf("[RESULT] outcome=%s dirs_ok=%d/%d new=%d reused=%d failed=%d read_errors=%d excluded=%d bytes=%d duration=%s",
-		status.Outcome, successfulDirs, len(opts.BackupDirs), status.NewChunks, status.ReusedChunks,
+		status.Outcome, successfulDirs, len(opts.BackupObjects), status.NewChunks, status.ReusedChunks,
 		status.FailedChunks, len(status.SkippedReadError), len(status.ExcludedByPolicy), status.TotalBytes, duration))
 
 	// Additive (choice A): OnComplete keeps its (success, message) contract for
@@ -952,13 +1049,82 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	return nil
 }
 
+// runMachineBackupInline handles machine backup using machinebackuplib
+func runMachineBackupInline(opts BackupOptions) error {
+	startTime := time.Now()
+	
+	// Create machine backup config from opts
+	cfg := &machinebackuplib.Config{
+		BaseURL:         opts.BaseURL,
+		CertFingerprint: opts.CertFingerprint,
+		AuthID:          opts.AuthID,
+		Secret:          opts.Secret,
+		Ticket:          opts.Ticket,
+		CSRFToken:       opts.CSRFToken,
+		Datastore:       opts.Datastore,
+		Namespace:       opts.Namespace,
+		BackupID:        opts.BackupID,
+		BackupType:      opts.BackupType,
+		BackupDevices:   opts.BackupObjects,
+	}
+
+	// Progress callback wrapper. Returning true (user pressed Stop, which
+	// cancels opts.Ctx) makes the backup abort without committing the index.
+	progress := func(pct float64, msg string) bool {
+		writeBackupLog(fmt.Sprintf("Backup progress: %.1f%% - %s", pct*100, msg))
+		if opts.OnProgress != nil {
+			opts.OnProgress(pct, msg)
+		}
+		return opts.Ctx != nil && opts.Ctx.Err() != nil
+	}
+	
+	// Perform machine backup
+	_, err := machinebackuplib.Backup(cfg, progress)
+	if err != nil {
+		// Handle error case
+		errMsg := fmt.Sprintf("Machine backup failed: %v", err)
+		writeBackupLog(errMsg)
+		
+		if opts.OnComplete != nil {
+			opts.OnComplete(false, errMsg)
+		}
+		if opts.OnResult != nil {
+			opts.OnResult(&BackupStatus{
+				Outcome:     OutcomeFailed,
+				BackupID:    opts.BackupID,
+				DurationSec: time.Since(startTime).Seconds(),
+				Message:     errMsg,
+			})
+		}
+		return fmt.Errorf("%s", errMsg)
+	}
+	
+	// Success case
+	duration := time.Since(startTime)
+	completionMsg := fmt.Sprintf("Machine backup completed in %s", formatDuration(duration))
+	
+	if opts.OnComplete != nil {
+		opts.OnComplete(true, completionMsg)
+	}
+	if opts.OnResult != nil {
+		opts.OnResult(&BackupStatus{
+			Outcome:     OutcomeVerifiedSuccess,
+			BackupID:    opts.BackupID,
+			DurationSec: duration.Seconds(),
+			Message:     completionMsg,
+		})
+	}
+	
+	return nil
+}
+
 func backupDirectory(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, usevss bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) (uint64, error) {
 	writeBackupLog(fmt.Sprintf("Starting backup of %s", backupdir))
 	originalPath := backupdir
 
 	if usevss {
 		var bytesArchived uint64
-		err := snapshot.CreateVSSSnapshot([]string{backupdir}, func(snaps map[string]snapshot.SnapShot) error {
+		err := snapshot.CreateVSSSnapshot([]string{backupdir}, true, func(snaps map[string]snapshot.SnapShot) error {
 			for _, snap := range snaps {
 				backupdir = snap.FullPath
 				break
@@ -988,7 +1154,7 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 	}()
 
 	client.Connect(false, "host")
-	knownChunks := hashmap.New[string, bool]()
+	knownChunks := haxmap.New[string, bool]()
 
 	// Start background scan to calculate total size (drives the progress %). This
 	// is non-blocking — the backup streams in parallel — but bound it with the same

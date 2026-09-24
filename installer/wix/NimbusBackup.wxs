@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ===================================================================== -->
+<!-- Nimbus Backup (RDEM Systems fork) brand installer entry.              -->
+<!-- Built by the fork's CI into NimbusBackup.msi from NimbusBackup.exe +    -->
+<!-- NimbusBackupSVC.exe; the GUI auto-brands as "nimbusbackup" at runtime   -->
+<!-- (gui/brand.go). Keep these URLs in sync with the brand catalog.         -->
+<!-- ===================================================================== -->
+<?define ProductName = "Nimbus Backup" ?>
+<?define ExeName = "NimbusBackup" ?>
+<?define ServiceExeName = "NimbusBackupSVC" ?>
+<?define VendorKey = "RDEMSystems" ?> <!-- same HKCU key as the <= 0.3.0 MSIs -->
+<?define Manufacturer = "RDEM Systems" ?>
+<!-- Nimbus Backup fork: MUST stay the UpgradeCode every Nimbus MSI shipped
+     with (<= 0.3.0 used Product.wxs with this code), otherwise the new MSI
+     installs next to the old one instead of upgrading it. -->
+<?define UpgradeCode = "12345678-1234-1234-1234-123456789012" ?>
+<?define ArpUrlAbout = "https://nimbus.rdem-systems.com/" ?>
+<?define ArpHelpLink = "https://github.com/rdemsystems/NimbusBackupClient#readme" ?>
+<?define ArpUrlUpdateInfo = "https://github.com/rdemsystems/NimbusBackupClient/releases" ?>
+<?define ArpContact = "contact@rdem-systems.com" ?>
+
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?ifndef ProductVersion ?>
+    <?define ProductVersion = "0.2.72" ?>
+  <?endif ?>
+
+  <?include ProductBody.wxi ?>
+</Wix>

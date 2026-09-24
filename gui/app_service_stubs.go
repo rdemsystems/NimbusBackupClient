@@ -80,19 +80,24 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
 	// BaseURL/AuthID/Secret/Datastore fields empty, so building options from those
 	// directly yielded "PBS connection parameters required" in service mode (the GUI
 	// standalone path already used EffectivePBS — audit M-01/M-04, reported in prod).
-	pbsCfg := a.config.EffectivePBS()
+	pbsCfg, err := a.withAuth(a.config.EffectivePBS())
+	if err != nil {
+		return err
+	}
 
 	// Prepare backup options
 	opts := BackupOptions{
 		BaseURL:         pbsCfg.BaseURL,
 		AuthID:          pbsCfg.AuthID,
 		Secret:          pbsCfg.Secret,
+		Ticket:          pbsCfg.Ticket,
+		CSRFToken:       pbsCfg.CSRFToken,
 		Datastore:       pbsCfg.Datastore,
 		Namespace:       pbsCfg.Namespace,
 		CertFingerprint: pbsCfg.CertFingerprint,
-		BackupDirs:      allDirs,
+		BackupObjects:   allDirs,
 		BackupID:        backupID,
-		BackupType:      backupType,
+		BackupType:      "host",
 		UseVSS:          useVSS,
 		Compression:     compression,
 		ExcludeList:     excludeList,
@@ -110,7 +115,23 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
 		},
 	}
 
+	// Machine backups take the block-device path (same as the GUI's
+	// startBackupDirect / startMachineBackupDirect): Kind selects it in
+	// RunBackupInline and PBS files the snapshot under the "vm" type.
+	if backupType == "machine" {
+		opts.Kind = "machine"
+		opts.BackupType = "vm"
+		opts.ExcludeList = nil
+	}
+
 	// Execute backup using inline implementation
 	writeDebugLog("[Service] Executing backup via RunBackupInline")
 	return RunBackupInline(opts)
+}
+
+// StartMachineBackup is required by api.BackupHandler (the GUI posts machine
+// backups to /backup/machine). The service runs them through StartBackup, the
+// same path scheduled machine jobs use.
+func (a *App) StartMachineBackup(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error {
+	return a.StartBackup("machine", nil, backupDevices, nil, backupID, useVSS, compression)
 }

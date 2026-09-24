@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cornelk/hashmap"
+	"github.com/alphadose/haxmap"
 	"github.com/tawesoft/golib/v2/dialog"
 )
 
@@ -39,11 +39,11 @@ type ChunkState struct {
 	C                  pbscommon.Chunker
 	newchunk           *atomic.Uint64
 	reusechunk         *atomic.Uint64
-	knownChunks        *hashmap.Map[string, bool]
+	knownChunks        *haxmap.Map[string, bool]
 }
 
 
-func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, knownChunks *hashmap.Map[string, bool]) {
+func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, knownChunks *haxmap.Map[string, bool]) {
 	c.assignments = make([]string, 0)
 	c.assignments_offset = make([]uint64, 0)
 	c.pos = 0
@@ -76,7 +76,7 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 			bindigest := h.Sum(nil)
 			shahash := hex.EncodeToString(bindigest)
 
-			if _, ok := c.knownChunks.GetOrInsert(shahash, true); !ok {
+			if _, ok := c.knownChunks.GetOrSet(shahash, true); !ok {
 				fmt.Printf("New chunk[%s] %d bytes\n", shahash, len(c.current_chunk))
 				c.newchunk.Add(1)
 
@@ -129,7 +129,7 @@ func (c *ChunkState) Eof(client *pbscommon.PBSClient) error {
 			return fmt.Errorf("failed to write final chunk digest: %w", err)
 		}
 
-		if _, ok := c.knownChunks.GetOrInsert(shahash, true); !ok {
+			if _, ok := c.knownChunks.GetOrSet(shahash, true); !ok {
 			fmt.Printf("New chunk[%s] %d bytes\n", shahash, len(c.current_chunk))
 			if err := client.UploadDynamicCompressedChunk(c.wrid, shahash, c.current_chunk); err != nil {
 				return fmt.Errorf("failed to upload final chunk %s: %w", shahash, err)
@@ -179,8 +179,26 @@ func main() {
 			fmt.Println("All options are mandatory")
 
 			flag.PrintDefaults()
+			os.Exit(1)
 		}
+	}
+
+	// Without -certfingerprint, fetch the fingerprint the server presents and
+	// ask the user to confirm it before pinning.
+	fingerprint, err := clientcommon.ConfirmFingerprint(cfg.BaseURL, cfg.CertFingerprint)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
+	}
+	cfg.CertFingerprint = fingerprint
+
+	// Ticket login without -pbspassword: ask for it on the console.
+	if cfg.PBSUsername != "" && cfg.PBSPassword == "" {
+		cfg.PBSPassword, err = clientcommon.PromptPassword(fmt.Sprintf("Password for %s: ", cfg.PBSUsername))
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	L := clientcommon.Locking{}
@@ -200,12 +218,20 @@ func main() {
 		CertFingerPrint: cfg.CertFingerprint, //"ea:7d:06:f9:87:73:a4:72:d0:e8:05:a4:b3:3d:95:d7:0a:26:dd:6d:5c:ca:e6:99:83:e4:11:3b:5f:10:f4:4b",
 		AuthID:          cfg.AuthID,
 		Secret:          cfg.Secret,
+		Username:        cfg.PBSUsername,
+		Password:        cfg.PBSPassword,
 		Datastore:       cfg.Datastore,
 		Namespace:       cfg.Namespace,
 		Insecure:        insecure,
 		Manifest: pbscommon.BackupManifest{
 			BackupID: cfg.BackupID,
 		},
+	}
+	if client.Username != "" {
+		if err := client.ObtainTicket(); err != nil {
+			fmt.Printf("Error: ticket login failed: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -306,7 +332,7 @@ func main() {
 }
 
 func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, filename string, stream io.Reader) error {
-	knownChunks := hashmap.New[string, bool]()
+	knownChunks := haxmap.New[string, bool]()
 	client.Connect(false, "host")
 	previousDidx, err := client.DownloadPreviousToBytes(filename)
 	if err != nil {
@@ -368,7 +394,7 @@ func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uin
 
 func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string) ([]string, error) {
 	client.Connect(false, "host")
-	knownChunks := hashmap.New[string, bool]()
+	knownChunks := haxmap.New[string, bool]()
 
 	archive := &pbscommon.PXARArchive{}
 	archive.ArchiveName = "backup.pxar.didx"
@@ -474,7 +500,7 @@ func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, px
 	var err error
 	var readErrors []string
 	if usevss {
-		err = snapshot.CreateVSSSnapshot(([]string{backupdir}), func(snaps map[string]snapshot.SnapShot) error {
+		err = snapshot.CreateVSSSnapshot(([]string{backupdir}), true, func(snaps map[string]snapshot.SnapShot) error {
 			// Get first snapshot from map (Go 1.22 compatible)
 			for _, snap := range snaps {
 				backupdir = snap.FullPath

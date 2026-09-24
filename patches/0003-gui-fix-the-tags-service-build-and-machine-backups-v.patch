@@ -1,0 +1,107 @@
+From 68d860449adb45a2c5061d18955733f19f62b117 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:03:32 +0200
+Subject: [PATCH 03/15] gui: fix the -tags service build and machine backups
+ via the service
+
+- app_service_stubs.go still set the removed BackupOptions.BackupDirs
+  (now BackupObjects), and the service App lacked StartMachineBackup,
+  which api.BackupHandler now requires: `go build -tags service` failed.
+- The GUI posts machine backups to /backup/machine, which the API server
+  never registered (404). Route it to handleBackup with the type forced
+  to "machine".
+- Machine backups started through StartBackup (the path scheduled machine
+  jobs take, in the GUI and in the service) never set Kind="machine", so
+  RunBackupInline walked \\.\PhysicalDriveN as a directory. Set Kind and
+  the "vm" PBS type on both paths.
+---
+ gui/api/server.go        |  7 +++++++
+ gui/app_service_stubs.go | 20 ++++++++++++++++++--
+ gui/main.go              |  6 +++++-
+ 3 files changed, 30 insertions(+), 3 deletions(-)
+
+diff --git a/gui/api/server.go b/gui/api/server.go
+index f1b2f56..36a76db 100644
+--- a/gui/api/server.go
++++ b/gui/api/server.go
+@@ -62,6 +62,7 @@ func NewServer(addr string, handler BackupHandler, token, version string) *Serve
+ func (s *Server) setupRoutes() {
+ 	s.mux.HandleFunc("/status", s.handleStatus)
+ 	s.mux.HandleFunc("/backup", s.handleBackup)
++	s.mux.HandleFunc("/backup/machine", s.handleBackup) // Client.StartMachineBackup
+ 	s.mux.HandleFunc("/backup/status/", s.handleBackupStatus)
+ 	s.mux.HandleFunc("/jobs", s.handleJobs)
+ 	s.mux.HandleFunc("/jobs/create", s.handleJobCreate)
+@@ -115,6 +116,12 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
+ 		return
+ 	}
+ 
++	// /backup/machine carries physical devices in DriveLetters; force the type so
++	// the handler runs a block-device backup whatever the GUI put in backup_type.
++	if r.URL.Path == "/backup/machine" {
++		req.BackupType = "machine"
++	}
++
+ 	// Validate request
+ 	if req.BackupID == "" {
+ 		s.writeError(w, "backup_id is required", http.StatusBadRequest)
+diff --git a/gui/app_service_stubs.go b/gui/app_service_stubs.go
+index dc19dfd..a4f557f 100644
+--- a/gui/app_service_stubs.go
++++ b/gui/app_service_stubs.go
+@@ -95,9 +95,9 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
+ 		Datastore:       pbsCfg.Datastore,
+ 		Namespace:       pbsCfg.Namespace,
+ 		CertFingerprint: pbsCfg.CertFingerprint,
+-		BackupDirs:      allDirs,
++		BackupObjects:   allDirs,
+ 		BackupID:        backupID,
+-		BackupType:      backupType,
++		BackupType:      "host",
+ 		UseVSS:          useVSS,
+ 		Compression:     compression,
+ 		ExcludeList:     excludeList,
+@@ -115,7 +115,23 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
+ 		},
+ 	}
+ 
++	// Machine backups take the block-device path (same as the GUI's
++	// startBackupDirect / startMachineBackupDirect): Kind selects it in
++	// RunBackupInline and PBS files the snapshot under the "vm" type.
++	if backupType == "machine" {
++		opts.Kind = "machine"
++		opts.BackupType = "vm"
++		opts.ExcludeList = nil
++	}
++
+ 	// Execute backup using inline implementation
+ 	writeDebugLog("[Service] Executing backup via RunBackupInline")
+ 	return RunBackupInline(opts)
+ }
++
++// StartMachineBackup is required by api.BackupHandler (the GUI posts machine
++// backups to /backup/machine). The service runs them through StartBackup, the
++// same path scheduled machine jobs use.
++func (a *App) StartMachineBackup(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error {
++	return a.StartBackup("machine", nil, backupDevices, nil, backupID, useVSS, compression)
++}
+diff --git a/gui/main.go b/gui/main.go
+index 38b4d16..08811a4 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -1027,7 +1027,11 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
+ 	go func() {
+ 		var err error
+ 		if backupType == "machine" {
+-			// For machine backups, we need to set the backup type to "vm" for the inline backup function
++			// For machine backups, we need to set the backup type to "vm" for the inline backup function.
++			// Kind routes RunBackupInline to the block-device path; without it the
++			// devices (e.g. \\.\PhysicalDrive0) were walked as directories — this
++			// is the path scheduled machine jobs take (executeScheduledJob → StartBackup).
++			opts.Kind = "machine"
+ 			opts.BackupType = "vm"
+ 			err = RunBackupInline(opts)
+ 		} else {
+-- 
+2.47.3
+

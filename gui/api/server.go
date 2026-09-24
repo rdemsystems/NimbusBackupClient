@@ -37,10 +37,11 @@ type BackupHandler interface {
 	UpdateScheduledJobFromMap(job map[string]interface{}) error
 	DeleteScheduledJobFromMap(jobID string) error
 	PinServerFingerprint(id, fingerprint string) error
+	StartMachineBackup(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error
 }
 
 // NewServer creates a new API server. token is the shared local-auth secret that
-// every request must present in the X-Nimbus-Token header (H-01).
+// every request must present in the X-Proxmox-Client-Token header (H-01).
 func NewServer(addr string, handler BackupHandler, token, version string) *Server {
 	if version == "" {
 		version = "dev"
@@ -61,6 +62,7 @@ func NewServer(addr string, handler BackupHandler, token, version string) *Serve
 func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/status", s.handleStatus)
 	s.mux.HandleFunc("/backup", s.handleBackup)
+	s.mux.HandleFunc("/backup/machine", s.handleBackup) // Client.StartMachineBackup
 	s.mux.HandleFunc("/backup/status/", s.handleBackupStatus)
 	s.mux.HandleFunc("/jobs", s.handleJobs)
 	s.mux.HandleFunc("/jobs/create", s.handleJobCreate)
@@ -112,6 +114,12 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeError(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
 		return
+	}
+
+	// /backup/machine carries physical devices in DriveLetters; force the type so
+	// the handler runs a block-device backup whatever the GUI put in backup_type.
+	if r.URL.Path == "/backup/machine" {
+		req.BackupType = "machine"
 	}
 
 	// Validate request

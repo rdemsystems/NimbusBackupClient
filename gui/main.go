@@ -32,9 +32,8 @@ import (
 var assets embed.FS
 
 const (
-	appName = "Nimbus Backup"
+	appName = "Proxmox Backup Client"
 )
-
 
 var (
 	crashReportPath string
@@ -111,13 +110,13 @@ func main() {
 
 	// Create application options
 	appOptions := &options.App{
-		Title:     fmt.Sprintf("%s v%s", appName, appVersion),
-		Width:     1000,
-		Height:    700,
-		MaxWidth:  1400, // Prevent window from being too large
-		MaxHeight: 900,  // Prevent title bar from going off-screen
-		MinWidth:  400,  // Allow very small windows for low-res screens
-		MinHeight: 300,  // Allow very small windows for low-res screens
+		Title:     fmt.Sprintf("%s v%s", BrandFromExecutable().Title, appVersion),
+		Width:     1200,
+		Height:    840,
+		MaxWidth:  1680, // Prevent window from being too large
+		MaxHeight: 1008, // Prevent title bar from going off-screen
+		MinWidth:  480,  // Allow very small windows for low-res screens
+		MinHeight: 360,  // Allow very small windows for low-res screens
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
@@ -134,7 +133,7 @@ func main() {
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 			DisableWindowIcon:    false,
-			WebviewUserDataPath:  filepath.Join(os.Getenv("APPDATA"), "NimbusBackup"),
+			WebviewUserDataPath:  filepath.Join(os.Getenv("APPDATA"), "ProxmoxBackupClient"),
 		},
 	}
 
@@ -161,11 +160,10 @@ func main() {
 	writeDebugLog("Application shutdown normally")
 }
 
-
 func writeCrashReport(message string) {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 
-	crashContent := fmt.Sprintf(`=== NIMBUS BACKUP CRASH REPORT ===
+	crashContent := fmt.Sprintf(`=== PROXMOX BACKUP CLIENT CRASH REPORT ===
 Time: %s
 Version: %s
 
@@ -175,8 +173,8 @@ Version: %s
 Service Log: %s
 Backup Log: %s
 
-Please report this issue to RDEM Systems:
-- Website: https://nimbus.rdem-systems.com
+Please report this issue to the Proxmox Backup Client project:
+- Register the issue at https://github.com/tizbac/proxmoxbackupclient_go/issues
 - Include this crash_report.txt file
 `, timestamp, appVersion, message, GetServiceLogPath(), GetBackupLogPath())
 
@@ -188,7 +186,6 @@ Please report this issue to RDEM Systems:
 		fmt.Fprintf(os.Stderr, "Crash report written to: %s\n", crashReportPath)
 	}
 }
-
 
 // SetProgressCallbacks sets custom progress callbacks for API mode
 func (a *App) SetProgressCallbacks(jobID string, onProgress func(string, float64, string), onComplete func(string, bool, string)) {
@@ -218,7 +215,7 @@ func (a *App) startup(ctx context.Context) {
 		a.CleanupAbandonedJobs()
 
 		// Clear any orphaned VSS shadow copies and reset the VSS service
-		// state from a previously crashed Nimbus process. Without this, the
+		// state from a previously crashed backup process. Without this, the
 		// next backup can fail with "shadow copy creation is already in
 		// progress". No-op on non-Windows platforms.
 		if err := snapshot.VSSCleanup(); err != nil {
@@ -257,8 +254,15 @@ func (a *App) domReady(ctx context.Context) {
 	writeDebugLog("App.domReady() called - UI loaded successfully")
 }
 
-// beforeClose is called when the application is about to quit
+// beforeClose is called when the application is about to quit.
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
+	// Only Windows has a tray that keeps the app alive, so only there do we
+	// swallow the close and hide the window. On other platforms the tray is a
+	// no-op, so we must let the window close or the app can never be quit.
+	if !a.preventCloseToTray() {
+		writeDebugLog("App.beforeClose() called - allowing close (no tray on this platform)")
+		return false
+	}
 	writeDebugLog("App.beforeClose() called - minimizing to tray")
 	// Instead of closing, minimize to tray
 	a.MinimizeToTray()
@@ -309,19 +313,20 @@ func (a *App) GetVersion() string {
 	return appVersion
 }
 
-// ListPhysicalDisks returns a list of available physical disks (DISABLED - feature postponed)
-/*
+// ListPhysicalDisks returns a list of available physical disks
 func (a *App) ListPhysicalDisks() ([]PhysicalDiskInfo, error) {
 	writeDebugLog("ListPhysicalDisks() called from frontend")
-	disks, err := ListPhysicalDisks()
+
+	// Call platform-specific disk listing function
+	disks, err := listPhysicalDisks()
 	if err != nil {
-		writeDebugLog(fmt.Sprintf("ListPhysicalDisks() error: %v", err))
+		writeDebugLog(fmt.Sprintf("Error listing physical disks: %v", err))
 		return nil, err
 	}
+
 	writeDebugLog(fmt.Sprintf("Found %d physical disks", len(disks)))
 	return disks, nil
 }
-*/
 
 // GetConfigWithHostname returns config with hostname pre-filled
 func (a *App) GetConfigWithHostname() map[string]interface{} {
@@ -336,14 +341,14 @@ func (a *App) GetConfigWithHostname() map[string]interface{} {
 		// M-04: never hand the PBS token to the webview/frontend. Expose only
 		// whether one is stored; SaveConfig keeps the existing secret when the
 		// frontend submits an empty value, and TestConnection falls back to it.
-		"secret":          "",
-		"secret_set":      cfg.Secret != "",
-		"datastore":       cfg.Datastore,
-		"namespace":       cfg.Namespace,
-		"backupdir":       cfg.BackupDir,
-		"backup-id":       cfg.BackupID,
-		"usevss":          cfg.UseVSS,
-		"hostname":        hostname,
+		"secret":     "",
+		"secret_set": cfg.Secret != "",
+		"datastore":  cfg.Datastore,
+		"namespace":  cfg.Namespace,
+		"backupdir":  cfg.BackupDir,
+		"backup-id":  cfg.BackupID,
+		"usevss":     cfg.UseVSS,
+		"hostname":   hostname,
 	}
 
 	// Pre-fill backup-id with hostname if empty
@@ -366,14 +371,14 @@ func (a *App) DiagnoseConfig() map[string]interface{} {
 	configPath, _ := getConfigPath()
 
 	return map[string]interface{}{
-		"config_path":       configPath,
-		"baseurl_set":       cfg.BaseURL != "",
-		"baseurl_value":     security.SanitizeURL(cfg.BaseURL),
-		"authid_set":        cfg.AuthID != "",
-		"datastore_set":     cfg.Datastore != "",
-		"validation_ok":     validationError == "",
-		"validation_error":  validationError,
-		"mode":              a.mode.String(),
+		"config_path":      configPath,
+		"baseurl_set":      cfg.BaseURL != "",
+		"baseurl_value":    security.SanitizeURL(cfg.BaseURL),
+		"authid_set":       cfg.AuthID != "",
+		"datastore_set":    cfg.Datastore != "",
+		"validation_ok":    validationError == "",
+		"validation_error": validationError,
+		"mode":             a.mode.String(),
 	}
 }
 
@@ -437,12 +442,20 @@ func (a *App) TestConnection(config *Config) error {
 		return err
 	}
 
+	// Mint a fresh PBS session ticket for this operation (username/password).
+	testConfig, err := a.withAuth(testConfig)
+	if err != nil {
+		return err
+	}
+
 	// Create PBS client
 	client := &pbscommon.PBSClient{
 		BaseURL:          testConfig.BaseURL,
 		CertFingerPrint:  testConfig.CertFingerprint,
 		AuthID:           testConfig.AuthID,
 		Secret:           testConfig.Secret,
+		Ticket:           testConfig.Ticket,
+		CSRFToken:        testConfig.CSRFToken,
 		Datastore:        testConfig.Datastore,
 		Namespace:        testConfig.Namespace,
 		Insecure:         testConfig.CertFingerprint != "",
@@ -651,6 +664,41 @@ func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters [
 	}
 }
 
+// StartMachineBackup starts a machine backup operation
+func (a *App) StartMachineBackup(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error {
+	writeDebugLog(fmt.Sprintf("StartMachineBackup() called - mode: %s, VSS: %v, compression: %s, isServiceProcess: %v", a.mode.String(), useVSS, compression, a.isServiceProcess))
+
+	// Default to "fastest" if compression is empty
+	if compression == "" {
+		compression = "fastest"
+		writeDebugLog("[Compression] Using default: fastest")
+	}
+
+	// Re-detect mode if currently Standalone (service may have started after GUI)
+	// IMPORTANT: Never re-detect if we ARE the service process (prevents infinite loop)
+	if !a.isServiceProcess && a.mode == api.ModeStandalone {
+		if a.apiClient.IsServiceAvailable() {
+			writeDebugLog("[Mode Detection] Service now available, switching to Service mode")
+			a.mode = api.ModeService
+		}
+	}
+
+	// Route based on execution mode
+	switch a.mode {
+	case api.ModeService:
+		// Use HTTP API to communicate with service (service has admin rights as LocalSystem)
+		return a.startMachineBackupViaService(backupType, backupDevices, backupID, useVSS, compression)
+	case api.ModeStandalone:
+		// Direct execution - check admin if VSS requested
+		if useVSS && !isAdmin() {
+			return fmt.Errorf("VSS (Shadow Copy) nécessite les privilèges administrateur - veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS")
+		}
+		return a.startMachineBackupDirect(backupType, backupDevices, backupID, useVSS, compression)
+	default:
+		return fmt.Errorf("unknown execution mode: %v", a.mode)
+	}
+}
+
 // startBackupViaService sends backup request to the service via HTTP API
 func (a *App) startBackupViaService(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string) error {
 	writeDebugLog("[Service Mode] Sending backup request to service")
@@ -672,6 +720,32 @@ func (a *App) startBackupViaService(backupType string, backupDirs []string, driv
 	}
 
 	writeDebugLog(fmt.Sprintf("[Service Mode] Backup started: %s (JobID: %s)", resp.Message, resp.JobID))
+
+	// Start polling for progress updates
+	go a.pollBackupProgress(resp.JobID)
+
+	return nil
+}
+
+// startMachineBackupViaService sends machine backup request to the service via HTTP API
+func (a *App) startMachineBackupViaService(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error {
+	writeDebugLog("[Service Mode] Sending machine backup request to service")
+
+	req := &api.BackupRequest{
+		BackupType:   backupType,
+		BackupID:     backupID,
+		DriveLetters: backupDevices, // Using DriveLetters field for machine backup devices
+		UseVSS:       useVSS,
+		Compression:  compression,
+	}
+
+	resp, err := a.apiClient.StartMachineBackup(req)
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("[Service Mode] Machine backup request failed: %v", err))
+		return fmt.Errorf("échec de la communication avec le service: %w", err)
+	}
+
+	writeDebugLog(fmt.Sprintf("[Service Mode] Machine backup started: %s (JobID: %s)", resp.Message, resp.JobID))
 
 	// Start polling for progress updates
 	go a.pollBackupProgress(resp.JobID)
@@ -760,8 +834,11 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 	// Note: Admin check for VSS is done in StartBackup() routing layer
 	// If we're here via service, we're already running as LocalSystem
 
-	// Resolve PBS fields from multi-PBS default when legacy fields are empty
-	pbsCfg := a.config.EffectivePBS()
+	// Resolve PBS fields from multi-PBS default, minting a fresh ticket (u/p).
+	pbsCfg, err := a.withAuth(a.config.EffectivePBS())
+	if err != nil {
+		return err
+	}
 
 	// Validate PBS config
 	if err := pbsCfg.Validate(); err != nil {
@@ -789,10 +866,12 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 		BaseURL:         pbsCfg.BaseURL,
 		AuthID:          pbsCfg.AuthID,
 		Secret:          pbsCfg.Secret,
+		Ticket:          pbsCfg.Ticket,
+		CSRFToken:       pbsCfg.CSRFToken,
 		Datastore:       pbsCfg.Datastore,
 		Namespace:       pbsCfg.Namespace,
 		CertFingerprint: pbsCfg.CertFingerprint,
-		BackupDirs:      targetDirs,
+		BackupObjects:   targetDirs,
 		BackupID:        backupID,
 		BackupType:      "host", // "host" for directory, would be "vm" for machine
 		UseVSS:          useVSS,
@@ -935,14 +1014,213 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 
 	// Run backup inline (in background goroutine to not block UI)
 	go func() {
-		// Machine backup disabled for now - Windows Defender flags it
-		// if backupType == "machine" {
-		// 	err = RunMachineBackup(opts)
-		// } else {
-		err := RunBackupInline(opts)
-		// }
+		var err error
+		if backupType == "machine" {
+			// For machine backups, we need to set the backup type to "vm" for the inline backup function.
+			// Kind routes RunBackupInline to the block-device path; without it the
+			// devices (e.g. \\.\PhysicalDrive0) were walked as directories — this
+			// is the path scheduled machine jobs take (executeScheduledJob → StartBackup).
+			opts.Kind = "machine"
+			opts.BackupType = "vm"
+			err = RunBackupInline(opts)
+		} else {
+			opts.BackupType = "host"
+			err = RunBackupInline(opts)
+		}
 		if err != nil {
 			writeDebugLog(fmt.Sprintf("Backup error: %v", err))
+		}
+	}()
+
+	return nil
+}
+
+// startMachineBackupDirect performs machine backup directly (standalone mode)
+func (a *App) startMachineBackupDirect(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error {
+	// Use hostname as fallback if backupID is empty
+	if backupID == "" {
+		backupID = a.GetHostname()
+		writeDebugLog(fmt.Sprintf("[Backup ID] Empty backup-id, using hostname: %s", backupID))
+	}
+
+	// Sanitize backup ID for logging
+	sanitizedID := security.SanitizeForLog(backupID)
+	writeDebugLog(fmt.Sprintf("[Standalone Mode] StartMachineBackup: type=%s, id=%s, vss=%v, compression=%s, device_count=%d, devs=%v",
+		backupType, sanitizedID, useVSS, compression, len(backupDevices), backupDevices))
+
+	// Validate BackupID (now guaranteed to be non-empty)
+	if err := security.ValidateBackupID(backupID); err != nil {
+		return fmt.Errorf("backup ID invalide: %w", err)
+	}
+
+	// Validate backup devices
+	for _, device := range backupDevices {
+		if device == "" {
+			return fmt.Errorf("one or more devices are empty")
+		}
+	}
+
+	// Note: Admin check for VSS is done in StartMachineBackup() routing layer
+	// If we're here via service, we're already running as LocalSystem
+
+	// Resolve PBS fields from multi-PBS default, minting a fresh ticket (u/p).
+	pbsCfg, err := a.withAuth(a.config.EffectivePBS())
+	if err != nil {
+		return err
+	}
+
+	// Validate PBS config
+	if err := pbsCfg.Validate(); err != nil {
+		return err
+	}
+
+	// Prepare backup options
+	opts := BackupOptions{
+		BaseURL:         pbsCfg.BaseURL,
+		AuthID:          pbsCfg.AuthID,
+		Secret:          pbsCfg.Secret,
+		Ticket:          pbsCfg.Ticket,
+		CSRFToken:       pbsCfg.CSRFToken,
+		Datastore:       pbsCfg.Datastore,
+		Namespace:       pbsCfg.Namespace,
+		CertFingerprint: pbsCfg.CertFingerprint,
+		BackupObjects:   backupDevices,
+		BackupID:        backupID,
+		Kind:            "machine",
+		BackupType:      "vm", // "vm" for machine backup
+		UseVSS:          useVSS,
+		Compression:     compression,
+		ExcludeList:     []string{}, // No exclude list for machine backups
+		DisableSplit:    a.config.DisableSplit,
+		SplitSizeBytes:  a.config.SplitSizeBytes(),
+		OnProgress: func(percent float64, message string) {
+			writeDebugLog(fmt.Sprintf("Progress: %.1f%% - %s", percent*100, message))
+
+			// Check if there's a registered callback for any job (service mode)
+			a.callbacksMutex.RLock()
+			hasCallbacks := len(a.callbacksMap) > 0
+			if hasCallbacks {
+				// Call all registered callbacks (typically just one per backup)
+				for jobID, callbacks := range a.callbacksMap {
+					if callbacks.onProgress != nil {
+						writeDebugLog(fmt.Sprintf("[OnProgress] Calling custom callback for jobID: %s", jobID))
+						callbacks.onProgress(jobID, percent*100, message)
+					}
+				}
+			}
+			a.callbacksMutex.RUnlock()
+
+			// If no custom callbacks and we have Wails context, emit events (GUI standalone mode)
+			// NEVER emit events if we're the service process (no Wails runtime)
+			if !hasCallbacks && !a.isServiceProcess && a.ctx != nil {
+				writeDebugLog("[OnProgress] Emitting Wails event (GUI mode)")
+				runtime.EventsEmit(a.ctx, "backup:progress", map[string]interface{}{
+					"percent": percent * 100,
+					"message": message,
+				})
+			} else if !hasCallbacks && (a.isServiceProcess || a.ctx == nil) {
+				writeDebugLog("[OnProgress] No callbacks/context (service or headless mode)")
+			}
+		},
+		OnComplete: func(success bool, message string) {
+			writeDebugLog(fmt.Sprintf("Machine backup complete: success=%v, %s", success, message))
+
+			// Check if there's a registered callback for any job (service mode)
+			a.callbacksMutex.RLock()
+			hasCallbacks := len(a.callbacksMap) > 0
+			var jobIDsToCleanup []string
+			if hasCallbacks {
+				// Call all registered callbacks and collect jobIDs for cleanup
+				for jobID, callbacks := range a.callbacksMap {
+					if callbacks.onComplete != nil {
+						writeDebugLog(fmt.Sprintf("[OnComplete] Calling custom callback for jobID: %s", jobID))
+						callbacks.onComplete(jobID, success, message)
+					}
+					jobIDsToCleanup = append(jobIDsToCleanup, jobID)
+				}
+			}
+			a.callbacksMutex.RUnlock()
+
+			// Clean up completed callbacks
+			if len(jobIDsToCleanup) > 0 {
+				a.callbacksMutex.Lock()
+				for _, jobID := range jobIDsToCleanup {
+					delete(a.callbacksMap, jobID)
+					writeDebugLog(fmt.Sprintf("[OnComplete] Cleaned up callbacks for jobID: %s", jobID))
+				}
+				a.callbacksMutex.Unlock()
+			}
+
+			// If no custom callbacks and we have Wails context, emit events (GUI standalone mode)
+			// NEVER emit events if we're the service process (no Wails runtime)
+			if !hasCallbacks && !a.isServiceProcess && a.ctx != nil {
+				writeDebugLog("[OnComplete] Emitting Wails event (GUI mode)")
+				runtime.EventsEmit(a.ctx, "backup:complete", map[string]interface{}{
+					"success": success,
+					"message": message,
+				})
+			} else if !hasCallbacks && (a.isServiceProcess || a.ctx == nil) {
+				writeDebugLog("[OnComplete] No callbacks/context (service or headless mode)")
+			}
+
+			// Add manual backup to history
+			historyEntry := JobHistory{
+				ID:         fmt.Sprintf("%d", time.Now().Unix()),
+				Name:       fmt.Sprintf("Backup machine - %s", backupID),
+				Timestamp:  time.Now().Format(time.RFC3339),
+				Status:     "success",
+				Message:    message,
+				BackupDirs: backupDevices,
+				BackupID:   backupID,
+				UseVSS:     useVSS,
+			}
+			if !success {
+				historyEntry.Status = "failed"
+			}
+			if err := a.AddJobHistory(historyEntry); err != nil {
+				writeDebugLog(fmt.Sprintf("Warning: Failed to add manual backup to history: %v", err))
+			}
+		},
+	}
+
+	// Structured live stats + final structured result for the GUI (standalone mode).
+	// In the service process there is no Wails runtime, and the service-mode stats
+	// bridge is a separate backlog item (service-mode progress), so we only emit here.
+	opts.OnStats = func(stats *BackupProgressStats) {
+		if a.isServiceProcess || a.ctx == nil {
+			return
+		}
+		runtime.EventsEmit(a.ctx, "backup:stats", map[string]interface{}{
+			"percent":      stats.Percent * 100,
+			"bytesDone":    stats.BytesDone,
+			"bytesTotal":   stats.BytesTotal,
+			"newChunks":    stats.NewChunks,
+			"reusedChunks": stats.ReusedChunks,
+			"failedChunks": stats.FailedChunks,
+			"currentDir":   stats.CurrentDir,
+			"message":      stats.Message,
+		})
+	}
+	opts.OnResult = func(status *BackupStatus) {
+		if a.isServiceProcess || a.ctx == nil {
+			return
+		}
+		runtime.EventsEmit(a.ctx, "backup:result", map[string]interface{}{
+			"outcome":      string(status.Outcome),
+			"newChunks":    status.NewChunks,
+			"reusedChunks": status.ReusedChunks,
+			"failedChunks": status.FailedChunks,
+			"totalBytes":   status.TotalBytes,
+			"durationSec":  status.DurationSec,
+			"skippedCount": len(status.SkippedReadError),
+		})
+	}
+
+	// Run backup inline (in background goroutine to not block UI)
+	go func() {
+		err := RunBackupInline(opts)
+		if err != nil {
+			writeDebugLog(fmt.Sprintf("Machine backup error: %v", err))
 		}
 	}()
 
@@ -960,13 +1238,13 @@ func (a *App) resolveRestorePBS(pbsID string) (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		return pbs.ToConfig(), nil
+		return a.withAuth(pbs.ToConfig())
 	}
 	cfg := a.config.EffectivePBS()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	return cfg, nil
+	return a.withAuth(cfg)
 }
 
 // ListSnapshots lists available snapshots on a PBS server, optionally filtered
@@ -982,7 +1260,7 @@ func (a *App) ListSnapshots(pbsID, backupID string) ([]map[string]interface{}, e
 		return nil, err
 	}
 
-	snaps, err := ListSnapshotsInline(cfg.BaseURL, cfg.AuthID, cfg.Secret,
+	snaps, err := ListSnapshotsInline(cfg.BaseURL, cfg.AuthID, cfg.Secret, cfg.Ticket, cfg.CSRFToken,
 		cfg.Datastore, cfg.Namespace, cfg.CertFingerprint, backupID)
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("ListSnapshotsInline failed: %v", err))
@@ -1027,6 +1305,8 @@ func (a *App) ListSnapshotContents(pbsID, backupID string, snapshotUnix int64, f
 		BaseURL:         cfg.BaseURL,
 		AuthID:          cfg.AuthID,
 		Secret:          cfg.Secret,
+		Ticket:          cfg.Ticket,
+		CSRFToken:       cfg.CSRFToken,
 		Datastore:       cfg.Datastore,
 		Namespace:       cfg.Namespace,
 		CertFingerprint: cfg.CertFingerprint,
@@ -1036,7 +1316,7 @@ func (a *App) ListSnapshotContents(pbsID, backupID string, snapshotUnix int64, f
 	return ListSnapshotContentsInline(opts, "", forceRefresh)
 }
 
-// GetSnapshotMeta returns the `.nimbus_backup_meta.json` sidecar from a
+// GetSnapshotMeta returns the `.proxmox_backup_client_meta.json` sidecar from a
 // snapshot. Returns nil (not an error) when the snapshot predates the sidecar
 // — the frontend should fall back to a generic banner in that case.
 //
@@ -1058,6 +1338,8 @@ func (a *App) GetSnapshotMeta(pbsID, backupID string, snapshotUnix int64) (*Back
 		BaseURL:         cfg.BaseURL,
 		AuthID:          cfg.AuthID,
 		Secret:          cfg.Secret,
+		Ticket:          cfg.Ticket,
+		CSRFToken:       cfg.CSRFToken,
 		Datastore:       cfg.Datastore,
 		Namespace:       cfg.Namespace,
 		CertFingerprint: cfg.CertFingerprint,
@@ -1070,7 +1352,7 @@ func (a *App) GetSnapshotMeta(pbsID, backupID string, snapshotUnix int64) (*Back
 // RestoreSnapshot extracts a snapshot (or selected files) according to mode.
 //
 //   - mode "original": restore in-place to the path captured in the snapshot's
-//     .nimbus_backup_meta.json sidecar. destPath is ignored. Cross-host
+//     .proxmox_backup_client_meta.json sidecar. destPath is ignored. Cross-host
 //     attempts are refused unless allowCrossHost is true.
 //   - mode "alternate_abs" (or empty): write to destPath, preserving the full
 //     archive directory layout below it.
@@ -1136,6 +1418,8 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
 		BaseURL:           cfg.BaseURL,
 		AuthID:            cfg.AuthID,
 		Secret:            cfg.Secret,
+		Ticket:            cfg.Ticket,
+		CSRFToken:         cfg.CSRFToken,
 		Datastore:         cfg.Datastore,
 		Namespace:         cfg.Namespace,
 		CertFingerprint:   cfg.CertFingerprint,
@@ -1266,6 +1550,8 @@ func (a *App) SearchFiles(pbsID, hostPrefix, query, mode string, fromUnix, toUni
 		BaseURL:         cfg.BaseURL,
 		AuthID:          cfg.AuthID,
 		Secret:          cfg.Secret,
+		Ticket:          cfg.Ticket,
+		CSRFToken:       cfg.CSRFToken,
 		Datastore:       cfg.Datastore,
 		Namespace:       cfg.Namespace,
 		CertFingerprint: cfg.CertFingerprint,

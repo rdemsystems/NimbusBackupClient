@@ -1,0 +1,133 @@
+From e21ff7965406b17b19cfaf54512c85a0e131412d Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:14:03 +0200
+Subject: [PATCH 11/15] gui, installer: fix upstream build breaks (service
+ build, MSI)
+
+- PhysicalDiskInfo was declared in main.go (!service) but used by
+  disklist_windows.go, which the service build also compiles: the
+  `-tags service` build failed with an undefined type. Move it to an
+  untagged file.
+- The MSI could not be built from the per-brand WiX files (the fork's CI
+  failed in "Build MSI Installer"; upstream's CI never built them):
+  - ProductBody.wxi is pulled in with <?include?> but had no <Include>
+    root element, which WiX 3 requires; wrap it (with the XML
+    declaration) and drop $(var.*) mentions from its comments;
+  - Product/@Icon is not a WiX 3 attribute: use the ARPPRODUCTICON
+    property instead;
+  - an Icon used by a Shortcut must have an Id ending in .ico.
+---
+ gui/disklist_types.go         | 15 +++++++++++++++
+ gui/main.go                   | 11 -----------
+ installer/wix/ProductBody.wxi | 16 +++++++++++-----
+ 3 files changed, 26 insertions(+), 16 deletions(-)
+ create mode 100644 gui/disklist_types.go
+
+diff --git a/gui/disklist_types.go b/gui/disklist_types.go
+new file mode 100644
+index 0000000..aaa1fa4
+--- /dev/null
++++ b/gui/disklist_types.go
+@@ -0,0 +1,15 @@
++package main
++
++// PhysicalDiskInfo represents information about a physical disk.
++//
++// Kept in an untagged file: disklist_windows.go / disklist_linux.go use it and
++// are compiled into the service build too, where main.go (!service) is not.
++type PhysicalDiskInfo struct {
++	DiskNumber   int64  `json:"disk_number"`
++	Size         int64  `json:"size"`
++	Model        string `json:"model"`
++	IsBootDisk   bool   `json:"is_boot_disk"`
++	IsSystemDisk bool   `json:"is_system_disk"`
++	DeviceID     string `json:"device_id"`
++	DevicePath   string `json:"device_path"`
++}
+diff --git a/gui/main.go b/gui/main.go
+index 08811a4..79b4600 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -313,17 +313,6 @@ func (a *App) GetVersion() string {
+ 	return appVersion
+ }
+ 
+-// PhysicalDiskInfo represents information about a physical disk
+-type PhysicalDiskInfo struct {
+-	DiskNumber   int64  `json:"disk_number"`
+-	Size         int64  `json:"size"`
+-	Model        string `json:"model"`
+-	IsBootDisk   bool   `json:"is_boot_disk"`
+-	IsSystemDisk bool   `json:"is_system_disk"`
+-	DeviceID     string `json:"device_id"`
+-	DevicePath   string `json:"device_path"`
+-}
+-
+ // ListPhysicalDisks returns a list of available physical disks
+ func (a *App) ListPhysicalDisks() ([]PhysicalDiskInfo, error) {
+ 	writeDebugLog("ListPhysicalDisks() called from frontend")
+diff --git a/installer/wix/ProductBody.wxi b/installer/wix/ProductBody.wxi
+index bce0436..362e486 100644
+--- a/installer/wix/ProductBody.wxi
++++ b/installer/wix/ProductBody.wxi
+@@ -1,18 +1,20 @@
++<?xml version="1.0" encoding="UTF-8"?>
+ <!-- Shared installer body. Included by a brand entry file (see Product.wxs /
+      NimbusBackup.wxs / AcmeBackup.wxs) that supplies the brand identity via
+-     !define BEFORE the include. All identity is driven by $(var.*):
++     !define BEFORE the include. All identity is driven by these preprocessor variables:
+        ProductName, ExeName, ServiceExeName, VendorKey, Manufacturer,
+        UpgradeCode, ProductVersion, ArpUrlAbout, ArpHelpLink,
+        ArpUrlUpdateInfo, ArpContact.
+      The exe is installed under the SAME name as the installer (ExeName); the
+      GUI resolves its brand from the exe base name at runtime (gui/brand.go),
+      so the installed exe name == installer name == brand key. -->
++<!-- WiX 3 requires an included file to have an Include root element. -->
++<Include xmlns="http://schemas.microsoft.com/wix/2006/wi">
+   <Product Id="*"
+            Name="$(var.ProductName)"
+            Language="1033"
+            Version="$(var.ProductVersion)"
+            Manufacturer="$(var.Manufacturer)"
+-           Icon="AppIcon"
+            UpgradeCode="$(var.UpgradeCode)">
+ 
+     <Package InstallerVersion="200"
+@@ -29,7 +31,10 @@
+     <MediaTemplate EmbedCab="yes" />
+ 
+     <!-- Application icon, selected from installer/icons/ by the ExeName -->
+-    <Icon Id="AppIcon" SourceFile="../icons/$(var.ExeName).ico" />
++    <Icon Id="AppIcon.ico" SourceFile="../icons/$(var.ExeName).ico" />
++    <!-- Programs & Features icon. WiX 3 has no Product/@Icon attribute
++         (candle rejects it); ARPPRODUCTICON is the supported way. -->
++    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+ 
+     <!-- Installation directory -->
+     <Directory Id="TARGETDIR" Name="SourceDir">
+@@ -62,7 +67,7 @@
+              "NimbusBackup"), NOT the service exe name: it is the name every
+              Nimbus MSI up to 0.3.0 registered (scripts/monitoring target it),
+              and gui/service_name.go derives the same name from the running
+-             $(var.ServiceExeName).exe by stripping its "SVC" suffix. -->
++             <ServiceExeName>.exe by stripping its "SVC" suffix. -->
+         <ServiceInstall
+           Id="BackupService"
+           Type="ownProcess"
+@@ -92,7 +97,7 @@
+         <Shortcut Id="ApplicationStartMenuShortcut"
+                   Name="$(var.ProductName)"
+                   Description="Backup client for Proxmox Backup Server"
+-                  Icon="AppIcon"
++                  Icon="AppIcon.ico"
+                   Target="[INSTALLFOLDER]$(var.ExeName).exe"
+                   WorkingDirectory="INSTALLFOLDER"/>
+         <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
+@@ -228,3 +233,4 @@ This includes:
+     </UI>
+ 
+   </Product>
++</Include>
+-- 
+2.47.3
+

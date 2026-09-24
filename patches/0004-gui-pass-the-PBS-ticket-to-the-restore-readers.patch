@@ -1,0 +1,40 @@
+From eee18195f2b64a1c4ea1af5b0461b952f6b9e432 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:03:50 +0200
+Subject: [PATCH 04/15] gui: pass the PBS ticket to the restore readers
+
+RestoreOptions carries the per-operation ticket for username/password
+servers, and snapshot listing used it, but the two PBSClient
+constructors that read archives (full/selective restore and the pcat1
+catalog listing used by browse and search) dropped Ticket/CSRFToken.
+Restores and uncached browsing therefore failed to authenticate on
+password-only servers.
+---
+ gui/restore_inline.go | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/gui/restore_inline.go b/gui/restore_inline.go
+index bf33d74..a528694 100644
+--- a/gui/restore_inline.go
++++ b/gui/restore_inline.go
+@@ -165,6 +165,8 @@ func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progres
+ 		CertFingerPrint:  opts.CertFingerprint,
+ 		AuthID:           opts.AuthID,
+ 		Secret:           opts.Secret,
++		Ticket:           opts.Ticket,
++		CSRFToken:        opts.CSRFToken,
+ 		Datastore:        opts.Datastore,
+ 		Namespace:        opts.Namespace,
+ 		Insecure:         opts.CertFingerprint != "",
+@@ -212,6 +214,8 @@ func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []
+ 		CertFingerPrint:  opts.CertFingerprint,
+ 		AuthID:           opts.AuthID,
+ 		Secret:           opts.Secret,
++		Ticket:           opts.Ticket,
++		CSRFToken:        opts.CSRFToken,
+ 		Datastore:        opts.Datastore,
+ 		Namespace:        opts.Namespace,
+ 		Insecure:         opts.CertFingerprint != "",
+-- 
+2.47.3
+

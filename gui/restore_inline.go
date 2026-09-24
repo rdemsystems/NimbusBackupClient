@@ -35,14 +35,16 @@ const (
 // descendants. Paths use forward slashes (archive style); backslashes are
 // accepted and normalized.
 //
-// RestoreACLs / RestoreADS / RestoreTimestamps are reserved for the upcoming
-// NTFS sidecar work — accepted today so the API surface is stable, but only
-// RestoreTimestamps has any effect (always-on: mtime is restored). The other
-// two are no-ops until the per-file .nimbus_meta sidecar lands.
+	// RestoreACLs / RestoreADS / RestoreTimestamps are reserved for the upcoming
+	// NTFS sidecar work — accepted today so the API surface is stable, but only
+	// RestoreTimestamps has any effect (always-on: mtime is restored). The other
+	// two are no-ops until the per-file .proxmox_meta sidecar lands.
 type RestoreOptions struct {
 	BaseURL         string
 	AuthID          string
 	Secret          string
+	Ticket          string // PBS session ticket (u/p login); preferred over AuthID/Secret when set
+	CSRFToken       string
 	Datastore       string
 	Namespace       string
 	CertFingerprint string
@@ -88,7 +90,7 @@ type SnapshotEntry struct {
 // ListSnapshotsInline lists available snapshots from PBS.
 // SECURITY: Only lists snapshots from the specified PBS server/datastore/namespace
 // to prevent cross-server snapshot access.
-func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFingerprint, backupID string) ([]SnapshotInfo, error) {
+func ListSnapshotsInline(baseURL, authID, secret, ticket, csrf, datastore, namespace, certFingerprint, backupID string) ([]SnapshotInfo, error) {
 	writeBackupLog(fmt.Sprintf("Listing snapshots for backup ID: %s on %s/%s/%s", backupID, baseURL, datastore, namespace))
 
 	client := &pbscommon.PBSClient{
@@ -96,6 +98,8 @@ func ListSnapshotsInline(baseURL, authID, secret, datastore, namespace, certFing
 		CertFingerPrint:  certFingerprint,
 		AuthID:           authID,
 		Secret:           secret,
+		Ticket:           ticket,
+		CSRFToken:        csrf,
 		Datastore:        datastore,
 		Namespace:        namespace,
 		Insecure:         certFingerprint != "",
@@ -146,7 +150,8 @@ func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progres
 	if archiveName == "" {
 		archiveName = "backup.pxar.didx"
 	}
-	if opts.BaseURL == "" || opts.AuthID == "" || opts.Secret == "" {
+	hasCreds := (opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "" // API token or u/p ticket
+	if opts.BaseURL == "" || !hasCreds {
 		return fmt.Errorf("PBS connection parameters required")
 	}
 	if opts.BackupID == "" {
@@ -161,6 +166,8 @@ func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progres
 		CertFingerPrint:  opts.CertFingerprint,
 		AuthID:           opts.AuthID,
 		Secret:           opts.Secret,
+		Ticket:           opts.Ticket,
+		CSRFToken:        opts.CSRFToken,
 		Datastore:        opts.Datastore,
 		Namespace:        opts.Namespace,
 		Insecure:         opts.CertFingerprint != "",
@@ -208,6 +215,8 @@ func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []
 		CertFingerPrint:  opts.CertFingerprint,
 		AuthID:           opts.AuthID,
 		Secret:           opts.Secret,
+		Ticket:           opts.Ticket,
+		CSRFToken:        opts.CSRFToken,
 		Datastore:        opts.Datastore,
 		Namespace:        opts.Namespace,
 		Insecure:         opts.CertFingerprint != "",
@@ -248,7 +257,7 @@ func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []
 		entries = append(entries, SnapshotEntry{Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: e.ModTime})
 		// The catalog lists the sidecar as a root-level file (no slash in path)
 		// iff the archive actually contains it.
-		if !e.IsDir && e.Path == BackupMetaFilename {
+		if !e.IsDir && (e.Path == BackupMetaFilename || e.Path == LegacyBackupMetaFilename) {
 			metaPresent = true
 		}
 	}
@@ -352,7 +361,7 @@ func buildSnapshotCacheKey(opts RestoreOptions) snapshotCacheKey {
 // once written, so the cache never goes stale, only ages out. Set forceRefresh
 // to bypass the cache (e.g. for a manual "Reload" button).
 //
-// As a side effect, the snapshot's `.nimbus_backup_meta.json` sidecar is parsed
+// As a side effect, the snapshot's `.proxmox_backup_client_meta.json` sidecar is parsed
 // and cached too, so a subsequent ReadSnapshotMetaInline call is free.
 //
 // archiveName defaults to "backup.pxar.didx" when empty.
@@ -387,11 +396,11 @@ func ListSnapshotContentsInline(opts RestoreOptions, archiveName string, forceRe
 	return result, nil
 }
 
-// tryReadBackupMeta extracts the .nimbus_backup_meta.json sidecar from an
+// tryReadBackupMeta extracts the .proxmox_backup_client_meta.json sidecar from an
 // already-parsed archive. Returns nil on any failure (legacy snapshots,
 // corrupted JSON, missing file) — meta is informational, never fatal.
 func tryReadBackupMeta(reader *pbscommon.PXARReader) *BackupMeta {
-	raw, err := reader.ReadVirtualFile(BackupMetaFilename)
+	raw, err := reader.ReadVirtualFile(BackupMetaFilename, LegacyBackupMetaFilename)
 	if err != nil {
 		// os.ErrNotExist is expected for legacy snapshots created before the
 		// sidecar shipped — log at debug volume only.
@@ -406,7 +415,7 @@ func tryReadBackupMeta(reader *pbscommon.PXARReader) *BackupMeta {
 	return &meta
 }
 
-// ReadSnapshotMetaInline returns the .nimbus_backup_meta.json sidecar stored
+// ReadSnapshotMetaInline returns the .proxmox_backup_client_meta.json sidecar stored
 // at the root of a snapshot, or nil with a non-nil error when no sidecar is
 // present (legacy snapshots created before the sidecar shipped).
 //
@@ -475,21 +484,21 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 	switch mode {
 	case RestoreModeOriginal:
 		if meta == nil {
-			return nil, fmt.Errorf("restauration in-place impossible : ce snapshot n'a pas de métadonnées (.nimbus_backup_meta.json absent), choisissez « autre emplacement »")
+			return nil, fmt.Errorf("in-place restore not possible: this snapshot has no metadata (.proxmox_backup_client_meta.json missing), choose \"alternate location\" instead")
 		}
 		if meta.OriginalPath == "" {
-			return nil, fmt.Errorf("restauration in-place impossible : le chemin d'origine n'est pas renseigné dans les métadonnées")
+			return nil, fmt.Errorf("in-place restore not possible: the original path is not set in the metadata")
 		}
 		if meta.OS != "" && meta.OS != runtime.GOOS {
-			return nil, fmt.Errorf("restauration in-place impossible : sauvegarde faite sur %s, machine actuelle %s", meta.OS, runtime.GOOS)
+			return nil, fmt.Errorf("in-place restore not possible: backup was made on %s, current machine is %s", meta.OS, runtime.GOOS)
 		}
 		if !opts.AllowCrossHost {
 			localHost, err := os.Hostname()
 			if err != nil {
-				return nil, fmt.Errorf("impossible de lire le hostname local : %w", err)
+				return nil, fmt.Errorf("could not read local hostname: %w", err)
 			}
 			if meta.Hostname != "" && !equalHostnames(meta.Hostname, localHost) {
-				return nil, fmt.Errorf("restauration in-place bloquée : sauvegarde de %q, machine actuelle %q — cochez « forcer cross-host » si l'intention est délibérée", meta.Hostname, localHost)
+				return nil, fmt.Errorf("in-place restore blocked: backup from %q, current machine %q — tick \"force cross-host\" if intentional", meta.Hostname, localHost)
 			}
 		}
 		// Materialize the original root once, with native separators.
@@ -628,7 +637,8 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		}
 	}
 
-	if opts.BaseURL == "" || opts.AuthID == "" || opts.Secret == "" {
+	hasCreds := (opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "" // API token or u/p ticket
+	if opts.BaseURL == "" || !hasCreds {
 		return fmt.Errorf("PBS connection parameters required")
 	}
 	if opts.BackupID == "" {

@@ -1,12 +1,19 @@
 * {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
+margin: 0;
+padding: 0;
+box-sizing: border-box;
+}
+
+/* Primary accent color — overridable at runtime by the active brand
+   (see App.jsx -> BrandFromExecutable) via documentElement.style.setProperty. */
+:root {
+    --accent: #e87003;
+    --accent-hover: #d46100;
 }
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #000000 0%, #555555 100%);
     color: #333;
     min-height: 100vh;
     display: flex;
@@ -14,8 +21,8 @@ body {
 }
 
 .header {
-    background: #2d3748;
-    color: white;
+    background: #000000;
+    color: var(--accent);
     padding: 20px;
     text-align: center;
     box-shadow: 0 2px 10px rgba(0,0,0,0.1);
@@ -35,7 +42,7 @@ body {
     flex: 1;
     padding: 30px;
     overflow-y: auto;
-    background: white;
+    background: #ffffff;
     margin: 20px;
     border-radius: 10px;
     box-shadow: 0 10px 40px rgba(0,0,0,0.1);
@@ -47,7 +54,7 @@ body {
 
 .tabs {
     display: flex;
-    border-bottom: 2px solid #e2e8f0;
+    border-bottom: 2px solid var(--accent);
     margin-bottom: 30px;
 }
 
@@ -57,6 +64,7 @@ body {
     border-bottom: 3px solid transparent;
     transition: all 0.3s;
     font-weight: 500;
+    color: #000000;
 }
 
 .tab:hover {
@@ -64,8 +72,8 @@ body {
 }
 
 .tab.active {
-    border-bottom-color: #667eea;
-    color: #667eea;
+    border-bottom-color: var(--accent);
+    color: var(--accent);
 }
 
 .tab-content {
@@ -90,7 +98,7 @@ body {
     display: block;
     margin-bottom: 8px;
     font-weight: 500;
-    color: #2d3748;
+    color: #000000;
 }
 
 .form-group input[type="text"],
@@ -99,7 +107,7 @@ body {
 .form-group textarea {
     width: 100%;
     padding: 12px;
-    border: 2px solid #e2e8f0;
+    border: 2px solid var(--accent);
     border-radius: 6px;
     font-size: 14px;
     transition: border-color 0.3s;
@@ -109,17 +117,101 @@ body {
 .form-group select:focus,
 .form-group textarea:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: var(--accent);
 }
 
 .form-group input[type="checkbox"] {
     margin-right: 8px;
 }
 
+/* Disk selection styling */
+.drive-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.drives-list {
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    padding: 6px 10px;
+    background: #f8fafc;
+}
+
+.drive-item {
+    margin-bottom: 0;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid #e2e8f0;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.drive-item:last-child {
+    border-bottom: none;
+}
+
+.drive-item:hover {
+    background: #edf2f7;
+}
+
+.drive-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin-right: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.drive-device {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+    font-weight: 600;
+    min-width: 150px;
+}
+
+.drive-size {
+    color: #4a5568;
+    min-width: 90px;
+    text-align: right;
+}
+
+.drive-model {
+    color: #718096;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.drive-badge {
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.drive-badge-system {
+    background: #64748b;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.label-text {
+    margin-left: 8px;
+}
+
 .btn {
     padding: 12px 24px;
-    background: #667eea;
-    color: white;
+    background: var(--accent);
+    color: #ffffff;
     border: none;
     border-radius: 6px;
     cursor: pointer;
@@ -130,9 +222,9 @@ body {
 }
 
 .btn:hover {
-    background: #5a67d8;
+    background: var(--accent-hover);
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    box-shadow: 0 4px 12px rgba(232, 112, 3, 0.4);
 }
 
 .btn:disabled {
@@ -149,10 +241,26 @@ body {
     background: #4a5568;
 }
 
+.cta-btn {
+    display: inline-block;
+    padding: 12px 24px;
+    background: var(--accent);
+    color: #ffffff;
+    text-decoration: none;
+    border-radius: 8px;
+    font-weight: bold;
+    transition: background 0.3s, transform 0.2s;
+}
+
+.cta-btn:hover {
+    background: var(--accent-hover);
+    transform: translateY(-2px);
+}
+
 .status {
     padding: 15px;
     background: #f7fafc;
-    border-left: 4px solid #667eea;
+    border-left: 4px solid var(--accent);
     border-radius: 4px;
     margin-top: 20px;
     display: none;
@@ -177,6 +285,7 @@ body {
     padding: 15px;
     border-radius: 6px;
     margin-top: 20px;
+    border: 1px solid var(--accent);
 }
 
 .progress {
@@ -190,7 +299,7 @@ body {
 
 .progress-bar {
     height: 100%;
-    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(90deg, var(--accent) 0%, var(--accent-hover) 100%);
     width: 0%;
     transition: width 0.3s;
     display: flex;
@@ -211,7 +320,7 @@ body {
     background: #f7fafc;
     padding: 20px;
     border-radius: 8px;
-    border-left: 4px solid #667eea;
+    border-left: 4px solid var(--accent);
 }
 
 .card h3 {
@@ -490,7 +599,7 @@ body {
     .compact-text-long {
         display: none;
     }
-    
+
     .compact-text-short {
         display: inline;
     }
