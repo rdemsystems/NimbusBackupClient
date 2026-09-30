@@ -1,5 +1,7 @@
 package machinebackuplib
 
+import "pbscommon"
+
 
 type MailSendConfig struct {
 	From string `json:"from"`
@@ -37,6 +39,13 @@ type Config struct {
 	SMTP            *SMTPConfig `json:"smtp"`
 	SysTray         bool        `json:"systray"`
 	BackupType      string      `json:"backuptype"`
+
+	// EncryptionKeyFile is an optional proxmox-backup-client key file (CLI);
+	// the passphrase of a protected key comes from PBS_ENCRYPTION_PASSWORD.
+	EncryptionKeyFile string `json:"keyfile,omitempty"`
+	// Crypt is the unlocked key (GUI callers set it directly). When set,
+	// every chunk and blob is encrypted client-side.
+	Crypt *pbscommon.CryptConfig `json:"-"`
 }
 
 func (c *Config) Valid() bool {

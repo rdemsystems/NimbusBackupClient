@@ -42,6 +42,11 @@ type Config struct {
 	PxarOut          string      `json:"pxarout"`
 	SMTP             *SMTPConfig `json:"smtp"`
 	UseVSS 			 bool        `json:"usevss"`
+
+	// Optional proxmox-backup-client key file: when set the backup is
+	// encrypted client-side. A passphrase-protected key reads its passphrase
+	// from PBS_ENCRYPTION_PASSWORD, like the official client.
+	EncryptionKeyFile string `json:"keyfile,omitempty"`
 }
 
 func (c *Config) valid() bool {
@@ -83,6 +88,7 @@ func loadConfig() *Config {
 	backupStreamNameFlag := flag.String("backupstream", "", "Filename for stream backup")
 	pxarOutFlag := flag.String("pxarout", "", "Output PXAR archive for debug purposes (optional)")
 	noVSSFlag := flag.Bool("novss", false, "Disable VSS ( For filesystems that don't support it, for example veracrypt )")
+	keyFileFlag := flag.String("keyfile", "", "Encryption key file (proxmox-backup-client format) to encrypt the backup client-side; passphrase from PBS_ENCRYPTION_PASSWORD (optional)")
 
 	mailHostFlag := flag.String("mail-host", "", "mail notification system: mail server host(optional)")
 	mailPortFlag := flag.String("mail-port", "", "mail notification system: mail server port(optional)")
@@ -154,6 +160,9 @@ func loadConfig() *Config {
 	}
 	if *noVSSFlag {
 		config.UseVSS = false
+	}
+	if *keyFileFlag != "" {
+		config.EncryptionKeyFile = *keyFileFlag
 	}
 
 	initSmtpConfigIfNeeded := func() {

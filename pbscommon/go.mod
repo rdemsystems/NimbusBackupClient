@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/alphadose/haxmap v1.4.1
 	github.com/klauspost/compress v1.17.9
+	golang.org/x/crypto v0.51.0
 	golang.org/x/net v0.23.0
 )
 

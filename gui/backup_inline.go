@@ -258,12 +258,9 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 		for chunkpos > 0 {
 			c.currentChunk = append(c.currentChunk, b[:chunkpos]...)
 
-			h := sha256.New()
-			if _, err := h.Write(c.currentChunk); err != nil {
-				return fmt.Errorf("failed to hash chunk: %w", err)
-			}
-			bindigest := h.Sum(nil)
-			shahash := hex.EncodeToString(bindigest)
+			// Keyed digest when the backup is encrypted (Crypt is nil-safe).
+			bindigest := client.Crypt.ChunkDigest(c.currentChunk)
+			shahash := hex.EncodeToString(bindigest[:])
 
 			if _, known := c.knownChunks.Get(shahash); !known {
 				writeBackupLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.currentChunk)))
@@ -307,7 +304,7 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 			if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.currentChunk)))); err != nil {
 				return fmt.Errorf("failed to write chunk offset: %w", err)
 			}
-			if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
+			if _, err := c.chunkdigests.Write(bindigest[:]); err != nil {
 				return fmt.Errorf("failed to write chunk digest: %w", err)
 			}
 
@@ -390,16 +387,12 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 
 func (c *ChunkState) EOF(client *pbscommon.PBSClient) error {
 	if len(c.currentChunk) > 0 {
-		h := sha256.New()
-		if _, err := h.Write(c.currentChunk); err != nil {
-			return fmt.Errorf("failed to hash final chunk: %w", err)
-		}
-
-		shahash := hex.EncodeToString(h.Sum(nil))
+		bindigest := client.Crypt.ChunkDigest(c.currentChunk)
+		shahash := hex.EncodeToString(bindigest[:])
 		if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.currentChunk)))); err != nil {
 			return fmt.Errorf("failed to write final chunk offset: %w", err)
 		}
-		if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
+		if _, err := c.chunkdigests.Write(bindigest[:]); err != nil {
 			return fmt.Errorf("failed to write final chunk digest: %w", err)
 		}
 

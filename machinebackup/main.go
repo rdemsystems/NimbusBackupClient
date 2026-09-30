@@ -54,6 +54,8 @@ func loadConfig() *machinebackuplib.Config {
 	mailSubjectTemplateFlag := flag.String("mail-subject-template", "", "mail notification system: mail subject template(optional)")
 	mailBodyTemplateFlag := flag.String("mail-body-template", "", "mail notification system: mail body template(optional)")
 
+	keyFileFlag := flag.String("keyfile", "", "Encryption key file (proxmox-backup-client format) to encrypt the backup client-side; passphrase from PBS_ENCRYPTION_PASSWORD (optional)")
+
 	configFile := flag.String("config", "", "Path to JSON config file. If this flag is provided all the others will override the loaded config file")
 
 	// Parse command line flags
@@ -103,6 +105,9 @@ func loadConfig() *machinebackuplib.Config {
 		config.BackupID = *backupIDFlag
 	}
 	config.BackupDevices = backupdevs
+	if *keyFileFlag != "" {
+		config.EncryptionKeyFile = *keyFileFlag
+	}
 	if *sysTrayFlag {
 		config.SysTray = true
 	}

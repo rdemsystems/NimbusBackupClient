@@ -155,11 +155,9 @@ func uploadWorker(client *pbscommon.PBSClient, filename string, total_size uint6
 	// local to the calling worker (no shared err variable across goroutines)
 	// and the assignment mutex is never left locked.
 	processSeg := func(seg PosSeg) error {
-		h := sha256.New()
-		if _, err := h.Write(seg.Data); err != nil {
-			return fmt.Errorf("failed to hash chunk at position %d: %w", seg.Pos, err)
-		}
-		sum := h.Sum(nil)
+		// Keyed digest when the backup is encrypted (Crypt is nil-safe).
+		digest := client.Crypt.ChunkDigest(seg.Data)
+		sum := digest[:]
 		shahash := hex.EncodeToString(sum)
 
 		assignment_mutex.Lock()
@@ -399,6 +397,17 @@ func Backup(cfg *Config, progressCallback ProgressCallback) (*BackupResult, erro
 		Manifest: pbscommon.BackupManifest{
 			BackupID: cfg.BackupID,
 		},
+	}
+	client.Crypt = cfg.Crypt
+	if client.Crypt == nil && cfg.EncryptionKeyFile != "" {
+		crypt, err := pbscommon.LoadCryptConfig(cfg.EncryptionKeyFile, []byte(os.Getenv("PBS_ENCRYPTION_PASSWORD")))
+		if err != nil {
+			return nil, err
+		}
+		client.Crypt = crypt
+	}
+	if client.Crypt != nil && progressCallback != nil {
+		progressCallback(0, "Client-side encryption enabled (key "+client.Crypt.ShortFingerprint()+")")
 	}
 	// A pre-obtained session ticket (GUI login) wins; otherwise exchange
 	// username/password for one.

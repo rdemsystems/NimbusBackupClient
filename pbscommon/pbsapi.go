@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"net"
 	"net/http"
@@ -23,7 +22,6 @@ import (
 	"time"
 
 	"github.com/alphadose/haxmap"
-	"github.com/klauspost/compress/zstd"
 	"golang.org/x/net/http2"
 )
 
@@ -96,6 +94,9 @@ type FixedIndexCreateReq struct {
 
 type Unprotected struct {
 	ChunkUploadStats ChunkUploadStats `json:"chunk_upload_stats"`
+	// KeyFingerprint names the encryption key of an encrypted backup
+	// ("aa:bb:..."), empty for unencrypted ones. Set by EncodeManifest.
+	KeyFingerprint   string           `json:"key-fingerprint,omitempty"`
 }
 
 type BackupManifest struct {
@@ -148,6 +149,12 @@ type PBSClient struct {
 	ReadErrors       []string         // Outcome-affecting read failures + content instability (v2-H-02)
 	CompressionLevel CompressionLevel // Zstd compression level (default: fastest)
 
+	// Crypt, when set, encrypts every chunk and blob of the backup (and
+	// decrypts them on restore) with a proxmox-backup-client compatible key;
+	// nil means an unencrypted backup. Chunk digests must then be computed
+	// with Crypt.ChunkDigest (nil-safe) so they are keyed.
+	Crypt *CryptConfig
+
 	// activeConn is the raw TLS socket underlying the HTTP/2 transport for
 	// this backup session. Close() uses it to force-terminate the connection
 	// so PBS releases the writer / snapshot lock immediately, without waiting
@@ -194,8 +201,6 @@ func CloseAllActive() {
 
 const PBS_FIXED_CHUNK_SIZE = 4 * 1024 * 1024
 
-var blobCompressedMagic = []byte{49, 185, 88, 66, 111, 182, 163, 127}
-var blobUncompressedMagic = []byte{66, 171, 56, 7, 190, 131, 112, 161}
 
 type SnapshotsResp struct {
 	Data []BackupManifest `json:"data"`
@@ -482,7 +487,7 @@ func (pbs *PBSClient) CreateFixedIndex(fic FixedIndexCreateReq) (uint64, error) 
 	fmt.Println("Writer id: ", R.WriterID)
 	defer resp2.Body.Close()
 	f := File{
-		CryptMode: "none",
+		CryptMode: pbs.cryptMode(),
 		Csum:      "",
 		Filename:  fic.ArchiveName,
 		Size:      0,
@@ -642,7 +647,7 @@ func (pbs *PBSClient) CreateDynamicIndex(name string) (uint64, error) {
 	fmt.Println("Writer id: ", R.WriterID)
 	defer resp2.Body.Close()
 	f := File{
-		CryptMode: "none",
+		CryptMode: pbs.cryptMode(),
 		Csum:      "",
 		Filename:  name,
 		Size:      0,
@@ -666,45 +671,12 @@ func (pbs *PBSClient) UploadFixedCompressedChunk(writerid uint64, digest string,
 }
 
 func (pbs *PBSClient) UploadChunk(writerid uint64, digest string, chunkdata []byte, dynamic bool, compressed bool) error {
-	outBuffer := make([]byte, 0)
-	if compressed {
-		outBuffer = append(outBuffer, blobCompressedMagic...)
-		compressedData := make([]byte, 0)
-
-		// Select compression level based on client configuration
-		var encoderLevel zstd.EncoderLevel
-		switch pbs.CompressionLevel {
-		case CompressionFastest:
-			encoderLevel = zstd.SpeedFastest
-		case CompressionBetter:
-			encoderLevel = zstd.SpeedBetterCompression
-		case CompressionBest:
-			encoderLevel = zstd.SpeedBestCompression
-		default: // CompressionDefault or empty
-			encoderLevel = zstd.SpeedDefault
-		}
-
-		w, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(encoderLevel))
-		compressedData = w.EncodeAll(chunkdata, compressedData)
-		checksum := crc32.Checksum(compressedData, crc32.IEEETable)
-		//binary.Write(outBuffer, binary.LittleEndian, checksum)
-		outBuffer = binary.LittleEndian.AppendUint32(outBuffer, checksum)
-
-		//fmt.Printf("Appended checksum %08x , len: %d\n", checksum, len(outBuffer))
-
-		outBuffer = append(outBuffer, compressedData...)
-
-		if len(compressedData) > len(chunkdata) {
-			return pbs.UploadChunk(writerid, digest, chunkdata, dynamic, false)
-		}
-	} else {
-		outBuffer = append(outBuffer, blobUncompressedMagic...)
-		checksum := crc32.Checksum(chunkdata, crc32.IEEETable)
-		outBuffer = binary.LittleEndian.AppendUint32(outBuffer, checksum)
-		outBuffer = append(outBuffer, chunkdata...)
+	// digest must come from pbs.Crypt.ChunkDigest(chunkdata): with encryption
+	// it is keyed, and PBS stores the chunk under that name.
+	outBuffer, err := EncodeBlob(chunkdata, pbs.Crypt, compressed, pbs.CompressionLevel)
+	if err != nil {
+		return err
 	}
-
-	//fmt.Printf("Compressed: %d , Orig: %d\n", len(compressedData), len(chunkdata))
 
 	q := &url.Values{}
 	q.Add("digest", digest)
@@ -804,13 +776,24 @@ func (pbs *PBSClient) CloseDynamicIndex(writerid uint64, checksum string, totals
 	return nil
 }
 
-func (pbs *PBSClient) UploadBlob(name string, data []byte) error {
-	out := make([]byte, 0)
-	out = append(out, blobUncompressedMagic...)
+// cryptMode is the manifest "crypt-mode" of the files this session uploads.
+func (pbs *PBSClient) cryptMode() string {
+	if pbs.Crypt != nil {
+		return "encrypt"
+	}
+	return "none"
+}
 
-	checksum := crc32.ChecksumIEEE(data)
-	out = binary.LittleEndian.AppendUint32(out, checksum)
-	out = append(out, data...)
+// UploadBlob uploads a stand-alone blob file (encrypted when pbs.Crypt is set).
+func (pbs *PBSClient) UploadBlob(name string, data []byte) error {
+	return pbs.uploadBlob(name, data, pbs.Crypt)
+}
+
+func (pbs *PBSClient) uploadBlob(name string, data []byte, crypt *CryptConfig) error {
+	out, err := EncodeBlob(data, crypt, false, pbs.CompressionLevel)
+	if err != nil {
+		return err
+	}
 
 	q := &url.Values{}
 	q.Add("encoded-size", fmt.Sprintf("%d", len(out)))
@@ -849,8 +832,12 @@ func (pbs *PBSClient) UploadBlob(name string, data []byte) error {
 	// before the manifest is serialized, its broken entry lands in
 	// the persisted JSON and /finish rejects it.
 	sum := sha256.Sum256(out)
+	mode := "none"
+	if crypt != nil {
+		mode = "encrypt"
+	}
 	pbs.Manifest.Files = append(pbs.Manifest.Files, File{
-		CryptMode: "none",
+		CryptMode: mode,
 		Csum:      hex.EncodeToString(sum[:]),
 		Filename:  name,
 		Size:      int64(len(out)),
@@ -859,12 +846,14 @@ func (pbs *PBSClient) UploadBlob(name string, data []byte) error {
 	return nil
 }
 
+// UploadManifest uploads index.json.blob. The manifest is never encrypted;
+// for encrypted backups it is signed and records the key fingerprint.
 func (pbs *PBSClient) UploadManifest() error {
-	manifestBin, err := json.Marshal(pbs.Manifest)
+	manifestBin, err := EncodeManifest(pbs.Manifest, pbs.Crypt)
 	if err != nil {
 		return err
 	}
-	return pbs.UploadBlob("index.json.blob", manifestBin)
+	return pbs.uploadBlob("index.json.blob", manifestBin, nil)
 }
 
 func (pbs *PBSClient) Finish() error {
@@ -1238,6 +1227,16 @@ func (pbs *PBSClient) GetKnownSha265FromFIDX(archivename string) (*haxmap.Map[st
 }
 
 func (pbs *PBSClient) GetChunkData(digest string) ([]byte, error) {
+	ret, err := pbs.getChunkRaw(digest)
+	if err != nil {
+		return nil, err
+	}
+	// Decrypts encrypted chunks with pbs.Crypt (ErrEncryptedNoKey without one).
+	return DecodeBlob(ret, pbs.Crypt)
+}
+
+// getChunkRaw downloads a chunk's raw (encoded) blob.
+func (pbs *PBSClient) getChunkRaw(digest string) ([]byte, error) {
 	q := &url.Values{}
 
 	q.Add("digest", digest)
@@ -1266,25 +1265,32 @@ func (pbs *PBSClient) GetChunkData(digest string) ([]byte, error) {
 		return nil, fmt.Errorf("short chunk response for %s: %d bytes", digest, len(ret))
 	}
 
-	if slices.Equal(ret[:8], blobUncompressedMagic) {
-		return ret[12:], nil
-	} else if slices.Equal(ret[:8], blobCompressedMagic) {
-		rd1 := bytes.NewReader(ret[12:])
-		dec, err := zstd.NewReader(rd1)
+	return ret, nil
+}
 
-		if err != nil {
-			return nil, err
-		}
-		defer dec.Close()
-		ret2 := make([]byte, 0)
-		ret2, err = dec.DecodeAll(ret[12:], ret2)
-		if err != nil {
-			return nil, err
-		}
-		return ret2, nil
-	} else {
-		return nil, fmt.Errorf("encrypted chunks not supported")
+// GetVerifiedChunk fetches and decodes a chunk, then checks it against its
+// digest: plain SHA-256 for an unencrypted chunk, SHA256(data || id_key) for
+// an encrypted one. The mode comes from the chunk itself, not from whether a
+// key is configured, so a client holding a key still restores older
+// unencrypted snapshots.
+func (pbs *PBSClient) GetVerifiedChunk(digest string) ([]byte, error) {
+	raw, err := pbs.getChunkRaw(digest)
+	if err != nil {
+		return nil, err
 	}
-
+	data, encrypted, err := decodeBlob(raw, pbs.Crypt)
+	if err != nil {
+		return nil, err
+	}
+	var sum [32]byte
+	if encrypted {
+		sum = pbs.Crypt.ChunkDigest(data)
+	} else {
+		sum = sha256.Sum256(data)
+	}
+	if hex.EncodeToString(sum[:]) != digest {
+		return nil, fmt.Errorf("chunk %s: content hash mismatch", digest)
+	}
+	return data, nil
 }
 
