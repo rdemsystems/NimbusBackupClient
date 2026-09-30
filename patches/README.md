@@ -50,6 +50,9 @@ git merge FETCH_HEAD
 Conflict hot spots and how to resolve them:
 
 - `README.md`, `README.fr.md` — keep ours (fork identity).
+- `README.<lang>.md` (it, de, es, ru, zh, …) — upstream-branded translations,
+  deleted in the fork: resolve modify/delete conflicts by keeping them deleted,
+  and remove any new one upstream adds.
 - `gui/wails.json` — keep upstream's neutral identity; keep **our** version
   number (CI stamps the Nimbus identity at build time, patch 0015).
 - `.github/workflows/build-and-release.yml` — keep ours, then port any

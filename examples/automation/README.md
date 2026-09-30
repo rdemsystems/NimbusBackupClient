@@ -8,13 +8,13 @@ DSC, GPO, a login script…) works the same way. There are two paths; pick one.
 
 ---
 
-## Path A — Command-line (`directorybackup.exe`) — recommended for IaC
+## Path A — Command-line (`proxmoxbackup-directory.exe`) — recommended for IaC
 
 One JSON file carries **everything for a backup**; scheduling is delegated to the
 Windows Task Scheduler.
 
 ```powershell
-directorybackup.exe --config "C:\ProgramData\NimbusBackup\backup.json"
+proxmoxbackup-directory.exe --config "C:\ProgramData\NimbusBackup\backup.json"
 ```
 
 - Config: [`cli-single-config.json`](cli-single-config.json) (all fields).
@@ -44,7 +44,8 @@ array. On (re)start the service reconciles those jobs into its store and
 **auto-computes each `nextRun`** — you don't compute timestamps in your template.
 
 - Config: [`gui-service-config.json`](gui-service-config.json).
-- Location: `C:\ProgramData\NimbusBackup\config.json`.
+- Location: `C:\ProgramData\ProxmoxBackupClient\config.json` (since 0.4.0; it was
+  `C:\ProgramData\NimbusBackup` up to 0.3.0 — files pushed there are no longer read).
 - Drop the file, restart the `NimbusBackup` service, done.
 
 Ansible example: [`ansible/deploy-gui-service.yml`](ansible/deploy-gui-service.yml)
@@ -102,7 +103,7 @@ Ansible example: [`ansible/deploy-gui-service.yml`](ansible/deploy-gui-service.y
 
 Deux voies pour un déploiement sans clic :
 
-- **Voie A — ligne de commande** (`directorybackup.exe --config fichier.json`) :
+- **Voie A — ligne de commande** (`proxmoxbackup-directory.exe --config fichier.json`) :
   un seul fichier JSON pour toute la sauvegarde, planification via le
   Planificateur de tâches Windows. Codes de retour fiables (`0` OK, `≠0` échec ou
   sauvegarde partielle). Idéale pour l'infrastructure-as-code.

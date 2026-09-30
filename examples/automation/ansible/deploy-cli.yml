@@ -1,5 +1,5 @@
 ---
-# Unattended deployment — command-line path (directorybackup.exe).
+# Unattended deployment — command-line path (proxmoxbackup-directory.exe).
 # One JSON config carries the whole job; scheduling is delegated to the Windows
 # Task Scheduler (idempotent). Recommended for infrastructure-as-code.
 #
@@ -32,10 +32,10 @@
         - '{{ nimbus_dir }}'
         - '{{ nimbus_cfg_dir }}'
 
-    - name: Copy directorybackup.exe
+    - name: Copy proxmoxbackup-directory.exe
       ansible.windows.win_copy:
-        src: files/directorybackup.exe
-        dest: '{{ nimbus_dir }}\directorybackup.exe'
+        src: files/proxmoxbackup-directory.exe
+        dest: '{{ nimbus_dir }}\proxmoxbackup-directory.exe'
 
     # Render cli-single-config.json.j2 from the vars above. Any field may also be
     # overridden on the command line — CLI flags win over the file.
@@ -49,7 +49,7 @@
         name: NimbusBackup-Daily
         description: Daily backup to Proxmox Backup Server
         actions:
-          - path: '{{ nimbus_dir }}\directorybackup.exe'
+          - path: '{{ nimbus_dir }}\proxmoxbackup-directory.exe'
             arguments: '--config "{{ nimbus_cfg_dir }}\backup.json"'
         triggers:
           - type: daily

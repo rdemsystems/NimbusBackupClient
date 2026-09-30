@@ -12,7 +12,7 @@
   gather_facts: false
 
   vars:
-    nimbus_cfg_dir: 'C:\ProgramData\NimbusBackup'
+    nimbus_cfg_dir: 'C:\ProgramData\ProxmoxBackupClient'  # service data folder since 0.4.0
     msi_url: 'https://github.com/rdemsystems/NimbusBackupClient/releases/latest/download/NimbusBackup.msi'
     pbs_baseurl: 'https://pbs.example.net:8007'
     pbs_fingerprint: 'AA:BB:CC:...'
