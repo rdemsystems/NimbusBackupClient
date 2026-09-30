@@ -76,6 +76,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite 
 - Multi-folder backup, file and disk (full machine) modes
 - Snapshot browsing, file search (wildcards) and restore
 - Multi-PBS server support, certificate fingerprint pinning (TOFU)
+- **🔒 Client-side encryption** (AES-256-GCM), key files compatible with `proxmox-backup-client` and Proxmox VE
 - Windows service mode + scheduled backups, backup history with one-click rerun
 - Debug logging for troubleshooting
 
@@ -110,6 +111,25 @@ When backing up an entire drive (e.g. `D:\`), Nimbus Backup automatically exclud
 - Path-traversal prevention
 - Retry logic with exponential backoff
 - CI gates on every build: tests, `golangci-lint`, `gosec`, `go mod tidy`
+
+### 🔒 Client-side encryption
+Backups can be encrypted **on the client** before they leave the machine, with
+the same scheme as the official `proxmox-backup-client` (AES-256-GCM, keyed chunk
+digests, signed manifest). The PBS server only stores opaque data and never sees
+the key — useful on a shared or managed PBS.
+
+- **GUI**: *Servers → Edit → 🔒 Encryption* — generate a key or import an existing
+  key file (from `proxmox-backup-client key create` or a PVE storage), then
+  **export it** and keep a copy off the machine (optionally passphrase-protected).
+- **CLI**: `-keyfile path/to/key.json` (or `"keyfile"` in the JSON config); a
+  passphrase-protected key reads its passphrase from `PBS_ENCRYPTION_PASSWORD`.
+- **Interoperable**: an encrypted backup restores with `proxmox-backup-client`
+  or Proxmox VE using the same key file, and vice versa.
+
+> ⚠️ **Without the key, encrypted backups are unrecoverable.** The first
+> encrypted backup uploads everything again (no deduplication with unencrypted
+> backups). Backup IDs, archive names and sizes stay visible to the server; file
+> contents, file names and the catalog are encrypted.
 
 ## 🤖 Unattended deployment (Ansible & IaC)
 

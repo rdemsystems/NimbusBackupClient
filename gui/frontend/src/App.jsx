@@ -9,6 +9,8 @@ let SaveScheduledJob, UpdateScheduledJob, GetScheduledJobs, DeleteScheduledJob, 
 // Multi-PBS functions
 let ListPBSServers, GetPBSServer, AddPBSServer, UpdatePBSServer, DeletePBSServer, SetDefaultPBSServer, GetDefaultPBSID, TestPBSConnection
 let GetServerFingerprint, PinPBSServerFingerprint
+// Client-side encryption (per PBS server)
+let GetEncryptionKeyInfo, GenerateEncryptionKey, ImportEncryptionKey, ExportEncryptionKey, GetEncryptionKeyFile, RemoveEncryptionKey
 
 // Check if we're running in Wails
 if (window.go) {
@@ -46,6 +48,12 @@ if (window.go) {
   TestPBSConnection = window.go.main.App.TestPBSConnection
   GetServerFingerprint = window.go.main.App.GetServerFingerprint
   PinPBSServerFingerprint = window.go.main.App.PinPBSServerFingerprint
+  GetEncryptionKeyInfo = window.go.main.App.GetEncryptionKeyInfo
+  GenerateEncryptionKey = window.go.main.App.GenerateEncryptionKey
+  ImportEncryptionKey = window.go.main.App.ImportEncryptionKey
+  ExportEncryptionKey = window.go.main.App.ExportEncryptionKey
+  GetEncryptionKeyFile = window.go.main.App.GetEncryptionKeyFile
+  RemoveEncryptionKey = window.go.main.App.RemoveEncryptionKey
 }
 
 // Wails events + runtime (open external URLs in the system browser)
@@ -100,6 +108,12 @@ function App() {
   })
   const [serverStatus, setServerStatus] = useState({}) // Map of server ID -> connection status
   const [serverTab, setServerTab] = useState('server') // active category tab in the server form
+  // Encryption tab of the server form (key operations need a saved server)
+  const [encInfo, setEncInfo] = useState(null)
+  const [encImportText, setEncImportText] = useState('')
+  const [encImportPass, setEncImportPass] = useState('')
+  const [encExportPass, setEncExportPass] = useState('')
+  const [encShownKey, setEncShownKey] = useState('')
 
   const [backupType, setBackupType] = useState('directory')
   const [backupDirs, setBackupDirs] = useState('')
@@ -713,6 +727,7 @@ function App() {
     })
     setServerTab(server.username ? 'userpass' : (server.authid ? 'token' : 'server'))
     setEditingServer(server.id)
+    resetEncryptionState()
   }
 
   const handleCancelEdit = () => {
@@ -731,10 +746,149 @@ function App() {
     })
     setServerTab('server')
     setEditingServer(null)
+    resetEncryptionState()
+  }
+
+  // ==================== CLIENT-SIDE ENCRYPTION ====================
+
+  const resetEncryptionState = () => {
+    setEncInfo(null)
+    setEncImportText('')
+    setEncImportPass('')
+    setEncExportPass('')
+    setEncShownKey('')
+  }
+
+  const loadEncInfo = async (id) => {
+    if (!GetEncryptionKeyInfo || !id) return
+    try {
+      setEncInfo(await GetEncryptionKeyInfo(id))
+    } catch (err) {
+      showStatus(`❌ ${err}`, 'error')
+    }
+  }
+
+  const handleGenerateKey = async () => {
+    if (!GenerateEncryptionKey) return
+    try {
+      setEncInfo(await GenerateEncryptionKey(editingServer))
+      showStatus(`🔒 ${t('encGenerated')}`, 'success', true)
+      loadPBSServers()
+    } catch (err) {
+      showStatus(`❌ ${err}`, 'error')
+    }
+  }
+
+  const handleImportKey = async () => {
+    if (!ImportEncryptionKey || !encImportText.trim()) return
+    try {
+      setEncInfo(await ImportEncryptionKey(editingServer, encImportText, encImportPass))
+      setEncImportText('')
+      setEncImportPass('')
+      showStatus(`🔒 ${t('encImported')}`, 'success')
+      loadPBSServers()
+    } catch (err) {
+      showStatus(`❌ ${err}`, 'error')
+    }
+  }
+
+  const handleExportKey = async () => {
+    if (!ExportEncryptionKey) return
+    try {
+      const path = await ExportEncryptionKey(editingServer, encExportPass)
+      if (path) showStatus(`✅ ${t('encExported')} ${path}`, 'success', true)
+    } catch (err) {
+      showStatus(`❌ ${err}`, 'error')
+    }
+  }
+
+  const handleToggleShowKey = async () => {
+    if (encShownKey) {
+      setEncShownKey('')
+      return
+    }
+    if (!GetEncryptionKeyFile) return
+    try {
+      setEncShownKey(await GetEncryptionKeyFile(editingServer, encExportPass))
+    } catch (err) {
+      showStatus(`❌ ${err}`, 'error')
+    }
+  }
+
+  const handleRemoveKey = async () => {
+    if (!RemoveEncryptionKey || !window.confirm(t('encRemoveConfirm'))) return
+    try {
+      await RemoveEncryptionKey(editingServer)
+      setEncShownKey('')
+      await loadEncInfo(editingServer)
+      showStatus(`🔓 ${t('encRemoved')}`, 'success')
+      loadPBSServers()
+    } catch (err) {
+      showStatus(`❌ ${err}`, 'error')
+    }
+  }
+
+  const renderEncryptionTab = () => {
+    if (!editingServer) {
+      return <div className="info-box">💡 {t('encSaveServerFirst')}</div>
+    }
+    const warnBox = {borderColor: '#f59e0b', background: '#fffbeb', color: '#92400e'}
+    return (
+      <>
+        <div className="info-box">🔒 {t('encIntro')}</div>
+        {encInfo && !encInfo.enabled && (
+          <>
+            <div className="info-box" style={warnBox}>🔓 {t('encDisabled')}</div>
+            <button onClick={handleGenerateKey} style={{width: '100%', marginBottom: '15px'}}>🔑 {t('encGenerate')}</button>
+            <h4>{t('encImportTitle')}</h4>
+            <div className="form-group">
+              <textarea value={encImportText} onChange={(e) => setEncImportText(e.target.value)} placeholder={t('encImportPlaceholder')} rows="5" style={{fontFamily: 'monospace', fontSize: '0.85em'}} />
+            </div>
+            <div className="form-group">
+              <input type="password" value={encImportPass} onChange={(e) => setEncImportPass(e.target.value)} placeholder={t('encImportPassphrase')} />
+            </div>
+            <button onClick={handleImportKey} disabled={!encImportText.trim()} style={{width: '100%'}}>📥 {t('encImport')}</button>
+            <div className="info-box" style={{marginTop: '15px'}}>ℹ️ {t('encWarnDedup')}</div>
+          </>
+        )}
+        {encInfo && encInfo.enabled && (
+          <>
+            {encInfo.error ? (
+              <div className="info-box" style={{borderColor: '#ef4444', background: '#fef2f2', color: '#991b1b', fontWeight: '600'}}>
+                ⚠️ {t('encKeyInvalid')} {encInfo.error}
+              </div>
+            ) : (
+              <div className="info-box" style={{borderColor: '#10b981', background: '#ecfdf5', color: '#065f46', fontWeight: '600'}}>
+                🔒 {t('encEnabled')} <code>{encInfo.fingerprint}</code>
+              </div>
+            )}
+            <div className="info-box" style={{...warnBox, fontWeight: '600'}}>⚠️ {t('encWarnLoss')}</div>
+            <h4>{t('encExportTitle')}</h4>
+            <div className="form-group">
+              <input type="password" value={encExportPass} onChange={(e) => setEncExportPass(e.target.value)} placeholder={t('encExportPassphrase')} />
+            </div>
+            <div style={{display: 'flex', gap: '10px'}}>
+              <button onClick={handleExportKey} style={{flex: 1}}>💾 {t('encExport')}</button>
+              <button onClick={handleToggleShowKey} style={{flex: 1, backgroundColor: '#64748b'}}>{encShownKey ? `🙈 ${t('encHide')}` : `👁️ ${t('encShow')}`}</button>
+            </div>
+            {encShownKey && (
+              <div className="form-group" style={{marginTop: '10px'}}>
+                <textarea readOnly value={encShownKey} rows="8" style={{fontFamily: 'monospace', fontSize: '0.8em'}} onFocus={(e) => e.target.select()} />
+              </div>
+            )}
+            <button onClick={handleRemoveKey} style={{width: '100%', marginTop: '15px', backgroundColor: '#ef4444', color: 'white'}}>🗑️ {t('encRemove')}</button>
+          </>
+        )}
+      </>
+    )
   }
 
   const switchServerTab = (key) => {
     setServerTab(key)
+    if (key === 'encryption') {
+      loadEncInfo(editingServer)
+      return
+    }
     // Choosing an auth method clears the other so the two never mix on save.
     if (key === 'userpass') {
       setServerFormData(f => ({ ...f, authid: '', secret: '' }))
@@ -751,7 +905,8 @@ function App() {
     const tabs = [
       ['server', `🌐 ${t('srvTabServer')}`],
       ['userpass', `👤 ${t('srvTabUserpass')}`],
-      ['token', `🔑 ${t('srvTabToken')}`]
+      ['token', `🔑 ${t('srvTabToken')}`],
+      ['encryption', `🔒 ${t('srvTabEncryption')}`]
     ]
     return (
       <div className="card">
@@ -845,6 +1000,8 @@ function App() {
             <div className="info-box">💡 <strong>{t('tipTitle')}</strong> {t('tipAPIToken')}<br/>{t('tipAPITokenPath')}</div>
           </>
         )}
+
+        {serverTab === 'encryption' && renderEncryptionTab()}
 
         <div style={{display: 'flex', gap: '10px', marginTop: '20px'}}>
           {editingServer ? (
@@ -1673,6 +1830,9 @@ function App() {
                         <td>
                           <strong>{server.name}</strong>
                           {server.id === defaultPBSID && <span style={{marginLeft: '5px', color: '#fbbf24'}}>⭐ {t('default')}</span>}
+                          {server.encryption_key_set && (
+                            <span style={{marginLeft: '5px', color: '#10b981'}} title={server.encryption_fingerprint || ''}>🔒 {t('encBadge')}</span>
+                          )}
                           {server.description && <div style={{fontSize: '0.85em', color: '#999'}}>{server.description}</div>}
                         </td>
                         <td>{server.baseurl}</td>

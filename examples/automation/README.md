@@ -75,6 +75,8 @@ Ansible example: [`ansible/deploy-gui-service.yml`](ansible/deploy-gui-service.y
 | `secret` | token secret (keep in Ansible Vault) |
 | `datastore` | target datastore |
 | `namespace` | optional namespace |
+| `encryption_key` | GUI/service, optional: client-side encryption key — the content of a `proxmox-backup-client` key file **without passphrase** (`"kdf": null`), as a JSON object. Keep it in Ansible Vault and keep a copy elsewhere: without it the backups are unrecoverable |
+| `keyfile` | CLI, optional: path to a key file; a passphrase-protected key reads `PBS_ENCRYPTION_PASSWORD` |
 
 ### Scheduled job (`scheduled_jobs[*]`, GUI/service path)
 
@@ -118,3 +120,8 @@ Deux voies pour un déploiement sans clic :
   `id`, ne touche pas aux jobs créés dans l'interface).
 
 Exemples Ansible prêts à l'emploi dans [`ansible/`](ansible/).
+
+Chiffrement côté client (facultatif) : `encryption_key` dans l'entrée
+`pbs_servers` (contenu d'un fichier de clé `proxmox-backup-client` sans phrase
+secrète) pour la voie B, `keyfile` (chemin) pour la voie A. Conservez la clé dans
+Ansible Vault **et** ailleurs : sans elle, les sauvegardes sont irrécupérables.

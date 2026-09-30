@@ -76,6 +76,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
 - Sauvegarde multi-dossiers, modes fichier et disque (machine complète)
 - Navigation dans les snapshots, recherche de fichiers (jokers) et restauration
 - Support multi-serveurs PBS, épinglage d'empreinte de certificat (TOFU)
+- **🔒 Chiffrement côté client** (AES-256-GCM), fichiers de clé compatibles avec `proxmox-backup-client` et Proxmox VE
 - Mode service Windows + sauvegardes planifiées, historique avec relance en un clic
 - Journalisation de débogage pour le diagnostic
 
@@ -110,6 +111,27 @@ Lors de la sauvegarde d'un disque entier (ex. `D:\`), Nimbus Backup exclut autom
 - Prévention des traversées de chemin (path traversal)
 - Logique de réessai avec backoff exponentiel
 - Contrôles CI à chaque build : tests, `golangci-lint`, `gosec`, `go mod tidy`
+
+### 🔒 Chiffrement côté client
+Les sauvegardes peuvent être chiffrées **sur le poste** avant de le quitter, avec
+le même schéma que le client officiel `proxmox-backup-client` (AES-256-GCM,
+empreintes de blocs à clé, manifeste signé). Le serveur PBS ne stocke que des
+données opaques et ne voit jamais la clé — idéal sur un PBS mutualisé ou infogéré.
+
+- **Interface** : *Serveurs → Modifier → 🔒 Chiffrement* — générez une clé ou
+  importez un fichier de clé existant (créé par `proxmox-backup-client key create`
+  ou issu d'un stockage PVE), puis **exportez-la** et conservez-en une copie hors
+  du poste (éventuellement protégée par une phrase secrète).
+- **Ligne de commande** : `-keyfile chemin/vers/cle.json` (ou `"keyfile"` dans le
+  fichier JSON) ; une clé protégée lit sa phrase secrète dans `PBS_ENCRYPTION_PASSWORD`.
+- **Interopérable** : une sauvegarde chiffrée se restaure avec
+  `proxmox-backup-client` ou Proxmox VE avec le même fichier de clé, et inversement.
+
+> ⚠️ **Sans la clé, les sauvegardes chiffrées sont irrécupérables.** La première
+> sauvegarde chiffrée renvoie toutes les données (pas de déduplication avec les
+> sauvegardes non chiffrées). Les identifiants de sauvegarde, noms d'archives et
+> tailles restent visibles du serveur ; le contenu et les noms des fichiers ainsi
+> que le catalogue sont chiffrés.
 
 ## 🤖 Déploiement sans surveillance (Ansible & IaC)
 

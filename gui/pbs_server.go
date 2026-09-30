@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"security"
 )
@@ -25,6 +26,18 @@ type PBSServer struct {
 	IsOnline        bool   `json:"is_online,omitempty"`   // Connection status (updated by GUI)
 	SecretSet       bool   `json:"secret_set,omitempty"`  // M-04: set on sanitized copies so the UI knows a token exists without receiving it
 	PasswordSet     bool   `json:"password_set,omitempty"`
+
+	// EncryptionKey, when set, encrypts this server's backups client-side. It
+	// is a proxmox-backup-client key file stored as-is (its JSON object, or a
+	// string holding it), unprotected (kdf null) so scheduled backups can run
+	// unattended. Never sent to the frontend; changed only through the
+	// dedicated encryption-key methods (encryption.go), which the service
+	// performs as the single writer of config.json.
+	EncryptionKey json.RawMessage `json:"encryption_key,omitempty" ts_type:"any"`
+	// Set on sanitized copies: whether a key is configured, and its short
+	// fingerprint (empty if the stored key is unusable).
+	EncryptionKeySet      bool   `json:"encryption_key_set,omitempty"`
+	EncryptionFingerprint string `json:"encryption_fingerprint,omitempty"`
 }
 
 // sanitized returns a copy with the secret and password stripped (SecretSet /
@@ -36,6 +49,9 @@ func (pbs *PBSServer) sanitized() *PBSServer {
 	c.PasswordSet = pbs.Password != ""
 	c.Secret = ""
 	c.Password = "" // never hand the credentials to the frontend
+	c.EncryptionKeySet = len(pbs.EncryptionKey) > 0
+	c.EncryptionFingerprint = storedKeyFingerprint(pbs.EncryptionKey)
+	c.EncryptionKey = nil
 	return &c
 }
 
@@ -106,5 +122,6 @@ func (pbs *PBSServer) ToConfig() *Config {
 		Password:        pbs.Password,
 		Datastore:       pbs.Datastore,
 		Namespace:       pbs.Namespace,
+		EncryptionKey:   pbs.EncryptionKey,
 	}
 }

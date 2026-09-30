@@ -240,6 +240,33 @@ func (c *Client) PinFingerprint(id, fingerprint string) error {
 	return nil
 }
 
+// SetEncryptionKey asks the service to store (or, with an empty keyJSON,
+// remove) the client-side encryption key of a PBS server, the service being
+// the single privileged writer of config.json.
+func (c *Client) SetEncryptionKey(id, keyJSON string) error {
+	body, err := json.Marshal(map[string]string{"id": id, "key": keyJSON})
+	if err != nil {
+		return fmt.Errorf("failed to encode request: %w", err)
+	}
+
+	resp, err := c.httpClient.Post(
+		c.baseURL+"/pbs/encryption-key",
+		"application/json",
+		bytes.NewBuffer(body),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to send encryption key request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to store encryption key: %s", string(respBody))
+	}
+
+	return nil
+}
+
 // UpdateJob updates an existing scheduled job
 func (c *Client) UpdateJob(job map[string]interface{}) error {
 	body, err := json.Marshal(job)

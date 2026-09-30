@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Client-side encryption, compatible with `proxmox-backup-client`.** Chunks and
+  blobs are encrypted on the client with AES-256-GCM before upload; chunk digests
+  are keyed and the manifest is signed, exactly like the official client, so an
+  encrypted backup restores with `proxmox-backup-client` / Proxmox VE using the
+  same key file, and vice versa. The PBS server never sees the key.
+  - GUI: new **🔒 Encryption** tab per PBS server — generate or import a key
+    (passphrase-protected key files are unlocked on import), export it to a file
+    (optionally passphrase-protected) or show it for copying, remove it. Servers
+    with a key show a 🔒 badge. Key writes go through the service when it owns
+    `config.json`.
+  - Provisioning: `encryption_key` on a `pbs_servers` entry (the key file JSON,
+    without passphrase).
+  - CLI: `-keyfile` for `proxmoxbackup-directory` and `proxmoxbackup-machine`,
+    passphrase from `PBS_ENCRYPTION_PASSWORD`.
+  - Restore/search/browse decrypt transparently; a missing or wrong key is
+    reported up front from the snapshot manifest. Older unencrypted snapshots
+    keep restoring when a key is configured.
+  - A configured but unusable key fails the backup instead of silently backing
+    up unencrypted data.
+
+### Changed
+- Once PBS servers are configured, backups and restores always use the default
+  server entry. Configs migrated from the legacy single-server format kept their
+  top-level connection fields, which took precedence and ignored later edits of
+  the server entry (changed default server, rotated token, encryption key).
+  If you maintain the top-level connection fields of `config.json` by hand, edit
+  the `pbs_servers` entry instead.
+- `SaveConfig` no longer drops the PBS server list when the payload omits it.
+
 ## [0.4.0] - 2026-09-24
 
 Minor-version milestone: **re-merge with upstream** (tizbac/proxmoxbackupclient_go).

@@ -37,6 +37,9 @@ type BackupOptions struct {
 	Datastore       string
 	Namespace       string
 	CertFingerprint string
+	// EncryptionKey is the PBS server's client-side encryption key (key file
+	// JSON), empty for unencrypted backups. An unusable key fails the backup.
+	EncryptionKey json.RawMessage
 	BackupObjects      []string // Multiple directories or drives to backup
 	BackupID        string
 	BackupType      string // "host" for directory, "vm" for machine
@@ -787,6 +790,27 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 			BackupID: opts.BackupID,
 		},
 	}
+	// Client-side encryption: a configured but unusable key fails the backup
+	// rather than silently uploading unencrypted data.
+	if err := applyEncryptionKey(client, opts.EncryptionKey); err != nil {
+		errMsg := fmt.Sprintf("encryption key error: %v", err)
+		writeBackupLog("❌ " + errMsg)
+		if opts.OnComplete != nil {
+			opts.OnComplete(false, errMsg)
+		}
+		if opts.OnResult != nil {
+			opts.OnResult(&BackupStatus{
+				Outcome:     OutcomeFailed,
+				BackupID:    opts.BackupID,
+				DurationSec: time.Since(startTime).Seconds(),
+				Message:     errMsg,
+			})
+		}
+		return fmt.Errorf("%s", errMsg)
+	}
+	if client.Crypt != nil {
+		writeBackupLog(fmt.Sprintf("🔒 Client-side encryption enabled (key %s)", client.Crypt.ShortFingerprint()))
+	}
 
 	writeBackupLog("[DEBUG] PBS client created, starting directory backup loop")
 
@@ -1060,6 +1084,24 @@ func runMachineBackupInline(opts BackupOptions) error {
 		BackupType:      opts.BackupType,
 		BackupDevices:   opts.BackupObjects,
 	}
+	crypt, kerr := cryptFromStoredKey(opts.EncryptionKey)
+	if kerr != nil {
+		errMsg := fmt.Sprintf("encryption key error: %v", kerr)
+		writeBackupLog("❌ " + errMsg)
+		if opts.OnComplete != nil {
+			opts.OnComplete(false, errMsg)
+		}
+		if opts.OnResult != nil {
+			opts.OnResult(&BackupStatus{
+				Outcome:     OutcomeFailed,
+				BackupID:    opts.BackupID,
+				DurationSec: time.Since(startTime).Seconds(),
+				Message:     errMsg,
+			})
+		}
+		return fmt.Errorf("%s", errMsg)
+	}
+	cfg.Crypt = crypt
 
 	// Progress callback wrapper. Returning true (user pressed Stop, which
 	// cancels opts.Ctx) makes the backup abort without committing the index.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -58,6 +59,7 @@ type SearchOptions struct {
 	Datastore       string
 	Namespace       string
 	CertFingerprint string
+	EncryptionKey   json.RawMessage // server's client-side encryption key, if any
 
 	HostPrefix      string
 	Query           string
@@ -262,6 +264,7 @@ func SearchFilesInline(opts SearchOptions) (*SearchResult, error) {
 			Datastore:       opts.Datastore,
 			Namespace:       opts.Namespace,
 			CertFingerprint: opts.CertFingerprint,
+			EncryptionKey:   opts.EncryptionKey,
 			BackupID:        tg.backupID,
 			SnapshotTime:    tg.at,
 		}

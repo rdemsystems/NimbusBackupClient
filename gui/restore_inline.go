@@ -48,6 +48,7 @@ type RestoreOptions struct {
 	Datastore       string
 	Namespace       string
 	CertFingerprint string
+	EncryptionKey   json.RawMessage // server's client-side encryption key, if any
 	BackupID        string
 	SnapshotTime    time.Time
 	DestPath        string
@@ -177,8 +178,17 @@ func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progres
 			BackupTime: opts.SnapshotTime.Unix(),
 		},
 	}
+	if err := applyEncryptionKey(client, opts.EncryptionKey); err != nil {
+		return err
+	}
 	client.Connect(true, "host")
 	defer client.Close()
+	// Clear "key required" / "wrong key" error up front for encrypted
+	// snapshots, instead of a decryption failure on the first chunk.
+	if err := client.VerifySnapshotKey(); err != nil {
+		writeBackupLog(fmt.Sprintf("Snapshot key check failed (%s): %v", logTag, err))
+		return err
+	}
 
 	ra, size, err := client.NewDIDXReaderAt(archiveName, 64, func(fetched, total int) {
 		if fetched == total || fetched%32 == 0 {
@@ -225,6 +235,10 @@ func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []
 			BackupID:   opts.BackupID,
 			BackupTime: opts.SnapshotTime.Unix(),
 		},
+	}
+	if err := applyEncryptionKey(client, opts.EncryptionKey); err != nil {
+		writeBackupLog(fmt.Sprintf("Catalog listing skipped: %v", err))
+		return nil, nil, false // the data-archive walk reports the error
 	}
 	client.Connect(true, "host")
 	defer client.Close()

@@ -37,6 +37,7 @@ type BackupHandler interface {
 	UpdateScheduledJobFromMap(job map[string]interface{}) error
 	DeleteScheduledJobFromMap(jobID string) error
 	PinServerFingerprint(id, fingerprint string) error
+	SetServerEncryptionKey(id, keyJSON string) error
 	StartMachineBackup(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error
 }
 
@@ -69,6 +70,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/jobs/update", s.handleJobUpdate)
 	s.mux.HandleFunc("/jobs/delete/", s.handleJobDelete)
 	s.mux.HandleFunc("/pbs/fingerprint", s.handlePinFingerprint)
+	s.mux.HandleFunc("/pbs/encryption-key", s.handleEncryptionKey)
 }
 
 // Start starts the HTTP server
@@ -432,6 +434,41 @@ func (s *Server) handlePinFingerprint(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"success": true,
 		"message": "Fingerprint pinned successfully",
+	}
+	s.writeJSON(w, resp, http.StatusOK)
+}
+
+// handleEncryptionKey lets the unprivileged GUI store (or, with an empty key,
+// remove) a PBS server's client-side encryption key through the privileged
+// service, the single writer of config.json. The key never leaves this
+// authenticated loopback API.
+func (s *Server) handleEncryptionKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID  string `json:"id"`
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+		s.writeError(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+	if req.ID == "" {
+		s.writeError(w, "id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.app.SetServerEncryptionKey(req.ID, req.Key); err != nil {
+		s.writeError(w, fmt.Sprintf("Failed to store encryption key: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	resp := map[string]interface{}{
+		"success": true,
+		"message": "Encryption key updated",
 	}
 	s.writeJSON(w, resp, http.StatusOK)
 }

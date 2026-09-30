@@ -394,6 +394,27 @@ func (a *App) SaveConfig(config *Config) error {
 		if config.SMTPPassword == "" {
 			config.SMTPPassword = a.config.SMTPPassword
 		}
+		// Encryption keys never reach the frontend and only change through the
+		// dedicated encryption-key methods: keep the stored ones. The frontend
+		// does not send the server map either, so an empty one means "unchanged"
+		// (saving it empty would drop every server, key and token).
+		config.EncryptionKey = a.config.EncryptionKey
+		if len(config.PBSServers) == 0 {
+			config.PBSServers = a.config.PBSServers
+			config.DefaultPBSID = a.config.DefaultPBSID
+		} else {
+			for id, srv := range config.PBSServers {
+				if srv == nil {
+					continue
+				}
+				srv.EncryptionKeySet = false
+				srv.EncryptionFingerprint = ""
+				srv.EncryptionKey = nil
+				if old, ok := a.config.PBSServers[id]; ok && old != nil {
+					srv.EncryptionKey = old.EncryptionKey
+				}
+			}
+		}
 	}
 
 	// Log sanitized config (no secrets)
@@ -530,10 +551,13 @@ func (a *App) UpdatePBSServer(pbs *PBSServer) error {
 	writeDebugLog(fmt.Sprintf("UpdatePBSServer(%s) called", pbs.ID))
 	// M-04: the frontend never receives the token (sanitized), so an empty secret
 	// on update means "keep the stored one", not "clear it".
-	if pbs.Secret == "" {
-		if existing, err := a.config.GetPBSServer(pbs.ID); err == nil && existing != nil {
+	if existing, err := a.config.GetPBSServer(pbs.ID); err == nil && existing != nil {
+		if pbs.Secret == "" {
 			pbs.Secret = existing.Secret
 		}
+		// The encryption key never reaches the frontend and only changes through
+		// the dedicated encryption-key methods: always keep the stored one.
+		pbs.EncryptionKey = existing.EncryptionKey
 	}
 	return a.config.UpdatePBSServer(pbs)
 }
@@ -871,6 +895,7 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 		Datastore:       pbsCfg.Datastore,
 		Namespace:       pbsCfg.Namespace,
 		CertFingerprint: pbsCfg.CertFingerprint,
+		EncryptionKey:   pbsCfg.EncryptionKey,
 		BackupObjects:   targetDirs,
 		BackupID:        backupID,
 		BackupType:      "host", // "host" for directory, would be "vm" for machine
@@ -1084,6 +1109,7 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 		Datastore:       pbsCfg.Datastore,
 		Namespace:       pbsCfg.Namespace,
 		CertFingerprint: pbsCfg.CertFingerprint,
+		EncryptionKey:   pbsCfg.EncryptionKey,
 		BackupObjects:   backupDevices,
 		BackupID:        backupID,
 		Kind:            "machine",
@@ -1310,6 +1336,7 @@ func (a *App) ListSnapshotContents(pbsID, backupID string, snapshotUnix int64, f
 		Datastore:       cfg.Datastore,
 		Namespace:       cfg.Namespace,
 		CertFingerprint: cfg.CertFingerprint,
+		EncryptionKey:   cfg.EncryptionKey,
 		BackupID:        backupID,
 		SnapshotTime:    time.Unix(snapshotUnix, 0),
 	}
@@ -1343,6 +1370,7 @@ func (a *App) GetSnapshotMeta(pbsID, backupID string, snapshotUnix int64) (*Back
 		Datastore:       cfg.Datastore,
 		Namespace:       cfg.Namespace,
 		CertFingerprint: cfg.CertFingerprint,
+		EncryptionKey:   cfg.EncryptionKey,
 		BackupID:        backupID,
 		SnapshotTime:    time.Unix(snapshotUnix, 0),
 	}
@@ -1423,6 +1451,7 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
 		Datastore:         cfg.Datastore,
 		Namespace:         cfg.Namespace,
 		CertFingerprint:   cfg.CertFingerprint,
+		EncryptionKey:     cfg.EncryptionKey,
 		BackupID:          backupID,
 		SnapshotTime:      timestamp,
 		DestPath:          destPath,
@@ -1555,6 +1584,7 @@ func (a *App) SearchFiles(pbsID, hostPrefix, query, mode string, fromUnix, toUni
 		Datastore:       cfg.Datastore,
 		Namespace:       cfg.Namespace,
 		CertFingerprint: cfg.CertFingerprint,
+		EncryptionKey:   cfg.EncryptionKey,
 		HostPrefix:      hostPrefix,
 		Query:           query,
 		Mode:            SearchMatchMode(mode),

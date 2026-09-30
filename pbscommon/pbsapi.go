@@ -1268,6 +1268,23 @@ func (pbs *PBSClient) getChunkRaw(digest string) ([]byte, error) {
 	return ret, nil
 }
 
+// VerifySnapshotKey reads the snapshot's manifest (reader session) and checks
+// it against pbs.Crypt, so restoring an encrypted snapshot without its key, or
+// with the wrong one, fails up front with a clear error instead of on the
+// first chunk. A manifest that cannot be fetched or decoded is not reported
+// here: the archive read that follows surfaces the real problem.
+func (pbs *PBSClient) VerifySnapshotKey() error {
+	raw, err := pbs.DownloadToBytes("index.json.blob")
+	if err != nil {
+		return nil
+	}
+	data, err := DecodeBlob(raw, nil)
+	if err != nil {
+		return nil
+	}
+	return VerifyManifest(data, pbs.Crypt)
+}
+
 // GetVerifiedChunk fetches and decodes a chunk, then checks it against its
 // digest: plain SHA-256 for an unencrypted chunk, SHA256(data || id_key) for
 // an encrypted one. The mode comes from the chunk itself, not from whether a

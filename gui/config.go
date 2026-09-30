@@ -36,6 +36,10 @@ type Config struct {
 	CSRFToken string `json:"-"`
 	Datastore       string `json:"datastore,omitempty"`
 	Namespace       string `json:"namespace,omitempty"`
+	// Client-side encryption key of the legacy single PBS (migrated into
+	// PBSServers["default"]); runtime copy of the active server's key after
+	// EffectivePBS()/ToConfig(). See PBSServer.EncryptionKey.
+	EncryptionKey json.RawMessage `json:"encryption_key,omitempty" ts_type:"any"`
 
 	// ==================== BACKUP SETTINGS ====================
 	BackupDir      string   `json:"backupdir,omitempty"`
@@ -77,6 +81,7 @@ func (c *Config) sanitized() *Config {
 	cp.Password = ""
 	cp.Ticket = "" // runtime credential, never to the frontend
 	cp.CSRFToken = ""
+	cp.EncryptionKey = nil // secret, never to the frontend
 	if c.PBSServers != nil {
 		cp.PBSServers = make(map[string]*PBSServer, len(c.PBSServers))
 		for k, v := range c.PBSServers {
@@ -212,6 +217,7 @@ func LoadConfig() *Config {
 			Secret:          config.Secret,
 			Datastore:       config.Datastore,
 			Namespace:       config.Namespace,
+			EncryptionKey:   config.EncryptionKey,
 			Description:     "Serveur PBS par défaut (migré depuis ancienne config)",
 		}
 
@@ -306,12 +312,16 @@ func (c *Config) Validate() error {
 // ==================== MULTI-PBS HELPER METHODS ====================
 
 // EffectivePBS returns a Config whose legacy PBS fields (BaseURL, AuthID, etc.)
-// are guaranteed to reflect the active PBS server. If the legacy fields are
-// already set, the receiver is returned as-is. Otherwise, the default entry
-// from PBSServers is promoted into a shallow copy so callers that still read
-// legacy fields work seamlessly with multi-PBS configurations.
+// reflect the active PBS server, for callers that still read legacy fields.
+//
+// Once PBSServers is populated, the default server entry is authoritative: a
+// migrated legacy config keeps its top-level fields, and preferring them made
+// backups ignore later edits of the server entry — a changed default server,
+// a rotated token, and above all an encryption key set on the entry, which
+// would then have been silently skipped (unencrypted backups). The legacy
+// fields are only used when no server entry can be resolved.
 func (c *Config) EffectivePBS() *Config {
-	if c.BaseURL != "" || len(c.PBSServers) == 0 {
+	if len(c.PBSServers) == 0 {
 		return c
 	}
 	pbs, err := c.GetPBSServer("")
@@ -327,6 +337,7 @@ func (c *Config) EffectivePBS() *Config {
 	cp.Password = pbs.Password
 	cp.Datastore = pbs.Datastore
 	cp.Namespace = pbs.Namespace
+	cp.EncryptionKey = pbs.EncryptionKey
 	return &cp
 }
 
@@ -372,6 +383,10 @@ func (c *Config) AddPBSServer(pbs *PBSServer) error {
 		return fmt.Errorf("mot de passe requis pour la connexion utilisateur/mot de passe")
 	}
 
+	// Display-only markers set on sanitized copies; never persist them.
+	pbs.EncryptionKeySet = false
+	pbs.EncryptionFingerprint = ""
+
 	if c.PBSServers == nil {
 		c.PBSServers = make(map[string]*PBSServer)
 	}
@@ -411,6 +426,9 @@ func (c *Config) UpdatePBSServer(pbs *PBSServer) error {
 		// frontend never receives the password, so it cannot echo it back.
 		pbs.Password = existing.Password
 	}
+	// Display-only markers set on sanitized copies; never persist them.
+	pbs.EncryptionKeySet = false
+	pbs.EncryptionFingerprint = ""
 
 	c.PBSServers[pbs.ID] = pbs
 	return c.Save()

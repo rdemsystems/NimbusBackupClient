@@ -95,6 +95,7 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
 		Datastore:       pbsCfg.Datastore,
 		Namespace:       pbsCfg.Namespace,
 		CertFingerprint: pbsCfg.CertFingerprint,
+		EncryptionKey:   pbsCfg.EncryptionKey,
 		BackupObjects:   allDirs,
 		BackupID:        backupID,
 		BackupType:      "host",
