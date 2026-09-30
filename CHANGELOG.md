@@ -40,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   if the source is still online). Every machine backup also stores these facts
   in `machine-info.json.blob`.
 
+### Fixed
+- **GUI disk backups always failed with the default Backup ID** (regression in
+  0.4.0): disk mode now files snapshots as `vm/<ID>` for Proxmox VE restore,
+  which needs a numeric VM ID, but the field was pre-filled with the hostname
+  ("machine backup needs a numeric backup ID"). Disk mode now has its own
+  **Proxmox VM ID** field (100–999999999, remembered per machine, separate from
+  the folder Backup ID), validated before the backup or scheduled job starts;
+  editing a scheduled disk job restores its VM ID and disks.
+
 ### Changed
 - Once PBS servers are configured, backups and restores always use the default
   server entry. Configs migrated from the legacy single-server format kept their

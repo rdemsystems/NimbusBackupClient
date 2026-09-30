@@ -375,9 +375,11 @@ func Backup(cfg *Config, progressCallback ProgressCallback) (*BackupResult, erro
 	// qemu-server config below, so it must be numeric. Check it now rather
 	// than after every disk has been uploaded.
 	if cfg.BackupType == "vm" {
-		if _, err := strconv.ParseInt(cfg.BackupID, 10, 32); err != nil {
-			return nil, fmt.Errorf("machine backup needs a numeric backup ID (PBS VM ID), got %q", cfg.BackupID)
+		// Proxmox VE VM IDs are 100..999999999.
+		if id, err := strconv.ParseInt(strings.TrimSpace(cfg.BackupID), 10, 32); err != nil || id < 100 || id > 999999999 {
+			return nil, fmt.Errorf("machine backup needs a Proxmox VM ID as backup ID (a number between 100 and 999999999, e.g. 9001), got %q", cfg.BackupID)
 		}
+		cfg.BackupID = strings.TrimSpace(cfg.BackupID)
 	}
 
 	client := &pbscommon.PBSClient{
