@@ -5,26 +5,16 @@ import (
 	"testing"
 )
 
-func TestRenderQemuConfigUsesVMIDForEveryDisk(t *testing.T) {
-	out, err := renderQemuConfig(qemuConfigData{
-		VMGenId: "11111111-1111-1111-1111-111111111111",
-		VMID:    107,
-		VMName:  "testhost",
-		OS:      "l26",
-		SMBIOS:  "22222222-2222-2222-2222-222222222222",
-		Disks:   []BackupDisk{{Index: 0, Size: 1 << 30}, {Index: 1, Size: 2 << 30}},
-	})
-	if err != nil {
-		t.Fatalf("renderQemuConfig: %v", err)
-	}
-	cfg := string(out)
+func TestBuildQemuConfigUsesVMIDForEveryDisk(t *testing.T) {
+	mi := &MachineInfo{Hostname: "testhost", OS: "linux", PVEOSType: "l26", BootDisk: -1}
+	cfg := BuildQemuConfig(mi, 107, []BackupDisk{{Index: 0, Size: 1 << 30}, {Index: 1, Size: 2 << 30}})
 	for _, want := range []string{
 		"name: testhost",
 		"sata0: local:107/vm-107-disk-0.raw,cache=writeback,discard=on,size=1073741824",
 		"sata1: local:107/vm-107-disk-1.raw,cache=writeback,discard=on,size=2147483648",
 		"#qmdump#map:sata0:drive-sata0::raw:",
 		"#qmdump#map:sata1:drive-sata1::raw:",
-		"vmgenid: 11111111-1111-1111-1111-111111111111",
+		"vmgenid: ",
 	} {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("config missing %q\n%s", want, cfg)
@@ -32,22 +22,21 @@ func TestRenderQemuConfigUsesVMIDForEveryDisk(t *testing.T) {
 	}
 }
 
-func TestRenderQemuConfigUEFI(t *testing.T) {
-	base := qemuConfigData{VMGenId: "g", VMID: 107, VMName: "h", OS: "win11", SMBIOS: "s", Disks: []BackupDisk{{Index: 0, Size: 1 << 30}}}
-	out, err := renderQemuConfig(base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(out), "bios:") {
+func TestBuildQemuConfigUEFI(t *testing.T) {
+	mi := &MachineInfo{Hostname: "h", OS: "windows", PVEOSType: "win11", BootDisk: -1}
+	disks := []BackupDisk{{Index: 0, Size: 1 << 30}}
+	if out := BuildQemuConfig(mi, 107, disks); strings.Contains(out, "bios:") {
 		t.Errorf("BIOS disk must not get a bios line\n%s", out)
 	}
-	base.UEFI = true
-	out, err = renderQemuConfig(base)
-	if err != nil {
-		t.Fatal(err)
+	// Firmware detection failed but the boot disk is GPT: still OVMF.
+	disks[0].GPT = true
+	if out := BuildQemuConfig(mi, 107, disks); !strings.Contains(out, "\nbios: ovmf\n") || strings.Contains(out, "efidisk") {
+		t.Errorf("GPT boot disk should get bios: ovmf and no efidisk\n%s", out)
 	}
-	if !strings.HasPrefix(string(out), "bios: ovmf\n") || strings.Contains(string(out), "efidisk") {
-		t.Errorf("UEFI config should start with bios: ovmf and have no efidisk\n%s", out)
+	disks[0].GPT = false
+	mi.Firmware = "uefi"
+	if out := BuildQemuConfig(mi, 107, disks); !strings.Contains(out, "\nbios: ovmf\n") {
+		t.Errorf("UEFI firmware should get bios: ovmf\n%s", out)
 	}
 }
 
