@@ -157,6 +157,20 @@ jobs:
           done
           exit $rc
 
+      # machinebackuplib has no replace directives of its own: test it through
+      # the machinebackup module, which maps pbscommon/snapshot. Only the
+      # machine-info / VM-config tests (pure Go, platform-independent) for now;
+      # -vet=off so pre-existing vet findings in the disk code do not gate this.
+      - name: Test machine backup VM metadata
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          GOWORK: off
+        run: |
+          set -e
+          cd machinebackup && go mod tidy
+          go test -vet=off -run 'SMBIOS|PVEOSType|QemuConfig|SanitizeVMName' machinebackuplib
+
       - name: Test Windows-only modules
         if: runner.os == 'Windows'
         shell: bash

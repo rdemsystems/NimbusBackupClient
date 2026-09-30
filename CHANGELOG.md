@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     keep restoring when a key is configured.
   - A configured but unusable key fails the backup instead of silently backing
     up unencrypted data.
+- **Disk backups restore in Proxmox VE as a VM that matches the machine.** The
+  VM config stored with "vm" snapshots was a fixed template (4 cores, 2 GB,
+  `win11`, BIOS, no network, random SMBIOS UUID, boot always on `sata0`). It is
+  now generated from the real machine: logical CPU count, RAM, firmware (UEFI →
+  `bios: ovmf`), guest OS type (Windows version/edition → `win11`/`win10`/`win8`/
+  `win7`…, Linux → `l26`), one NIC per physical adapter keeping its MAC (`e1000e`
+  on Windows, `virtio` on Linux), the SMBIOS identity (UUID, manufacturer,
+  product, serial…) and the boot disk (the disk holding the system drive / root
+  filesystem). The VM description lists what to add before the first boot (EFI
+  disk, with pre-enrolled keys when Secure Boot was on; TPM state; "Unique" MACs
+  if the source is still online). Every machine backup also stores these facts
+  in `machine-info.json.blob`.
 
 ### Changed
 - Once PBS servers are configured, backups and restores always use the default

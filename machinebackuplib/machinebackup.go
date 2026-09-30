@@ -1,17 +1,15 @@
 package machinebackuplib
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
 	"math"
 	"os"
 	"regexp"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,7 +19,6 @@ import (
 	"pbscommon"
 
 	"github.com/alphadose/haxmap"
-	"github.com/google/uuid"
 )
 
 // ProgressCallback function type for reporting progress.
@@ -365,6 +362,7 @@ type BackupDisk struct {
 // BackupResult represents the result of a backup operation
 type BackupResult struct {
 	Disks []BackupDisk
+	Info  *MachineInfo
 }
 
 // Backup performs a machine backup using the provided configuration
@@ -525,60 +523,27 @@ func Backup(cfg *Config, progressCallback ProgressCallback) (*BackupResult, erro
 		}
 	}
 
-	if cfg.BackupType == "vm" {
-		type ConfigTemplate struct {
-			VMGenId string
-			VMID    int64
-			VMName  string
-			Disks   []BackupDisk
-			OS      string
-			SMBIOS  string
+	// Machine facts (CPU, RAM, firmware, NICs, SMBIOS, boot disk): uploaded as
+	// a side-car for every machine backup, and used to generate the VM config
+	// Proxmox VE restores for "vm" snapshots.
+	info := CollectMachineInfo(cfg.BackupDevices, disks)
+	if progressCallback != nil {
+		progressCallback(1, fmt.Sprintf("Machine: %s, %d CPUs, %d MiB RAM, firmware %s, %d NIC(s)",
+			info.OSName, info.CPUs, info.MemoryMiB, info.Firmware, len(info.NICs)))
+	}
+	if infoJSON, err := json.MarshalIndent(info, "", "  "); err == nil {
+		if err := client.UploadBlob("machine-info.json.blob", infoJSON); err != nil {
+			return nil, fmt.Errorf("upload machine info blob: %v", err)
 		}
+	}
 
-		tmpl, err := template.New("qemuconfig").Parse(`boot: order=sata0
-cores: 4
-machine: q35
-memory: 2048
-name: {{.VMName}}
-numa: 0
-onboot: 0
-ostype: {{.OS}}
-scsihw: virtio-scsi-single
-smbios1: uuid={{.SMBIOS}}
-sockets: 1
-{{range .Disks}}
-sata{{.Index}}: local:{{.VMID}}/vm-{{.VMID}}-disk-{{.Index}}.raw,cache=writeback,discard=on,iothread=1,size={{.Size}}
-{{end}}
-vmgenid: {{.VMGenId}}
-		`)
-		if err != nil {
-			return nil, fmt.Errorf("parse VM config template %v", err)
-		}
+	if cfg.BackupType == "vm" {
 		vmid, err := strconv.ParseInt(cfg.BackupID, 10, 32)
 		if err != nil {
 			return nil, fmt.Errorf("parse VM ID %v", err)
 		}
-		hostname, err := os.Hostname()
-		if err != nil {
-			return nil, fmt.Errorf("get hostname: %v", err)
-		}
-		wr := bytes.Buffer{}
-		cfgt := ConfigTemplate{
-			VMGenId: uuid.New().String(),
-			VMID:    vmid,
-			Disks:   disks,
-			VMName:  hostname,
-			SMBIOS:  uuid.New().String(), //TODO extract from real machine
-		}
-		if runtime.GOOS == "windows" { // TODO Improve
-			cfgt.OS = "win11"
-		} else {
-			cfgt.OS = "l26"
-		}
-		if err := tmpl.Execute(&wr, cfgt); err != nil {
-			return nil, fmt.Errorf("execute VM config template: %v", err)
-		}
-		if err := client.UploadBlob("qemu-server.conf.blob", wr.Bytes()); err != nil {
+		conf := BuildQemuConfig(info, vmid, disks)
+		if err := client.UploadBlob("qemu-server.conf.blob", []byte(conf)); err != nil {
 			return nil, fmt.Errorf("upload VM config blob: %v", err)
 		}
 	}
@@ -593,6 +558,7 @@ vmgenid: {{.VMGenId}}
 	
 	return &BackupResult{
 		Disks: disks,
+		Info:  info,
 	}, nil
 }
 
