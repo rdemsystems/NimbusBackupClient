@@ -14,7 +14,7 @@ One JSON file carries **everything for a backup**; scheduling is delegated to th
 Windows Task Scheduler.
 
 ```powershell
-proxmoxbackup-directory.exe --config "C:\ProgramData\NimbusBackup\backup.json"
+proxmoxbackup-directory.exe --config "C:\ProgramData\NimbusBackupCLI\backup.json"
 ```
 
 - Config: [`cli-single-config.json`](cli-single-config.json) (all fields).
@@ -94,8 +94,12 @@ Ansible example: [`ansible/deploy-gui-service.yml`](ansible/deploy-gui-service.y
 | `nextRun` | optional — auto-computed if empty |
 
 > **Secrets:** never commit real tokens. Use Ansible Vault
-> (`{{ vault_pbs_secret }}` in the examples). On disk, `config.json` is written
-> `0600` and the token is stripped before it ever reaches the GUI frontend.
+> (`{{ vault_pbs_secret }}` in the examples). The token is stripped before it
+> ever reaches the GUI frontend, but on disk the config files are protected
+> **only by the folder's ACLs** (the `0600` mode Go applies has no effect on
+> Windows). `C:\ProgramData` lets local users read files created there by
+> default, so restrict the folder to `SYSTEM` and `Administrators` — the CLI
+> playbook does this for its config folder with `win_acl`/`win_acl_inheritance`.
 
 ---
 

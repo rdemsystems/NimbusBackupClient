@@ -12,7 +12,7 @@
 
   vars:
     nimbus_dir: 'C:\Program Files\NimbusBackup'
-    nimbus_cfg_dir: 'C:\ProgramData\NimbusBackup'
+    nimbus_cfg_dir: 'C:\ProgramData\NimbusBackupCLI'
     # Override these per host/group (Vault for the secret).
     pbs_baseurl: 'https://pbs.example.net:8007'
     pbs_fingerprint: 'AA:BB:CC:...'
@@ -31,6 +31,28 @@
       loop:
         - '{{ nimbus_dir }}'
         - '{{ nimbus_cfg_dir }}'
+
+    # backup.json holds the PBS secret. ProgramData's inherited ACLs let local
+    # users read files created there, so restrict the folder to SYSTEM and
+    # Administrators (grant first, then drop inheritance).
+    - name: Grant SYSTEM and Administrators full control of the config directory
+      ansible.windows.win_acl:
+        path: '{{ nimbus_cfg_dir }}'
+        user: '{{ item }}'
+        rights: FullControl
+        type: allow
+        state: present
+        inherit: ContainerInherit, ObjectInherit
+        propagation: None
+      loop:
+        - SYSTEM
+        - Administrators
+
+    - name: Remove inherited permissions from the config directory
+      ansible.windows.win_acl_inheritance:
+        path: '{{ nimbus_cfg_dir }}'
+        state: absent
+        reorganize: false
 
     - name: Copy proxmoxbackup-directory.exe
       ansible.windows.win_copy:
