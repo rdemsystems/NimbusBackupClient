@@ -4,7 +4,9 @@ on:
   push:
     # merge-upstream-*: fork branches re-merging tizbac/master (see
     # patches/README.md) get the full build + tests; releases stay tag-only.
-    branches: [ main, develop, github-release, 'merge-upstream-*' ]
+    # master is the fork's published branch: build + test every push there so
+    # untagged test builds are available as workflow artifacts.
+    branches: [ master, main, develop, github-release, 'merge-upstream-*' ]
     tags:
       - 'v*'
   pull_request:
