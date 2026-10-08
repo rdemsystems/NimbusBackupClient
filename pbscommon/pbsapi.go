@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -109,13 +110,58 @@ type BackupManifest struct {
 	Unprotected Unprotected `json:"unprotected"`
 }
 
+// AuthErr is returned when PBS refuses to upgrade the connection to the
+// backup or reader protocol. Despite its name, that is not always an
+// authentication problem: PBS also refuses with 400 ("backup owner check
+// failed"), 403 (missing privilege) or 404 ("namespace not found"), with the
+// reason as plain text in the body.
 type AuthErr struct {
-	StatusCode   string
-	ResponseBody string
+	StatusCode   int    // HTTP status code
+	Status       string // reason phrase of the status line, e.g. "Bad Request"
+	ResponseBody string // response body only, whitespace-collapsed
 }
 
 func (e *AuthErr) Error() string {
-	return fmt.Sprintf("PBS authentication failed: HTTP %s - %s", e.StatusCode, e.ResponseBody)
+	reason := e.ResponseBody
+	if reason == "" {
+		reason = e.Status
+	}
+	if reason == "" {
+		reason = http.StatusText(e.StatusCode)
+	}
+	what := "PBS refused the backup"
+	switch e.StatusCode {
+	case http.StatusUnauthorized:
+		what = "PBS authentication failed"
+	case http.StatusForbidden:
+		what = "PBS access denied"
+	}
+	return fmt.Sprintf("%s (HTTP %d): %s", what, e.StatusCode, reason)
+}
+
+// upgradeRejection builds the error for a refused protocol upgrade from the
+// response status line ("HTTP/1.1 400 Bad Request") and body. The response
+// headers are left out: they only go to the debug log.
+func upgradeRejection(statusLine string, body []byte) *AuthErr {
+	e := &AuthErr{}
+	toks := strings.SplitN(strings.TrimSpace(statusLine), " ", 3)
+	if len(toks) > 1 {
+		e.StatusCode, _ = strconv.Atoi(toks[1])
+	}
+	if len(toks) > 2 {
+		e.Status = toks[2]
+	}
+	text := strings.TrimSpace(string(body))
+	// PBS answers API errors in JSON ({"message": ...}) and the upgrade
+	// refusal in plain text; accept both.
+	var j struct {
+		Message string `json:"message"`
+	}
+	if strings.HasPrefix(text, "{") && json.Unmarshal([]byte(text), &j) == nil && j.Message != "" {
+		text = j.Message
+	}
+	e.ResponseBody = strings.Join(strings.Fields(text), " ")
+	return e
 }
 
 type PBSClient struct {
@@ -1088,14 +1134,7 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 							fmt.Printf("PBS error body: %s\n", responseBody)
 						}
 
-						errBody := string(buf)
-						if responseBody != "" {
-							errBody = errBody + "\nBody: " + responseBody
-						}
-						return nil, &AuthErr{
-							StatusCode:   statusCode,
-							ResponseBody: errBody,
-						}
+						return nil, upgradeRejection(lines[0], []byte(responseBody))
 					}
 				}
 

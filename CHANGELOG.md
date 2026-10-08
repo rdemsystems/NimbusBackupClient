@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in `machine-info.json.blob`.
 
 ### Fixed
+- Error messages now show the reason returned by PBS instead of "authentication
+  failed" for every refusal, e.g. `PBS refused the backup (HTTP 400): backup
+  owner check failed (…)`. 401 and 403 keep their own wording, and the raw
+  response headers no longer appear in the message.
 - **GUI disk backups always failed with the default Backup ID** (regression in
   0.4.0): disk mode now files snapshots as `vm/<ID>` for Proxmox VE restore,
   which needs a numeric VM ID, but the field was pre-filled with the hostname
