@@ -260,6 +260,11 @@ jobs:
     name: Build GUI
     needs: [security, test, test-modules]
     runs-on: windows-latest
+    # The environment pins the OIDC subject to
+    # repo:rdemsystems/NimbusBackupClient:environment:signing, so one Azure
+    # federated credential covers every branch and tag (a ref-based subject
+    # cannot wildcard v* tags).
+    environment: signing
     # id-token: OIDC login to Azure for code signing (no stored secret).
     permissions:
       contents: read
