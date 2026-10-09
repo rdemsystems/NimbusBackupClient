@@ -250,6 +250,12 @@ func main() {
 		hostname = "unknown"
 	}
 
+	excludes, err := cfg.ExcludePatterns()
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
 	dirs := cfg.Dirs()
 	var client *pbscommon.PBSClient
 	if len(dirs) <= 1 {
@@ -263,13 +269,13 @@ func main() {
 	begin := time.Now()
 	var readErrors []string
 	if len(dirs) == 1 {
-		readErrors, err = backup(client, newchunk, reusechunk, cfg.PxarOut, dirs[0], cfg.UseVSS)
+		readErrors, err = backup(client, newchunk, reusechunk, cfg.PxarOut, dirs[0], cfg.UseVSS, excludes)
 	} else if len(dirs) > 1 {
 		baseID := cfg.BackupID
 		if baseID == "" {
 			baseID = hostname
 		}
-		readErrors, err = backup_many(newClient, newchunk, reusechunk, cfg.PxarOut, dirs, baseID, cfg.UseVSS)
+		readErrors, err = backup_many(newClient, newchunk, reusechunk, cfg.PxarOut, dirs, baseID, cfg.UseVSS, excludes)
 	} else if cfg.BackupStreamName != "" {
 		sn := cfg.BackupStreamName
 		if !strings.HasSuffix(sn, ".didx") {
@@ -363,7 +369,7 @@ func main() {
 // retention and restore treat every directory as an independent series. A
 // directory that fails does not stop the others; the failures are joined into
 // the returned error.
-func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool) ([]string, error) {
+func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool, excludes []string) ([]string, error) {
 	if pxarOut != "" {
 		return nil, fmt.Errorf("-pxarout writes a single archive and cannot be combined with several -backupdir")
 	}
@@ -388,7 +394,7 @@ func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), 
 			failures = append(failures, fmt.Errorf("%s: ticket login failed: %w", dir, err))
 			continue
 		}
-		dirReadErrors, err := backup(client, newchunk, reusechunk, "", dir, usevss)
+		dirReadErrors, err := backup(client, newchunk, reusechunk, "", dir, usevss, excludes)
 		// Release the session even after a failure, otherwise PBS keeps the
 		// group locked until the connection times out.
 		client.Close()
@@ -461,12 +467,17 @@ func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uin
 	return client.Finish()
 }
 
-func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string) ([]string, error) {
+// backup_real archives backupdir (the VSS snapshot path when VSS is used);
+// excludeRoot is the original directory, so absolute exclusion patterns match
+// whatever path is actually read.
+func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, excludeRoot string, excludes []string) ([]string, error) {
 	client.Connect(false, "host")
 	knownChunks := haxmap.New[string, bool]()
 
 	archive := &pbscommon.PXARArchive{}
 	archive.ArchiveName = "backup.pxar.didx"
+	archive.ExcludeList = excludes
+	archive.ExcludeRoot = excludeRoot
 
 	previousDidx, err := client.DownloadPreviousToBytes(archive.ArchiveName)
 	if err != nil {
@@ -563,7 +574,7 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
 	return archive.ReadErrors, nil
 }
 
-func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, usevss bool) ([]string, error) {
+func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, usevss bool, excludes []string) ([]string, error) {
 
 	fmt.Printf("Starting backup of %s\n", backupdir)
 	var err error
@@ -579,7 +590,7 @@ func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, px
 			}
 			//Remove VSS snapshot on windows, on linux for now NOP
 			var e error
-			readErrors, e = backup_real(client, newchunk, reusechunk, pxarOut, snapshotDir)
+			readErrors, e = backup_real(client, newchunk, reusechunk, pxarOut, snapshotDir, originalDir, excludes)
 			return e
 
 		})
@@ -588,7 +599,7 @@ func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, px
 			readErrors[i] = unmapSnapshotPathString(readErrors[i], snapshotDir, originalDir)
 		}
 	} else {
-		readErrors, err = backup_real(client, newchunk, reusechunk, pxarOut, backupdir)
+		readErrors, err = backup_real(client, newchunk, reusechunk, pxarOut, backupdir, originalDir, excludes)
 	}
 
 	if err != nil {

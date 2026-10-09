@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -60,4 +62,35 @@ func TestConfigDirsWithKeyFile(t *testing.T) {
 	if !cfg.valid() {
 		t.Error("config with several backupdirs and a keyfile should be valid")
 	}
+}
+
+func TestConfigExcludePatterns(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "exclude.txt")
+	content := "# caches\n*.tmp\n\n  node_modules  \r\nlogs/*.log\n"
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var cfg Config
+	if err := json.Unmarshal([]byte(`{"exclude":["Thumbs.db"],"exclude-from":`+jsonString(file)+`}`), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := cfg.ExcludePatterns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Thumbs.db", "*.tmp", "node_modules", "logs/*.log"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ExcludePatterns() = %q, want %q", got, want)
+	}
+
+	cfg.ExcludeFrom = filepath.Join(t.TempDir(), "missing.txt")
+	if _, err := cfg.ExcludePatterns(); err == nil {
+		t.Error("a missing exclusion file must be an error, not an unfiltered backup")
+	}
+}
+
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

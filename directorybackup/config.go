@@ -55,6 +55,35 @@ type Config struct {
 	// PBKDF2 KDF. Left empty, the passphrase is asked for on the console.
 	// Ignored for `--kdf none` key files, which need nothing.
 	KeyFilePassphrase string `json:"keyfilepassphrase"`
+
+	// Exclude lists exclusion patterns, the same syntax as the GUI's exclusion
+	// list: a pattern without a separator matches a name anywhere in the tree
+	// ("*.tmp", "node_modules"); a pattern with a separator is anchored to the
+	// backup root ("logs/*.log", or an absolute "C:\\Data\\Cache").
+	Exclude []string `json:"exclude"`
+
+	// ExcludeFrom is a file with one pattern per line (blank lines and lines
+	// starting with # are ignored), added to Exclude.
+	ExcludeFrom string `json:"exclude-from"`
+}
+
+// ExcludePatterns returns the patterns of Exclude and of the ExcludeFrom file.
+func (c *Config) ExcludePatterns() ([]string, error) {
+	patterns := append([]string(nil), c.Exclude...)
+	if c.ExcludeFrom == "" {
+		return patterns, nil
+	}
+	data, err := os.ReadFile(c.ExcludeFrom) // #nosec G304 -- path given by the operator
+	if err != nil {
+		return nil, fmt.Errorf("read exclusion file: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			patterns = append(patterns, line)
+		}
+	}
+	return patterns, nil
 }
 
 // Dirs returns every configured source directory: "backupdir" first (if set),
@@ -115,6 +144,9 @@ func loadConfig() *Config {
 	backupIDFlag := flag.String("backup-id", "", "Backup ID (optional - if not specified, the hostname is used as the default)")
 	var backupSourceDirFlags dirListFlag
 	flag.Var(&backupSourceDirFlags, "backupdir", "Backup source directory, must not be symlink. Repeat the flag to back up several directories; each becomes its own backup group (backup-id <base>_<path>)")
+	var excludeFlags dirListFlag
+	flag.Var(&excludeFlags, "exclude", "Exclusion pattern, repeatable: a name anywhere in the tree (\"*.tmp\", \"node_modules\") or a path anchored to the backup root (\"logs/*.log\")")
+	excludeFromFlag := flag.String("exclude-from", "", "File with one exclusion pattern per line (# starts a comment)")
 	backupStreamNameFlag := flag.String("backupstream", "", "Filename for stream backup")
 	pxarOutFlag := flag.String("pxarout", "", "Output PXAR archive for debug purposes (optional)")
 	noVSSFlag := flag.Bool("novss", false, "Disable VSS ( For filesystems that don't support it, for example veracrypt )")
@@ -182,6 +214,13 @@ func loadConfig() *Config {
 	if len(backupSourceDirFlags) > 0 {
 		config.BackupSourceDir = backupSourceDirFlags[0]
 		config.BackupSourceDirs = backupSourceDirFlags[1:]
+	}
+
+	if len(excludeFlags) > 0 {
+		config.Exclude = append(config.Exclude, excludeFlags...)
+	}
+	if *excludeFromFlag != "" {
+		config.ExcludeFrom = *excludeFromFlag
 	}
 
 	if *backupStreamNameFlag != "" {

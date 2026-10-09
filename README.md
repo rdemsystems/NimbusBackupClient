@@ -81,7 +81,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite 
 - Debug logging for troubleshooting
 
 ### Command-line tools
-- `proxmoxbackup-directory` — directory (PXAR) backups with deduplication, stream backups (`-backupstream`, e.g. a `mysqldump` pipe), e-mail notifications, JSON config file
+- `proxmoxbackup-directory` — directory (PXAR) backups with deduplication, stream backups (`-backupstream`, e.g. a `mysqldump` pipe), exclusions (`-exclude "*.tmp"`, repeatable, or `-exclude-from file`; `"exclude"` in the JSON config), e-mail notifications, JSON config file
 - `proxmoxbackup-machine` — full live machine backups as a bootable disk image (FIDX): VSS on Windows, incremental, parallel hashing
 - `proxmoxbackup-nbd` — NBD server to mount a disk backup on Linux (file-level restore, bare-metal restore from a [patched Clonezilla live ISO](PATCH-CLONEZILLA.md))
 

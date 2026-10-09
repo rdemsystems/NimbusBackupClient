@@ -81,7 +81,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
 - Journalisation de débogage pour le diagnostic
 
 ### Outils en ligne de commande
-- `proxmoxbackup-directory` — sauvegarde de dossiers (PXAR) avec déduplication, sauvegarde de flux (`-backupstream`, ex. un `mysqldump` en pipe), notifications par e-mail, fichier de configuration JSON
+- `proxmoxbackup-directory` — sauvegarde de dossiers (PXAR) avec déduplication, sauvegarde de flux (`-backupstream`, ex. un `mysqldump` en pipe), exclusions (`-exclude "*.tmp"`, répétable, ou `-exclude-from fichier` ; `"exclude"` dans la config JSON), notifications par e-mail, fichier de configuration JSON
 - `proxmoxbackup-machine` — sauvegarde à chaud d'une machine complète en image disque amorçable (FIDX) : VSS sous Windows, incrémentale, hachage parallélisé
 - `proxmoxbackup-nbd` — serveur NBD pour monter une sauvegarde disque sous Linux (restauration de fichiers, restauration bare-metal depuis une [ISO Clonezilla live patchée](PATCH-CLONEZILLA.md))
 
