@@ -458,18 +458,6 @@ func gptSignatureIn(head []byte) bool {
 	return false
 }
 
-// bootDiskIsGPT looks at sata0, the disk the generated config boots from:
-// the lowest-indexed backed-up disk.
-func bootDiskIsGPT(disks []BackupDisk) bool {
-	best := -1
-	for i, d := range disks {
-		if best < 0 || d.Index < disks[best].Index {
-			best = i
-		}
-	}
-	return best >= 0 && disks[best].GPT
-}
-
 // BackupResult represents the result of a backup operation
 type BackupResult struct {
 	Disks []BackupDisk

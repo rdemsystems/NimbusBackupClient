@@ -467,7 +467,9 @@ func mergeProvisionedJobs(existing, provisioned []ScheduledJob) []ScheduledJob {
 			// idempotent re-provisioning doesn't move or re-fire the job.
 			if pj.ScheduleTime == prev.ScheduleTime && validRFC3339(prev.NextRun) {
 				pj.NextRun = prev.NextRun
-			} else if pj.Enabled && pj.ScheduleTime != "" && !validRFC3339(pj.NextRun) {
+			} else if pj.Enabled && pj.ScheduleTime != "" && (pj.ScheduleTime != prev.ScheduleTime || !validRFC3339(pj.NextRun)) {
+				// A changed schedule always gets a fresh run time, even when
+				// the declared job carries a (stale) nextRun of its own.
 				pj.NextRun = calculateNextRun(pj.ScheduleTime)
 			}
 			out[idx] = pj

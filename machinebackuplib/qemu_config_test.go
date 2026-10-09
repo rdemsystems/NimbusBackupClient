@@ -33,6 +33,13 @@ func TestBuildQemuConfigUEFI(t *testing.T) {
 	if out := BuildQemuConfig(mi, 107, disks); !strings.Contains(out, "\nbios: ovmf\n") || strings.Contains(out, "efidisk") {
 		t.Errorf("GPT boot disk should get bios: ovmf and no efidisk\n%s", out)
 	}
+	// OVMF follows the boot disk, not the lowest-index one.
+	mi.BootDisk = 1
+	two := []BackupDisk{{Index: 0, Size: 1 << 30}, {Index: 1, Size: 1 << 30, GPT: true}}
+	if out := BuildQemuConfig(mi, 107, two); !strings.Contains(out, "boot: order=sata1\n") || !strings.Contains(out, "\nbios: ovmf\n") {
+		t.Errorf("GPT boot disk sata1 should get bios: ovmf\n%s", out)
+	}
+	mi.BootDisk = -1
 	disks[0].GPT = false
 	mi.Firmware = "uefi"
 	if out := BuildQemuConfig(mi, 107, disks); !strings.Contains(out, "\nbios: ovmf\n") {
@@ -52,7 +59,7 @@ func TestGPTDetection(t *testing.T) {
 	if gptSignatureIn(make([]byte, 8192)) {
 		t.Error("MBR/blank disk reported as GPT")
 	}
-	if !bootDiskIsGPT([]BackupDisk{{Index: 1}, {Index: 0, GPT: true}}) || bootDiskIsGPT([]BackupDisk{{Index: 0}, {Index: 1, GPT: true}}) {
-		t.Error("bootDiskIsGPT must follow the lowest-index disk")
+	if !diskIsGPT([]BackupDisk{{Index: 1}, {Index: 0, GPT: true}}, 0) || diskIsGPT([]BackupDisk{{Index: 0}, {Index: 1, GPT: true}}, 0) {
+		t.Error("diskIsGPT must look at the requested disk")
 	}
 }

@@ -366,7 +366,7 @@ func BuildQemuConfig(mi *MachineInfo, vmid int64, disks []BackupDisk) string {
 
 	// A GPT boot disk only boots under OVMF ("no bootable device" under the
 	// default SeaBIOS), even when firmware detection came back empty.
-	if mi.Firmware == "uefi" || bootDiskIsGPT(disks) {
+	if mi.Firmware == "uefi" || diskIsGPT(disks, boot) {
 		b.WriteString("bios: ovmf\n")
 	}
 	if boot >= 0 {
@@ -421,6 +421,17 @@ func BuildQemuConfig(mi *MachineInfo, vmid int64, disks []BackupDisk) string {
 	b.WriteString("sockets: 1\n")
 	fmt.Fprintf(&b, "vmgenid: %s\n", uuid.New().String())
 	return b.String()
+}
+
+// diskIsGPT reports whether the disk with BackupDisk.Index index (the boot
+// disk the config selects) has a GPT partition table.
+func diskIsGPT(disks []BackupDisk, index int) bool {
+	for _, d := range disks {
+		if d.Index == index {
+			return d.GPT
+		}
+	}
+	return false
 }
 
 // smbios1Value builds the PVE smbios1 option: the source UUID (a fresh one

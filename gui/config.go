@@ -75,7 +75,13 @@ func migrateStandaloneFromProgramData() {
 	}
 	// Nimbus Backup <= 0.3.0 kept its data in ProgramData\NimbusBackup (see
 	// legacy_datadir.go): fall back to it for files the service dir lacks.
-	sources := []string{src, filepath.Join(filepath.Dir(src), legacyDataDirName)}
+	sources := []string{src}
+	legacy := filepath.Join(filepath.Dir(src), legacyDataDirName)
+	// Once copied into the service dir the legacy folder is retired (its
+	// marker file): never bring its data back from there.
+	if _, err := os.Stat(filepath.Join(legacy, legacyCopiedMarker)); err != nil {
+		sources = append(sources, legacy)
+	}
 	for _, name := range []string{"config.json", "scheduled_jobs.json", "job_history.json"} {
 		dstFile := filepath.Join(dst, name)
 		if _, err := os.Stat(dstFile); err == nil {

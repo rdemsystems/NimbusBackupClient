@@ -49,11 +49,14 @@ export default function EncryptionKeyField({ value, onChange, className = '' }) 
       setInfo(null)
       return
     }
-    try {
-      setInfo(inspect(value || ''))
-    } catch {
-      setInfo(null)
-    }
+    // Wails bindings return a Promise: wait for it, and drop the answer if
+    // the path changed meanwhile (the user is typing).
+    let stale = false
+    Promise.resolve()
+      .then(() => inspect(value || ''))
+      .then((res) => { if (!stale) setInfo(res || null) })
+      .catch(() => { if (!stale) setInfo(null) })
+    return () => { stale = true }
   }, [value, inspect])
 
   const handleBrowse = async () => {
