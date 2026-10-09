@@ -1,0 +1,41 @@
+From b331b705b7ebb2dbc16fe7f0b7179d1ba727959c Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:14:03 +0200
+Subject: [PATCH 11/22] installer: WiX icon ids WiX 3 accepts
+
+Shortcut icons need an Id with the target's extension (AppIcon.ico), and
+WiX 3 sets the Programs & Features icon through ARPPRODUCTICON. The rest
+of the former build-break patch (service build PhysicalDiskInfo, Include
+root) is fixed upstream.
+---
+ installer/wix/ProductBody.wxi | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/installer/wix/ProductBody.wxi b/installer/wix/ProductBody.wxi
+index 40cc680..00f9347 100644
+--- a/installer/wix/ProductBody.wxi
++++ b/installer/wix/ProductBody.wxi
+@@ -21,7 +21,10 @@
+     <MediaTemplate EmbedCab="yes" />
+ 
+     <!-- Application icon, selected from installer/icons/ by the ExeName -->
+-    <Icon Id="AppIcon" SourceFile="../icons/$(var.ExeName).ico" />
++    <Icon Id="AppIcon.ico" SourceFile="../icons/$(var.ExeName).ico" />
++    <!-- Programs & Features icon. WiX 3 has no Product/@Icon attribute
++         (candle rejects it); ARPPRODUCTICON is the supported way. -->
++    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+ 
+     <!-- Installation directory -->
+     <Directory Id="TARGETDIR" Name="SourceDir">
+@@ -84,7 +87,7 @@
+         <Shortcut Id="ApplicationStartMenuShortcut"
+                   Name="$(var.ProductName)"
+                   Description="Backup client for Proxmox Backup Server"
+-                  Icon="AppIcon"
++                  Icon="AppIcon.ico"
+                   Target="[INSTALLFOLDER]$(var.ExeName).exe"
+                   WorkingDirectory="INSTALLFOLDER"/>
+         <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
+-- 
+2.47.3
+

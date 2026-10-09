@@ -1,0 +1,110 @@
+From 5654b9733f114fbda961d4172f31e6c070628861 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 09:44:57 +0200
+Subject: [PATCH 15/22] ci: fork build workflow; run the PBS end-to-end suite
+ on fork branches
+
+Keep the fork's build-and-release.yml (Nimbus brand, master pushes,
+gating module tests, VM metadata tests) and run upstream's e2e suite
+(real PBS in Docker, restore with the official client) on master,
+github-release and merge-upstream-* pushes.
+---
+ .github/workflows/build-and-release.yml | 31 ++++++++++++++++++-------
+ .github/workflows/e2e.yml               |  4 +++-
+ 2 files changed, 25 insertions(+), 10 deletions(-)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index a99430b..8866e0d 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -4,7 +4,9 @@ on:
+   push:
+     # merge-upstream-*: fork branches re-merging tizbac/master (see
+     # patches/README.md) get the full build + tests; releases stay tag-only.
+-    branches: [ main, develop, github-release, 'merge-upstream-*' ]
++    # master is the fork's published branch: build + test every push there so
++    # untagged test builds are available as workflow artifacts.
++    branches: [ master, main, develop, github-release, 'merge-upstream-*' ]
+     tags:
+       - 'v*'
+   pull_request:
+@@ -122,11 +124,8 @@ jobs:
+   test-modules:
+     name: Test non-GUI modules (${{ matrix.os }})
+     runs-on: ${{ matrix.os }}
+-    # Informational for now: this job surfaced that some library modules aren't
+-    # self-contained under GOWORK=off. It must NOT block builds/release until the
+-    # underlying module test is green, so it is not in any job's `needs` and is
+-    # allowed to fail. Re-enable gating once it passes. [Q-9]
+-    continue-on-error: true
++    # Gating (in build-cli/build-gui needs): a failing pbscommon/pkg/*/snapshot
++    # test blocks the build and release. [Q-9]
+     strategy:
+       fail-fast: false
+       matrix:
+@@ -160,6 +159,20 @@ jobs:
+           done
+           exit $rc
+ 
++      # machinebackuplib has no replace directives of its own: test it through
++      # the machinebackup module, which maps pbscommon/snapshot. Only the
++      # machine-info / VM-config tests (pure Go, platform-independent) for now;
++      # -vet=off so pre-existing vet findings in the disk code do not gate this.
++      - name: Test machine backup VM metadata
++        if: runner.os == 'Linux'
++        shell: bash
++        env:
++          GOWORK: off
++        run: |
++          set -e
++          cd machinebackup && go mod tidy
++          go test -vet=off -run 'SMBIOS|PVEOSType|QemuConfig|SanitizeVMName' machinebackuplib
++
+       - name: Test Windows-only modules
+         if: runner.os == 'Windows'
+         shell: bash
+@@ -174,7 +187,7 @@ jobs:
+   # Build CLI for all platforms
+   build-cli:
+     name: Build CLI
+-    needs: [security, test]
++    needs: [security, test, test-modules]
+     strategy:
+       matrix:
+         os: [ubuntu-latest, windows-latest, macos-latest]
+@@ -201,7 +214,7 @@ jobs:
+   # Build GUI (Windows only for now)
+   build-gui:
+     name: Build GUI
+-    needs: [security, test]
++    needs: [security, test, test-modules]
+     runs-on: windows-latest
+ 
+     steps:
+@@ -505,7 +518,7 @@ jobs:
+           cat > RELEASE_BODY.md << 'EOFNOTES'
+           # 🚀 Nimbus Backup ${{ steps.version.outputs.VERSION }}
+ 
+-          > ⚠️ **Windows flagged the download as a virus?** This is a known false positive (unsigned Go/Wails binary) — *not* a virus. See [why this happens and how to verify the download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/) · [🇫🇷 FR](https://nimbus.rdem-systems.com/faux-positif-antivirus/). A code-signing certificate (SignPath Foundation) is on the way.
++          > ⚠️ **Windows flagged the download as a virus?** This is a known false positive (unsigned Go/Wails binary) — *not* a virus. See [why this happens and how to verify the download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/) · [🇫🇷 FR](https://nimbus.rdem-systems.com/faux-positif-antivirus/). Code signing: the Azure (Trusted Signing) account creation is still blocked on Azure's side — signed builds are targeted for 0.4.1.
+ 
+           ## 📝 What's in this release
+ 
+diff --git a/.github/workflows/e2e.yml b/.github/workflows/e2e.yml
+index 01ffc9a..22871fc 100644
+--- a/.github/workflows/e2e.yml
++++ b/.github/workflows/e2e.yml
+@@ -8,7 +8,9 @@ name: End-to-end tests
+ 
+ on:
+   push:
+-    branches: [main, develop]
++    # Fork: run the real-PBS interop suite on the published branch and on
++    # upstream re-merge branches too.
++    branches: [main, develop, master, github-release, 'merge-upstream-*']
+   pull_request:
+     branches: [main, develop]
+   workflow_dispatch:
+-- 
+2.47.3
+

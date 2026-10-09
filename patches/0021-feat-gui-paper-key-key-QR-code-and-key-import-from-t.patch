@@ -1,0 +1,458 @@
+From 74d74d7df7fc94463b3efe8859d230d471c9a1f4 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 09:52:24 +0200
+Subject: [PATCH 21/22] feat(gui): paper key, key QR code and key import from
+ text
+
+Next to the encryption key field:
+- Print (paper key): saves the key file as a printable HTML page with its
+  QR code, optionally re-wrapped with a passphrase first.
+- Show the key and its QR code, from the same export.
+- Import a key from text or a QR code: rebuilds a key file from a pasted
+  key file, a scanned QR code or a paper key (passphrase-protected keys
+  are unlocked, since the GUI only uses unprotected key files), written
+  where the user chooses and never over an existing file.
+Strings in fr/en/it/de/pl.
+---
+ .../src/components/EncryptionKeyField.jsx     | 108 +++++++++++-
+ gui/frontend/src/i18n/translations.js         |  80 +++++++++
+ gui/paperkey_gui.go                           | 166 ++++++++++++++++++
+ 3 files changed, 353 insertions(+), 1 deletion(-)
+ create mode 100644 gui/paperkey_gui.go
+
+diff --git a/gui/frontend/src/components/EncryptionKeyField.jsx b/gui/frontend/src/components/EncryptionKeyField.jsx
+index dd23932..45ee38d 100644
+--- a/gui/frontend/src/components/EncryptionKeyField.jsx
++++ b/gui/frontend/src/components/EncryptionKeyField.jsx
+@@ -20,14 +20,26 @@ function resolve(name, prop) {
+  * failing later during a backup or a restore.
+  */
+ export default function EncryptionKeyField({ value, onChange, className = '' }) {
+-  const { t } = useTranslation()
++  const { t, language } = useTranslation()
+   const [info, setInfo] = useState(null)
+   const [busy, setBusy] = useState(false)
++  // Safekeeping copy (QR code / paper key) and import from text.
++  const [copyPass, setCopyPass] = useState('')
++  const [shownCopy, setShownCopy] = useState(null)
++  const [importOpen, setImportOpen] = useState(false)
++  const [importText, setImportText] = useState('')
++  const [importPass, setImportPass] = useState('')
+ 
+   const inspect = useCallback(resolve('InspectEncryptionKeyFile'), [])
+   const generate = useCallback(resolve('GenerateEncryptionKeyFile'), [])
+   const openExisting = useCallback(resolve('OpenEncryptionKeyDialog'), [])
+   const openNew = useCallback(resolve('OpenEncryptionKeySaveDialog'), [])
++  const getCopy = useCallback(resolve('GetEncryptionKeyCopy'), [])
++  const exportPaper = useCallback(resolve('ExportEncryptionPaperKey'), [])
++  const importText_ = useCallback(resolve('ImportEncryptionKeyText'), [])
++
++  // A shown copy belongs to the key it was made from.
++  useEffect(() => { setShownCopy(null) }, [value, copyPass])
+ 
+   // Re-inspect whenever the path changes. inspect() is synchronous in Go and
+   // cheap (one stat + a small JSON read), and doing it here means the user
+@@ -74,7 +86,56 @@ export default function EncryptionKeyField({ value, onChange, className = '' })
+     }
+   }
+ 
++  const handleToggleCopy = async () => {
++    if (shownCopy) {
++      setShownCopy(null)
++      return
++    }
++    if (!getCopy) return
++    try {
++      setShownCopy(await getCopy(value || '', copyPass))
++    } catch (err) {
++      window.alert(`❌ ${err}`)
++    }
++  }
++
++  // Printable copy (key text + QR code), like `proxmox-backup-client key paperkey`.
++  const handlePrint = async () => {
++    if (!exportPaper) return
++    try {
++      const out = await exportPaper(value || '', copyPass, {
++        lang: language,
++        title: t('encPaperTitle'),
++        notes: [t('encPaperNoteRestore'), t('encPaperNotePBS'), copyPass ? t('encPaperNoteProtected') : t('encPaperNoteClear')],
++      })
++      if (out) window.alert(`✅ ${t('encPaperExported')} ${out}`)
++    } catch (err) {
++      window.alert(`❌ ${err}`)
++    }
++  }
++
++  const handleImportText = async () => {
++    if (!importText_ || !importText.trim()) return
++    setBusy(true)
++    try {
++      const result = await importText_(importText, importPass)
++      if (result && result.path) {
++        onChange(result.path)
++        setInfo(result)
++        setImportText('')
++        setImportPass('')
++        setImportOpen(false)
++        window.alert(t('encryptionKeyCreated').replace('{path}', result.path).replace('{fp}', result.fingerprint || '?'))
++      }
++    } catch (err) {
++      window.alert(`❌ ${err}`)
++    } finally {
++      setBusy(false)
++    }
++  }
++
+   const reason = info && !info.usable ? info.reason : ''
++  const keyReadable = info && info.exists && info.fingerprint
+ 
+   return (
+     <div className={`form-group ${className}`.trim()}>
+@@ -115,6 +176,51 @@ export default function EncryptionKeyField({ value, onChange, className = '' })
+           <div style={{ color: '#c62828', wordBreak: 'break-word' }}>{reason}</div>
+         )}
+       </div>
++
++      {keyReadable && (
++        <div style={{ marginTop: '10px' }}>
++          <input
++            type="password"
++            value={copyPass}
++            onChange={(e) => setCopyPass(e.target.value)}
++            placeholder={t('encCopyPassphrase')}
++          />
++          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
++            <button type="button" className="btn btn-secondary" onClick={handlePrint} disabled={!exportPaper || busy}>
++              🖨️ {t('encPaperExport')}
++            </button>
++            <button type="button" className="btn btn-secondary" onClick={handleToggleCopy} disabled={!getCopy || busy}>
++              {shownCopy ? `🙈 ${t('encHide')}` : `👁️ ${t('encShow')}`}
++            </button>
++          </div>
++          {shownCopy && (
++            <div style={{ marginTop: '8px' }}>
++              <textarea readOnly value={shownCopy.key} rows="8" style={{ fontFamily: 'monospace', fontSize: '0.8em', width: '100%' }} onFocus={(e) => e.target.select()} />
++              {shownCopy.qr_svg && (
++                <div style={{ textAlign: 'center', marginTop: '8px' }}>
++                  <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(shownCopy.qr_svg)}`} alt={t('encQRAlt')} style={{ width: '220px', height: '220px' }} />
++                  <div style={{ fontSize: '0.85em', color: '#64748b' }}>{t('encQRHint')}</div>
++                </div>
++              )}
++            </div>
++          )}
++        </div>
++      )}
++
++      <div style={{ marginTop: '10px' }}>
++        <button type="button" className="btn btn-secondary" onClick={() => setImportOpen(!importOpen)} disabled={!importText_ || busy}>
++          📥 {t('encImportTitle')}
++        </button>
++        {importOpen && (
++          <div style={{ marginTop: '6px' }}>
++            <textarea value={importText} onChange={(e) => setImportText(e.target.value)} placeholder={t('encImportPlaceholder')} rows="5" style={{ fontFamily: 'monospace', fontSize: '0.85em', width: '100%' }} />
++            <input type="password" value={importPass} onChange={(e) => setImportPass(e.target.value)} placeholder={t('encImportPassphrase')} style={{ marginTop: '6px' }} />
++            <button type="button" className="btn" onClick={handleImportText} disabled={!importText.trim() || busy} style={{ marginTop: '6px' }}>
++              {t('encImport')}
++            </button>
++          </div>
++        )}
++      </div>
+     </div>
+   )
+ }
+\ No newline at end of file
+diff --git a/gui/frontend/src/i18n/translations.js b/gui/frontend/src/i18n/translations.js
+index 665499a..b45a157 100644
+--- a/gui/frontend/src/i18n/translations.js
++++ b/gui/frontend/src/i18n/translations.js
+@@ -101,6 +101,22 @@ const translations = {
+       encryptionKeyCreated: "Clé créée dans {path} — empreinte {fp}",
+       encryptionKeyConfirm: "Créer une nouvelle clé de chiffrement dans {path} ? Conservez-la : sans ce fichier, les snapshots chiffrés avec elle deviennent illisibles.",
+       encryptionKeyGenerateFailed: "Échec de la création de la clé : {err}",
++      encCopyPassphrase: "Phrase secrète pour protéger la copie (facultatif, 5 caractères minimum)",
++      encPaperExport: "Imprimer (copie papier)",
++      encShow: "Afficher la clé et son QR code",
++      encHide: "Masquer la clé",
++      encPaperExported: "Page imprimable enregistrée (ouvrez-la dans un navigateur pour l'imprimer) :",
++      encPaperTitle: "Clé de chiffrement des sauvegardes — copie papier",
++      encPaperNoteRestore: "Pour restaurer : scannez le QR code (il contient le fichier de clé ci-dessus) ou recopiez le texte, puis utilisez « Importer une clé depuis un texte ou un QR code » à côté du champ « Clé de chiffrement ».",
++      encPaperNotePBS: "Ce fichier de clé fonctionne aussi avec proxmox-backup-client (--keyfile) et Proxmox VE.",
++      encPaperNoteProtected: "Cette copie est protégée par une phrase secrète : elle sera demandée à l'import. Sans elle, cette feuille est inutilisable.",
++      encPaperNoteClear: "Cette copie n'est PAS protégée par une phrase secrète : toute personne qui la lit peut déchiffrer vos sauvegardes. Rangez-la en lieu sûr.",
++      encQRAlt: "QR code de la clé de chiffrement",
++      encQRHint: "Le QR code contient le fichier de clé : scannez-le pour en garder une copie.",
++      encImportTitle: "Importer une clé depuis un texte ou un QR code",
++      encImportPlaceholder: "Collez ici le fichier de clé (JSON), le texte d'un QR code scanné ou d'une copie papier (marqueurs BEGIN/END compris)",
++      encImportPassphrase: "Phrase secrète (uniquement si la clé est protégée)",
++      encImport: "Enregistrer comme fichier de clé…",
+ 
+       // Multi-PBS
+       multiPBSInfo: "Multi-PBS :",
+@@ -477,6 +493,22 @@ const translations = {
+       encryptionKeyCreated: "Key created at {path} - fingerprint {fp}",
+       encryptionKeyConfirm: "Create a new encryption key at {path}? Keep it safe: without this file, snapshots encrypted with it become unreadable.",
+       encryptionKeyGenerateFailed: "Key creation failed: {err}",
++      encCopyPassphrase: "Passphrase to protect the copy (optional, at least 5 characters)",
++      encPaperExport: "Print (paper key)",
++      encShow: "Show the key and its QR code",
++      encHide: "Hide the key",
++      encPaperExported: "Printable page saved (open it in a browser to print it):",
++      encPaperTitle: "Backup encryption key — paper copy",
++      encPaperNoteRestore: "To restore: scan the QR code (it holds the key file above) or type the text back, then use \"Import a key from text or a QR code\" next to the \"Encryption key\" field.",
++      encPaperNotePBS: "This key file also works with proxmox-backup-client (--keyfile) and Proxmox VE.",
++      encPaperNoteProtected: "This copy is protected by a passphrase, which the import will ask for. Without it, this sheet is useless.",
++      encPaperNoteClear: "This copy is NOT protected by a passphrase: anyone who reads it can decrypt your backups. Keep it somewhere safe.",
++      encQRAlt: "Encryption key QR code",
++      encQRHint: "The QR code holds the key file: scan it to keep a copy.",
++      encImportTitle: "Import a key from text or a QR code",
++      encImportPlaceholder: "Paste the key file (JSON), the text of a scanned QR code or of a paper key (BEGIN/END markers included)",
++      encImportPassphrase: "Passphrase (only if the key is protected)",
++      encImport: "Save as a key file…",
+ 
+       // Multi-PBS
+       multiPBSInfo: "Multi-PBS:",
+@@ -854,6 +886,22 @@ const translations = {
+       encryptionKeyCreated: "Chiave creata in {path} - impronta {fp}",
+       encryptionKeyConfirm: "Creare una nuova chiave di cifratura in {path}? Conservala: senza questo file gli snapshot cifrati con essa diventano illeggibili.",
+       encryptionKeyGenerateFailed: "Creazione della chiave non riuscita: {err}",
++      encCopyPassphrase: "Passphrase per proteggere la copia (facoltativa, almeno 5 caratteri)",
++      encPaperExport: "Stampa (copia cartacea)",
++      encShow: "Mostra la chiave e il suo codice QR",
++      encHide: "Nascondi la chiave",
++      encPaperExported: "Pagina stampabile salvata (aprila in un browser per stamparla):",
++      encPaperTitle: "Chiave di cifratura dei backup — copia cartacea",
++      encPaperNoteRestore: "Per ripristinare: scansiona il codice QR (contiene il file di chiave qui sopra) o ricopia il testo, poi usa « Importa una chiave da testo o codice QR » accanto al campo « Chiave di cifratura ».",
++      encPaperNotePBS: "Questo file di chiave funziona anche con proxmox-backup-client (--keyfile) e Proxmox VE.",
++      encPaperNoteProtected: "Questa copia è protetta da una passphrase, che verrà richiesta all'importazione. Senza di essa, questo foglio è inutilizzabile.",
++      encPaperNoteClear: "Questa copia NON è protetta da una passphrase: chiunque la legga può decifrare i tuoi backup. Conservala in un luogo sicuro.",
++      encQRAlt: "Codice QR della chiave di cifratura",
++      encQRHint: "Il codice QR contiene il file di chiave: scansionalo per conservarne una copia.",
++      encImportTitle: "Importa una chiave da testo o codice QR",
++      encImportPlaceholder: "Incolla il file di chiave (JSON), il testo di un codice QR scansionato o di una copia cartacea (marcatori BEGIN/END inclusi)",
++      encImportPassphrase: "Passphrase (solo se la chiave è protetta)",
++      encImport: "Salva come file di chiave…",
+ 
+       // Multi-PBS
+       multiPBSInfo: "Multi-PBS:",
+@@ -1231,6 +1279,22 @@ const translations = {
+       encryptionKeyCreated: "Schlüssel erstellt unter {path} - Fingerabdruck {fp}",
+       encryptionKeyConfirm: "Neuen Verschlüsselungsschlüssel unter {path} erstellen? Bewahren Sie ihn sicher auf: ohne diese Datei werden damit verschlüsselte Snapshots unlesbar.",
+       encryptionKeyGenerateFailed: "Erstellung des Schlüssels fehlgeschlagen: {err}",
++      encCopyPassphrase: "Passphrase zum Schutz der Kopie (optional, mindestens 5 Zeichen)",
++      encPaperExport: "Drucken (Papierkopie)",
++      encShow: "Schlüssel und QR-Code anzeigen",
++      encHide: "Schlüssel ausblenden",
++      encPaperExported: "Druckbare Seite gespeichert (zum Drucken im Browser öffnen):",
++      encPaperTitle: "Verschlüsselungsschlüssel der Sicherungen — Papierkopie",
++      encPaperNoteRestore: "Zur Wiederherstellung: QR-Code scannen (er enthält die obige Schlüsseldatei) oder den Text abtippen und dann „Schlüssel aus Text oder QR-Code importieren“ neben dem Feld „Verschlüsselungsschlüssel“ verwenden.",
++      encPaperNotePBS: "Diese Schlüsseldatei funktioniert auch mit proxmox-backup-client (--keyfile) und Proxmox VE.",
++      encPaperNoteProtected: "Diese Kopie ist durch eine Passphrase geschützt, die beim Import abgefragt wird. Ohne sie ist dieses Blatt unbrauchbar.",
++      encPaperNoteClear: "Diese Kopie ist NICHT durch eine Passphrase geschützt: Wer sie liest, kann Ihre Sicherungen entschlüsseln. Bewahren Sie sie sicher auf.",
++      encQRAlt: "QR-Code des Verschlüsselungsschlüssels",
++      encQRHint: "Der QR-Code enthält die Schlüsseldatei: Scannen Sie ihn, um eine Kopie aufzubewahren.",
++      encImportTitle: "Schlüssel aus Text oder QR-Code importieren",
++      encImportPlaceholder: "Schlüsseldatei (JSON), den Text eines gescannten QR-Codes oder einer Papierkopie (inkl. BEGIN/END-Markierungen) hier einfügen",
++      encImportPassphrase: "Passphrase (nur wenn der Schlüssel geschützt ist)",
++      encImport: "Als Schlüsseldatei speichern…",
+ 
+       // Multi-PBS
+       multiPBSInfo: "Multi-PBS:",
+@@ -1608,6 +1672,22 @@ const translations = {
+       encryptionKeyCreated: "Utworzono klucz w {path} - odcisk {fp}",
+       encryptionKeyConfirm: "Utworzyć nowy klucz szyfrowania w {path}? Zachowaj go: bez tego pliku migawki nim zaszyfrowane staną się nieczytelne.",
+       encryptionKeyGenerateFailed: "Utworzenie klucza nie powiodło się: {err}",
++      encCopyPassphrase: "Hasło chroniące kopię (opcjonalne, co najmniej 5 znaków)",
++      encPaperExport: "Drukuj (kopia papierowa)",
++      encShow: "Pokaż klucz i jego kod QR",
++      encHide: "Ukryj klucz",
++      encPaperExported: "Zapisano stronę do druku (otwórz ją w przeglądarce, aby wydrukować):",
++      encPaperTitle: "Klucz szyfrowania kopii zapasowych — kopia papierowa",
++      encPaperNoteRestore: "Aby przywrócić: zeskanuj kod QR (zawiera powyższy plik klucza) lub przepisz tekst, a następnie użyj „Importuj klucz z tekstu lub kodu QR” obok pola „Klucz szyfrowania”.",
++      encPaperNotePBS: "Ten plik klucza działa również z proxmox-backup-client (--keyfile) i Proxmox VE.",
++      encPaperNoteProtected: "Ta kopia jest chroniona hasłem, o które zostaniesz poproszony przy imporcie. Bez niego ta kartka jest bezużyteczna.",
++      encPaperNoteClear: "Ta kopia NIE jest chroniona hasłem: każdy, kto ją przeczyta, może odszyfrować Twoje kopie zapasowe. Przechowuj ją w bezpiecznym miejscu.",
++      encQRAlt: "Kod QR klucza szyfrowania",
++      encQRHint: "Kod QR zawiera plik klucza: zeskanuj go, aby zachować kopię.",
++      encImportTitle: "Importuj klucz z tekstu lub kodu QR",
++      encImportPlaceholder: "Wklej plik klucza (JSON), tekst zeskanowanego kodu QR lub kopii papierowej (wraz ze znacznikami BEGIN/END)",
++      encImportPassphrase: "Hasło (tylko jeśli klucz jest chroniony)",
++      encImport: "Zapisz jako plik klucza…",
+ 
+       // Multi-PBS
+       multiPBSInfo: "Multi-PBS:",
+diff --git a/gui/paperkey_gui.go b/gui/paperkey_gui.go
+new file mode 100644
+index 0000000..a7672fd
+--- /dev/null
++++ b/gui/paperkey_gui.go
+@@ -0,0 +1,166 @@
++package main
++
++import (
++	"errors"
++	"fmt"
++	"os"
++	"path/filepath"
++	"strings"
++
++	"github.com/wailsapp/wails/v2/pkg/runtime"
++	"pbscommon"
++	"security"
++)
++
++// Safekeeping copies of an encryption key file: the key as text with its QR
++// code, a printable paper key (`proxmox-backup-client key paperkey` format),
++// and the way back, a key file rebuilt from text copied or scanned off such a
++// copy. The GUI only ever reads the key file the user points it at.
++
++// EncryptionKeyCopy is a key file as shown for safekeeping: its text and the
++// QR code of that text (an SVG document), both from the same export so a
++// passphrase-protected copy matches its QR code.
++type EncryptionKeyCopy struct {
++	Key   string `json:"key"`
++	QRSVG string `json:"qr_svg"`
++}
++
++// PaperKeyLabels is the localized text of the printable paper key page.
++type PaperKeyLabels struct {
++	Lang  string   `json:"lang"`
++	Title string   `json:"title"`
++	Notes []string `json:"notes"`
++}
++
++// keyCopy loads the key file at path for a copy. With a passphrase, an
++// unprotected key is re-wrapped with it (scrypt, like `key create`) so the
++// copy is useless without the passphrase; a key file that is already
++// protected is copied as is.
++func keyCopy(path, passphrase string) (*pbscommon.PaperKey, *pbscommon.KeyConfig, error) {
++	path = strings.TrimSpace(path)
++	if path == "" {
++		return nil, nil, errors.New("aucun fichier de cle configure")
++	}
++	kc, err := pbscommon.LoadKeyConfig(path)
++	if err != nil {
++		return nil, nil, err
++	}
++	out := kc
++	if passphrase != "" && kc.KDF == nil {
++		crypt, err := kc.CryptConfig(nil)
++		if err != nil {
++			return nil, nil, err
++		}
++		if out, err = pbscommon.ProtectKeyConfig(crypt, []byte(passphrase), kc.Hint); err != nil {
++			return nil, nil, err
++		}
++		if kc.Created != "" {
++			out.Created = kc.Created
++		}
++	}
++	pk, err := pbscommon.NewPaperKey(out)
++	if err != nil {
++		return nil, nil, err
++	}
++	return pk, kc, nil
++}
++
++// GetEncryptionKeyCopy returns the key file at path and its QR code, for
++// copying it somewhere safe (password manager, paper, phone). The QR code
++// holds the key file as proxmox-backup-client prints it, so scanning it gives
++// an importable key.
++func (a *App) GetEncryptionKeyCopy(path, passphrase string) (*EncryptionKeyCopy, error) {
++	writeDebugLog("GetEncryptionKeyCopy called")
++	pk, _, err := keyCopy(path, passphrase)
++	if err != nil {
++		return nil, err
++	}
++	return &EncryptionKeyCopy{Key: pk.JSON, QRSVG: pk.QRSVG}, nil
++}
++
++// ExportEncryptionPaperKey saves the key file at path as a printable HTML page
++// (key text + QR code) through a native save dialog and returns the chosen
++// path ("" if cancelled).
++func (a *App) ExportEncryptionPaperKey(path, passphrase string, labels PaperKeyLabels) (string, error) {
++	writeDebugLog("ExportEncryptionPaperKey called")
++	if a.ctx == nil {
++		return "", fmt.Errorf("interface graphique non initialisee")
++	}
++	pk, kc, err := keyCopy(path, passphrase)
++	if err != nil {
++		return "", err
++	}
++	subject := filepath.Base(strings.TrimSpace(path))
++	if kc.Fingerprint != "" {
++		subject += " — " + kc.Fingerprint
++	}
++	page := pk.HTML(pbscommon.PaperKeyPage{Lang: labels.Lang, Title: labels.Title, Subject: subject, Notes: labels.Notes})
++	out, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
++		Title:           labels.Title,
++		DefaultFilename: "paperkey.html",
++		Filters:         []runtime.FileFilter{{DisplayName: "HTML (*.html)", Pattern: "*.html"}},
++	})
++	if err != nil || out == "" {
++		return "", err
++	}
++	if err := os.WriteFile(out, page, 0o600); err != nil {
++		return "", fmt.Errorf("ecriture de %s: %w", out, err)
++	}
++	return out, nil
++}
++
++// ImportEncryptionKeyText rebuilds a key file from text: a key file pasted
++// as is, the payload of a scanned QR code, or the text copied off a paper key
++// (BEGIN/END markers included). A passphrase-protected key is unlocked with
++// passphrase, because the GUI can only use unprotected key files. The new
++// file is written where the user chooses (never over an existing file) and
++// its info is returned, Path included, for the key field.
++func (a *App) ImportEncryptionKeyText(text, passphrase string) (EncryptionKeyInfo, error) {
++	writeDebugLog("ImportEncryptionKeyText called")
++	kc, err := pbscommon.ParseKeyConfig([]byte(text))
++	if err != nil {
++		return EncryptionKeyInfo{}, err
++	}
++	if kc.KDF != nil && passphrase == "" {
++		return EncryptionKeyInfo{}, errors.New("cette cle est protegee par une phrase de passe: saisissez-la pour l'importer")
++	}
++	crypt, err := kc.CryptConfig([]byte(passphrase))
++	if err != nil {
++		return EncryptionKeyInfo{}, err
++	}
++	dest, err := a.OpenEncryptionKeySaveDialog()
++	if err != nil || dest == "" {
++		return EncryptionKeyInfo{}, err
++	}
++	if err := a.writeNewKeyFile(dest, crypt); err != nil {
++		return EncryptionKeyInfo{}, err
++	}
++	info := inspectKeyFile(dest)
++	if !info.Usable {
++		return EncryptionKeyInfo{}, fmt.Errorf("la cle %s a ete ecrite mais ne peut pas etre relue: %s", dest, info.Reason)
++	}
++	writeDebugLog(fmt.Sprintf("ImportEncryptionKeyText: wrote %s (fingerprint %s)", dest, info.Fingerprint))
++	return info, nil
++}
++
++// writeNewKeyFile writes crypt's key, unprotected, to a NEW file at path,
++// with the same checks as GenerateEncryptionKeyFile: an existing file is never
++// overwritten, since it may be the only key able to decrypt other snapshots.
++func (a *App) writeNewKeyFile(path string, crypt *pbscommon.CryptConfig) error {
++	path = strings.TrimSpace(path)
++	if err := security.ValidatePath(path); err != nil {
++		return fmt.Errorf("chemin de cle invalide: %w", err)
++	}
++	if _, err := os.Stat(path); err == nil {
++		return fmt.Errorf("le fichier %s existe deja: il n'est jamais ecrase, choisissez un autre nom", path)
++	} else if !os.IsNotExist(err) {
++		return fmt.Errorf("verification de %s: %w", path, err)
++	}
++	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
++		return fmt.Errorf("creation du dossier %s: %w", filepath.Dir(path), err)
++	}
++	if err := pbscommon.SaveKeyFile(path, crypt); err != nil {
++		return fmt.Errorf("ecriture de %s: %w", path, err)
++	}
++	return nil
++}
+-- 
+2.47.3
+

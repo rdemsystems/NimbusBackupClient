@@ -1,0 +1,232 @@
+From aa7342b60a40e0cc653253530281d4c24aca9bc0 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Thu, 8 Oct 2026 20:05:43 +0200
+Subject: [PATCH 16/22] fix(pbs): show PBS's reason when it refuses the backup
+ session
+
+Any refusal of the backup/reader protocol upgrade was reported as
+"PBS authentication failed: HTTP ...", with the raw response headers
+appended. PBS also refuses with 400 ("backup owner check failed"),
+403 (missing privilege) or 404 ("namespace not found"), so users went
+looking for a password problem.
+
+The error now carries the status code and the response body only, and
+its wording follows the status:
+- 401: PBS authentication failed (HTTP 401): <reason>
+- 403: PBS access denied (HTTP 403): <reason>
+- other: PBS refused the backup (HTTP <code>): <reason>
+The reason is the body (or its JSON "message"), whitespace-collapsed,
+falling back to the status text when empty. Headers stay in the debug
+log. The AuthErr type is kept.
+---
+ CHANGELOG.md                    |  4 ++
+ pbscommon/pbsapi.go             | 67 +++++++++++++++++++++-------
+ pbscommon/upgrade_error_test.go | 79 +++++++++++++++++++++++++++++++++
+ 3 files changed, 135 insertions(+), 15 deletions(-)
+ create mode 100644 pbscommon/upgrade_error_test.go
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7abfee9..cfccb6b 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+   in `machine-info.json.blob`.
+ 
+ ### Fixed
++- Error messages now show the reason returned by PBS instead of "authentication
++  failed" for every refusal, e.g. `PBS refused the backup (HTTP 400): backup
++  owner check failed (…)`. 401 and 403 keep their own wording, and the raw
++  response headers no longer appear in the message.
+ - **GUI disk backups always failed with the default Backup ID** (regression in
+   0.4.0): disk mode now files snapshots as `vm/<ID>` for Proxmox VE restore,
+   which needs a numeric VM ID, but the field was pre-filled with the hostname
+diff --git a/pbscommon/pbsapi.go b/pbscommon/pbsapi.go
+index 1b94dab..8c8a88d 100644
+--- a/pbscommon/pbsapi.go
++++ b/pbscommon/pbsapi.go
+@@ -17,6 +17,7 @@ import (
+ 	"net/url"
+ 	"os"
+ 	"slices"
++	"strconv"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
+@@ -127,13 +128,58 @@ type BackupManifest struct {
+ 	Unprotected Unprotected `json:"unprotected"`
+ }
+ 
++// AuthErr is returned when PBS refuses to upgrade the connection to the
++// backup or reader protocol. Despite its name, that is not always an
++// authentication problem: PBS also refuses with 400 ("backup owner check
++// failed"), 403 (missing privilege) or 404 ("namespace not found"), with the
++// reason as plain text in the body.
+ type AuthErr struct {
+-	StatusCode   string
+-	ResponseBody string
++	StatusCode   int    // HTTP status code
++	Status       string // reason phrase of the status line, e.g. "Bad Request"
++	ResponseBody string // response body only, whitespace-collapsed
+ }
+ 
+ func (e *AuthErr) Error() string {
+-	return fmt.Sprintf("PBS authentication failed: HTTP %s - %s", e.StatusCode, e.ResponseBody)
++	reason := e.ResponseBody
++	if reason == "" {
++		reason = e.Status
++	}
++	if reason == "" {
++		reason = http.StatusText(e.StatusCode)
++	}
++	what := "PBS refused the backup"
++	switch e.StatusCode {
++	case http.StatusUnauthorized:
++		what = "PBS authentication failed"
++	case http.StatusForbidden:
++		what = "PBS access denied"
++	}
++	return fmt.Sprintf("%s (HTTP %d): %s", what, e.StatusCode, reason)
++}
++
++// upgradeRejection builds the error for a refused protocol upgrade from the
++// response status line ("HTTP/1.1 400 Bad Request") and body. The response
++// headers are left out: they only go to the debug log.
++func upgradeRejection(statusLine string, body []byte) *AuthErr {
++	e := &AuthErr{}
++	toks := strings.SplitN(strings.TrimSpace(statusLine), " ", 3)
++	if len(toks) > 1 {
++		e.StatusCode, _ = strconv.Atoi(toks[1])
++	}
++	if len(toks) > 2 {
++		e.Status = toks[2]
++	}
++	text := strings.TrimSpace(string(body))
++	// PBS answers API errors in JSON ({"message": ...}) and the upgrade
++	// refusal in plain text; accept both.
++	var j struct {
++		Message string `json:"message"`
++	}
++	if strings.HasPrefix(text, "{") && json.Unmarshal([]byte(text), &j) == nil && j.Message != "" {
++		text = j.Message
++	}
++	e.ResponseBody = strings.Join(strings.Fields(text), " ")
++	return e
+ }
+ 
+ // NamespaceNotFoundErr is returned when the server rejects a request because
+@@ -1306,24 +1352,15 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
+ 							fmt.Printf("PBS error body: %s\n", responseBody)
+ 						}
+ 
+-						errBody := string(buf)
+-						if responseBody != "" {
+-							errBody = errBody + "\nBody: " + responseBody
+-						}
+ 						// A missing namespace is reported as HTTP 404 on
+-						// the upgrade handshake, which would otherwise
+-						// surface as an AuthErr and look like bad
+-						// credentials.
+-						if pbs.Namespace != "" && namespaceNotFound(errBody) {
++						// the upgrade handshake; give it its own error.
++						if pbs.Namespace != "" && namespaceNotFound(responseBody) {
+ 							return nil, &NamespaceNotFoundErr{
+ 								Namespace: pbs.Namespace,
+ 								Datastore: pbs.Datastore,
+ 							}
+ 						}
+-						return nil, &AuthErr{
+-							StatusCode:   statusCode,
+-							ResponseBody: errBody,
+-						}
++						return nil, upgradeRejection(lines[0], []byte(responseBody))
+ 					}
+ 				}
+ 
+diff --git a/pbscommon/upgrade_error_test.go b/pbscommon/upgrade_error_test.go
+new file mode 100644
+index 0000000..afbf183
+--- /dev/null
++++ b/pbscommon/upgrade_error_test.go
+@@ -0,0 +1,79 @@
++package pbscommon
++
++import (
++	"strings"
++	"testing"
++)
++
++func TestUpgradeRejectionMessage(t *testing.T) {
++	for _, tc := range []struct {
++		name, statusLine, body, want string
++	}{
++		{
++			name:       "owner check",
++			statusLine: "HTTP/1.1 400 Bad Request\r",
++			body:       "backup owner check failed (a@pbs!x != a@pbs)\n",
++			want:       "PBS refused the backup (HTTP 400): backup owner check failed (a@pbs!x != a@pbs)",
++		},
++		{
++			name:       "json body",
++			statusLine: "HTTP/1.1 400 Bad Request",
++			body:       `{"data":null,"message":"parameter verification errors"}`,
++			want:       "PBS refused the backup (HTTP 400): parameter verification errors",
++		},
++		{
++			name:       "authentication",
++			statusLine: "HTTP/1.1 401 Unauthorized\r",
++			body:       "permission check failed",
++			want:       "PBS authentication failed (HTTP 401): permission check failed",
++		},
++		{
++			name:       "access denied",
++			statusLine: "HTTP/1.1 403 Forbidden\r",
++			body:       "permission check failed - missing Datastore.Backup on /datastore/store1",
++			want:       "PBS access denied (HTTP 403): permission check failed - missing Datastore.Backup on /datastore/store1",
++		},
++		{
++			name:       "namespace",
++			statusLine: "HTTP/1.1 404 Not Found\r",
++			body:       "namespace not found",
++			want:       "PBS refused the backup (HTTP 404): namespace not found",
++		},
++		{
++			name:       "empty body",
++			statusLine: "HTTP/1.1 400 Bad Request\r",
++			body:       "",
++			want:       "PBS refused the backup (HTTP 400): Bad Request",
++		},
++		{
++			name:       "empty body, no reason phrase",
++			statusLine: "HTTP/1.1 503\r",
++			body:       "  \n",
++			want:       "PBS refused the backup (HTTP 503): Service Unavailable",
++		},
++		{
++			name:       "multi-line body",
++			statusLine: "HTTP/1.1 400 Bad Request\r",
++			body:       "line one\r\n  line two\n",
++			want:       "PBS refused the backup (HTTP 400): line one line two",
++		},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			got := upgradeRejection(tc.statusLine, []byte(tc.body)).Error()
++			if got != tc.want {
++				t.Errorf("got  %q\nwant %q", got, tc.want)
++			}
++		})
++	}
++}
++
++// The error carries the body only: the response headers stay in the debug log.
++func TestUpgradeRejectionOmitsHeaders(t *testing.T) {
++	err := upgradeRejection("HTTP/1.1 400 Bad Request\r", []byte("backup owner check failed"))
++	if msg := err.Error(); strings.Contains(msg, "content-length") || strings.Contains(msg, "HTTP/1.1") {
++		t.Errorf("headers leaked into the error: %q", msg)
++	}
++	if err.StatusCode != 400 || err.Status != "Bad Request" {
++		t.Errorf("status = %d %q", err.StatusCode, err.Status)
++	}
++}
+-- 
+2.47.3
+
