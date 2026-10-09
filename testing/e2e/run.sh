@@ -354,6 +354,41 @@ test_dedup_reuse() {
 	ok "second identical block backup completed (fixed index is content-addressed)"
 }
 
+# ===========================================================================
+# Test 10: two directories backed up in parallel, with exclusions
+# ===========================================================================
+# Each directory is its own backup group <base>_<path> (clientcommon
+# GenerateBackupID); both must restore to the source tree, the excluded
+# files (-exclude and -exclude-from) left out.
+e2e_backup_id() {
+	printf '%s_%s' "$1" "$(printf '%s' "$2" | tr '/' '_' | tr ' ' '-' | tr -cd 'A-Za-z0-9_.-' | sed 's/^_*//; s/_*$//')"
+}
+
+test_parallel_with_exclusions() {
+	local a="$WORK/par-a" b="$WORK/par-b"
+	rm -rf "$a" "$b"
+	cp -a "$WORK/src" "$a"
+	cp -a "$WORK/src" "$b"
+	printf 'excluded by -exclude\n' >"$a/skip.tmp"
+	mkdir -p "$b/subdir/cache"
+	printf 'excluded by -exclude-from\n' >"$b/subdir/cache/blob.bin"
+	printf '# e2e exclusions\ncache\n' >"$WORK/exclude.txt"
+
+	our_directory_backup "$a" -backupdir "$b" -backup-id e2e-par -parallel 2 \
+		-exclude '*.tmp' -exclude-from "$WORK/exclude.txt" >"$WORK/log-par.txt" 2>&1 \
+		|| { cat "$WORK/log-par.txt"; return 1; }
+	grep -q '2 at a time' "$WORK/log-par.txt" \
+		|| { cat "$WORK/log-par.txt"; die "the run did not back up the directories in parallel"; }
+
+	local d id
+	for d in a b; do
+		id="$(e2e_backup_id e2e-par "$WORK/par-$d")"
+		pbc_restore "host/$id" backup.pxar.didx "restore-par-$d"
+		assert_tree_identical "$WORK/src" "$WORK/restore-par-$d" "parallel backup of par-$d"
+	done
+	ok "both directories restored without their excluded files"
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -402,6 +437,7 @@ main() {
 	run_test "7. chunk dedup on a second identical backup"         test_dedup_reuse
 	run_test "8. namespace round-trip (-namespace / --ns)"         test_namespace_roundtrip
 	run_test "9. official encrypted block backup -> our read back" test_official_encrypted_block_readback
+	run_test "10. parallel directories + exclusions -> official"   test_parallel_with_exclusions
 
 	section "Summary"
 	log "passed: ${#PASSED[@]}"

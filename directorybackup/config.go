@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -65,6 +66,16 @@ type Config struct {
 	// ExcludeFrom is a file with one pattern per line (blank lines and lines
 	// starting with # are ignored), added to Exclude.
 	ExcludeFrom string `json:"exclude-from"`
+
+	// Parallel is how many directories of a multi-directory run are backed up
+	// at the same time (default 1, one after the other). No upper limit; the
+	// recommended value is the number of CPUs / 4 (RecommendedParallel).
+	Parallel int `json:"parallel"`
+}
+
+// RecommendedParallel is the suggested -parallel value: CPUs / 4, at least 1.
+func RecommendedParallel() int {
+	return max(runtime.NumCPU()/4, 1)
 }
 
 // ExcludePatterns returns the patterns of Exclude and of the ExcludeFrom file.
@@ -147,6 +158,7 @@ func loadConfig() *Config {
 	var excludeFlags dirListFlag
 	flag.Var(&excludeFlags, "exclude", "Exclusion pattern, repeatable: a name anywhere in the tree (\"*.tmp\", \"node_modules\") or a path anchored to the backup root (\"logs/*.log\")")
 	excludeFromFlag := flag.String("exclude-from", "", "File with one exclusion pattern per line (# starts a comment)")
+	parallelFlag := flag.Int("parallel", 0, fmt.Sprintf("Number of directories backed up at the same time when several -backupdir are given (default 1; recommended: CPUs / 4 = %d on this machine)", RecommendedParallel()))
 	backupStreamNameFlag := flag.String("backupstream", "", "Filename for stream backup")
 	pxarOutFlag := flag.String("pxarout", "", "Output PXAR archive for debug purposes (optional)")
 	noVSSFlag := flag.Bool("novss", false, "Disable VSS ( For filesystems that don't support it, for example veracrypt )")
@@ -221,6 +233,9 @@ func loadConfig() *Config {
 	}
 	if *excludeFromFlag != "" {
 		config.ExcludeFrom = *excludeFromFlag
+	}
+	if *parallelFlag != 0 {
+		config.Parallel = *parallelFlag
 	}
 
 	if *backupStreamNameFlag != "" {
