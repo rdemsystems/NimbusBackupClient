@@ -54,6 +54,19 @@ carry the Nimbus identity, docs and CI.
 | 0031 | fix: real file owners in pxar on Unix; upstream lint findings | upstream candidate | pxar hardcoded uid/gid 1000: restoring as another user failed ("failed to set ownership"), restoring as root gave files to uid 1000. `serviceIdentity` unused outside the service build; ST1020 comment. |
 | 0032 | ci: run Build GUI in the 'signing' environment | fork-only | One Azure federated credential (`repo:rdemsystems/NimbusBackupClient:environment:signing`) for every branch and tag. |
 | 0033 | docs: PBS user, token and DatastoreBackup permissions | fork-only | |
+| 0034 | ci: lint-all lists every finding, per module, as annotations | fork-only |  |
+| 0035 | ci: lint-all strips colours and hides raw output from the Go problem matcher | fork-only |  |
+| 0036 | pbscommon: check (discard) Close and Write errors flagged by errcheck | upstream candidate |  |
+| 0037 | fix(gui): maximise fills the screen (issue #1) | upstream candidate | MaxWidth/MaxHeight 1680x1008 capped the maximised window; startup window shrunk to fit small screens instead. |
+| 0038 | ci: lint-all reads golangci-lint JSON reports; pbscommon errcheck fixes | fork-only (pbscommon part: upstream candidate) | The upgrade request write error is now returned. |
+| 0039 | fix(service): honour the selected PBS server and compression (issue #2) | upstream candidate | The /backup route swapped PBS id and compression; the service ignored the selected PBS. |
+| 0040 | feat(cli): exclusions in proxmoxbackup-directory (issue #4) | upstream candidate | `-exclude`, `-exclude-from`, `"exclude"`/`"exclude-from"`. |
+| 0041 | fix: the 67 golangci-lint findings outside gui | upstream candidate | Includes the service backup goroutines' context leak (lostcancel). |
+| 0042 | feat(cli): -parallel N backs up several directories at once (issue #6) | upstream candidate | e2e test 10 (parallel + exclusions). |
+| 0043 | feat(gui): back up several folders in parallel (issue #6) | upstream candidate | Config `parallel`, one lock and one VSS set per batch; Linux one snapshot per device. |
+| 0044 | feat(vss): one snapshot for a whole multi-folder backup, one shadow copy per volume | upstream candidate | Sequential runs too; per-folder fallback when the set cannot be taken. |
+| 0045 | docs, gui: encryption wording for the release notes | fork-only (import warning: upstream candidate) |  |
+| 0046 | docs: README in upstream's 11 other languages (AI translations) | fork-only |  |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

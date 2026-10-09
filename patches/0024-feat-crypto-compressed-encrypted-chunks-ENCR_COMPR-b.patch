@@ -1,7 +1,7 @@
 From 013127e890c74ab56402989dd0b090bd336d9cd2 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 10:09:19 +0200
-Subject: [PATCH 24/33] feat(crypto): compressed encrypted chunks (ENCR_COMPR),
+Subject: [PATCH 24/46] feat(crypto): compressed encrypted chunks (ENCR_COMPR),
  both ways
 
 proxmox-backup-client compresses then encrypts chunks and blobs by

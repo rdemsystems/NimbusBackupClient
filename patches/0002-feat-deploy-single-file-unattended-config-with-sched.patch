@@ -1,7 +1,7 @@
 From 097aa797a28b806664ca2bd81d7396730752a5e8 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 09:41:22 +0200
-Subject: [PATCH 02/33] feat(deploy): single-file unattended config with
+Subject: [PATCH 02/46] feat(deploy): single-file unattended config with
  schedule provisioning
 
 Port of the fork's 0.3.0 feature: scheduled_jobs declared in config.json

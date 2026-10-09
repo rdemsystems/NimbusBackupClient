@@ -1,0 +1,736 @@
+From 7495cf704fa9a625e0192e8fefce4561783b1fc1 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 14:58:37 +0200
+Subject: [PATCH 43/46] feat(gui): back up several folders in parallel (issue
+ #6)
+
+"Folders backed up in parallel" in the backup form, stored in config.json
+("parallel", pushed to the service, so scheduled backups use it too), with
+the recommended value (CPUs / 4) as a hint. runFoldersParallel runs the
+folders of a multi-folder backup N at a time: one destination lock for the
+batch, one VSS snapshot set for every folder, progress averaged and
+statistics summed; the sequential path is unchanged.
+
+Review fixes (Codex), CLI and GUI:
+- Linux: folders on the same block device share one snapshot; a second one
+  destroyed the first (its tracer looked like a leftover).
+- The snapshot callback returns the folder failures, so Windows deletes the
+  shadow copies right away.
+- A snapshot that fails to be taken or released is never reported as success.
+- e2e: the expected backup-id cleans the path like GenerateBackupID.
+---
+ CHANGELOG.md                          |   1 +
+ README.fr.md                          |   4 +-
+ README.md                             |   4 +-
+ directorybackup/main.go               |   6 +-
+ gui/app_service_stubs.go              |   1 +
+ gui/backup_inline.go                  | 262 +++++++++++++++++++++++---
+ gui/backup_parallel_test.go           |  36 ++++
+ gui/config.go                         |   6 +
+ gui/frontend/src/App.jsx              |  38 ++++
+ gui/frontend/src/i18n/translations.js |  10 +
+ gui/main.go                           |  30 +++
+ gui/service_api.go                    |   1 +
+ snapshot/linux_snapshot.go            |  19 +-
+ testing/e2e/run.sh                    |   5 +-
+ 14 files changed, 388 insertions(+), 35 deletions(-)
+ create mode 100644 gui/backup_parallel_test.go
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index e67101c..d5b9d20 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -26,6 +26,7 @@ replaces the fork's unreleased one.
+   and a real-PBS end-to-end test suite in CI.
+ 
+ ### Added
++- **Several folders backed up in parallel** (issue #6): GUI setting "Folders backed up in parallel" (one-shot and scheduled backups) and `-parallel N` / `"parallel"` in `proxmoxbackup-directory`. No maximum; CPUs / 4 is recommended. Each folder stays its own backup group; under VSS one snapshot set covers every folder.
+ - **Exclusions in `proxmoxbackup-directory`** (issue #4): `-exclude PATTERN` (repeatable), `-exclude-from FILE` (one pattern per line, `#` comments) and `"exclude"` / `"exclude-from"` in the JSON config, with the GUI's pattern syntax.
+ - **Paper key**: print an encryption key as a page with its QR code, in the
+   format of `proxmox-backup-client key paperkey` (the QR code holds the key
+diff --git a/README.fr.md b/README.fr.md
+index 910779a..342c2d4 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -73,7 +73,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
+ - Configuration conviviale avec test de connexion (jeton API ou identifiant/mot de passe)
+ - Progression de sauvegarde en temps réel avec débit et temps restant, annulation à tout moment
+ - Support VSS (Volume Shadow Copy) pour des sauvegardes cohérentes
+-- Sauvegarde multi-dossiers, modes fichier et disque (machine complète)
++- Sauvegarde multi-dossiers, modes fichier et disque (machine complète) ; dossiers sauvegardables en parallèle (recommandé : nombre de CPU / 4)
+ - Navigation dans les snapshots, recherche de fichiers (jokers) et restauration
+ - Support multi-serveurs PBS, épinglage d'empreinte de certificat (TOFU)
+ - **🔒 Chiffrement côté client** (AES-256-GCM), fichiers de clé compatibles avec `proxmox-backup-client` et Proxmox VE
+@@ -81,7 +81,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
+ - Journalisation de débogage pour le diagnostic
+ 
+ ### Outils en ligne de commande
+-- `proxmoxbackup-directory` — sauvegarde de dossiers (PXAR) avec déduplication, sauvegarde de flux (`-backupstream`, ex. un `mysqldump` en pipe), exclusions (`-exclude "*.tmp"`, répétable, ou `-exclude-from fichier` ; `"exclude"` dans la config JSON), notifications par e-mail, fichier de configuration JSON
++- `proxmoxbackup-directory` — sauvegarde de dossiers (PXAR) avec déduplication, sauvegarde de flux (`-backupstream`, ex. un `mysqldump` en pipe), exclusions (`-exclude "*.tmp"`, répétable, ou `-exclude-from fichier` ; `"exclude"` dans la config JSON), plusieurs dossiers à la fois (`-parallel N`, recommandé : nombre de CPU / 4), notifications par e-mail, fichier de configuration JSON
+ - `proxmoxbackup-machine` — sauvegarde à chaud d'une machine complète en image disque amorçable (FIDX) : VSS sous Windows, incrémentale, hachage parallélisé
+ - `proxmoxbackup-nbd` — serveur NBD pour monter une sauvegarde disque sous Linux (restauration de fichiers, restauration bare-metal depuis une [ISO Clonezilla live patchée](PATCH-CLONEZILLA.md))
+ 
+diff --git a/README.md b/README.md
+index dbd6ae6..6b33fb3 100644
+--- a/README.md
++++ b/README.md
+@@ -73,7 +73,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite
+ - User-friendly configuration with connection testing (API token or username/password)
+ - Real-time backup progress with speed and ETA, cancel at any time
+ - VSS (Volume Shadow Copy) support for consistent backups
+-- Multi-folder backup, file and disk (full machine) modes
++- Multi-folder backup, file and disk (full machine) modes; folders can run in parallel (recommended: CPUs / 4)
+ - Snapshot browsing, file search (wildcards) and restore
+ - Multi-PBS server support, certificate fingerprint pinning (TOFU)
+ - **🔒 Client-side encryption** (AES-256-GCM), key files compatible with `proxmox-backup-client` and Proxmox VE
+@@ -81,7 +81,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite
+ - Debug logging for troubleshooting
+ 
+ ### Command-line tools
+-- `proxmoxbackup-directory` — directory (PXAR) backups with deduplication, stream backups (`-backupstream`, e.g. a `mysqldump` pipe), exclusions (`-exclude "*.tmp"`, repeatable, or `-exclude-from file`; `"exclude"` in the JSON config), e-mail notifications, JSON config file
++- `proxmoxbackup-directory` — directory (PXAR) backups with deduplication, stream backups (`-backupstream`, e.g. a `mysqldump` pipe), exclusions (`-exclude "*.tmp"`, repeatable, or `-exclude-from file`; `"exclude"` in the JSON config), several directories at once (`-parallel N`, recommended: CPUs / 4), e-mail notifications, JSON config file
+ - `proxmoxbackup-machine` — full live machine backups as a bootable disk image (FIDX): VSS on Windows, incremental, parallel hashing
+ - `proxmoxbackup-nbd` — NBD server to mount a disk backup on Linux (file-level restore, bare-metal restore from a [patched Clonezilla live ISO](PATCH-CLONEZILLA.md))
+ 
+diff --git a/directorybackup/main.go b/directorybackup/main.go
+index a54322b..123e2a0 100644
+--- a/directorybackup/main.go
++++ b/directorybackup/main.go
+@@ -460,9 +460,11 @@ func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, erro
+ 			}
+ 			return ""
+ 		})
+-		return nil
++		// Returning the failures lets the snapshot code delete the shadow
++		// copies right away (Windows only does it on an error).
++		return runErr
+ 	})
+-	return readErrors, errors.Join(err, runErr)
++	return readErrors, err
+ }
+ 
+ // backup_one backs up one directory of a parallel run as backup group
+diff --git a/gui/app_service_stubs.go b/gui/app_service_stubs.go
+index c84365a..2b9b61c 100644
+--- a/gui/app_service_stubs.go
++++ b/gui/app_service_stubs.go
+@@ -137,6 +137,7 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
+ 		ExcludeList:     excludes,
+ 		DisableSplit:    pbsCfg.DisableSplit,
+ 		SplitSizeBytes:  pbsCfg.SplitSizeBytes(),
++		Parallel:        a.config.Parallel,
+ 		OnProgress: func(percent float64, message string) {
+ 			writeDebugLog(fmt.Sprintf("[Backup Progress] %.1f%% - %s", percent*100, message))
+ 			// Feed the API server's progress map so the GUI's polling sees it.
+diff --git a/gui/backup_inline.go b/gui/backup_inline.go
+index dc4a66d..cd605c0 100644
+--- a/gui/backup_inline.go
++++ b/gui/backup_inline.go
+@@ -58,6 +58,22 @@ type BackupOptions struct {
+ 	// OnStats delivers structured live progress so the GUI can show real
+ 	// statistics instead of parsing them out of the progress message string.
+ 	OnStats func(*BackupProgressStats)
++	// Parallel is how many folders of a multi-folder backup run at the same
++	// time (0 or 1: one after the other). No upper limit; the GUI recommends
++	// CPUs / 4 (RecommendedParallel).
++	Parallel int
++
++	// Set by runFoldersParallel on each folder's options: the batch already
++	// holds the destination lock, and under VSS the folder reads snapshotPath,
++	// taken once for the whole batch.
++	lockHeld     bool
++	snapshotPath string
++}
++
++// RecommendedParallel is the suggested number of folders backed up at the same
++// time: CPUs / 4, at least 1.
++func RecommendedParallel() int {
++	return max(runtime.NumCPU()/4, 1)
+ }
+ 
+ // isFatalSessionError returns true for errors that make the current PBS session
+@@ -600,6 +616,36 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
+ 		baseID = hostname
+ 	}
+ 
++	if parallel := min(opts.Parallel, len(opts.BackupObjects)); parallel > 1 {
++		perDirErrors = runFoldersParallel(opts, baseID, parallel, agg)
++	} else {
++		perDirErrors = runFoldersSequential(opts, baseID, agg)
++	}
++
++	agg.DurationSec = time.Since(aggStart).Seconds()
++	if len(perDirErrors) > 0 {
++		agg.Message = fmt.Sprintf("%d/%d dossiers en échec:\n%s", len(perDirErrors), len(opts.BackupObjects), strings.Join(perDirErrors, "\n"))
++	} else {
++		agg.Message = fmt.Sprintf("Backup de %d dossiers terminé (%d new, %d reused chunks)", len(opts.BackupObjects), agg.NewChunks, agg.ReusedChunks)
++	}
++
++	if opts.OnComplete != nil {
++		opts.OnComplete(agg.Success(), agg.Message)
++	}
++	if opts.OnResult != nil {
++		opts.OnResult(agg)
++	}
++	if len(perDirErrors) > 0 {
++		return fmt.Errorf("%s", agg.Message)
++	}
++	return nil
++}
++
++// runFoldersSequential backs up the folders one after the other, each as its
++// own backup group, merging every folder's result into agg. It returns the
++// per-folder errors.
++func runFoldersSequential(opts BackupOptions, baseID string, agg *BackupStatus) []string {
++	var perDirErrors []string
+ 	for i, dir := range opts.BackupObjects {
+ 		if opts.Ctx != nil && opts.Ctx.Err() != nil {
+ 			// A cancelled run must never be reported as a success: the skipped
+@@ -638,23 +684,176 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
+ 		}
+ 	}
+ 
+-	agg.DurationSec = time.Since(aggStart).Seconds()
+-	if len(perDirErrors) > 0 {
+-		agg.Message = fmt.Sprintf("%d/%d dossiers en échec:\n%s", len(perDirErrors), len(opts.BackupObjects), strings.Join(perDirErrors, "\n"))
+-	} else {
+-		agg.Message = fmt.Sprintf("Backup de %d dossiers terminé (%d new, %d reused chunks)", len(opts.BackupObjects), agg.NewChunks, agg.ReusedChunks)
++	return perDirErrors
++}
++
++// errFoldersFailed tells runFoldersParallel's snapshot callback that some
++// folders failed (already reported per folder).
++var errFoldersFailed = errors.New("some folders failed")
++
++// runFoldersParallel backs up up to parallel folders at the same time, each as
++// its own backup group and PBS session, merging every result into agg. It
++// returns the per-folder errors.
++//
++// The batch takes the destination lock once (folders skip it, or they would
++// run one by one). Under VSS, ONE snapshot set covering every folder is taken
++// before any upload: concurrent snapshot creations collide ("VSS busy"), and
++// the busy-recovery path deletes every shadow copy, which would pull the
++// snapshot from under the folders already running. Progress is the average of
++// the folders, statistics their sum.
++func runFoldersParallel(opts BackupOptions, baseID string, parallel int, agg *BackupStatus) []string {
++	dirs := opts.BackupObjects
++	writeBackupLog(fmt.Sprintf("[Parallel] Backing up %d folders, %d at a time", len(dirs), parallel))
++
++	backupLock := getBackupLock(opts.BaseURL, opts.Datastore)
++	if opts.OnProgress != nil {
++		opts.OnProgress(0, "Waiting for previous backup to complete...")
+ 	}
++	backupLock.Lock()
++	defer backupLock.Unlock()
+ 
+-	if opts.OnComplete != nil {
+-		opts.OnComplete(agg.Success(), agg.Message)
++	var mu sync.Mutex
++	var perDirErrors []string
++	fractions := make([]float64, len(dirs))
++	stats := make([]BackupProgressStats, len(dirs))
++	started := 0
++
++	reportProgress := func(i int, pct float64, msg string) {
++		mu.Lock()
++		fractions[i] = pct
++		sum := 0.0
++		for _, f := range fractions {
++			sum += f
++		}
++		mu.Unlock()
++		if opts.OnProgress != nil {
++			opts.OnProgress(sum/float64(len(dirs)), fmt.Sprintf("[%s] %s", filepath.Base(dirs[i]), msg))
++		}
+ 	}
+-	if opts.OnResult != nil {
+-		opts.OnResult(agg)
++	reportStats := func(i int, s *BackupProgressStats) {
++		mu.Lock()
++		stats[i] = *s
++		total := BackupProgressStats{CurrentDir: s.CurrentDir, Message: s.Message}
++		for _, st := range stats {
++			total.BytesDone += st.BytesDone
++			total.BytesTotal += st.BytesTotal
++			total.NewChunks += st.NewChunks
++			total.ReusedChunks += st.ReusedChunks
++			total.FailedChunks += st.FailedChunks
++		}
++		sum := 0.0
++		for _, f := range fractions {
++			sum += f
++		}
++		total.Percent = sum / float64(len(dirs))
++		mu.Unlock()
++		opts.OnStats(&total)
++	}
++
++	runAll := func(snapshotPaths map[string]string) {
++		sem := make(chan struct{}, parallel)
++		var wg sync.WaitGroup
++		for i, dir := range dirs {
++			sem <- struct{}{}
++			if opts.Ctx != nil && opts.Ctx.Err() != nil {
++				<-sem
++				// A cancelled run must never be reported as a success: the
++				// folders not started were not backed up.
++				errMsg := fmt.Sprintf("backup cancelled: %d/%d folder(s) not backed up", len(dirs)-i, len(dirs))
++				writeBackupLog("Cancellation requested — skipping remaining folders (" + errMsg + ")")
++				mu.Lock()
++				perDirErrors = append(perDirErrors, errMsg)
++				mu.Unlock()
++				break
++			}
++			mu.Lock()
++			started++
++			mu.Unlock()
++			wg.Add(1)
++			go func() {
++				defer wg.Done()
++				defer func() { <-sem }()
++
++				dirOpts := opts
++				dirOpts.BackupObjects = []string{dir}
++				dirOpts.BackupID = GenerateBackupID(baseID, dir)
++				dirOpts.OnComplete = nil // aggregated by the caller
++				var dirStatus *BackupStatus
++				dirOpts.OnResult = func(s *BackupStatus) { dirStatus = s }
++				dirOpts.OnProgress = func(pct float64, msg string) { reportProgress(i, pct, msg) }
++				if opts.OnStats != nil {
++					dirOpts.OnStats = func(s *BackupProgressStats) { reportStats(i, s) }
++				}
++				dirOpts.lockHeld = true
++				if snapshotPaths != nil {
++					dirOpts.snapshotPath = snapshotPaths[dir]
++				}
++
++				writeBackupLog(fmt.Sprintf("[Parallel] Backing up %s as its own group %s", dir, dirOpts.BackupID))
++				derr := runBackupInlineInternal(dirOpts)
++
++				mu.Lock()
++				defer mu.Unlock()
++				if dirStatus != nil {
++					agg.merge(dirStatus)
++				} else if derr != nil {
++					agg.Outcome = OutcomeFailed
++				}
++				if derr != nil {
++					errMsg := fmt.Sprintf("backup of %s failed: %v", dir, derr)
++					writeBackupLog(errMsg)
++					perDirErrors = append(perDirErrors, errMsg)
++				}
++			}()
++		}
++		wg.Wait()
++	}
++
++	if opts.UseVSS {
++		err := snapshot.CreateVSSSnapshot(dirs, true, func(snaps map[string]snapshot.SnapShot) error {
++			paths := make(map[string]string, len(dirs))
++			for _, dir := range dirs {
++				if s, ok := snaps[dir]; ok {
++					paths[dir] = s.FullPath
++				} else if abs, aerr := filepath.Abs(dir); aerr == nil {
++					if s, ok := snaps[abs]; ok {
++						paths[dir] = s.FullPath
++					}
++				}
++			}
++			runAll(paths)
++			if len(perDirErrors) > 0 {
++				// Lets the snapshot code delete the shadow copies right away
++				// (Windows only does it on an error); already reported.
++				return errFoldersFailed
++			}
++			return nil
++		})
++		if err != nil && !errors.Is(err, errFoldersFailed) {
++			// Taking or releasing the snapshot failed: never a success, even
++			// when every folder uploaded.
++			errMsg := fmt.Sprintf("VSS snapshot of the folders failed: %v", err)
++			writeBackupLog(errMsg)
++			perDirErrors = append(perDirErrors, errMsg)
++			if started == 0 {
++				agg.Outcome = OutcomeFailed
++			} else if outcomeRank(agg.Outcome) > outcomeRank(OutcomePartial) {
++				agg.Outcome = OutcomePartial
++			}
++		}
++	} else {
++		runAll(nil)
+ 	}
+-	if len(perDirErrors) > 0 {
+-		return fmt.Errorf("%s", agg.Message)
++
++	// Cancelled or VSS-failed before every folder ran: never a success.
++	if len(perDirErrors) > 0 && started < len(dirs) {
++		if started == 0 {
++			agg.Outcome = OutcomeFailed
++		} else if outcomeRank(agg.Outcome) > outcomeRank(OutcomePartial) {
++			agg.Outcome = OutcomePartial
++		}
+ 	}
+-	return nil
++	return perDirErrors
+ }
+ 
+ // runBackupInlineInternal is the actual backup implementation (called by RunBackupInline)
+@@ -682,21 +881,24 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
+ 
+ 	startTime := time.Now()
+ 
+-	// Acquire backup lock for this destination to prevent concurrent backups
+-	backupLock := getBackupLock(opts.BaseURL, opts.Datastore)
+-	writeBackupLog(fmt.Sprintf("[Backup Lock] Waiting for lock on %s/%s (prevents concurrent backups)", opts.BaseURL, opts.Datastore))
++	// Acquire backup lock for this destination to prevent concurrent backups.
++	// A folder of a parallel batch runs under the batch's lock.
++	if !opts.lockHeld {
++		backupLock := getBackupLock(opts.BaseURL, opts.Datastore)
++		writeBackupLog(fmt.Sprintf("[Backup Lock] Waiting for lock on %s/%s (prevents concurrent backups)", opts.BaseURL, opts.Datastore))
+ 
+-	// Notify that we're waiting if OnProgress is set
+-	if opts.OnProgress != nil {
+-		opts.OnProgress(0, "Waiting for previous backup to complete...")
+-	}
++		// Notify that we're waiting if OnProgress is set
++		if opts.OnProgress != nil {
++			opts.OnProgress(0, "Waiting for previous backup to complete...")
++		}
+ 
+-	backupLock.Lock()
+-	writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock acquired for %s/%s - starting backup", opts.BaseURL, opts.Datastore))
+-	defer func() {
+-		backupLock.Unlock()
+-		writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock released for %s/%s", opts.BaseURL, opts.Datastore))
+-	}()
++		backupLock.Lock()
++		writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock acquired for %s/%s - starting backup", opts.BaseURL, opts.Datastore))
++		defer func() {
++			backupLock.Unlock()
++			writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock released for %s/%s", opts.BaseURL, opts.Datastore))
++		}()
++	}
+ 
+ 	// Generate backup ID from path if not specified
+ 	writeBackupLog("[DEBUG] Generating backup ID if needed")
+@@ -826,7 +1028,15 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
+ 		var err error
+ 		var dirBytes uint64
+ 		for attempt := 1; attempt <= maxDirAttempts; attempt++ {
+-			dirBytes, err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
++			switch {
++			case opts.UseVSS && opts.lockHeld && opts.snapshotPath == "":
++				err = fmt.Errorf("no VSS snapshot was taken for %s", dir)
++			case opts.snapshotPath != "":
++				// Folder of a parallel batch: read the batch's snapshot.
++				dirBytes, err = backupReal(client, &newchunk, &reusechunk, &failedchunk, opts.snapshotPath, dir, true, progress, opts.OnStats, opts.ExcludeList)
++			default:
++				dirBytes, err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
++			}
+ 			if err == nil {
+ 				break
+ 			}
+diff --git a/gui/backup_parallel_test.go b/gui/backup_parallel_test.go
+new file mode 100644
+index 0000000..6fceb7d
+--- /dev/null
++++ b/gui/backup_parallel_test.go
+@@ -0,0 +1,36 @@
++package main
++
++import (
++	"context"
++	"strings"
++	"testing"
++)
++
++// A batch cancelled before any folder started reports a failure naming every
++// skipped folder, and never contacts PBS (no server is configured here).
++func TestRunFoldersParallelCancelledBeforeStart(t *testing.T) {
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	opts := BackupOptions{
++		Ctx:           ctx,
++		BaseURL:       "https://pbs.invalid:8007",
++		Datastore:     "test-parallel",
++		BackupObjects: []string{"/data/a", "/data/b", "/data/c"},
++	}
++	agg := &BackupStatus{Outcome: OutcomeVerifiedSuccess}
++
++	errs := runFoldersParallel(opts, "host", 2, agg)
++
++	if len(errs) != 1 || !strings.Contains(errs[0], "3/3 folder(s) not backed up") {
++		t.Fatalf("errors = %q, want one cancellation error for 3/3 folders", errs)
++	}
++	if agg.Outcome != OutcomeFailed {
++		t.Errorf("outcome = %v, want %v", agg.Outcome, OutcomeFailed)
++	}
++}
++
++func TestRecommendedParallelAtLeastOne(t *testing.T) {
++	if n := RecommendedParallel(); n < 1 {
++		t.Errorf("RecommendedParallel() = %d, want >= 1", n)
++	}
++}
+diff --git a/gui/config.go b/gui/config.go
+index ef6bb7e..c2d15c4 100644
+--- a/gui/config.go
++++ b/gui/config.go
+@@ -154,6 +154,10 @@ type Config struct {
+ 	// per-bin target size; 0 means the default (DefaultSplitSizeGB).
+ 	DisableSplit bool `json:"disable_split,omitempty"`
+ 	SplitSizeGB  int  `json:"split_size_gb,omitempty"`
++	// Parallel is how many folders of a multi-folder backup run at the same
++	// time (0 or 1: one after the other). No upper limit; the GUI recommends
++	// CPUs / 4 (RecommendedParallel).
++	Parallel int `json:"parallel,omitempty"`
+ 
+ 	// ==================== EMAIL NOTIFICATIONS ====================
+ 	SMTPHost     string `json:"smtp_host,omitempty"`
+@@ -766,6 +770,7 @@ func (c *Config) fullConfigDocument() map[string]interface{} {
+ 		"last_backup_dirs":    c.LastBackupDirs,
+ 		"disable_split":       c.DisableSplit,
+ 		"split_size_gb":       c.SplitSizeGB,
++		"parallel":            c.Parallel,
+ 		"smtp_host":           c.SMTPHost,
+ 		"smtp_port":           c.SMTPPort,
+ 		"smtp_username":       c.SMTPUsername,
+@@ -850,6 +855,7 @@ func parseFullConfig(doc map[string]interface{}) *Config {
+ 	c.LastBackupDirs = stringSlice(doc["last_backup_dirs"])
+ 	c.DisableSplit = bol("disable_split")
+ 	c.SplitSizeGB = num("split_size_gb")
++	c.Parallel = num("parallel")
+ 	c.SMTPHost = str("smtp_host")
+ 	c.SMTPPort = str("smtp_port")
+ 	c.SMTPUsername = str("smtp_username")
+diff --git a/gui/frontend/src/App.jsx b/gui/frontend/src/App.jsx
+index 86070f4..8b5a3d2 100644
+--- a/gui/frontend/src/App.jsx
++++ b/gui/frontend/src/App.jsx
+@@ -140,6 +140,10 @@ function App() {
+   // Opt-in: split this backup into parts (for the first backup of a large volume).
+   // Off by default → no size analysis, the backup starts immediately.
+   const [splitFirstBackup, setSplitFirstBackup] = useState(false)
++  // Folders of a multi-folder backup run at the same time (config "parallel",
++  // shared by one-shot and scheduled backups). No maximum; CPUs / 4 is advised.
++  const [parallelFolders, setParallelFolders] = useState(1)
++  const [recommendedParallel, setRecommendedParallel] = useState(1)
+ 
+   // Scheduling states
+   const [backupMode, setBackupMode] = useState('oneshot') // 'oneshot' or 'scheduled'
+@@ -492,6 +496,12 @@ function App() {
+               'backup-id': data['backup-id'] || hn,
+               usevss: data.usevss !== undefined ? data.usevss : true
+             })
++            setParallelFolders(data.parallel > 0 ? data.parallel : 1)
++            if (window.go?.main?.App?.GetRecommendedParallel) {
++              window.go.main.App.GetRecommendedParallel()
++                .then(n => setRecommendedParallel(n > 0 ? n : 1))
++                .catch(() => {})
++            }
+ 
+             // Initialize backupDirs from config if available
+             if (data.backupdir) {
+@@ -2175,6 +2185,34 @@ function App() {
+             </div>
+           )}
+ 
++          {backupType === 'directory' && (
++            <div className="form-group">
++              <label htmlFor="parallel-folders">{t('parallelFolders')}</label>
++              <input
++                id="parallel-folders"
++                type="number"
++                min="1"
++                step="1"
++                value={parallelFolders}
++                onChange={(e) => setParallelFolders(e.target.value)}
++                onBlur={async () => {
++                  const n = Math.max(1, Math.floor(Number(parallelFolders)) || 1)
++                  setParallelFolders(n)
++                  if (!window.go?.main?.App?.SetParallelFolders) return
++                  try {
++                    await window.go.main.App.SetParallelFolders(n)
++                  } catch (err) {
++                    showStatus(`❌ ${err}`, 'error')
++                  }
++                }}
++                style={{maxWidth: '120px'}}
++              />
++              <div className="info-box" style={{marginTop: '10px', backgroundColor: '#f8f9fa', borderColor: '#dee2e6'}}>
++                ℹ️ {t('parallelFoldersHint').replace('{n}', recommendedParallel)}
++              </div>
++            </div>
++          )}
++
+           {progress > 0 && progress < 100 && (
+             <div style={{marginTop: '20px', marginBottom: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #dee2e6'}}>
+               <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '10px'}}>
+diff --git a/gui/frontend/src/i18n/translations.js b/gui/frontend/src/i18n/translations.js
+index b45a157..38a30c4 100644
+--- a/gui/frontend/src/i18n/translations.js
++++ b/gui/frontend/src/i18n/translations.js
+@@ -197,6 +197,8 @@ const translations = {
+       standaloneReasonAuthFailed: "Le service est en cours d'exécution mais l'authentification a échoué (impossible de lire le jeton).",
+       standaloneSchedulingDisabled: "La planification nécessite le service local. Installez et démarrez le service pour activer cette fonctionnalité.",
+       splitFirstBackup: "Découper ce backup en plusieurs parties",
++      parallelFolders: "Dossiers sauvegardés en parallèle",
++      parallelFoldersHint: "Plusieurs dossiers sélectionnés sont sauvegardés en même temps, chacun dans son groupe de sauvegarde (aussi pour les backups planifiés). Recommandé : {n} (nombre de processeurs / 4). Gagne du temps quand la relecture domine (disques rapides, peu de données nouvelles) ; à éviter sur un disque dur classique.",
+       splitFirstBackupHint: "Recommandé pour le 1er backup d'un gros volume (C:\\, D:\\…) : découpe le seed initial en backups plus petits et résumables. Laissez décoché pour les backups suivants (full). L'analyse de la taille peut prendre quelques minutes sur un gros volume.",
+       splitAnalyzing: "Analyse de la taille…",
+ 
+@@ -589,6 +591,8 @@ const translations = {
+       standaloneReasonAuthFailed: "Service is running but authentication failed (unable to read token).",
+       standaloneSchedulingDisabled: "Scheduling requires the local service. Install and start the service to enable this feature.",
+       splitFirstBackup: "Split this backup into multiple parts",
++      parallelFolders: "Folders backed up in parallel",
++      parallelFoldersHint: "Several selected folders are backed up at the same time, each in its own backup group (scheduled backups too). Recommended: {n} (number of CPUs / 4). Saves time when re-reading dominates (fast disks, little new data); avoid on a spinning hard disk.",
+       splitFirstBackupHint: "Recommended for the first backup of a large volume (C:\\, D:\\…): it splits the initial seed into smaller, resumable backups. Leave unchecked for subsequent backups (full). The size analysis can take a few minutes on a large volume.",
+       splitAnalyzing: "Analyzing size…",
+ 
+@@ -982,6 +986,8 @@ const translations = {
+       standaloneReasonAuthFailed: "Il servizio è in esecuzione ma l'autenticazione è fallita (impossibile leggere il token).",
+       standaloneSchedulingDisabled: "La pianificazione richiede il servizio locale. Installa e avvia il servizio per attivare questa funzionalità.",
+       splitFirstBackup: "Dividi questo backup in più parti",
++      parallelFolders: "Cartelle salvate in parallelo",
++      parallelFoldersHint: "Più cartelle selezionate vengono salvate contemporaneamente, ognuna nel proprio gruppo di backup (anche per i backup pianificati). Consigliato: {n} (numero di CPU / 4). Fa risparmiare tempo quando domina la rilettura (dischi veloci, pochi dati nuovi); da evitare su un disco rigido tradizionale.",
+       splitFirstBackupHint: "Consigliato per il primo backup di un volume grande (C:\\, D:\\…): divide il seed iniziale in backup più piccoli e riprendibili. Lasciare deselezionato per i backup successivi (full). L'analisi della dimensione può richiedere alcuni minuti su un volume grande.",
+       splitAnalyzing: "Analisi dimensione…",
+ 
+@@ -1375,6 +1381,8 @@ const translations = {
+       standaloneReasonAuthFailed: "Dienst läuft, aber Authentifizierung fehlgeschlagen (Token konnte nicht gelesen werden).",
+       standaloneSchedulingDisabled: "Zeitplanung erfordert den lokalen Dienst. Installieren und starten Sie den Dienst, um diese Funktion zu aktivieren.",
+       splitFirstBackup: "Diese Sicherung in mehrere Teile aufteilen",
++      parallelFolders: "Parallel gesicherte Ordner",
++      parallelFoldersHint: "Mehrere ausgewählte Ordner werden gleichzeitig gesichert, jeder in seiner eigenen Sicherungsgruppe (auch bei geplanten Sicherungen). Empfohlen: {n} (Anzahl CPUs / 4). Spart Zeit, wenn das erneute Lesen überwiegt (schnelle Datenträger, wenig neue Daten); auf einer klassischen Festplatte vermeiden.",
+       splitFirstBackupHint: "Empfohlen für die erste Sicherung eines großen Datenträgers (C:\\, D:\\…): teilt das ursprüngliche Seed in kleinere, fortsetzbare Sicherungen auf. Für nachfolgende Sicherungen (vollständig) nicht aktivieren. Die Größenanalyse kann einige Minuten dauern bei einem großen Datenträger.",
+       splitAnalyzing: "Größe wird analysiert…",
+ 
+@@ -1768,6 +1776,8 @@ const translations = {
+       standaloneReasonAuthFailed: "Usługa działa, ale autentykacja nie powiodła się (nie można odczytać tokenu).",
+       standaloneSchedulingDisabled: "Planowanie wymaga lokalnej usługi. Zainstaluj i uruchom usługę, aby włączyć tę funkcję.",
+       splitFirstBackup: "Podziel tę kopię zapasową na wiele części",
++      parallelFolders: "Foldery kopiowane równolegle",
++      parallelFoldersHint: "Kilka wybranych folderów jest kopiowanych jednocześnie, każdy we własnej grupie kopii zapasowych (również dla zaplanowanych kopii). Zalecane: {n} (liczba procesorów / 4). Oszczędza czas, gdy dominuje ponowny odczyt (szybkie dyski, mało nowych danych); unikać na klasycznym dysku twardym.",
+       splitFirstBackupHint: "Zalecane dla pierwszej kopii zapasowej dużego woluminu (C:\\, D:\\…): dzieli początkowy seed na mniejsze, możliwe do wznowienia kopie zapasowe. Zostaw niezaznaczone dla kolejnych kopii zapasowych (pełne). Analiza rozmiaru może zająć kilka minut na dużym woluminie.",
+       splitAnalyzing: "Analiza rozmiaru…",
+ 
+diff --git a/gui/main.go b/gui/main.go
+index 953a854..3f839b9 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -790,6 +790,35 @@ func (a *App) SaveConfig(config *Config) error {
+ 	return nil
+ }
+ 
++// GetRecommendedParallel returns the suggested number of folders backed up at
++// the same time (CPUs / 4, at least 1) for the GUI's hint.
++func (a *App) GetRecommendedParallel() int {
++	return RecommendedParallel()
++}
++
++// SetParallelFolders stores how many folders of a multi-folder backup run at
++// the same time (1 = one after the other) and persists it: through the
++// service in service mode (it runs the backups), to config.json otherwise.
++func (a *App) SetParallelFolders(n int) error {
++	if n < 1 {
++		return fmt.Errorf("the number of parallel folders must be at least 1")
++	}
++	if a.config == nil {
++		return fmt.Errorf("configuration not loaded")
++	}
++	next := *a.config
++	next.Parallel = n
++	if a.isDelegatedToService() {
++		a.config = &next
++		return a.pushConfigToService()
++	}
++	if err := next.Save(); err != nil {
++		return err
++	}
++	a.config = &next
++	return nil
++}
++
+ // pushConfigToService sends the current config document to the service via
+ // /config POST. Credentials this GUI knows (typed in the current session) are
+ // transmitted so the service can store them; empty ones mean "keep existing"
+@@ -1392,6 +1421,7 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
+ 		ExcludeList:     excludeList,
+ 		DisableSplit:    a.config.DisableSplit,
+ 		SplitSizeBytes:  a.config.SplitSizeBytes(),
++		Parallel:        a.config.Parallel,
+ 		Crypt:           pbsCfg.Crypt,
+ 		// Use the backup context that was set via SetBackupContext for this job
+ 		Ctx: func() context.Context {
+diff --git a/gui/service_api.go b/gui/service_api.go
+index a5eef41..1817d58 100644
+--- a/gui/service_api.go
++++ b/gui/service_api.go
+@@ -121,6 +121,7 @@ func (a *App) SaveFullConfigFromAPI(doc map[string]interface{}) error {
+ 	cfg.LastBackupDirs = incoming.LastBackupDirs
+ 	cfg.DisableSplit = incoming.DisableSplit
+ 	cfg.SplitSizeGB = incoming.SplitSizeGB
++	cfg.Parallel = incoming.Parallel
+ 	// The key PATH is not a secret and the GUI knows it, so the document is the
+ 	// source of truth: keeping it out of the merge would silently drop the
+ 	// encryption key on the next push and stop encrypting backups.
+diff --git a/snapshot/linux_snapshot.go b/snapshot/linux_snapshot.go
+index b3009e1..7487f19 100644
+--- a/snapshot/linux_snapshot.go
++++ b/snapshot/linux_snapshot.go
+@@ -348,6 +348,10 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
+ 
+ 	snapshots := make(map[string]SnapShot, len(paths))
+ 	var created []*linuxSnapshot
++	// One snapshot per block device: paths on the same filesystem share it.
++	// Creating a second one would destroy the first (destroyStaleTracers
++	// treats our existing tracer on the device as a leftover).
++	byDevice := make(map[string]*linuxSnapshot)
+ 
+ 	defer func() {
+ 		for i := len(created) - 1; i >= 0; i-- {
+@@ -360,11 +364,22 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
+ 		if err != nil {
+ 			absPath = path
+ 		}
+-		ls, subPath, err := createOne(control, absPath, needFiles)
++		mountpoint, device, _, err := findMount(absPath)
+ 		if err != nil {
+ 			return fmt.Errorf("could not snapshot %s: %w: refusing to proceed with an inconsistent full-system snapshot", absPath, err)
+ 		}
+-		created = append(created, ls)
++		ls, shared := byDevice[device]
++		var subPath string
++		if shared {
++			subPath = strings.TrimPrefix(strings.TrimPrefix(absPath, strings.TrimRight(mountpoint, "/")), "/")
++		} else {
++			ls, subPath, err = createOne(control, absPath, needFiles)
++			if err != nil {
++				return fmt.Errorf("could not snapshot %s: %w: refusing to proceed with an inconsistent full-system snapshot", absPath, err)
++			}
++			created = append(created, ls)
++			byDevice[device] = ls
++		}
+ 		sn := SnapShot{
+ 			ObjectPath: ls.device,
+ 			Id:         strconv.Itoa(ls.minor),
+diff --git a/testing/e2e/run.sh b/testing/e2e/run.sh
+index 4aa1271..402e43e 100755
+--- a/testing/e2e/run.sh
++++ b/testing/e2e/run.sh
+@@ -361,7 +361,10 @@ test_dedup_reuse() {
+ # GenerateBackupID); both must restore to the source tree, the excluded
+ # files (-exclude and -exclude-from) left out.
+ e2e_backup_id() {
+-	printf '%s_%s' "$1" "$(printf '%s' "$2" | tr '/' '_' | tr ' ' '-' | tr -cd 'A-Za-z0-9_.-' | sed 's/^_*//; s/_*$//')"
++	local clean
++	# filepath.Clean, as GenerateBackupID does, then the same character mapping.
++	clean="$(python3 -c 'import os, sys; print(os.path.normpath(sys.argv[1]))' "$2")"
++	printf '%s_%s' "$1" "$(printf '%s' "$clean" | tr '/' '_' | tr ' ' '-' | tr -cd 'A-Za-z0-9_.-' | sed 's/^_*//; s/_*$//')"
+ }
+ 
+ test_parallel_with_exclusions() {
+-- 
+2.47.3
+

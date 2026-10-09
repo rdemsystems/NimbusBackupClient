@@ -1,7 +1,7 @@
 From 4df905f9798d4ad6ec0b7c3f8289ee6ebca48630 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:02:14 +0200
-Subject: [PATCH 04/33] gui: keep reading the legacy .nimbus_backup_meta.json
+Subject: [PATCH 04/46] gui: keep reading the legacy .nimbus_backup_meta.json
  sidecar
 
 The metadata sidecar was renamed to .proxmox_backup_client_meta.json and

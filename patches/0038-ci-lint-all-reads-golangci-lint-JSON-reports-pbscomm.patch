@@ -1,0 +1,221 @@
+From 10a6d83d523af13d43e39a83c1e0e6f4125bbf96 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 14:34:53 +0200
+Subject: [PATCH 38/46] ci: lint-all reads golangci-lint JSON reports;
+ pbscommon errcheck fixes
+
+The console output of golangci-lint became 10 capped, path-less annotations
+and the parsed list never showed. Write a JSON report per module and keep the
+raw output out of the log.
+
+pbscommon: binary.Write into a bytes.Buffer cannot fail (explicitly
+discarded); the upgrade request write error is now returned.
+---
+ .github/workflows/build-and-release.yml | 49 ++++++++++++++++---------
+ pbscommon/pbsapi.go                     |  6 ++-
+ pbscommon/pxar.go                       | 28 +++++++-------
+ 3 files changed, 49 insertions(+), 34 deletions(-)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index f390d04..160f594 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -112,37 +112,50 @@ jobs:
+       - name: Install golangci-lint
+         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+ 
+-      # Same module loop as `make lint`, but with no per-linter / same-issue
+-      # caps, and every finding prefixed with its module. A step shows at most
+-      # 10 annotations per level, each cut at 4 KB: the full list is packed
+-      # into error + warning + notice annotations so it is readable without
+-      # downloading the job log.
++      # Same module loop as `make lint`, with no per-linter / same-issue caps.
++      # golangci-lint writes JSON to a file and its console output stays out
++      # of the log (it was turned into 10 capped, path-less annotations). The
++      # findings, prefixed with their module, are packed into error + warning
++      # + notice annotations (10 per level, 4 KB each) so the whole list is
++      # readable without downloading the job log.
+       - name: Lint every module
+         run: |
+           lint_bin=$(command -v golangci-lint || echo "$HOME/go/bin/golangci-lint")
+           ws=$(sed -nE 's/^WORKSPACE_MODULES *:= *//p' Makefile)
+           sa=$(sed -nE 's/^STANDALONE_MODULES *:= *//p' Makefile)
+-          : > "$RUNNER_TEMP/lint.txt"
++          out="$RUNNER_TEMP/lint"
++          mkdir -p "$out"
+           rc=0
+           for m in $ws $sa; do
+             gowork=auto
+             case " $sa " in *" $m "*) gowork=off ;; esac
++            name=$(echo "$m" | tr / _)
+             echo "==> $m"
+-            ( cd "$m" && GOWORK=$gowork "$lint_bin" run --max-issues-per-linter=0 --max-same-issues=0 ./... ) > "$RUNNER_TEMP/lint-one.txt" 2>&1 || rc=1
+-            # Strip colours and the workspace prefix; echo the raw output
+-            # behind "| " so setup-go's Go problem matcher does not turn it
+-            # into its own (capped) annotations.
+-            sed -r 's/\x1b\[[0-9;]*m//g; s/\r//g' "$RUNNER_TEMP/lint-one.txt" | sed "s|$GITHUB_WORKSPACE/$m/||; s|$GITHUB_WORKSPACE/||" > "$RUNNER_TEMP/lint-clean.txt"
+-            sed 's/^/| /' "$RUNNER_TEMP/lint-clean.txt"
+-            grep -E '^[^ ]+\.go:[0-9]+(:[0-9]+)?: ' "$RUNNER_TEMP/lint-clean.txt" | sed "s|^|$m/|" >> "$RUNNER_TEMP/lint.txt" || true
++            ( cd "$m" && GOWORK=$gowork "$lint_bin" run --max-issues-per-linter=0 --max-same-issues=0 \
++                --output.json.path="$out/$name.json" ./... ) > "$out/$name.log" 2>&1 || rc=1
++            echo "$m" > "$out/$name.module"
+           done
+-          python3 - "$RUNNER_TEMP/lint.txt" <<'PY'
+-          import collections, re, sys
+-          lines = [l.rstrip("\n") for l in open(sys.argv[1], encoding="utf-8", errors="replace") if l.strip()]
++          python3 - "$out" <<'PY'
++          import collections, glob, json, os, sys
++          out = sys.argv[1]
++          lines = []
++          for mod_file in sorted(glob.glob(os.path.join(out, "*.module"))):
++              base = mod_file[: -len(".module")]
++              mod = open(mod_file).read().strip()
++              try:
++                  issues = json.load(open(base + ".json")).get("Issues") or []
++              except Exception:
++                  tail = open(base + ".log", errors="replace").read()[-600:].replace("\n", " / ")
++                  lines.append(f"{mod}: no JSON report ({tail}) (run)")
++                  continue
++              for i in issues:
++                  p = i.get("Pos", {})
++                  lines.append(f"{mod}/{p.get('Filename')}:{p.get('Line')}: {i.get('Text')} ({i.get('FromLinter')})")
++          # "| " keeps setup-go's Go problem matcher off these lines.
++          print("\n".join("| " + l for l in lines))
+           if not lines:
+-              print("::error title=Lint::no finding parsed from the linter output (see the log)")
+               sys.exit(0)
+-          per = collections.Counter(m.group(1) if (m := re.search(r"\((\w+)\)$", l)) else "?" for l in lines)
++          per = collections.Counter(l.rsplit("(", 1)[-1].rstrip(")") for l in lines)
+           head = f"{len(lines)} findings: " + ", ".join(f"{k} {v}" for k, v in per.most_common())
+           chunks, cur = [], head + "\n"
+           for l in lines:
+diff --git a/pbscommon/pbsapi.go b/pbscommon/pbsapi.go
+index 6d80be1..2c73854 100644
+--- a/pbscommon/pbsapi.go
++++ b/pbscommon/pbsapi.go
+@@ -1306,7 +1306,9 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
+ 				fmt.Printf("=== SENDING HTTP REQUEST TO PBS ===\n%s=== END REQUEST ===\n", redactedRequest)
+ 
+ 				// Send the request
+-				conn.Write([]byte(fullRequest))
++				if _, err := conn.Write([]byte(fullRequest)); err != nil {
++					return nil, fmt.Errorf("send upgrade request: %w", err)
++				}
+ 				fmt.Print("Reading response to upgrade...\n")
+ 				buf := make([]byte, 0)
+ 				for !strings.HasSuffix(string(buf), "\r\n\r\n") && !strings.HasSuffix(string(buf), "\n\n") {
+@@ -1337,7 +1339,7 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
+ 						for _, line := range lines {
+ 							line = strings.TrimSpace(line)
+ 							if strings.HasPrefix(strings.ToLower(line), "content-length:") {
+-								fmt.Sscanf(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), "%d", &contentLength)
++								_, _ = fmt.Sscanf(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), "%d", &contentLength)
+ 							}
+ 						}
+ 						var responseBody string
+diff --git a/pbscommon/pxar.go b/pbscommon/pxar.go
+index afd4a09..14e4c48 100644
+--- a/pbscommon/pxar.go
++++ b/pbscommon/pxar.go
+@@ -460,7 +460,7 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
+ 			len: uint64(16) + uint64(len(dirname)) + 1,
+ 		}
+ 
+-		binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
++		_ = binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
+ 
+ 		a.buffer.WriteString(dirname)
+ 		a.buffer.WriteByte(0x00)
+@@ -495,7 +495,7 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
+ 			padding: 0,
+ 		},
+ 	}
+-	binary.Write(&a.buffer, binary.LittleEndian, entry)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, entry)
+ 
+ 	if err := a.Flush(); err != nil {
+ 		return CatalogDir{}, err
+@@ -657,13 +657,13 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
+ 	}
+ 	goodbye_start := a.pos
+ 
+-	binary.Write(&a.buffer, binary.LittleEndian, PXAR_GOODBYE)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, PXAR_GOODBYE)
+ 	goodbyelen := uint64(16 + 24*(len(goodbyteitems)+1))
+-	binary.Write(&a.buffer, binary.LittleEndian, goodbyelen)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, goodbyelen)
+ 
+ 	for _, gi := range goodbyteitems {
+ 		gi.offset = a.pos - gi.offset
+-		binary.Write(&a.buffer, binary.LittleEndian, gi)
++		_ = binary.Write(&a.buffer, binary.LittleEndian, gi)
+ 	}
+ 
+ 	gi := &GoodByeItem{
+@@ -672,7 +672,7 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
+ 		hash:   0xef5eed5b753e1555,
+ 	}
+ 
+-	binary.Write(&a.buffer, binary.LittleEndian, gi)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, gi)
+ 
+ 	if err := a.Flush(); err != nil {
+ 		return CatalogDir{}, err
+@@ -753,7 +753,7 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
+ 		len: uint64(16) + uint64(len(basename)) + 1,
+ 	}
+ 
+-	binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
+ 
+ 	a.buffer.WriteString(basename)
+ 	a.buffer.WriteByte(0x00)
+@@ -772,7 +772,7 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
+ 			padding: 0,
+ 		},
+ 	}
+-	binary.Write(&a.buffer, binary.LittleEndian, entry)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, entry)
+ 
+ 	// The PXAR stream is a flat byte sequence: the next entry's header begins
+ 	// immediately after exactly declaredSize payload bytes. We commit declaredSize
+@@ -781,10 +781,10 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
+ 	// and the read below (common for files in use WITHOUT VSS: logs, .pst, SQL .mdf)
+ 	// would otherwise desynchronise the whole archive and corrupt every entry that
+ 	// follows. So we cap reads at declaredSize and zero-pad any shortfall.
+-	binary.Write(&a.buffer, binary.LittleEndian, PXAR_PAYLOAD)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, PXAR_PAYLOAD)
+ 	declaredSize := uint64(fileInfo.Size())
+ 	filesize := declaredSize + 16 //Payload size + header size
+-	binary.Write(&a.buffer, binary.LittleEndian, filesize)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, filesize)
+ 
+ 	if err := a.Flush(); err != nil {
+ 		return CatalogFile{}, err
+@@ -863,7 +863,7 @@ func (a *PXARArchive) WriteVirtualFile(filename string, data []byte, mtime uint6
+ 		hdr: PXAR_FILENAME,
+ 		len: uint64(16) + uint64(len(filename)) + 1,
+ 	}
+-	binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
+ 	a.buffer.WriteString(filename)
+ 	a.buffer.WriteByte(0x00)
+ 
+@@ -881,11 +881,11 @@ func (a *PXARArchive) WriteVirtualFile(filename string, data []byte, mtime uint6
+ 			padding: 0,
+ 		},
+ 	}
+-	binary.Write(&a.buffer, binary.LittleEndian, entry)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, entry)
+ 
+-	binary.Write(&a.buffer, binary.LittleEndian, PXAR_PAYLOAD)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, PXAR_PAYLOAD)
+ 	filesize := uint64(len(data)) + 16
+-	binary.Write(&a.buffer, binary.LittleEndian, filesize)
++	_ = binary.Write(&a.buffer, binary.LittleEndian, filesize)
+ 
+ 	a.buffer.Write(data)
+ 
+-- 
+2.47.3
+
