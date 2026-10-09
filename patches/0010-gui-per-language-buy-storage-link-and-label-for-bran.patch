@@ -1,7 +1,7 @@
 From c1a301fdb611c6e8590436e03e1b19a612aaa797 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:06:21 +0200
-Subject: [PATCH 10/46] gui: per-language buy-storage link and label for brands
+Subject: [PATCH 10/49] gui: per-language buy-storage link and label for brands
 
 A brand could only set one BuyStorageURL/Text for every UI language, so
 a vendor with localized landing pages sent everyone to the same one.

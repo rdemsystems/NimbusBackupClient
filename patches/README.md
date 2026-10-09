@@ -67,6 +67,9 @@ carry the Nimbus identity, docs and CI.
 | 0044 | feat(vss): one snapshot for a whole multi-folder backup, one shadow copy per volume | upstream candidate | Sequential runs too; per-folder fallback when the set cannot be taken. |
 | 0045 | docs, gui: encryption wording for the release notes | fork-only (import warning: upstream candidate) |  |
 | 0046 | docs: README in upstream's 11 other languages (AI translations) | fork-only |  |
+| 0047 | docs: credit the client-side encryption to upstream in every README | fork-only |  |
+| 0048 | docs: 0.4.1 is signed; issue #9 in full; README features and upstream section | fork-only | Also removes CHANGELOG duplicates a sed in 0039 had inserted under every released "Fixed" section. |
+| 0049 | docs: carry the README update into the 11 AI translations | fork-only |  |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

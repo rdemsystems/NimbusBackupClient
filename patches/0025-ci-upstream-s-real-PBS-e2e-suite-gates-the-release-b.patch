@@ -1,7 +1,7 @@
 From c7808ad9b6bee15d58943856df21b667ea85d677 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 10:11:41 +0200
-Subject: [PATCH 25/46] ci: upstream's real-PBS e2e suite gates the release,
+Subject: [PATCH 25/49] ci: upstream's real-PBS e2e suite gates the release,
  both interop directions
 
 - e2e.yml becomes a reusable workflow called by build-and-release.yml on

@@ -1,7 +1,7 @@
 From 23a062e67aeb9d0c9553943b0147531ea6b298ca Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:07:03 +0200
-Subject: [PATCH 13/46] fork: real Nimbus Backup brand identity
+Subject: [PATCH 13/49] fork: real Nimbus Backup brand identity
 
 - gui/brand.go: replace the nimbus.example placeholders with the real
   Nimbus site (EN by default, FR landing page for the French UI, utm

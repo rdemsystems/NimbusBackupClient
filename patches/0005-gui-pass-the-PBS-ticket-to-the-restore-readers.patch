@@ -1,7 +1,7 @@
 From 0d5c4bc74b3ccaad504bb8fc3ad6c1b6148544e9 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:03:50 +0200
-Subject: [PATCH 05/46] gui: pass the PBS ticket to the restore readers
+Subject: [PATCH 05/49] gui: pass the PBS ticket to the restore readers
 
 RestoreOptions carries the per-operation ticket for username/password
 servers, and snapshot listing used it, but the two PBSClient
