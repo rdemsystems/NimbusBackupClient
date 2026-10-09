@@ -27,7 +27,7 @@ Fiecare versiune include:
 - `SHA256SUMS.txt` — sume de control
 
 > ⚠️ **Windows raportează „virus detectat” (de ex. `Trojan:Win32/Sabsik.FL.A!ml`) sau afișează un avertisment SmartScreen?**
-> Este un **fals pozitiv** cunoscut pentru aplicațiile Go/Wails — *nu* este un virus. Sufixul `!ml` înseamnă că provine de la un model de învățare automată care semnalează executabilele *nesemnate și puțin răspândite*.
+> Este un **fals pozitiv** cunoscut pentru aplicațiile Go/Wails — *nu* este un virus. Sufixul `!ml` înseamnă că provine de la un model de învățare automată care semnalează executabilele *puțin răspândite* (și, până la 0.4.0, pe cele nesemnate).
 > Citiți [de ce se întâmplă acest lucru și cum să verificați descărcarea](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
 
 ### 🔎 Verificarea oricărei descărcări
@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
 [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
 
-> ℹ️ **Semnarea codului:** binarele Windows **nu sunt încă semnate Authenticode**, ceea ce declanșează avertismentele SmartScreen / `!ml` de mai sus. Cererea noastră pentru un certificat OSS gratuit de la [SignPath Foundation](https://signpath.org) nu a primit răspuns; semnarea prin Azure Artifact Signing este în curs de configurare și este vizată pentru **0.4.1**. Până atunci, proveniența este stabilită prin atestarea de proveniență a build-ului și sumele de control de mai sus.
+> 🔏 **Semnarea codului:** începând cu 0.4.1, `NimbusBackup.exe`, serviciul său și `NimbusBackup.msi` sunt **semnate Authenticode de RDEM SYSTEMS** (Azure Artifact Signing); *Proprietăți → Semnături digitale* afișează editorul. SmartScreen poate încă afișa avertismente pentru o versiune nouă până când reputația acesteia este stabilită: verificați că editorul este RDEM SYSTEMS, apoi *Mai multe informații → Executați oricum*. Instrumentele în linie de comandă nu sunt încă semnate; atestarea de proveniență a build-ului și sumele de control de mai sus acoperă toate fișierele.
 
 ### 🐧 Pe Linux? Folosiți clientul oficial
 
@@ -74,11 +74,12 @@ Nu doriți să găzduiți singuri Proxmox Backup Server? Folosiți datastore-uri
 ### GUI (recomandat)
 - **🌍 Multilingv** — interfață în engleză, franceză, italiană, germană și poloneză
 - Configurare ușoară, cu testarea conexiunii (token API sau nume de utilizator/parolă)
-- Progresul backup-ului în timp real, cu viteză și timp estimat, anulare oricând
-- Suport VSS (Volume Shadow Copy) pentru backup-uri consistente
+- Progresul backup-ului în timp real, cu viteză și timp estimat, anulare oricând, o filă cu joburile în desfășurare
+- VSS (Volume Shadow Copy) pentru backup-uri consistente: un singur snapshot pentru un întreg backup cu mai multe directoare, o copie shadow per volum
 - Backup pentru mai multe directoare, moduri fișier și disc (mașină completă); directoarele pot rula în paralel (recomandat: CPU-uri / 4)
-- Navigare în snapshot-uri, căutare de fișiere (wildcard-uri) și restaurare
-- Suport pentru mai multe servere PBS, fixarea amprentei certificatului (TOFU)
+- Backup-urile de disc se restaurează în Proxmox VE ca VM care corespunde mașinii (CPU-uri, RAM, firmware, plăci de rețea cu adresele lor MAC, ID de VM dedicat)
+- Navigare în snapshot-uri, căutare de fișiere (wildcard-uri) și restaurare, inclusiv ACL-urile NTFS
+- Suport pentru mai multe servere PBS, cu un server PBS per job, fixarea amprentei certificatului (TOFU)
 - **🔒 Criptare pe partea clientului** (AES-256-GCM), fișiere cheie compatibile cu `proxmox-backup-client` și Proxmox VE
 - Mod serviciu Windows + backup-uri programate, istoric al backup-urilor cu reluare dintr-un clic
 - Jurnalizare de depanare pentru diagnosticarea problemelor
@@ -113,7 +114,7 @@ La backup-ul unei unități întregi (de ex. `D:\`), Nimbus Backup exclude autom
 - Validarea datelor de intrare și igienizarea credențialelor (secretele sunt mascate în jurnale)
 - Prevenirea path traversal
 - Logică de reîncercare cu backoff exponențial
-- Verificări CI la fiecare build: teste, `golangci-lint`, `gosec`, `go mod tidy`
+- Verificări CI la fiecare build: teste, `golangci-lint`, `gosec`, `go mod tidy` și o suită end-to-end pe un PBS real (restaurări cu `proxmox-backup-client` oficial, PBS verify)
 
 ### 🔒 Criptare pe partea clientului
 Backup-urile pot fi criptate **pe client** înainte de a părăsi mașina, cu
@@ -216,11 +217,12 @@ Brandul este ales după numele executabilului: `NimbusBackup.exe` rulează ca Ni
 
 ## 🔗 Relația cu upstream
 
-Nimbus Backup a pornit ca fork al [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client în Go, de Tiziano Bacocco, GPLv3), la care am adăugat GUI-ul Windows, serviciul, programarea, suportul multi-PBS și restaurarea. În septembrie 2026, upstream a integrat acest GUI și l-a făcut neutru din punct de vedere al brandului („Proxmox Backup Client GUI”). Începând cu 0.4.0, Nimbus Backup este construit din aceeași bază de cod: **cele două proiecte sunt acum aproape identice din punct de vedere funcțional.**
+Nimbus Backup a pornit ca fork al [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client în Go, de Tiziano Bacocco, GPLv3), la care am adăugat GUI-ul Windows, serviciul, programarea, suportul multi-PBS și restaurarea. În septembrie 2026, upstream a integrat acest GUI și l-a făcut neutru din punct de vedere al brandului („Proxmox Backup Client GUI”). În octombrie 2026 (0.4.1), Nimbus Backup a fost reconstruit pe codul actual din upstream, adoptând criptarea pe partea clientului din upstream: **cele două proiecte au aceeași bază de cod.**
 
-Ceea ce adaugă acest depozit peste upstream este o serie mică și documentată de patch-uri ([`patches/`](patches/README.md)):
+Ceea ce adaugă acest depozit peste upstream este o serie documentată de patch-uri ([`patches/`](patches/README.md)), în mare parte propuse upstream:
 
-- **Corecturi încă neintegrate în upstream** (build-ul serviciului, restaurare cu servere cu nume de utilizator/parolă, coduri de ieșire, mascarea datelor în jurnale, fiabilitatea backup-ului de mașină…) — trimise upstream pe măsură ce sunt integrate.
+- **Funcționalități**: paper key și importul cheii (cod QR), backup-uri de directoare în paralel, un singur snapshot VSS per backup cu mai multe directoare, excluderi în CLI, o configurație de VM Proxmox VE generată din mașina reală.
+- **Corecturi încă neintegrate în upstream** (restaurarea backup-urilor criptate și comprimate ale `proxmox-backup-client`, serverul PBS ales pentru un backup al serviciului, motivele de refuz ale PBS, restaurare cu servere cu nume de utilizator/parolă, maximizarea ferestrei…) — trimise upstream pe măsură ce sunt integrate.
 - **Identitatea Nimbus Backup** — `NimbusBackup.exe`/`.msi`, serviciul `NimbusBackup` și codul de actualizare MSI al instalărilor existente, astfel încât acestea să se actualizeze în continuare pe loc.
 - **Calea de actualizare** de la Nimbus Backup ≤ 0.3.0 (migrarea directorului de date, metadate vechi ale snapshot-urilor).
 - **Pipeline-ul de lansare** — atestare de proveniență a build-ului, sume de control, rapoarte VirusTotal.

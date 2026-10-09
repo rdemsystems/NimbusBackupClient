@@ -27,7 +27,7 @@ Ogni release include:
 - `SHA256SUMS.txt` — checksum
 
 > ⚠️ **Windows segnala "virus rilevato" (ad es. `Trojan:Win32/Sabsik.FL.A!ml`) o mostra un avviso SmartScreen?**
-> Si tratta di un **falso positivo** noto per le applicazioni Go/Wails — *non* è un virus. Il suffisso `!ml` indica che proviene da un modello di machine learning che segnala gli eseguibili *non firmati e poco diffusi*.
+> Si tratta di un **falso positivo** noto per le applicazioni Go/Wails — *non* è un virus. Il suffisso `!ml` indica che proviene da un modello di machine learning che segnala gli eseguibili *poco diffusi* (e, fino alla 0.4.0, quelli non firmati).
 > Leggete [perché succede e come verificare il download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
 
 ### 🔎 Verificare un download
@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
 [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
 
-> ℹ️ **Firma del codice:** i binari Windows **non sono ancora firmati Authenticode**, ed è questo che provoca gli avvisi SmartScreen / `!ml` descritti sopra. La nostra richiesta di un certificato OSS gratuito alla [SignPath Foundation](https://signpath.org) non ha ricevuto risposta; la firma tramite Azure Artifact Signing è in fase di configurazione ed è prevista per la **0.4.1**. Fino ad allora, la provenienza è garantita dall'attestazione di provenienza della build e dai checksum indicati sopra.
+> 🔏 **Firma del codice:** dalla 0.4.1, `NimbusBackup.exe`, il relativo servizio e `NimbusBackup.msi` sono **firmati Authenticode da RDEM SYSTEMS** (Azure Artifact Signing); *Proprietà → Firme digitali* mostra l'editore. SmartScreen può ancora mostrare un avviso su una nuova release finché la sua reputazione non è consolidata: verificate che l'editore sia RDEM SYSTEMS, poi *Ulteriori informazioni → Esegui comunque*. Gli strumenti da riga di comando non sono ancora firmati; l'attestazione di provenienza della build e i checksum indicati sopra coprono tutti i file.
 
 ### 🐧 Su Linux? Usate il client ufficiale
 
@@ -74,11 +74,12 @@ Non volete ospitare voi stessi un Proxmox Backup Server? Usate i nostri datastor
 ### GUI (consigliata)
 - **🌍 Multilingue** — interfaccia in inglese, francese, italiano, tedesco e polacco
 - Configurazione semplice con test della connessione (token API o nome utente/password)
-- Avanzamento del backup in tempo reale con velocità e tempo stimato, annullabile in qualsiasi momento
-- Supporto VSS (Volume Shadow Copy) per backup coerenti
+- Avanzamento del backup in tempo reale con velocità e tempo stimato, annullabile in qualsiasi momento, una scheda Job in esecuzione
+- VSS (Volume Shadow Copy) per backup coerenti: un solo snapshot per un intero backup di più cartelle, una shadow copy per volume
 - Backup di più cartelle, modalità file e disco (macchina intera); le cartelle possono essere elaborate in parallelo (consigliato: CPU / 4)
-- Navigazione degli snapshot, ricerca di file (caratteri jolly) e ripristino
-- Supporto di più server PBS, pinning dell'impronta del certificato (TOFU)
+- I backup del disco si ripristinano in Proxmox VE come una VM conforme alla macchina (CPU, RAM, firmware, schede di rete con i loro MAC, VM ID dedicato)
+- Navigazione degli snapshot, ricerca di file (caratteri jolly) e ripristino, ACL NTFS incluse
+- Supporto di più server PBS con un server PBS per job, pinning dell'impronta del certificato (TOFU)
 - **🔒 Cifratura lato client** (AES-256-GCM), file di chiave compatibili con `proxmox-backup-client` e Proxmox VE
 - Modalità servizio Windows + backup pianificati, cronologia dei backup con riesecuzione in un clic
 - Log di debug per la risoluzione dei problemi
@@ -113,7 +114,7 @@ Quando si esegue il backup di un'intera unità (ad es. `D:\`), Nimbus Backup esc
 - Validazione degli input e sanificazione delle credenziali (segreti oscurati nei log)
 - Prevenzione del path traversal
 - Logica di retry con backoff esponenziale
-- Controlli CI a ogni build: test, `golangci-lint`, `gosec`, `go mod tidy`
+- Controlli CI a ogni build: test, `golangci-lint`, `gosec`, `go mod tidy`, e una suite end-to-end su un vero PBS (ripristini con il `proxmox-backup-client` ufficiale, verify di PBS)
 
 ### 🔒 Cifratura lato client
 I backup possono essere cifrati **sul client** prima di lasciare la macchina, con
@@ -216,11 +217,12 @@ Il marchio viene scelto in base al nome dell'eseguibile: `NimbusBackup.exe` si a
 
 ## 🔗 Rapporto con il progetto upstream
 
-Nimbus Backup è nato come fork di [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, di Tiziano Bacocco, GPLv3), a cui abbiamo aggiunto la GUI Windows, il servizio, la pianificazione, il multi-PBS e il ripristino. Nel settembre 2026, il progetto upstream ha integrato quella GUI rendendola neutra rispetto al marchio ("Proxmox Backup Client GUI"). Dalla 0.4.0, Nimbus Backup è compilato a partire dalla stessa base di codice: **i due progetti sono ora quasi identici dal punto di vista funzionale.**
+Nimbus Backup è nato come fork di [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, di Tiziano Bacocco, GPLv3), a cui abbiamo aggiunto la GUI Windows, il servizio, la pianificazione, il multi-PBS e il ripristino. Nel settembre 2026, il progetto upstream ha integrato quella GUI rendendola neutra rispetto al marchio ("Proxmox Backup Client GUI"). Nell'ottobre 2026 (0.4.1), Nimbus Backup è stato ricostruito sul codice attuale dell'upstream, adottando la cifratura lato client dell'upstream: **i due progetti condividono la stessa base di codice.**
 
-Ciò che questo repository aggiunge rispetto all'upstream è una piccola serie di patch documentata ([`patches/`](patches/README.md)):
+Ciò che questo repository aggiunge rispetto all'upstream è una serie di patch documentata ([`patches/`](patches/README.md)), in gran parte proposta upstream:
 
-- **Correzioni non ancora integrate upstream** (build del servizio, ripristino con server a nome utente/password, codici di uscita, oscuramento dei log, affidabilità del backup della macchina…) — inviate upstream man mano che vengono integrate.
+- **Funzionalità**: chiave cartacea e importazione della chiave (codice QR), backup di cartelle in parallelo, un solo snapshot VSS per backup di più cartelle, esclusioni da riga di comando, una configurazione di VM Proxmox VE generata dalla macchina reale.
+- **Correzioni non ancora integrate upstream** (ripristino dei backup cifrati e compressi di `proxmox-backup-client`, il server PBS scelto per un backup del servizio, motivi di rifiuto di PBS, ripristino con server a nome utente/password, massimizzazione della finestra…) — inviate upstream man mano che vengono integrate.
 - **L'identità Nimbus Backup** — `NimbusBackup.exe`/`.msi`, il servizio `NimbusBackup` e l'upgrade code MSI delle installazioni esistenti, affinché continuino ad aggiornarsi sul posto.
 - **Percorso di aggiornamento** da Nimbus Backup ≤ 0.3.0 (migrazione della cartella dei dati, metadati degli snapshot legacy).
 - **Pipeline di release** — attestazione di provenienza della build, checksum, report VirusTotal.

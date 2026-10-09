@@ -27,7 +27,7 @@ Nimbus Backup は [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxba
 - `SHA256SUMS.txt` — チェックサム
 
 > ⚠️ **Windows が「ウイルスが検出されました」（例：`Trojan:Win32/Sabsik.FL.A!ml`）と表示したり、SmartScreen の警告が出たりしますか？**
-> これは Go/Wails アプリケーションで既知の**誤検知**であり、ウイルスでは*ありません*。`!ml` という接尾辞は、*署名がなく普及度の低い*実行ファイルを検出する機械学習モデルによる判定であることを意味します。
+> これは Go/Wails アプリケーションで既知の**誤検知**であり、ウイルスでは*ありません*。`!ml` という接尾辞は、*普及度の低い*実行ファイル（0.4.0 までは署名のないものも）を検出する機械学習モデルによる判定であることを意味します。
 > [この現象が起こる理由とダウンロードの検証方法](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github)をお読みください。
 
 ### 🔎 ダウンロードの検証
@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
 [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
 
-> ℹ️ **コード署名：** Windows バイナリは**まだ Authenticode 署名されていません**。これが上記の SmartScreen / `!ml` 警告の原因です。[SignPath Foundation](https://signpath.org) への無償 OSS 証明書の申請には返答がありませんでした。Azure Artifact Signing による署名を準備中で、**0.4.1** での対応を目標としています。それまでは、上記のビルド来歴証明とチェックサムによって出所を確認できます。
+> 🔏 **コード署名：** 0.4.1 以降、`NimbusBackup.exe`、そのサービス、`NimbusBackup.msi` は **RDEM SYSTEMS により Authenticode 署名されています**（Azure Artifact Signing）。*プロパティ → デジタル署名* で発行元を確認できます。新しいリリースでは、評価が確立されるまで SmartScreen が警告を表示することがあります。発行元が RDEM SYSTEMS であることを確認してから、*詳細情報 → 実行* を選択してください。コマンドラインツールはまだ署名されていません。上記のビルド来歴証明とチェックサムはすべてのファイルを対象としています。
 
 ### 🐧 Linux をお使いですか？ 公式クライアントをご利用ください
 
@@ -74,11 +74,12 @@ Proxmox Backup Server を自前でホストしたくないですか？ 私たち
 ### GUI（推奨）
 - **🌍 多言語対応** — 英語、フランス語、イタリア語、ドイツ語、ポーランド語のインターフェース
 - 接続テスト付きのわかりやすい設定（API トークンまたはユーザー名/パスワード）
-- 速度と残り時間を含むリアルタイムのバックアップ進捗表示、いつでもキャンセル可能
-- 整合性のあるバックアップのための VSS（ボリュームシャドウコピー）対応
+- 速度と残り時間を含むリアルタイムのバックアップ進捗表示、いつでもキャンセル可能、「実行中のジョブ」タブ
+- 整合性のあるバックアップのための VSS（ボリュームシャドウコピー）：複数フォルダーのバックアップ全体で 1 つのスナップショット、ボリュームごとに 1 つのシャドウコピー
 - 複数フォルダーのバックアップ、ファイルモードとディスク（マシン全体）モード。フォルダーは並列実行可能（推奨：CPU 数 / 4）
-- スナップショットの閲覧、ファイル検索（ワイルドカード対応）、リストア
-- 複数 PBS サーバー対応、証明書フィンガープリントのピン留め（TOFU）
+- ディスクバックアップは Proxmox VE 上で元のマシンに合わせた VM としてリストア可能（CPU、RAM、ファームウェア、MAC アドレスを引き継いだ NIC、専用の VM ID）
+- スナップショットの閲覧、ファイル検索（ワイルドカード対応）、リストア（NTFS ACL を含む）
+- 複数 PBS サーバー対応（ジョブごとに PBS サーバーを指定可能）、証明書フィンガープリントのピン留め（TOFU）
 - **🔒 クライアント側暗号化**（AES-256-GCM）、鍵ファイルは `proxmox-backup-client` および Proxmox VE と互換
 - Windows サービスモード + スケジュールバックアップ、ワンクリックで再実行できるバックアップ履歴
 - トラブルシューティング用のデバッグログ
@@ -113,7 +114,7 @@ Proxmox Backup Server を自前でホストしたくないですか？ 私たち
 - 入力の検証と認証情報のサニタイズ（シークレットはログ上で伏せ字化）
 - パストラバーサルの防止
 - 指数バックオフによるリトライ処理
-- すべてのビルドで CI チェック：テスト、`golangci-lint`、`gosec`、`go mod tidy`
+- すべてのビルドで CI チェック：テスト、`golangci-lint`、`gosec`、`go mod tidy`、および実際の PBS に対するエンドツーエンドテストスイート（公式 `proxmox-backup-client` によるリストア、PBS の verify）
 
 ### 🔒 クライアント側暗号化
 バックアップはマシンから送出される前に**クライアント上で**暗号化できます。
@@ -216,11 +217,12 @@ wails build      # or: wails dev  (hot reload)
 
 ## 🔗 アップストリームとの関係
 
-Nimbus Backup は [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（Tiziano Bacocco による Go 製の Proxmox Backup Client、GPLv3）のフォークとして始まり、私たちはそこに Windows GUI、サービス、スケジューリング、複数 PBS 対応、リストア機能を追加しました。2026 年 9 月、アップストリームはこの GUI を取り込み、ブランド中立化しました（「Proxmox Backup Client GUI」）。0.4.0 以降、Nimbus Backup は同じコードベースからビルドされています：**現在、両プロジェクトは機能的にほぼ同一です。**
+Nimbus Backup は [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（Tiziano Bacocco による Go 製の Proxmox Backup Client、GPLv3）のフォークとして始まり、私たちはそこに Windows GUI、サービス、スケジューリング、複数 PBS 対応、リストア機能を追加しました。2026 年 9 月、アップストリームはこの GUI を取り込み、ブランド中立化しました（「Proxmox Backup Client GUI」）。2026 年 10 月（0.4.1）、Nimbus Backup はアップストリームの最新コードをもとに再構築され、アップストリームのクライアント側暗号化を採用しました：**両プロジェクトは同じコードベースを共有しています。**
 
-このリポジトリがアップストリームに加えているのは、小規模で文書化されたパッチシリーズ（[`patches/`](patches/README.md)）です：
+このリポジトリがアップストリームに加えているのは、文書化されたパッチシリーズ（[`patches/`](patches/README.md)）で、その大部分はアップストリームに提案済みです：
 
-- **アップストリームにまだマージされていない修正**（サービスのビルド、ユーザー名/パスワード認証のサーバーからのリストア、終了コード、ログの伏せ字化、マシンバックアップの信頼性など） — 順次アップストリームに送り、マージを待っています。
+- **機能**：ペーパーキーとキーのインポート（QR コード）、フォルダーの並列バックアップ、複数フォルダーのバックアップごとに 1 つの VSS スナップショット、コマンドラインでの除外指定、実マシンから生成される Proxmox VE の VM 構成。
+- **アップストリームにまだマージされていない修正**（`proxmox-backup-client` の圧縮・暗号化されたバックアップのリストア、サービスによるバックアップで選択される PBS サーバー、PBS の拒否理由、ユーザー名/パスワード認証のサーバーからのリストア、ウィンドウの最大化など） — 順次アップストリームに送り、マージを待っています。
 - **Nimbus Backup としての識別情報** — `NimbusBackup.exe`/`.msi`、`NimbusBackup` サービス、既存インストールの MSI アップグレードコード。これにより既存環境は引き続きその場でアップグレードされます。
 - **アップグレードパス** — Nimbus Backup 0.3.0 以前からの移行（データフォルダーの移行、旧形式のスナップショットメタデータ）。
 - **リリースパイプライン** — ビルド来歴証明、チェックサム、VirusTotal レポート。

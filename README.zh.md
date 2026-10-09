@@ -27,7 +27,7 @@ Nimbus Backup 是 RDEM Systems 对 [Proxmox Backup Client GO](https://github.com
 - `SHA256SUMS.txt` — 校验和
 
 > ⚠️ **Windows 提示“检测到病毒”（例如 `Trojan:Win32/Sabsik.FL.A!ml`）或显示 SmartScreen 警告？**
-> 这是 Go/Wails 应用程序已知的**误报**——它*不是*病毒。`!ml` 后缀表示该告警来自一个机器学习模型，该模型会标记*未签名、普及度低*的可执行文件。
+> 这是 Go/Wails 应用程序已知的**误报**——它*不是*病毒。`!ml` 后缀表示该告警来自一个机器学习模型，该模型会标记*普及度低*的可执行文件（在 0.4.0 及之前，还包括未签名的文件）。
 > 阅读[为什么会出现这种情况以及如何验证下载文件](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github)。
 
 ### 🔎 验证任何下载文件
@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
 [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
 
-> ℹ️ **代码签名：** Windows 二进制文件**尚未进行 Authenticode 签名**，这正是触发上述 SmartScreen / `!ml` 警告的原因。我们向 [SignPath Foundation](https://signpath.org) 申请免费开源证书未获回复；通过 Azure Artifact Signing 进行签名的工作正在配置中，目标版本为 **0.4.1**。在此之前，来源可通过上述构建来源证明和校验和来确认。
+> 🔏 **代码签名：** 自 0.4.1 起，`NimbusBackup.exe`、其服务以及 `NimbusBackup.msi` 均**由 RDEM SYSTEMS 进行 Authenticode 签名**（Azure Artifact Signing）；*属性 → 数字签名* 中会显示发布者。在新版本的信誉建立之前，SmartScreen 仍可能发出警告：请确认发布者为 RDEM SYSTEMS，然后点击 *更多信息 → 仍要运行*。命令行工具尚未签名；上述构建来源证明和校验和覆盖所有文件。
 
 ### 🐧 使用 Linux？请使用官方客户端
 
@@ -74,11 +74,12 @@ Nimbus Backup GUI 仅支持 Windows（CLI 工具也可为 Linux 和 macOS 构建
 ### GUI（推荐）
 - **🌍 多语言** — 英语、法语、意大利语、德语和波兰语界面
 - 友好的配置界面，支持连接测试（API 令牌或用户名/密码）
-- 实时显示备份进度、速度和预计剩余时间，可随时取消
-- 支持 VSS（卷影复制）以实现一致性备份
+- 实时显示备份进度、速度和预计剩余时间，可随时取消，提供“运行中的作业”标签页
+- VSS（卷影复制）实现一致性备份：整个多文件夹备份只用一个快照，每个卷一个卷影副本
 - 多文件夹备份，文件模式和磁盘（整机）模式；文件夹可并行备份（推荐：CPU 数 / 4）
-- 快照浏览、文件搜索（支持通配符）和恢复
-- 支持多台 PBS 服务器，证书指纹固定（TOFU）
+- 磁盘备份可在 Proxmox VE 中恢复为与原机器一致的虚拟机（CPU、内存、固件、带原 MAC 地址的网卡、专用 VM ID）
+- 快照浏览、文件搜索（支持通配符）和恢复，包括 NTFS ACL
+- 支持多台 PBS 服务器，每个作业可使用各自的 PBS 服务器，证书指纹固定（TOFU）
 - **🔒 客户端加密**（AES-256-GCM），密钥文件与 `proxmox-backup-client` 及 Proxmox VE 兼容
 - Windows 服务模式 + 计划备份，备份历史记录支持一键重新运行
 - 用于故障排查的调试日志
@@ -113,7 +114,7 @@ Nimbus Backup GUI 仅支持 Windows（CLI 工具也可为 Linux 和 macOS 构建
 - 输入验证和凭据清理（日志中的机密信息会被脱敏）
 - 防止路径遍历
 - 带指数退避的重试逻辑
-- 每次构建都执行 CI 检查：测试、`golangci-lint`、`gosec`、`go mod tidy`
+- 每次构建都执行 CI 检查：测试、`golangci-lint`、`gosec`、`go mod tidy`，以及针对真实 PBS 的端到端测试套件（使用官方 `proxmox-backup-client` 恢复、PBS 校验）
 
 ### 🔒 客户端加密
 备份可以在离开机器之前**在客户端**进行加密，
@@ -216,11 +217,12 @@ wails build      # or: wails dev  (hot reload)
 
 ## 🔗 与上游项目的关系
 
-Nimbus Backup 最初是 [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（用 Go 编写的 Proxmox Backup Client，作者 Tiziano Bacocco，GPLv3）的一个分支，我们在其基础上添加了 Windows GUI、服务、计划任务、多 PBS 和恢复功能。2026 年 9 月，上游合并了该 GUI 并使其品牌中立（“Proxmox Backup Client GUI”）。自 0.4.0 起，Nimbus Backup 基于同一代码库构建：**两个项目现在在功能上几乎完全相同。**
+Nimbus Backup 最初是 [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（用 Go 编写的 Proxmox Backup Client，作者 Tiziano Bacocco，GPLv3）的一个分支，我们在其基础上添加了 Windows GUI、服务、计划任务、多 PBS 和恢复功能。2026 年 9 月，上游合并了该 GUI 并使其品牌中立（“Proxmox Backup Client GUI”）。2026 年 10 月（0.4.1），Nimbus Backup 基于上游的当前代码重新构建，并采用了上游的客户端加密：**两个项目共享同一代码库。**
 
-本仓库在上游基础上增加的是一个小型、有文档说明的补丁系列（[`patches/`](patches/README.md)）：
+本仓库在上游基础上增加的是一个有文档说明的补丁系列（[`patches/`](patches/README.md)），其中大部分已提交给上游：
 
-- **尚未合并到上游的修复**（服务构建、使用用户名/密码的服务器的恢复、退出码、日志脱敏、整机备份可靠性……）——已陆续提交给上游，等待其合并。
+- **功能**：纸质密钥和密钥导入（二维码）、文件夹并行备份、多文件夹备份只用一个 VSS 快照、命令行排除项、根据真实机器生成的 Proxmox VE 虚拟机配置。
+- **尚未合并到上游的修复**（恢复 `proxmox-backup-client` 的压缩加密备份、服务备份所选用的 PBS 服务器、PBS 拒绝原因、使用用户名/密码的服务器的恢复、窗口最大化……）——已陆续提交给上游，等待其合并。
 - **Nimbus Backup 标识** — `NimbusBackup.exe`/`.msi`、`NimbusBackup` 服务，以及现有安装的 MSI 升级代码，以便它们继续原地升级。
 - **升级路径** — 从 Nimbus Backup ≤ 0.3.0 升级（数据文件夹迁移、旧版快照元数据）。
 - **发布流水线** — 构建来源证明、校验和、VirusTotal 报告。
