@@ -94,7 +94,10 @@ func TestUploadChunkEncryptedFraming(t *testing.T) {
 	pt := bytes.Repeat([]byte("proxmox"), 4096) // 28672 bytes, compressible
 	digest := client.ChunkDigestHex(pt)
 
-	if err := client.UploadChunk(7, digest, pt, false, true); err != nil {
+	// Uncompressed upload: the plain encrypted framing (header + ciphertext
+	// of the same length); the compressed form is covered by
+	// TestUploadChunkEncryptedCompresses.
+	if err := client.UploadChunk(7, digest, pt, false, false); err != nil {
 		t.Fatalf("UploadChunk: %v", err)
 	}
 

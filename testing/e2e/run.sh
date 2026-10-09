@@ -241,7 +241,7 @@ test_official_encrypted_block_readback() {
 		warn "official client skipped -- nothing to read back"
 		return 0
 	fi
-	pbc backup disk.img:/e2e/disk.img --backup-id e2e-pbc-block-enc \
+	pbc backup disk.img:disk.img --backup-id e2e-pbc-block-enc \
 		--keyfile key.pem >"$WORK/log-pbc-block-enc.txt" 2>&1 \
 		|| { cat "$WORK/log-pbc-block-enc.txt"; return 1; }
 
