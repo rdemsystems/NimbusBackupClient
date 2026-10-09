@@ -118,11 +118,18 @@ the same scheme as the official `proxmox-backup-client` (AES-256-GCM, keyed chun
 digests, signed manifest). The PBS server only stores opaque data and never sees
 the key — useful on a shared or managed PBS.
 
-- **GUI**: *Servers → Edit → 🔒 Encryption* — generate a key or import an existing
-  key file (from `proxmox-backup-client key create` or a PVE storage), then
-  **export it** and keep a copy off the machine (optionally passphrase-protected).
+- **GUI**: *Servers → Edit → Encryption key* — create a key file or pick an
+  existing one (from `proxmox-backup-client key create --kdf none` or a PVE
+  storage); its fingerprint is shown. Then keep a copy off the machine:
+  **Print (paper key)** saves a printable page with the key and its QR code (the
+  format of `proxmox-backup-client key paperkey`), optionally passphrase-protected.
+  **Import a key from text or a QR code** turns a scanned QR code or a paper key
+  back into a key file.
 - **CLI**: `-keyfile path/to/key.json` (or `"keyfile"` in the JSON config); a
-  passphrase-protected key reads its passphrase from `PBS_ENCRYPTION_PASSWORD`.
+  passphrase-protected key takes `-keyfile-passphrase`, or prompts for it.
+- **Bare-metal restore**: the patched Clonezilla ISO restores encrypted disk
+  backups too (key from a USB stick, with its passphrase if any) — see
+  [PATCH-CLONEZILLA.md](PATCH-CLONEZILLA.md).
 - **Interoperable**: an encrypted backup restores with `proxmox-backup-client`
   or Proxmox VE using the same key file, and vice versa.
 

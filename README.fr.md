@@ -118,12 +118,20 @@ le même schéma que le client officiel `proxmox-backup-client` (AES-256-GCM,
 empreintes de blocs à clé, manifeste signé). Le serveur PBS ne stocke que des
 données opaques et ne voit jamais la clé — idéal sur un PBS mutualisé ou infogéré.
 
-- **Interface** : *Serveurs → Modifier → 🔒 Chiffrement* — générez une clé ou
-  importez un fichier de clé existant (créé par `proxmox-backup-client key create`
-  ou issu d'un stockage PVE), puis **exportez-la** et conservez-en une copie hors
-  du poste (éventuellement protégée par une phrase secrète).
+- **Interface** : *Serveurs → Modifier → Clé de chiffrement* — créez un fichier
+  de clé ou choisissez-en un existant (créé par
+  `proxmox-backup-client key create --kdf none` ou issu d'un stockage PVE) ; son
+  empreinte s'affiche. Gardez-en ensuite une copie hors du poste :
+  **Imprimer (copie papier)** enregistre une page imprimable avec la clé et son QR
+  code (le format de `proxmox-backup-client key paperkey`), éventuellement
+  protégée par une phrase secrète. **Importer une clé depuis un texte ou un QR
+  code** refait un fichier de clé à partir d'un QR code scanné ou d'une copie papier.
 - **Ligne de commande** : `-keyfile chemin/vers/cle.json` (ou `"keyfile"` dans le
-  fichier JSON) ; une clé protégée lit sa phrase secrète dans `PBS_ENCRYPTION_PASSWORD`.
+  fichier JSON) ; une clé protégée prend `-keyfile-passphrase`, sinon la phrase
+  secrète est demandée.
+- **Restauration bare-metal** : l'ISO Clonezilla modifiée restaure aussi les
+  sauvegardes de disque chiffrées (clé sur clé USB, avec sa phrase secrète le cas
+  échéant) — voir [PATCH-CLONEZILLA.md](PATCH-CLONEZILLA.md).
 - **Interopérable** : une sauvegarde chiffrée se restaure avec
   `proxmox-backup-client` ou Proxmox VE avec le même fichier de clé, et inversement.
 
