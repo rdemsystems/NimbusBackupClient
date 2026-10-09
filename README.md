@@ -73,7 +73,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite 
 - User-friendly configuration with connection testing (API token or username/password)
 - Real-time backup progress with speed and ETA, cancel at any time
 - VSS (Volume Shadow Copy) support for consistent backups
-- Multi-folder backup, file and disk (full machine) modes
+- Multi-folder backup, file and disk (full machine) modes; folders can run in parallel (recommended: CPUs / 4)
 - Snapshot browsing, file search (wildcards) and restore
 - Multi-PBS server support, certificate fingerprint pinning (TOFU)
 - **🔒 Client-side encryption** (AES-256-GCM), key files compatible with `proxmox-backup-client` and Proxmox VE
@@ -81,7 +81,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite 
 - Debug logging for troubleshooting
 
 ### Command-line tools
-- `proxmoxbackup-directory` — directory (PXAR) backups with deduplication, stream backups (`-backupstream`, e.g. a `mysqldump` pipe), exclusions (`-exclude "*.tmp"`, repeatable, or `-exclude-from file`; `"exclude"` in the JSON config), e-mail notifications, JSON config file
+- `proxmoxbackup-directory` — directory (PXAR) backups with deduplication, stream backups (`-backupstream`, e.g. a `mysqldump` pipe), exclusions (`-exclude "*.tmp"`, repeatable, or `-exclude-from file`; `"exclude"` in the JSON config), several directories at once (`-parallel N`, recommended: CPUs / 4), e-mail notifications, JSON config file
 - `proxmoxbackup-machine` — full live machine backups as a bootable disk image (FIDX): VSS on Windows, incremental, parallel hashing
 - `proxmoxbackup-nbd` — NBD server to mount a disk backup on Linux (file-level restore, bare-metal restore from a [patched Clonezilla live ISO](PATCH-CLONEZILLA.md))
 

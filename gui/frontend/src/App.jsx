@@ -140,6 +140,10 @@ function App() {
   // Opt-in: split this backup into parts (for the first backup of a large volume).
   // Off by default → no size analysis, the backup starts immediately.
   const [splitFirstBackup, setSplitFirstBackup] = useState(false)
+  // Folders of a multi-folder backup run at the same time (config "parallel",
+  // shared by one-shot and scheduled backups). No maximum; CPUs / 4 is advised.
+  const [parallelFolders, setParallelFolders] = useState(1)
+  const [recommendedParallel, setRecommendedParallel] = useState(1)
 
   // Scheduling states
   const [backupMode, setBackupMode] = useState('oneshot') // 'oneshot' or 'scheduled'
@@ -492,6 +496,12 @@ function App() {
               'backup-id': data['backup-id'] || hn,
               usevss: data.usevss !== undefined ? data.usevss : true
             })
+            setParallelFolders(data.parallel > 0 ? data.parallel : 1)
+            if (window.go?.main?.App?.GetRecommendedParallel) {
+              window.go.main.App.GetRecommendedParallel()
+                .then(n => setRecommendedParallel(n > 0 ? n : 1))
+                .catch(() => {})
+            }
 
             // Initialize backupDirs from config if available
             if (data.backupdir) {
@@ -2171,6 +2181,34 @@ function App() {
               </label>
               <div className="info-box" style={{marginTop: '10px', backgroundColor: '#f8f9fa', borderColor: '#dee2e6'}}>
                 ℹ️ {t('splitFirstBackupHint')}
+              </div>
+            </div>
+          )}
+
+          {backupType === 'directory' && (
+            <div className="form-group">
+              <label htmlFor="parallel-folders">{t('parallelFolders')}</label>
+              <input
+                id="parallel-folders"
+                type="number"
+                min="1"
+                step="1"
+                value={parallelFolders}
+                onChange={(e) => setParallelFolders(e.target.value)}
+                onBlur={async () => {
+                  const n = Math.max(1, Math.floor(Number(parallelFolders)) || 1)
+                  setParallelFolders(n)
+                  if (!window.go?.main?.App?.SetParallelFolders) return
+                  try {
+                    await window.go.main.App.SetParallelFolders(n)
+                  } catch (err) {
+                    showStatus(`❌ ${err}`, 'error')
+                  }
+                }}
+                style={{maxWidth: '120px'}}
+              />
+              <div className="info-box" style={{marginTop: '10px', backgroundColor: '#f8f9fa', borderColor: '#dee2e6'}}>
+                ℹ️ {t('parallelFoldersHint').replace('{n}', recommendedParallel)}
               </div>
             </div>
           )}

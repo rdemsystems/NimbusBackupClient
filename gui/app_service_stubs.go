@@ -137,6 +137,7 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
 		ExcludeList:     excludes,
 		DisableSplit:    pbsCfg.DisableSplit,
 		SplitSizeBytes:  pbsCfg.SplitSizeBytes(),
+		Parallel:        a.config.Parallel,
 		OnProgress: func(percent float64, message string) {
 			writeDebugLog(fmt.Sprintf("[Backup Progress] %.1f%% - %s", percent*100, message))
 			// Feed the API server's progress map so the GUI's polling sees it.

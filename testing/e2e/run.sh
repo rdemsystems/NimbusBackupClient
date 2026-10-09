@@ -361,7 +361,10 @@ test_dedup_reuse() {
 # GenerateBackupID); both must restore to the source tree, the excluded
 # files (-exclude and -exclude-from) left out.
 e2e_backup_id() {
-	printf '%s_%s' "$1" "$(printf '%s' "$2" | tr '/' '_' | tr ' ' '-' | tr -cd 'A-Za-z0-9_.-' | sed 's/^_*//; s/_*$//')"
+	local clean
+	# filepath.Clean, as GenerateBackupID does, then the same character mapping.
+	clean="$(python3 -c 'import os, sys; print(os.path.normpath(sys.argv[1]))' "$2")"
+	printf '%s_%s' "$1" "$(printf '%s' "$clean" | tr '/' '_' | tr ' ' '-' | tr -cd 'A-Za-z0-9_.-' | sed 's/^_*//; s/_*$//')"
 }
 
 test_parallel_with_exclusions() {

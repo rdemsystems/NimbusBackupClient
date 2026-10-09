@@ -73,7 +73,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
 - Configuration conviviale avec test de connexion (jeton API ou identifiant/mot de passe)
 - Progression de sauvegarde en temps réel avec débit et temps restant, annulation à tout moment
 - Support VSS (Volume Shadow Copy) pour des sauvegardes cohérentes
-- Sauvegarde multi-dossiers, modes fichier et disque (machine complète)
+- Sauvegarde multi-dossiers, modes fichier et disque (machine complète) ; dossiers sauvegardables en parallèle (recommandé : nombre de CPU / 4)
 - Navigation dans les snapshots, recherche de fichiers (jokers) et restauration
 - Support multi-serveurs PBS, épinglage d'empreinte de certificat (TOFU)
 - **🔒 Chiffrement côté client** (AES-256-GCM), fichiers de clé compatibles avec `proxmox-backup-client` et Proxmox VE
@@ -81,7 +81,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
 - Journalisation de débogage pour le diagnostic
 
 ### Outils en ligne de commande
-- `proxmoxbackup-directory` — sauvegarde de dossiers (PXAR) avec déduplication, sauvegarde de flux (`-backupstream`, ex. un `mysqldump` en pipe), exclusions (`-exclude "*.tmp"`, répétable, ou `-exclude-from fichier` ; `"exclude"` dans la config JSON), notifications par e-mail, fichier de configuration JSON
+- `proxmoxbackup-directory` — sauvegarde de dossiers (PXAR) avec déduplication, sauvegarde de flux (`-backupstream`, ex. un `mysqldump` en pipe), exclusions (`-exclude "*.tmp"`, répétable, ou `-exclude-from fichier` ; `"exclude"` dans la config JSON), plusieurs dossiers à la fois (`-parallel N`, recommandé : nombre de CPU / 4), notifications par e-mail, fichier de configuration JSON
 - `proxmoxbackup-machine` — sauvegarde à chaud d'une machine complète en image disque amorçable (FIDX) : VSS sous Windows, incrémentale, hachage parallélisé
 - `proxmoxbackup-nbd` — serveur NBD pour monter une sauvegarde disque sous Linux (restauration de fichiers, restauration bare-metal depuis une [ISO Clonezilla live patchée](PATCH-CLONEZILLA.md))
 

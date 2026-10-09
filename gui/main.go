@@ -790,6 +790,35 @@ func (a *App) SaveConfig(config *Config) error {
 	return nil
 }
 
+// GetRecommendedParallel returns the suggested number of folders backed up at
+// the same time (CPUs / 4, at least 1) for the GUI's hint.
+func (a *App) GetRecommendedParallel() int {
+	return RecommendedParallel()
+}
+
+// SetParallelFolders stores how many folders of a multi-folder backup run at
+// the same time (1 = one after the other) and persists it: through the
+// service in service mode (it runs the backups), to config.json otherwise.
+func (a *App) SetParallelFolders(n int) error {
+	if n < 1 {
+		return fmt.Errorf("the number of parallel folders must be at least 1")
+	}
+	if a.config == nil {
+		return fmt.Errorf("configuration not loaded")
+	}
+	next := *a.config
+	next.Parallel = n
+	if a.isDelegatedToService() {
+		a.config = &next
+		return a.pushConfigToService()
+	}
+	if err := next.Save(); err != nil {
+		return err
+	}
+	a.config = &next
+	return nil
+}
+
 // pushConfigToService sends the current config document to the service via
 // /config POST. Credentials this GUI knows (typed in the current session) are
 // transmitted so the service can store them; empty ones mean "keep existing"
@@ -1392,6 +1421,7 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 		ExcludeList:     excludeList,
 		DisableSplit:    a.config.DisableSplit,
 		SplitSizeBytes:  a.config.SplitSizeBytes(),
+		Parallel:        a.config.Parallel,
 		Crypt:           pbsCfg.Crypt,
 		// Use the backup context that was set via SetBackupContext for this job
 		Ctx: func() context.Context {

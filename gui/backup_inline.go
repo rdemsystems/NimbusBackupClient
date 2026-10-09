@@ -58,6 +58,22 @@ type BackupOptions struct {
 	// OnStats delivers structured live progress so the GUI can show real
 	// statistics instead of parsing them out of the progress message string.
 	OnStats func(*BackupProgressStats)
+	// Parallel is how many folders of a multi-folder backup run at the same
+	// time (0 or 1: one after the other). No upper limit; the GUI recommends
+	// CPUs / 4 (RecommendedParallel).
+	Parallel int
+
+	// Set by runFoldersParallel on each folder's options: the batch already
+	// holds the destination lock, and under VSS the folder reads snapshotPath,
+	// taken once for the whole batch.
+	lockHeld     bool
+	snapshotPath string
+}
+
+// RecommendedParallel is the suggested number of folders backed up at the same
+// time: CPUs / 4, at least 1.
+func RecommendedParallel() int {
+	return max(runtime.NumCPU()/4, 1)
 }
 
 // isFatalSessionError returns true for errors that make the current PBS session
@@ -600,6 +616,36 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 		baseID = hostname
 	}
 
+	if parallel := min(opts.Parallel, len(opts.BackupObjects)); parallel > 1 {
+		perDirErrors = runFoldersParallel(opts, baseID, parallel, agg)
+	} else {
+		perDirErrors = runFoldersSequential(opts, baseID, agg)
+	}
+
+	agg.DurationSec = time.Since(aggStart).Seconds()
+	if len(perDirErrors) > 0 {
+		agg.Message = fmt.Sprintf("%d/%d dossiers en échec:\n%s", len(perDirErrors), len(opts.BackupObjects), strings.Join(perDirErrors, "\n"))
+	} else {
+		agg.Message = fmt.Sprintf("Backup de %d dossiers terminé (%d new, %d reused chunks)", len(opts.BackupObjects), agg.NewChunks, agg.ReusedChunks)
+	}
+
+	if opts.OnComplete != nil {
+		opts.OnComplete(agg.Success(), agg.Message)
+	}
+	if opts.OnResult != nil {
+		opts.OnResult(agg)
+	}
+	if len(perDirErrors) > 0 {
+		return fmt.Errorf("%s", agg.Message)
+	}
+	return nil
+}
+
+// runFoldersSequential backs up the folders one after the other, each as its
+// own backup group, merging every folder's result into agg. It returns the
+// per-folder errors.
+func runFoldersSequential(opts BackupOptions, baseID string, agg *BackupStatus) []string {
+	var perDirErrors []string
 	for i, dir := range opts.BackupObjects {
 		if opts.Ctx != nil && opts.Ctx.Err() != nil {
 			// A cancelled run must never be reported as a success: the skipped
@@ -638,23 +684,176 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 		}
 	}
 
-	agg.DurationSec = time.Since(aggStart).Seconds()
-	if len(perDirErrors) > 0 {
-		agg.Message = fmt.Sprintf("%d/%d dossiers en échec:\n%s", len(perDirErrors), len(opts.BackupObjects), strings.Join(perDirErrors, "\n"))
-	} else {
-		agg.Message = fmt.Sprintf("Backup de %d dossiers terminé (%d new, %d reused chunks)", len(opts.BackupObjects), agg.NewChunks, agg.ReusedChunks)
+	return perDirErrors
+}
+
+// errFoldersFailed tells runFoldersParallel's snapshot callback that some
+// folders failed (already reported per folder).
+var errFoldersFailed = errors.New("some folders failed")
+
+// runFoldersParallel backs up up to parallel folders at the same time, each as
+// its own backup group and PBS session, merging every result into agg. It
+// returns the per-folder errors.
+//
+// The batch takes the destination lock once (folders skip it, or they would
+// run one by one). Under VSS, ONE snapshot set covering every folder is taken
+// before any upload: concurrent snapshot creations collide ("VSS busy"), and
+// the busy-recovery path deletes every shadow copy, which would pull the
+// snapshot from under the folders already running. Progress is the average of
+// the folders, statistics their sum.
+func runFoldersParallel(opts BackupOptions, baseID string, parallel int, agg *BackupStatus) []string {
+	dirs := opts.BackupObjects
+	writeBackupLog(fmt.Sprintf("[Parallel] Backing up %d folders, %d at a time", len(dirs), parallel))
+
+	backupLock := getBackupLock(opts.BaseURL, opts.Datastore)
+	if opts.OnProgress != nil {
+		opts.OnProgress(0, "Waiting for previous backup to complete...")
+	}
+	backupLock.Lock()
+	defer backupLock.Unlock()
+
+	var mu sync.Mutex
+	var perDirErrors []string
+	fractions := make([]float64, len(dirs))
+	stats := make([]BackupProgressStats, len(dirs))
+	started := 0
+
+	reportProgress := func(i int, pct float64, msg string) {
+		mu.Lock()
+		fractions[i] = pct
+		sum := 0.0
+		for _, f := range fractions {
+			sum += f
+		}
+		mu.Unlock()
+		if opts.OnProgress != nil {
+			opts.OnProgress(sum/float64(len(dirs)), fmt.Sprintf("[%s] %s", filepath.Base(dirs[i]), msg))
+		}
+	}
+	reportStats := func(i int, s *BackupProgressStats) {
+		mu.Lock()
+		stats[i] = *s
+		total := BackupProgressStats{CurrentDir: s.CurrentDir, Message: s.Message}
+		for _, st := range stats {
+			total.BytesDone += st.BytesDone
+			total.BytesTotal += st.BytesTotal
+			total.NewChunks += st.NewChunks
+			total.ReusedChunks += st.ReusedChunks
+			total.FailedChunks += st.FailedChunks
+		}
+		sum := 0.0
+		for _, f := range fractions {
+			sum += f
+		}
+		total.Percent = sum / float64(len(dirs))
+		mu.Unlock()
+		opts.OnStats(&total)
 	}
 
-	if opts.OnComplete != nil {
-		opts.OnComplete(agg.Success(), agg.Message)
+	runAll := func(snapshotPaths map[string]string) {
+		sem := make(chan struct{}, parallel)
+		var wg sync.WaitGroup
+		for i, dir := range dirs {
+			sem <- struct{}{}
+			if opts.Ctx != nil && opts.Ctx.Err() != nil {
+				<-sem
+				// A cancelled run must never be reported as a success: the
+				// folders not started were not backed up.
+				errMsg := fmt.Sprintf("backup cancelled: %d/%d folder(s) not backed up", len(dirs)-i, len(dirs))
+				writeBackupLog("Cancellation requested — skipping remaining folders (" + errMsg + ")")
+				mu.Lock()
+				perDirErrors = append(perDirErrors, errMsg)
+				mu.Unlock()
+				break
+			}
+			mu.Lock()
+			started++
+			mu.Unlock()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				dirOpts := opts
+				dirOpts.BackupObjects = []string{dir}
+				dirOpts.BackupID = GenerateBackupID(baseID, dir)
+				dirOpts.OnComplete = nil // aggregated by the caller
+				var dirStatus *BackupStatus
+				dirOpts.OnResult = func(s *BackupStatus) { dirStatus = s }
+				dirOpts.OnProgress = func(pct float64, msg string) { reportProgress(i, pct, msg) }
+				if opts.OnStats != nil {
+					dirOpts.OnStats = func(s *BackupProgressStats) { reportStats(i, s) }
+				}
+				dirOpts.lockHeld = true
+				if snapshotPaths != nil {
+					dirOpts.snapshotPath = snapshotPaths[dir]
+				}
+
+				writeBackupLog(fmt.Sprintf("[Parallel] Backing up %s as its own group %s", dir, dirOpts.BackupID))
+				derr := runBackupInlineInternal(dirOpts)
+
+				mu.Lock()
+				defer mu.Unlock()
+				if dirStatus != nil {
+					agg.merge(dirStatus)
+				} else if derr != nil {
+					agg.Outcome = OutcomeFailed
+				}
+				if derr != nil {
+					errMsg := fmt.Sprintf("backup of %s failed: %v", dir, derr)
+					writeBackupLog(errMsg)
+					perDirErrors = append(perDirErrors, errMsg)
+				}
+			}()
+		}
+		wg.Wait()
 	}
-	if opts.OnResult != nil {
-		opts.OnResult(agg)
+
+	if opts.UseVSS {
+		err := snapshot.CreateVSSSnapshot(dirs, true, func(snaps map[string]snapshot.SnapShot) error {
+			paths := make(map[string]string, len(dirs))
+			for _, dir := range dirs {
+				if s, ok := snaps[dir]; ok {
+					paths[dir] = s.FullPath
+				} else if abs, aerr := filepath.Abs(dir); aerr == nil {
+					if s, ok := snaps[abs]; ok {
+						paths[dir] = s.FullPath
+					}
+				}
+			}
+			runAll(paths)
+			if len(perDirErrors) > 0 {
+				// Lets the snapshot code delete the shadow copies right away
+				// (Windows only does it on an error); already reported.
+				return errFoldersFailed
+			}
+			return nil
+		})
+		if err != nil && !errors.Is(err, errFoldersFailed) {
+			// Taking or releasing the snapshot failed: never a success, even
+			// when every folder uploaded.
+			errMsg := fmt.Sprintf("VSS snapshot of the folders failed: %v", err)
+			writeBackupLog(errMsg)
+			perDirErrors = append(perDirErrors, errMsg)
+			if started == 0 {
+				agg.Outcome = OutcomeFailed
+			} else if outcomeRank(agg.Outcome) > outcomeRank(OutcomePartial) {
+				agg.Outcome = OutcomePartial
+			}
+		}
+	} else {
+		runAll(nil)
 	}
-	if len(perDirErrors) > 0 {
-		return fmt.Errorf("%s", agg.Message)
+
+	// Cancelled or VSS-failed before every folder ran: never a success.
+	if len(perDirErrors) > 0 && started < len(dirs) {
+		if started == 0 {
+			agg.Outcome = OutcomeFailed
+		} else if outcomeRank(agg.Outcome) > outcomeRank(OutcomePartial) {
+			agg.Outcome = OutcomePartial
+		}
 	}
-	return nil
+	return perDirErrors
 }
 
 // runBackupInlineInternal is the actual backup implementation (called by RunBackupInline)
@@ -682,21 +881,24 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 
 	startTime := time.Now()
 
-	// Acquire backup lock for this destination to prevent concurrent backups
-	backupLock := getBackupLock(opts.BaseURL, opts.Datastore)
-	writeBackupLog(fmt.Sprintf("[Backup Lock] Waiting for lock on %s/%s (prevents concurrent backups)", opts.BaseURL, opts.Datastore))
+	// Acquire backup lock for this destination to prevent concurrent backups.
+	// A folder of a parallel batch runs under the batch's lock.
+	if !opts.lockHeld {
+		backupLock := getBackupLock(opts.BaseURL, opts.Datastore)
+		writeBackupLog(fmt.Sprintf("[Backup Lock] Waiting for lock on %s/%s (prevents concurrent backups)", opts.BaseURL, opts.Datastore))
 
-	// Notify that we're waiting if OnProgress is set
-	if opts.OnProgress != nil {
-		opts.OnProgress(0, "Waiting for previous backup to complete...")
+		// Notify that we're waiting if OnProgress is set
+		if opts.OnProgress != nil {
+			opts.OnProgress(0, "Waiting for previous backup to complete...")
+		}
+
+		backupLock.Lock()
+		writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock acquired for %s/%s - starting backup", opts.BaseURL, opts.Datastore))
+		defer func() {
+			backupLock.Unlock()
+			writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock released for %s/%s", opts.BaseURL, opts.Datastore))
+		}()
 	}
-
-	backupLock.Lock()
-	writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock acquired for %s/%s - starting backup", opts.BaseURL, opts.Datastore))
-	defer func() {
-		backupLock.Unlock()
-		writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock released for %s/%s", opts.BaseURL, opts.Datastore))
-	}()
 
 	// Generate backup ID from path if not specified
 	writeBackupLog("[DEBUG] Generating backup ID if needed")
@@ -826,7 +1028,15 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		var err error
 		var dirBytes uint64
 		for attempt := 1; attempt <= maxDirAttempts; attempt++ {
-			dirBytes, err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
+			switch {
+			case opts.UseVSS && opts.lockHeld && opts.snapshotPath == "":
+				err = fmt.Errorf("no VSS snapshot was taken for %s", dir)
+			case opts.snapshotPath != "":
+				// Folder of a parallel batch: read the batch's snapshot.
+				dirBytes, err = backupReal(client, &newchunk, &reusechunk, &failedchunk, opts.snapshotPath, dir, true, progress, opts.OnStats, opts.ExcludeList)
+			default:
+				dirBytes, err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
+			}
 			if err == nil {
 				break
 			}

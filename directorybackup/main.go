@@ -460,9 +460,11 @@ func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, erro
 			}
 			return ""
 		})
-		return nil
+		// Returning the failures lets the snapshot code delete the shadow
+		// copies right away (Windows only does it on an error).
+		return runErr
 	})
-	return readErrors, errors.Join(err, runErr)
+	return readErrors, err
 }
 
 // backup_one backs up one directory of a parallel run as backup group

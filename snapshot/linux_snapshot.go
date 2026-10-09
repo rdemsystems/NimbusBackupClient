@@ -348,6 +348,10 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 
 	snapshots := make(map[string]SnapShot, len(paths))
 	var created []*linuxSnapshot
+	// One snapshot per block device: paths on the same filesystem share it.
+	// Creating a second one would destroy the first (destroyStaleTracers
+	// treats our existing tracer on the device as a leftover).
+	byDevice := make(map[string]*linuxSnapshot)
 
 	defer func() {
 		for i := len(created) - 1; i >= 0; i-- {
@@ -360,11 +364,22 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 		if err != nil {
 			absPath = path
 		}
-		ls, subPath, err := createOne(control, absPath, needFiles)
+		mountpoint, device, _, err := findMount(absPath)
 		if err != nil {
 			return fmt.Errorf("could not snapshot %s: %w: refusing to proceed with an inconsistent full-system snapshot", absPath, err)
 		}
-		created = append(created, ls)
+		ls, shared := byDevice[device]
+		var subPath string
+		if shared {
+			subPath = strings.TrimPrefix(strings.TrimPrefix(absPath, strings.TrimRight(mountpoint, "/")), "/")
+		} else {
+			ls, subPath, err = createOne(control, absPath, needFiles)
+			if err != nil {
+				return fmt.Errorf("could not snapshot %s: %w: refusing to proceed with an inconsistent full-system snapshot", absPath, err)
+			}
+			created = append(created, ls)
+			byDevice[device] = ls
+		}
 		sn := SnapShot{
 			ObjectPath: ls.device,
 			Id:         strconv.Itoa(ls.minor),

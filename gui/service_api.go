@@ -121,6 +121,7 @@ func (a *App) SaveFullConfigFromAPI(doc map[string]interface{}) error {
 	cfg.LastBackupDirs = incoming.LastBackupDirs
 	cfg.DisableSplit = incoming.DisableSplit
 	cfg.SplitSizeGB = incoming.SplitSizeGB
+	cfg.Parallel = incoming.Parallel
 	// The key PATH is not a secret and the GUI knows it, so the document is the
 	// source of truth: keeping it out of the merge would silently drop the
 	// encryption key on the next push and stop encrypting backups.

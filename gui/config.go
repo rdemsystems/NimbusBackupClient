@@ -154,6 +154,10 @@ type Config struct {
 	// per-bin target size; 0 means the default (DefaultSplitSizeGB).
 	DisableSplit bool `json:"disable_split,omitempty"`
 	SplitSizeGB  int  `json:"split_size_gb,omitempty"`
+	// Parallel is how many folders of a multi-folder backup run at the same
+	// time (0 or 1: one after the other). No upper limit; the GUI recommends
+	// CPUs / 4 (RecommendedParallel).
+	Parallel int `json:"parallel,omitempty"`
 
 	// ==================== EMAIL NOTIFICATIONS ====================
 	SMTPHost     string `json:"smtp_host,omitempty"`
@@ -766,6 +770,7 @@ func (c *Config) fullConfigDocument() map[string]interface{} {
 		"last_backup_dirs":    c.LastBackupDirs,
 		"disable_split":       c.DisableSplit,
 		"split_size_gb":       c.SplitSizeGB,
+		"parallel":            c.Parallel,
 		"smtp_host":           c.SMTPHost,
 		"smtp_port":           c.SMTPPort,
 		"smtp_username":       c.SMTPUsername,
@@ -850,6 +855,7 @@ func parseFullConfig(doc map[string]interface{}) *Config {
 	c.LastBackupDirs = stringSlice(doc["last_backup_dirs"])
 	c.DisableSplit = bol("disable_split")
 	c.SplitSizeGB = num("split_size_gb")
+	c.Parallel = num("parallel")
 	c.SMTPHost = str("smtp_host")
 	c.SMTPPort = str("smtp_port")
 	c.SMTPUsername = str("smtp_username")

@@ -197,6 +197,8 @@ const translations = {
       standaloneReasonAuthFailed: "Le service est en cours d'exécution mais l'authentification a échoué (impossible de lire le jeton).",
       standaloneSchedulingDisabled: "La planification nécessite le service local. Installez et démarrez le service pour activer cette fonctionnalité.",
       splitFirstBackup: "Découper ce backup en plusieurs parties",
+      parallelFolders: "Dossiers sauvegardés en parallèle",
+      parallelFoldersHint: "Plusieurs dossiers sélectionnés sont sauvegardés en même temps, chacun dans son groupe de sauvegarde (aussi pour les backups planifiés). Recommandé : {n} (nombre de processeurs / 4). Gagne du temps quand la relecture domine (disques rapides, peu de données nouvelles) ; à éviter sur un disque dur classique.",
       splitFirstBackupHint: "Recommandé pour le 1er backup d'un gros volume (C:\\, D:\\…) : découpe le seed initial en backups plus petits et résumables. Laissez décoché pour les backups suivants (full). L'analyse de la taille peut prendre quelques minutes sur un gros volume.",
       splitAnalyzing: "Analyse de la taille…",
 
@@ -589,6 +591,8 @@ const translations = {
       standaloneReasonAuthFailed: "Service is running but authentication failed (unable to read token).",
       standaloneSchedulingDisabled: "Scheduling requires the local service. Install and start the service to enable this feature.",
       splitFirstBackup: "Split this backup into multiple parts",
+      parallelFolders: "Folders backed up in parallel",
+      parallelFoldersHint: "Several selected folders are backed up at the same time, each in its own backup group (scheduled backups too). Recommended: {n} (number of CPUs / 4). Saves time when re-reading dominates (fast disks, little new data); avoid on a spinning hard disk.",
       splitFirstBackupHint: "Recommended for the first backup of a large volume (C:\\, D:\\…): it splits the initial seed into smaller, resumable backups. Leave unchecked for subsequent backups (full). The size analysis can take a few minutes on a large volume.",
       splitAnalyzing: "Analyzing size…",
 
@@ -982,6 +986,8 @@ const translations = {
       standaloneReasonAuthFailed: "Il servizio è in esecuzione ma l'autenticazione è fallita (impossibile leggere il token).",
       standaloneSchedulingDisabled: "La pianificazione richiede il servizio locale. Installa e avvia il servizio per attivare questa funzionalità.",
       splitFirstBackup: "Dividi questo backup in più parti",
+      parallelFolders: "Cartelle salvate in parallelo",
+      parallelFoldersHint: "Più cartelle selezionate vengono salvate contemporaneamente, ognuna nel proprio gruppo di backup (anche per i backup pianificati). Consigliato: {n} (numero di CPU / 4). Fa risparmiare tempo quando domina la rilettura (dischi veloci, pochi dati nuovi); da evitare su un disco rigido tradizionale.",
       splitFirstBackupHint: "Consigliato per il primo backup di un volume grande (C:\\, D:\\…): divide il seed iniziale in backup più piccoli e riprendibili. Lasciare deselezionato per i backup successivi (full). L'analisi della dimensione può richiedere alcuni minuti su un volume grande.",
       splitAnalyzing: "Analisi dimensione…",
 
@@ -1375,6 +1381,8 @@ const translations = {
       standaloneReasonAuthFailed: "Dienst läuft, aber Authentifizierung fehlgeschlagen (Token konnte nicht gelesen werden).",
       standaloneSchedulingDisabled: "Zeitplanung erfordert den lokalen Dienst. Installieren und starten Sie den Dienst, um diese Funktion zu aktivieren.",
       splitFirstBackup: "Diese Sicherung in mehrere Teile aufteilen",
+      parallelFolders: "Parallel gesicherte Ordner",
+      parallelFoldersHint: "Mehrere ausgewählte Ordner werden gleichzeitig gesichert, jeder in seiner eigenen Sicherungsgruppe (auch bei geplanten Sicherungen). Empfohlen: {n} (Anzahl CPUs / 4). Spart Zeit, wenn das erneute Lesen überwiegt (schnelle Datenträger, wenig neue Daten); auf einer klassischen Festplatte vermeiden.",
       splitFirstBackupHint: "Empfohlen für die erste Sicherung eines großen Datenträgers (C:\\, D:\\…): teilt das ursprüngliche Seed in kleinere, fortsetzbare Sicherungen auf. Für nachfolgende Sicherungen (vollständig) nicht aktivieren. Die Größenanalyse kann einige Minuten dauern bei einem großen Datenträger.",
       splitAnalyzing: "Größe wird analysiert…",
 
@@ -1768,6 +1776,8 @@ const translations = {
       standaloneReasonAuthFailed: "Usługa działa, ale autentykacja nie powiodła się (nie można odczytać tokenu).",
       standaloneSchedulingDisabled: "Planowanie wymaga lokalnej usługi. Zainstaluj i uruchom usługę, aby włączyć tę funkcję.",
       splitFirstBackup: "Podziel tę kopię zapasową na wiele części",
+      parallelFolders: "Foldery kopiowane równolegle",
+      parallelFoldersHint: "Kilka wybranych folderów jest kopiowanych jednocześnie, każdy we własnej grupie kopii zapasowych (również dla zaplanowanych kopii). Zalecane: {n} (liczba procesorów / 4). Oszczędza czas, gdy dominuje ponowny odczyt (szybkie dyski, mało nowych danych); unikać na klasycznym dysku twardym.",
       splitFirstBackupHint: "Zalecane dla pierwszej kopii zapasowej dużego woluminu (C:\\, D:\\…): dzieli początkowy seed na mniejsze, możliwe do wznowienia kopie zapasowe. Zostaw niezaznaczone dla kolejnych kopii zapasowych (pełne). Analiza rozmiaru może zająć kilka minut na dużym woluminie.",
       splitAnalyzing: "Analiza rozmiaru…",
 
