@@ -577,10 +577,25 @@ jobs:
       # pointing at a signed executable, then a clean uninstall.
       - name: Install and upgrade test
         shell: pwsh
+        timeout-minutes: 30
         run: |
+          # Waits for msiexec itself only (Start-Process -Wait also waits for
+          # every descendant), 10 minutes at most; on a timeout or a failure
+          # the end of the MSI log is published as an annotation.
           function Invoke-Msi([string[]]$msiArgs, [string]$what) {
-            $p = Start-Process msiexec.exe -Wait -PassThru -NoNewWindow -ArgumentList $msiArgs
-            if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "$what failed: msiexec exit code $($p.ExitCode)" }
+            $log = $msiArgs[[array]::IndexOf($msiArgs, '/l*v') + 1]
+            Write-Output "$what ..."
+            $p = Start-Process msiexec.exe -PassThru -NoNewWindow -ArgumentList $msiArgs
+            $done = $p.WaitForExit(600000)
+            if (-not $done -or ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010)) {
+              $why = if ($done) { "msiexec exit code $($p.ExitCode)" } else { 'timed out after 10 minutes' }
+              if (-not $done) { $p.Kill() }
+              $tail = if (Test-Path $log) { (Get-Content $log -Tail 40 -Encoding Unicode) -join "`n" } else { 'no MSI log' }
+              if ($tail.Length -gt 3400) { $tail = $tail.Substring($tail.Length - 3400) }
+              $msg = ($tail -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A')
+              Write-Output "::error title=$what ($why)::$msg"
+              throw "${what}: $why"
+            }
           }
           function Get-Nimbus {
             Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |

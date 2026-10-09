@@ -203,23 +203,31 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 			fmt.Println("  Note: Snapshot created despite writer warnings - file-level backup will proceed")
 		}
 
-		_, err = SymlinkSnapshot(filepath.Join(appDataFolder, "VSS"), snapshot.Id, snapshot.DeviceObjectPath)
+		// Ours from here on: deleted by the deferred cleanup if a later step fails.
+		createdIDs = append(createdIDs, snapshot.Id)
+
+		// Lease first, symlink second: VSSCleanup in another process of ours
+		// (a GUI started during a CLI backup) treats a live symlink without a
+		// held lease as an orphan, so the lease must exist before the symlink.
+		// It is held until this call returns.
+		vssDir := filepath.Join(appDataFolder, "VSS")
+		if err := os.MkdirAll(vssDir, 0o700); err != nil {
+			return err
+		}
+		if lease, lerr := holdShadowLease(filepath.Join(vssDir, snapshot.Id)); lerr == nil {
+			leases = append(leases, lease)
+		} else {
+			fmt.Printf("⚠️  VSS: could not create the in-use marker for %s: %v\n", snapshot.Id, lerr)
+		}
+
+		_, err = SymlinkSnapshot(vssDir, snapshot.Id, snapshot.DeviceObjectPath)
 
 		if err != nil {
 			return err
 		}
 
-		snapshots[path] = SnapShot{FullPath: filepath.Join(appDataFolder, "VSS", snapshot.Id, subPath), Id: snapshot.Id, ObjectPath: snapshot.DeviceObjectPath, Valid: true}
+		snapshots[path] = SnapShot{FullPath: filepath.Join(vssDir, snapshot.Id, subPath), Id: snapshot.Id, ObjectPath: snapshot.DeviceObjectPath, Valid: true}
 		byVolume[strings.ToUpper(volName)] = snapshots[path]
-		createdIDs = append(createdIDs, snapshot.Id)
-		// Lease: held open until this call returns, so VSSCleanup in another
-		// process of ours (a GUI started during a CLI backup) knows the shadow
-		// is in use and leaves it alone.
-		if lease, lerr := holdShadowLease(filepath.Join(appDataFolder, "VSS", snapshot.Id)); lerr == nil {
-			leases = append(leases, lease)
-		} else {
-			fmt.Printf("⚠️  VSS: could not create the in-use marker for %s: %v\n", snapshot.Id, lerr)
-		}
 
 	}
 
