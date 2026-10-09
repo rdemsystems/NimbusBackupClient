@@ -697,7 +697,7 @@ jobs:
           cat > RELEASE_BODY.md << 'EOFNOTES'
           # 🚀 Nimbus Backup ${{ steps.version.outputs.VERSION }}
 
-          > ⚠️ **Windows flagged the download as a virus?** This is a known false positive (unsigned Go/Wails binary) — *not* a virus. See [why this happens and how to verify the download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/) · [🇫🇷 FR](https://nimbus.rdem-systems.com/faux-positif-antivirus/). Code signing: the Azure (Trusted Signing) account creation is still blocked on Azure's side — signed builds are targeted for 0.4.1.
+          > 🔏 **Signed by RDEM SYSTEMS.** `NimbusBackup.exe`, its service and `NimbusBackup.msi` are Authenticode-signed (Azure Artifact Signing): *Properties → Digital Signatures* shows RDEM SYSTEMS. SmartScreen may still warn on a new release until its reputation is established: check that the publisher is RDEM SYSTEMS, then *More info → Run anyway*. The command-line tools are not signed yet. Antivirus false positive? See [why this happens and how to verify the download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/) · [🇫🇷 FR](https://nimbus.rdem-systems.com/faux-positif-antivirus/).
 
           ## 📝 What's in this release
 

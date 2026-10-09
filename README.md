@@ -24,7 +24,7 @@ Each release ships:
 - `SHA256SUMS.txt` — checksums
 
 > ⚠️ **Windows says "virus detected" (e.g. `Trojan:Win32/Sabsik.FL.A!ml`) or shows a SmartScreen warning?**
-> This is a known **false positive** for Go/Wails applications — it is *not* a virus. The `!ml` suffix means it comes from a machine-learning model that flags *unsigned, low-prevalence* executables.
+> This is a known **false positive** for Go/Wails applications — it is *not* a virus. The `!ml` suffix means it comes from a machine-learning model that flags *low-prevalence* executables (and, up to 0.4.0, unsigned ones).
 > Read [why this happens and how to verify the download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
 
 ### 🔎 Verify any download
@@ -41,7 +41,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
 [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
 
-> ℹ️ **Code signing:** Windows binaries are **not yet Authenticode-signed**, which is what triggers the SmartScreen / `!ml` warnings above. Our request for a free OSS certificate from the [SignPath Foundation](https://signpath.org) got no reply; signing through Azure Artifact Signing is being set up and is targeted for **0.4.1**. Until then, provenance is established via the build-provenance attestation and checksums above.
+> 🔏 **Code signing:** since 0.4.1, `NimbusBackup.exe`, its service and `NimbusBackup.msi` are **Authenticode-signed by RDEM SYSTEMS** (Azure Artifact Signing); *Properties → Digital Signatures* shows the publisher. SmartScreen may still warn on a new release until its reputation is established: check that the publisher is RDEM SYSTEMS, then *More info → Run anyway*. The command-line tools are not signed yet; the build-provenance attestation and checksums above cover every file.
 
 ### 🐧 On Linux? Use the official client
 
@@ -71,11 +71,12 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite 
 ### GUI (recommended)
 - **🌍 Multi-language** — English, French, Italian, German and Polish interface
 - User-friendly configuration with connection testing (API token or username/password)
-- Real-time backup progress with speed and ETA, cancel at any time
-- VSS (Volume Shadow Copy) support for consistent backups
+- Real-time backup progress with speed and ETA, cancel at any time, a Running jobs tab
+- VSS (Volume Shadow Copy) for consistent backups: one snapshot for a whole multi-folder backup, one shadow copy per volume
 - Multi-folder backup, file and disk (full machine) modes; folders can run in parallel (recommended: CPUs / 4)
-- Snapshot browsing, file search (wildcards) and restore
-- Multi-PBS server support, certificate fingerprint pinning (TOFU)
+- Disk backups restore in Proxmox VE as a VM matching the machine (CPUs, RAM, firmware, NICs with their MACs, dedicated VM ID)
+- Snapshot browsing, file search (wildcards) and restore, NTFS ACLs included
+- Multi-PBS server support with a PBS server per job, certificate fingerprint pinning (TOFU)
 - **🔒 Client-side encryption** (AES-256-GCM), key files compatible with `proxmox-backup-client` and Proxmox VE
 - Windows service mode + scheduled backups, backup history with one-click rerun
 - Debug logging for troubleshooting
@@ -110,7 +111,7 @@ When backing up an entire drive (e.g. `D:\`), Nimbus Backup automatically exclud
 - Input validation and credential sanitization (secrets redacted from logs)
 - Path-traversal prevention
 - Retry logic with exponential backoff
-- CI gates on every build: tests, `golangci-lint`, `gosec`, `go mod tidy`
+- CI gates on every build: tests, `golangci-lint`, `gosec`, `go mod tidy`, and an end-to-end suite against a real PBS (restores with the official `proxmox-backup-client`, PBS verify)
 
 ### 🔒 Client-side encryption
 Backups can be encrypted **on the client** before they leave the machine, with
@@ -213,11 +214,12 @@ The brand is picked from the executable name: `NimbusBackup.exe` runs as Nimbus 
 
 ## 🔗 Relationship with upstream
 
-Nimbus Backup started as a fork of [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, by Tiziano Bacocco, GPLv3), to which we added the Windows GUI, the service, scheduling, multi-PBS and restore. In September 2026, upstream merged that GUI back and made it brand-neutral ("Proxmox Backup Client GUI"). Since 0.4.0, Nimbus Backup is built from the same code base: **the two projects are now functionally almost identical.**
+Nimbus Backup started as a fork of [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, by Tiziano Bacocco, GPLv3), to which we added the Windows GUI, the service, scheduling, multi-PBS and restore. In September 2026, upstream merged that GUI back and made it brand-neutral ("Proxmox Backup Client GUI"). In October 2026 (0.4.1), Nimbus Backup was rebuilt on upstream's current code, adopting upstream's client-side encryption: **the two projects share the same code base.**
 
-What this repository adds on top of upstream is a small, documented patch series ([`patches/`](patches/README.md)):
+What this repository adds on top of upstream is a documented patch series ([`patches/`](patches/README.md)), most of it offered upstream:
 
-- **Fixes not yet merged upstream** (service build, restore with username/password servers, exit codes, log redaction, machine backup reliability…) — sent upstream as they are merged.
+- **Features**: paper key and key import (QR code), parallel folder backups, one VSS snapshot per multi-folder backup, CLI exclusions, a Proxmox VE VM config generated from the real machine.
+- **Fixes not yet merged upstream** (restore of `proxmox-backup-client`'s compressed encrypted backups, the PBS server chosen for a service backup, PBS refusal reasons, restore with username/password servers, window maximise…) — sent upstream as they are merged.
 - **The Nimbus Backup identity** — `NimbusBackup.exe`/`.msi`, the `NimbusBackup` service, and the MSI upgrade code of existing installs, so they keep upgrading in place.
 - **Upgrade path** from Nimbus Backup ≤ 0.3.0 (data-folder migration, legacy snapshot metadata).
 - **Release pipeline** — build-provenance attestation, checksums, VirusTotal reports.
