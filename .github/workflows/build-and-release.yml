@@ -249,6 +249,19 @@ jobs:
     name: Build GUI
     needs: [security, test, test-modules]
     runs-on: windows-latest
+    # id-token: OIDC login to Azure for code signing (no stored secret).
+    permissions:
+      contents: read
+      id-token: write
+    # Azure Artifact Signing. The account is not secret; the signing steps run
+    # only once the repository variable AZURE_SIGNING_PROFILE (Public Trust
+    # certificate profile) is set, with AZURE_CLIENT_ID / AZURE_TENANT_ID of
+    # the app registration that has a federated credential for this repo and
+    # the "Artifact Signing Certificate Profile Signer" role on the profile.
+    env:
+      SIGNING_ENDPOINT: https://swn.codesigning.azure.net/
+      SIGNING_ACCOUNT: github-nimbus
+      SIGNING_SUBSCRIPTION: 8d9f8b1c-7a41-46e2-a4de-d51407239a8a
 
     steps:
       - uses: actions/checkout@v4
@@ -372,6 +385,39 @@ jobs:
           go build -tags service -trimpath -buildmode=pie -ldflags "-s -w -X main.appVersion=${{ steps.version.outputs.VERSION }}" -o build/bin/NimbusBackupSVC.exe
         shell: pwsh
 
+      - name: Azure login (code signing)
+        if: ${{ vars.AZURE_SIGNING_PROFILE != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.SIGNING_SUBSCRIPTION }}
+
+      # Sign the binaries BEFORE the MSI packs them (ProductBody.wxi takes
+      # them from gui/build/bin), then the MSI itself below.
+      - name: Sign executables
+        if: ${{ vars.AZURE_SIGNING_PROFILE != '' }}
+        uses: Azure/artifact-signing-action@v2.0.0
+        with:
+          endpoint: ${{ env.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\gui\build\bin
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
       - name: Copy binaries to dist
         run: |
           New-Item -ItemType Directory -Force -Path dist
@@ -398,6 +444,29 @@ jobs:
           light.exe NimbusBackup.wixobj -ext WixUIExtension -ext WixUtilExtension -out NimbusBackup.msi
           Copy-Item NimbusBackup.msi ../../dist/
         shell: pwsh
+
+      - name: Sign MSI
+        if: ${{ vars.AZURE_SIGNING_PROFILE != '' }}
+        uses: Azure/artifact-signing-action@v2.0.0
+        with:
+          endpoint: ${{ env.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist
+          files-folder-filter: msi
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
 
       - name: Upload GUI artifacts
         uses: actions/upload-artifact@v4
