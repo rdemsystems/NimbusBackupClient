@@ -118,6 +118,8 @@ le même schéma que le client officiel `proxmox-backup-client` (AES-256-GCM,
 empreintes de blocs à clé). Le serveur PBS ne stocke que des
 données opaques et ne voit jamais la clé — idéal sur un PBS mutualisé ou infogéré.
 
+Le chiffrement a été développé en amont par Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)) ; la clé papier, l'export en QR code et l'import de clé sont des ajouts de Nimbus Backup.
+
 - **Interface** : *Serveurs → Modifier → Clé de chiffrement* — créez un fichier
   de clé ou choisissez-en un existant (créé par
   `proxmox-backup-client key create --kdf none` ou issu d'un stockage PVE) ; son

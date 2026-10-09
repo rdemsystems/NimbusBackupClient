@@ -121,6 +121,8 @@ demselben Verfahren wie der offizielle `proxmox-backup-client` (AES-256-GCM, sch
 Chunk-Digests). Der PBS-Server speichert nur undurchsichtige Daten und bekommt
 den Schlüssel nie zu sehen — nützlich auf einem gemeinsam genutzten oder verwalteten PBS.
 
+Die Verschlüsselung wurde im Upstream-Projekt von Tiziano Bacocco entwickelt ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); der Papierschlüssel, der QR-Code-Export und der Schlüsselimport sind Ergänzungen von Nimbus Backup.
+
 - **GUI**: *Server → Bearbeiten → Verschlüsselungsschlüssel* — erstellen Sie eine Schlüsseldatei oder wählen Sie eine
   vorhandene aus (aus `proxmox-backup-client key create --kdf none` oder einem PVE-
   Storage); ihr Fingerabdruck wird angezeigt. Bewahren Sie anschließend eine Kopie außerhalb der Maschine auf:

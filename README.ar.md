@@ -127,6 +127,8 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 مقاطع مرتبطة بالمفتاح). لا يخزّن خادم PBS سوى بيانات معتمة ولا يرى
 المفتاح أبدًا — وهذا مفيد على خادم PBS مشترك أو مُدار.
 
+طوّر Tiziano Bacocco التشفير في المشروع الأصلي ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go))؛ أما المفتاح الورقي وتصدير رمز QR واستيراد المفتاح فهي إضافات من Nimbus Backup.
+
 - **الواجهة الرسومية**: *Servers → Edit → Encryption key* — أنشئ ملف مفتاح أو اختر
   ملفًا موجودًا (من `proxmox-backup-client key create --kdf none` أو من تخزين
   PVE)؛ وتُعرض بصمته. ثم احتفظ بنسخة منه خارج الجهاز:

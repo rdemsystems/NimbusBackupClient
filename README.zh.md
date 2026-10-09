@@ -121,6 +121,8 @@ Nimbus Backup GUI 仅支持 Windows（CLI 工具也可为 Linux 和 macOS 构建
 摘要）。PBS 服务器只存储不透明的数据，永远看不到
 密钥——这在共享或托管的 PBS 上非常有用。
 
+加密功能由 Tiziano Bacocco 在上游项目中开发（[tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)）；纸质密钥、二维码导出和密钥导入是 Nimbus Backup 新增的功能。
+
 - **GUI**：*服务器 → 编辑 → 加密密钥* — 创建密钥文件或选择
   已有的密钥文件（来自 `proxmox-backup-client key create --kdf none` 或 PVE
   存储）；界面会显示其指纹。然后请在机器之外保留一份副本：

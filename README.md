@@ -118,6 +118,8 @@ the same scheme as the official `proxmox-backup-client` (AES-256-GCM, keyed chun
 digests). The PBS server only stores opaque data and never sees
 the key — useful on a shared or managed PBS.
 
+The encryption was developed upstream by Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); the paper key, the QR code export and the key import are Nimbus Backup additions.
+
 - **GUI**: *Servers → Edit → Encryption key* — create a key file or pick an
   existing one (from `proxmox-backup-client key create --kdf none` or a PVE
   storage); its fingerprint is shown. Then keep a copy off the machine:

@@ -121,6 +121,8 @@ samma schema som den officiella `proxmox-backup-client` (AES-256-GCM, nyckelbase
 chunk-digests). PBS-servern lagrar endast ogenomskinliga data och ser aldrig
 nyckeln — användbart på en delad eller hanterad PBS.
 
+Krypteringen har utvecklats i originalprojektet av Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); papperskopian av nyckeln, QR-kodsexporten och nyckelimporten är tillägg i Nimbus Backup.
+
 - **GUI**: *Servers → Edit → Encryption key* — skapa en nyckelfil eller välj
   en befintlig (från `proxmox-backup-client key create --kdf none` eller en PVE-
   storage); dess fingeravtryck visas. Spara sedan en kopia utanför maskinen:

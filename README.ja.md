@@ -121,6 +121,8 @@ Proxmox Backup Server を自前でホストしたくないですか？ 私たち
 ダイジェスト）。PBS サーバーは中身の見えないデータを保存するだけで、鍵を
 目にすることはありません — 共有 PBS やマネージド PBS で役立ちます。
 
+暗号化はアップストリームで Tiziano Bacocco 氏が開発しました（[tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)）。ペーパーキー、QR コードでのエクスポート、鍵のインポートは Nimbus Backup による追加機能です。
+
 - **GUI**：*サーバー → 編集 → 暗号化キー* — 鍵ファイルを作成するか、
   既存のもの（`proxmox-backup-client key create --kdf none` で作成したもの、または PVE
   ストレージのもの）を選択します。そのフィンガープリントが表示されます。その後、マシン外にコピーを保管してください：

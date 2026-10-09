@@ -127,6 +127,8 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 قطعه‌ها وابسته به کلید). سرور PBS فقط داده‌های غیرقابل‌خواندن را ذخیره می‌کند و هرگز
 کلید را نمی‌بیند — که روی یک PBS اشتراکی یا مدیریت‌شده مفید است.
 
+رمزگذاری را Tiziano Bacocco در پروژهٔ اصلی توسعه داده است ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go))؛ کلید کاغذی، خروجی کد QR و وارد کردن کلید افزوده‌های Nimbus Backup هستند.
+
 - **رابط گرافیکی**: *Servers → Edit → Encryption key* — یک فایل کلید بسازید یا
   یک فایل موجود را انتخاب کنید (ساخته‌شده با `proxmox-backup-client key create --kdf none` یا از یک
   فضای ذخیره‌سازی PVE)؛ اثر انگشت آن نمایش داده می‌شود. سپس یک نسخه از آن را بیرون از ماشین نگه دارید:

@@ -121,6 +121,8 @@ lo stesso schema del `proxmox-backup-client` ufficiale (AES-256-GCM, digest dei 
 con chiave). Il server PBS memorizza solo dati opachi e non vede mai
 la chiave — utile su un PBS condiviso o gestito.
 
+La cifratura è stata sviluppata a monte da Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); la chiave cartacea, l'esportazione in codice QR e l'importazione della chiave sono aggiunte di Nimbus Backup.
+
 - **GUI**: *Server → Modifica → Chiave di cifratura* — create un file di chiave o selezionatene uno
   esistente (da `proxmox-backup-client key create --kdf none` o da uno storage
   PVE); ne viene mostrata l'impronta. Conservatene poi una copia fuori dalla macchina:

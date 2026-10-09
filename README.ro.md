@@ -121,6 +121,8 @@ aceeași schemă ca `proxmox-backup-client` oficial (AES-256-GCM, digest-uri de 
 cu cheie). Serverul PBS stochează doar date opace și nu vede niciodată
 cheia — util pe un PBS partajat sau gestionat.
 
+Criptarea a fost dezvoltată în proiectul original de Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); cheia pe hârtie, exportul ca cod QR și importul cheii sunt adăugiri Nimbus Backup.
+
 - **GUI**: *Servers → Edit → Encryption key* — creați un fișier cheie sau alegeți
   unul existent (din `proxmox-backup-client key create --kdf none` sau dintr-un storage
   PVE); amprenta sa este afișată. Apoi păstrați o copie în afara mașinii:
