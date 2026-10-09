@@ -449,12 +449,23 @@ func LoadKeyConfig(path string) (*KeyConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to read key file %s: %w", path, err)
 	}
+	cfg, err := ParseKeyConfig(raw)
+	if err != nil {
+		return nil, fmt.Errorf("key file %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+// ParseKeyConfig parses a key file's content. It also accepts the text copied
+// off a paper key (between its BEGIN/END marker lines, see paperkey.go), so a
+// key typed or scanned back from paper imports as is.
+func ParseKeyConfig(raw []byte) (*KeyConfig, error) {
 	cfg := &KeyConfig{}
-	if err := json.Unmarshal(raw, cfg); err != nil {
-		return nil, fmt.Errorf("unable to parse key file %s: %w", path, err)
+	if err := json.Unmarshal(stripPaperKeyMarkers(raw), cfg); err != nil {
+		return nil, fmt.Errorf("unable to parse key file: %w", err)
 	}
 	if cfg.Data == "" {
-		return nil, fmt.Errorf("key file %s contains no key data", path)
+		return nil, errors.New("key file contains no key data")
 	}
 	return cfg, nil
 }

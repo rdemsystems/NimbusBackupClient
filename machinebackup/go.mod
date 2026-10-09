@@ -24,6 +24,7 @@ require (
 	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	pbscommon v0.0.0 // indirect
+	rsc.io/qr v0.2.0 // indirect
 	snapshot v0.0.0 // indirect
 )
 
