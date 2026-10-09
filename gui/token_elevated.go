@@ -65,7 +65,7 @@ func handleElevatedTokenFetchChild(args []string) bool {
 
 		// The parent created the handoff file; open it WITHOUT creating
 		// it, so a vanished file can never be re-created root-owned.
-		f, err := os.OpenFile(handoff, os.O_WRONLY|os.O_TRUNC, 0600)
+		f, err := os.OpenFile(handoff, os.O_WRONLY|os.O_TRUNC, 0600) // #nosec G304 G703 -- handoff path created and passed by our own parent process
 		if err != nil {
 			writeDebugLog(fmt.Sprintf("[ElevatedTokenFetch] child: cannot open handoff file: %v", err))
 			os.Exit(exitHandoffUnusable)
