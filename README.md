@@ -115,7 +115,7 @@ When backing up an entire drive (e.g. `D:\`), Nimbus Backup automatically exclud
 ### 🔒 Client-side encryption
 Backups can be encrypted **on the client** before they leave the machine, with
 the same scheme as the official `proxmox-backup-client` (AES-256-GCM, keyed chunk
-digests, signed manifest). The PBS server only stores opaque data and never sees
+digests). The PBS server only stores opaque data and never sees
 the key — useful on a shared or managed PBS.
 
 - **GUI**: *Servers → Edit → Encryption key* — create a key file or pick an
@@ -124,14 +124,19 @@ the key — useful on a shared or managed PBS.
   **Print (paper key)** saves a printable page with the key and its QR code (the
   format of `proxmox-backup-client key paperkey`), optionally passphrase-protected.
   **Import a key from text or a QR code** turns a scanned QR code or a paper key
-  back into a key file.
+  back into a key file. The GUI only uses unprotected key files: importing a
+  passphrase-protected key unlocks it and saves the new key file **without** a
+  passphrase — keep that file as safe as the key itself.
 - **CLI**: `-keyfile path/to/key.json` (or `"keyfile"` in the JSON config); a
   passphrase-protected key takes `-keyfile-passphrase`, or prompts for it.
 - **Bare-metal restore**: the patched Clonezilla ISO restores encrypted disk
   backups too (key from a USB stick, with its passphrase if any) — see
   [PATCH-CLONEZILLA.md](PATCH-CLONEZILLA.md).
-- **Interoperable**: an encrypted backup restores with `proxmox-backup-client`
-  or Proxmox VE using the same key file, and vice versa.
+- **Compatible with `proxmox-backup-client`, verified in CI on every build**
+  against a real PBS: a folder encrypted by Nimbus Backup with a key created by
+  `proxmox-backup-client` is restored by the official client with the same key
+  (and refused without it), and an encrypted disk backup made by the official
+  client is read back by Nimbus Backup. Proxmox VE uses the same key files.
 
 > ⚠️ **Without the key, encrypted backups are unrecoverable.** The first
 > encrypted backup uploads everything again (no deduplication with unencrypted

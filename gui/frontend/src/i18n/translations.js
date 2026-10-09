@@ -116,6 +116,7 @@ const translations = {
       encImportTitle: "Importer une clé depuis un texte ou un QR code",
       encImportPlaceholder: "Collez ici le fichier de clé (JSON), le texte d'un QR code scanné ou d'une copie papier (marqueurs BEGIN/END compris)",
       encImportPassphrase: "Phrase secrète (uniquement si la clé est protégée)",
+      encImportUnprotectedWarning: "Le fichier de clé enregistré n'est PAS protégé par une phrase secrète, même si la clé importée l'était : l'interface n'utilise que des fichiers de clé non protégés. Conservez ce fichier aussi soigneusement que la clé elle-même.",
       encImport: "Enregistrer comme fichier de clé…",
 
       // Multi-PBS
@@ -510,6 +511,7 @@ const translations = {
       encImportTitle: "Import a key from text or a QR code",
       encImportPlaceholder: "Paste the key file (JSON), the text of a scanned QR code or of a paper key (BEGIN/END markers included)",
       encImportPassphrase: "Passphrase (only if the key is protected)",
+      encImportUnprotectedWarning: "The saved key file is NOT protected by a passphrase, even if the imported key was: the GUI only uses unprotected key files. Keep this file as safe as the key itself.",
       encImport: "Save as a key file…",
 
       // Multi-PBS
@@ -905,6 +907,7 @@ const translations = {
       encImportTitle: "Importa una chiave da testo o codice QR",
       encImportPlaceholder: "Incolla il file di chiave (JSON), il testo di un codice QR scansionato o di una copia cartacea (marcatori BEGIN/END inclusi)",
       encImportPassphrase: "Passphrase (solo se la chiave è protetta)",
+      encImportUnprotectedWarning: "Il file di chiave salvato NON è protetto da passphrase, anche se la chiave importata lo era: l'interfaccia usa solo file di chiave non protetti. Conserva questo file con la stessa cura della chiave stessa.",
       encImport: "Salva come file di chiave…",
 
       // Multi-PBS
@@ -1300,6 +1303,7 @@ const translations = {
       encImportTitle: "Schlüssel aus Text oder QR-Code importieren",
       encImportPlaceholder: "Schlüsseldatei (JSON), den Text eines gescannten QR-Codes oder einer Papierkopie (inkl. BEGIN/END-Markierungen) hier einfügen",
       encImportPassphrase: "Passphrase (nur wenn der Schlüssel geschützt ist)",
+      encImportUnprotectedWarning: "Die gespeicherte Schlüsseldatei ist NICHT durch eine Passphrase geschützt, auch wenn der importierte Schlüssel es war: die Oberfläche verwendet nur ungeschützte Schlüsseldateien. Bewahren Sie diese Datei so sorgfältig auf wie den Schlüssel selbst.",
       encImport: "Als Schlüsseldatei speichern…",
 
       // Multi-PBS
@@ -1695,6 +1699,7 @@ const translations = {
       encImportTitle: "Importuj klucz z tekstu lub kodu QR",
       encImportPlaceholder: "Wklej plik klucza (JSON), tekst zeskanowanego kodu QR lub kopii papierowej (wraz ze znacznikami BEGIN/END)",
       encImportPassphrase: "Hasło (tylko jeśli klucz jest chroniony)",
+      encImportUnprotectedWarning: "Zapisany plik klucza NIE jest chroniony hasłem, nawet jeśli importowany klucz był: interfejs używa tylko niechronionych plików kluczy. Przechowuj ten plik równie starannie jak sam klucz.",
       encImport: "Zapisz jako plik klucza…",
 
       // Multi-PBS

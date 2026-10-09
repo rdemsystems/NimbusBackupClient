@@ -115,7 +115,7 @@ Lors de la sauvegarde d'un disque entier (ex. `D:\`), Nimbus Backup exclut autom
 ### 🔒 Chiffrement côté client
 Les sauvegardes peuvent être chiffrées **sur le poste** avant de le quitter, avec
 le même schéma que le client officiel `proxmox-backup-client` (AES-256-GCM,
-empreintes de blocs à clé, manifeste signé). Le serveur PBS ne stocke que des
+empreintes de blocs à clé). Le serveur PBS ne stocke que des
 données opaques et ne voit jamais la clé — idéal sur un PBS mutualisé ou infogéré.
 
 - **Interface** : *Serveurs → Modifier → Clé de chiffrement* — créez un fichier
@@ -126,14 +126,20 @@ données opaques et ne voit jamais la clé — idéal sur un PBS mutualisé ou i
   code (le format de `proxmox-backup-client key paperkey`), éventuellement
   protégée par une phrase secrète. **Importer une clé depuis un texte ou un QR
   code** refait un fichier de clé à partir d'un QR code scanné ou d'une copie papier.
+  L'interface n'utilise que des fichiers de clé non protégés : importer une clé
+  protégée par une phrase secrète la déverrouille et enregistre le nouveau fichier
+  **sans** phrase secrète — conservez ce fichier aussi soigneusement que la clé.
 - **Ligne de commande** : `-keyfile chemin/vers/cle.json` (ou `"keyfile"` dans le
   fichier JSON) ; une clé protégée prend `-keyfile-passphrase`, sinon la phrase
   secrète est demandée.
 - **Restauration bare-metal** : l'ISO Clonezilla modifiée restaure aussi les
   sauvegardes de disque chiffrées (clé sur clé USB, avec sa phrase secrète le cas
   échéant) — voir [PATCH-CLONEZILLA.md](PATCH-CLONEZILLA.md).
-- **Interopérable** : une sauvegarde chiffrée se restaure avec
-  `proxmox-backup-client` ou Proxmox VE avec le même fichier de clé, et inversement.
+- **Compatible avec `proxmox-backup-client`, vérifié par la CI à chaque build**
+  sur un vrai PBS : un dossier chiffré par Nimbus Backup avec une clé créée par
+  `proxmox-backup-client` est restauré par le client officiel avec la même clé
+  (et refusé sans elle), et une sauvegarde de disque chiffrée par le client
+  officiel est relue par Nimbus Backup. Proxmox VE utilise les mêmes fichiers de clé.
 
 > ⚠️ **Sans la clé, les sauvegardes chiffrées sont irrécupérables.** La première
 > sauvegarde chiffrée renvoie toutes les données (pas de déduplication avec les

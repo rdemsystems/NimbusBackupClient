@@ -14,10 +14,14 @@ replaces the fork's unreleased one.
 
 ### Added (from upstream)
 - **Client-side encryption, compatible with `proxmox-backup-client`**: AES-256-GCM
-  chunks and blobs, keyed chunk digests, signed manifest. The GUI points each PBS
-  server at a key file (create one or pick an existing one, fingerprint shown;
-  passphrase-protected key files are CLI-only), the CLIs take `-keyfile` and
-  `-keyfile-passphrase` (or prompt). Restore, search, browse and the NBD server
+  chunks and blobs, keyed chunk digests. Compatibility is verified in CI on every
+  build against a real PBS: a folder encrypted by Nimbus Backup with a key created
+  by `proxmox-backup-client` is restored by the official client with the same
+  key (and refused without it), and an encrypted disk backup made by the official
+  client is read back by Nimbus Backup. The GUI points each PBS server at an
+  unprotected key file (create one or pick an existing one, fingerprint shown);
+  the CLIs also take passphrase-protected key files (`-keyfile` and
+  `-keyfile-passphrase`, or prompt). Restore, search, browse and the NBD server
   decrypt; the patched Clonezilla ISO restores encrypted disk backups.
 - Linux packages (Debian, Fedora, Arch) with a systemd service, a Running jobs
   tab (progress, ETA, cancel), a PBS server choice per job, disks pinned by
@@ -33,8 +37,10 @@ replaces the fork's unreleased one.
   format of `proxmox-backup-client key paperkey` (the QR code holds the key
   file), optionally protected by a passphrase; the key and its QR code can also
   be shown in the GUI. **Import a key from text or a QR code** rebuilds a key
-  file from a scanned QR code, a paper key or a pasted key file (protected keys
-  are unlocked with their passphrase).
+  file from a scanned QR code, a paper key or a pasted key file. **A protected
+  key is unlocked with its passphrase and saved without one** (the GUI only
+  uses unprotected key files): the import says so, keep that file as safe as
+  the key itself.
 - **Disk backups restore in Proxmox VE as a VM that matches the machine.** The
   VM config stored with "vm" snapshots is generated from the real machine:
   logical CPU count, RAM, firmware (UEFI or GPT boot disk → `bios: ovmf`), guest

@@ -218,6 +218,9 @@ export default function EncryptionKeyField({ value, onChange, className = '' }) 
           <div style={{ marginTop: '6px' }}>
             <textarea value={importText} onChange={(e) => setImportText(e.target.value)} placeholder={t('encImportPlaceholder')} rows="5" style={{ fontFamily: 'monospace', fontSize: '0.85em', width: '100%' }} />
             <input type="password" value={importPass} onChange={(e) => setImportPass(e.target.value)} placeholder={t('encImportPassphrase')} style={{ marginTop: '6px' }} />
+            <div className="info-box" style={{ marginTop: '6px', backgroundColor: '#fff3cd', borderColor: '#ffeeba' }}>
+              ⚠️ {t('encImportUnprotectedWarning')}
+            </div>
             <button type="button" className="btn" onClick={handleImportText} disabled={!importText.trim() || busy} style={{ marginTop: '6px' }}>
               {t('encImport')}
             </button>
