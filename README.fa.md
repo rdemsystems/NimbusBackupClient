@@ -50,7 +50,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
 [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
 
-> 🔏 **امضای کد:** از نسخه‌ی 0.4.1، `NimbusBackup.exe`، سرویس آن و `NimbusBackup.msi` **با Authenticode توسط RDEM SYSTEMS امضا شده‌اند** (Azure Artifact Signing)؛ بخش *Properties ← Digital Signatures* ناشر را نشان می‌دهد. SmartScreen ممکن است تا زمانی که اعتبار یک نسخه‌ی جدید تثبیت نشده، همچنان هشدار دهد: بررسی کنید که ناشر RDEM SYSTEMS باشد، سپس *More info ← Run anyway* را بزنید. ابزارهای خط فرمان هنوز امضا نشده‌اند؛ گواهی منشأ ساخت و چک‌سام‌های بالا همه‌ی فایل‌ها را پوشش می‌دهند.
+> 🔏 **امضای کد:** از نسخه‌ی 0.4.1، `NimbusBackup.exe`، سرویس آن و `NimbusBackup.msi` **با Authenticode توسط RDEM SYSTEMS امضا شده‌اند** (Azure Artifact Signing)؛ بخش *ویژگی‌ها (Properties) ← امضاهای دیجیتال (Digital Signatures)* ناشر را نشان می‌دهد. SmartScreen ممکن است تا زمانی که اعتبار یک نسخه‌ی جدید تثبیت نشده، همچنان هشدار دهد: بررسی کنید که ناشر RDEM SYSTEMS باشد، سپس *اطلاعات بیشتر (More info) ← در هر صورت اجرا شود (Run anyway)* را بزنید. ابزارهای خط فرمان هنوز امضا نشده‌اند؛ گواهی منشأ ساخت و چک‌سام‌های بالا همه‌ی فایل‌ها را پوشش می‌دهند.
 
 ### 🐧 روی Linux؟ از کلاینت رسمی استفاده کنید
 
