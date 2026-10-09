@@ -1,7 +1,7 @@
 From aa7342b60a40e0cc653253530281d4c24aca9bc0 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Thu, 8 Oct 2026 20:05:43 +0200
-Subject: [PATCH 16/22] fix(pbs): show PBS's reason when it refuses the backup
+Subject: [PATCH 16/23] fix(pbs): show PBS's reason when it refuses the backup
  session
 
 Any refusal of the backup/reader protocol upgrade was reported as

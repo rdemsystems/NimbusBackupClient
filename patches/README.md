@@ -43,6 +43,7 @@ carry the Nimbus identity, docs and CI.
 | 0020 | feat(crypto): printable paper key with QR code | upstream candidate | `proxmox-backup-client key paperkey` equivalent (`rsc.io/qr`), `ProtectKeyConfig`, paper-key text accepted by `ParseKeyConfig` / `LoadKeyConfig`. |
 | 0021 | feat(gui): paper key, key QR code and key import from text | upstream candidate | Print / show the QR code next to the key field; rebuild a key file from a scanned QR code or a paper key (protected keys unlocked). |
 | 0022 | docs: encryption, paper key and upstream re-merge in README and CHANGELOG | fork-only | |
+| 0023 | fix: review findings on the upstream rebuild | upstream candidate | `EncryptionKeyField` awaited the Wails Promise (upstream bug: fingerprint never shown); OVMF follows the boot disk; a changed provisioned schedule recomputes nextRun; a retired legacy folder is never a migration source. |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts
