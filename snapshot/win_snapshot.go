@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/st-matskevich/go-vss"
 )
@@ -80,7 +82,14 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 	snapshotters := make([]*vss.Snapshotter, 0, len(paths))
 	// IDs of the shadows this call actually created, in creation order.
 	createdIDs := make([]string, 0, len(paths))
+	var leases []shadowLease
 	defer func() {
+		// Released last (defers run in reverse), once the shadows are gone.
+		defer func() {
+			for _, l := range leases {
+				l.release()
+			}
+		}()
 		for _, s := range snapshotters {
 			if err := s.Release(); err != nil {
 				fmt.Printf("⚠️  VSS: releasing snapshot: %v\n", err)
@@ -148,26 +157,23 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 
 		sn := &vss.Snapshotter{}
 		snapshot, err := sn.CreateSnapshot(volName, false, 180)
-		if err != nil && isShadowAlreadyInProgress(err) {
-			// IVssBackupComponents stuck from a previous crashed run.
-			// vssadmin delete shadows alone won't release it — we have to bounce
-			// the VSS service to drop the orphaned context, then retry once.
-			if len(snapshotters) > 0 {
-				// We already hold shadows for earlier volumes in this set, and
-				// vssForceReset deletes shadows / bounces the VSS service, which
-				// would destroy them. Fail instead of self-sabotaging the set.
-				return fmt.Errorf("VSS busy while building a multi-volume snapshot set: %w", err)
-			}
-			fmt.Printf("⚠️  VSS busy: %v\n", err)
-			fmt.Println("         → Resetting VSS service state and retrying once...")
+		// VSS creates one shadow copy set at a time on the whole host: "already
+		// in progress" means another requester (another backup, a restore
+		// point) is creating one. Wait for it and retry; never delete shadows
+		// or restart the VSS service, which destroyed every shadow copy on the
+		// host (restore points, other backup tools, our other runs).
+		for attempt := 0; err != nil && isShadowAlreadyInProgress(err) && attempt < len(vssBusyRetryWaits); attempt++ {
+			wait := vssBusyRetryWaits[attempt]
+			fmt.Printf("⚠️  VSS busy (another shadow copy is being created): %v — retrying in %s (%d/%d)\n", err, wait, attempt+1, len(vssBusyRetryWaits))
+			time.Sleep(wait)
 			// Do NOT Release the failed Snapshotter: go-vss already aborted and
 			// released its components on the failed CreateSnapshot (without
 			// nil-ing them), so a second Release would touch freed COM state.
-			if resetErr := vssForceReset(); resetErr != nil {
-				fmt.Printf("         → VSS reset failed: %v\n", resetErr)
-			}
 			sn = &vss.Snapshotter{}
 			snapshot, err = sn.CreateSnapshot(volName, false, 180)
+		}
+		if err != nil && isShadowAlreadyInProgress(err) {
+			return fmt.Errorf("VSS is still busy with another shadow copy (another backup, or a VSS context stuck since a crash): %w. Retry later; if no other backup is running, restarting the \"Volume Shadow Copy\" service clears a stuck context", err)
 		}
 		if err != nil {
 			errMsg := err.Error()
@@ -206,6 +212,14 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 		snapshots[path] = SnapShot{FullPath: filepath.Join(appDataFolder, "VSS", snapshot.Id, subPath), Id: snapshot.Id, ObjectPath: snapshot.DeviceObjectPath, Valid: true}
 		byVolume[strings.ToUpper(volName)] = snapshots[path]
 		createdIDs = append(createdIDs, snapshot.Id)
+		// Lease: held open until this call returns, so VSSCleanup in another
+		// process of ours (a GUI started during a CLI backup) knows the shadow
+		// is in use and leaves it alone.
+		if lease, lerr := holdShadowLease(filepath.Join(appDataFolder, "VSS", snapshot.Id)); lerr == nil {
+			leases = append(leases, lease)
+		} else {
+			fmt.Printf("⚠️  VSS: could not create the in-use marker for %s: %v\n", snapshot.Id, lerr)
+		}
 
 	}
 
@@ -282,7 +296,14 @@ func VSSCleanup() error {
 			continue
 		}
 
-		// Live symlink ⇒ the shadow still exists ⇒ a genuine orphan from a crash.
+		// Another process of ours (e.g. a CLI backup running while this GUI
+		// starts) is still reading this shadow: not an orphan.
+		if shadowInUse(marker) {
+			fmt.Printf("VSS Cleanup: shadow %s is in use by another backup, kept\n", id)
+			continue
+		}
+
+		// Live symlink, no live owner ⇒ a genuine orphan from a crash.
 		fmt.Printf("VSS Cleanup: removing orphaned Proxmox Backup Client shadow %s...\n", id)
 		deleteCmd := exec.Command("vssadmin", "delete", "shadows", "/shadow={"+id+"}", "/quiet")
 		if out, derr := deleteCmd.CombinedOutput(); derr != nil {
@@ -300,10 +321,8 @@ func VSSCleanup() error {
 	// Exec, Windows Server Backup, SQL/Exchange agents), restarting VSS can abort
 	// their in-flight snapshots and corrupt their backup state. Doing it on every
 	// service startup is especially hostile and runs even when no backup is due.
-	// A stuck IVssBackupComponents context from a previously crashed run ("shadow
-	// copy creation already in progress") is instead recovered lazily and only when
-	// it actually blocks us, by vssForceReset() on the next CreateSnapshot attempt
-	// — right before our own backup. See CreateVSSSnapshot.
+	// A busy VSS ("shadow copy creation already in progress") is waited for and
+	// retried by CreateVSSSnapshot, never forced.
 	return nil
 }
 
@@ -321,51 +340,43 @@ func isShadowAlreadyInProgress(err error) bool {
 		strings.Contains(msg, "0x8004230f")
 }
 
-// vssForceReset is the aggressive recovery used mid-backup when a snapshot
-// attempt returns "already in progress". It deletes orphan shadows then
-// bounces the VSS service so the next CreateSnapshot starts from a clean
-// state.
-//
-// DELIBERATE /all here (unlike startup VSSCleanup which is now scoped): this runs
-// ONLY when our own CreateSnapshot is already blocked by a stuck VSS context, not
-// on every service start — a much smaller blast radius. The "in progress" state is
-// an in-flight requester/provider sequence, not a completed shadow we can target
-// by ID, so clearing it needs the service bounce below. WINDOWS-VERIFY: tighten
-// this (and the error classifier above; the in-progress code may be 0x80042316,
-// not 0x8004230f) before relying on it.
-func vssForceReset() error {
-	deleteCmd := exec.Command("vssadmin", "delete", "shadows", "/all", "/quiet")
-	if out, err := deleteCmd.CombinedOutput(); err != nil {
-		fmt.Printf("VSS reset: delete shadows warning: %v - %s\n", err, string(out))
-	}
-	return restartVSSService()
+// vssBusyRetryWaits are the waits between CreateSnapshot attempts while VSS
+// reports that another shadow copy set is being created.
+var vssBusyRetryWaits = []time.Duration{30 * time.Second, 60 * time.Second, 120 * time.Second}
+
+// shadowLease marks a shadow copy as in use by this process: <marker>.lock is
+// held open without FILE_SHARE_DELETE, so another process cannot delete it
+// while we live. When the process dies, Windows closes the handle and the
+// lease can be removed, which is how VSSCleanup tells an orphan from a shadow
+// another run of ours is still reading.
+type shadowLease struct {
+	handle syscall.Handle
+	path   string
 }
 
-// restartVSSService bounces the Windows Volume Shadow Copy service. Safe at
-// service startup and during error recovery because Proxmox Backup Client is the only VSS
-// consumer on backup-dedicated hosts, and stopping VSS just discards any
-// in-flight shadow context (which is exactly what we want when it's stuck).
-func restartVSSService() error {
-	fmt.Println("VSS Cleanup: Restarting VSS service to clear stuck state...")
-	stopCmd := exec.Command("net", "stop", "VSS")
-	if out, err := stopCmd.CombinedOutput(); err != nil {
-		// "service is not started" is fine — we'll start it next.
-		if !strings.Contains(string(out), "not started") &&
-			!strings.Contains(strings.ToLower(string(out)), "n'est pas démarr") {
-			fmt.Printf("VSS service stop warning: %v - %s\n", err, string(out))
-		}
+func holdShadowLease(marker string) (shadowLease, error) {
+	path := marker + ".lock"
+	p, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return shadowLease{}, err
 	}
-	startCmd := exec.Command("net", "start", "VSS")
-	if out, err := startCmd.CombinedOutput(); err != nil {
-		// "already started" is fine.
-		if strings.Contains(string(out), "already been started") ||
-			strings.Contains(strings.ToLower(string(out)), "déjà été démarr") {
-			return nil
-		}
-		return fmt.Errorf("net start VSS failed: %v - %s", err, string(out))
+	h, err := syscall.CreateFile(p, syscall.GENERIC_READ|syscall.GENERIC_WRITE, syscall.FILE_SHARE_READ, nil, syscall.OPEN_ALWAYS, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		return shadowLease{}, err
 	}
-	fmt.Println("VSS Cleanup: VSS service restarted")
-	return nil
+	return shadowLease{handle: h, path: path}, nil
+}
+
+func (l shadowLease) release() {
+	_ = syscall.CloseHandle(l.handle)
+	_ = os.Remove(l.path)
+}
+
+// shadowInUse reports whether another live process holds the lease of the
+// shadow behind marker. A lease left by a dead process is removed here.
+func shadowInUse(marker string) bool {
+	err := os.Remove(marker + ".lock")
+	return err != nil && !os.IsNotExist(err)
 }
 
 // DetectControl reports whether a Linux block-snapshot control module is
