@@ -97,6 +97,10 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 		}
 	}()
 	snapshots := make(map[string]SnapShot)
+	// One shadow copy per volume, shared by every path on it: the folders of
+	// a volume are then frozen at the same instant (and VSS is not asked for
+	// several copies of the same volume).
+	byVolume := make(map[string]SnapShot)
 
 	for _, path := range paths {
 		path, _ = filepath.Abs(path)
@@ -108,6 +112,11 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 		if err != nil {
 			fmt.Println("Error:", err)
 			return err
+		}
+
+		if shared, ok := byVolume[strings.ToUpper(volName)]; ok {
+			snapshots[path] = SnapShot{FullPath: filepath.Join(appDataFolder, "VSS", shared.Id, subPath), Id: shared.Id, ObjectPath: shared.ObjectPath, Valid: true}
+			continue
 		}
 
 		fmt.Print("Creating VSS Snapshot...")
@@ -195,6 +204,7 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 		}
 
 		snapshots[path] = SnapShot{FullPath: filepath.Join(appDataFolder, "VSS", snapshot.Id, subPath), Id: snapshot.Id, ObjectPath: snapshot.DeviceObjectPath, Valid: true}
+		byVolume[strings.ToUpper(volName)] = snapshots[path]
 		createdIDs = append(createdIDs, snapshot.Id)
 
 	}

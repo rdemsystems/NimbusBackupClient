@@ -26,7 +26,8 @@ replaces the fork's unreleased one.
   and a real-PBS end-to-end test suite in CI.
 
 ### Added
-- **Several folders backed up in parallel** (issue #6): GUI setting "Folders backed up in parallel" (one-shot and scheduled backups) and `-parallel N` / `"parallel"` in `proxmoxbackup-directory`. No maximum; CPUs / 4 is recommended. Each folder stays its own backup group; under VSS one snapshot set covers every folder.
+- **Several folders backed up in parallel** (issue #6): GUI setting "Folders backed up in parallel" (one-shot and scheduled backups) and `-parallel N` / `"parallel"` in `proxmoxbackup-directory`. No maximum; CPUs / 4 is recommended. Each folder stays its own backup group.
+- **One VSS snapshot for a whole multi-folder backup**, one after the other or in parallel: the snapshot is taken once for every folder before the first upload, with one shadow copy per volume, so all the folders of a volume are frozen at the same instant (each folder used to get its own snapshot at its own turn). Same on Linux, one snapshot per block device.
 - **Exclusions in `proxmoxbackup-directory`** (issue #4): `-exclude PATTERN` (repeatable), `-exclude-from FILE` (one pattern per line, `#` comments) and `"exclude"` / `"exclude-from"` in the JSON config, with the GUI's pattern syntax.
 - **Paper key**: print an encryption key as a page with its QR code, in the
   format of `proxmox-backup-client key paperkey` (the QR code holds the key

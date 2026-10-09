@@ -370,8 +370,8 @@ func main() {
 // backup group with the id <base>_<path> (the same ids the GUI uses), so PBS
 // retention and restore treat every directory as an independent series. A
 // directory that fails does not stop the others; the failures are joined into
-// the returned error. With parallel > 1, up to that many directories are backed
-// up at the same time (see backup_parallel).
+// the returned error. Up to parallel directories (at least 1) are backed up at
+// the same time, from one snapshot set taken for all of them (backup_parallel).
 func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool, excludes []string, parallel int) ([]string, error) {
 	if pxarOut != "" {
 		return nil, fmt.Errorf("-pxarout writes a single archive and cannot be combined with several -backupdir")
@@ -386,39 +386,18 @@ func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), 
 		ids[id] = dir
 	}
 
-	if parallel > 1 {
-		return backup_parallel(newClient, newchunk, reusechunk, dirs, baseID, usevss, excludes, parallel)
-	}
-
-	var readErrors []string
-	var failures []error
-	for _, dir := range dirs {
-		id := clientcommon.GenerateBackupID(baseID, dir)
-		fmt.Printf("Backing up %s as backup group %s\n", dir, id)
-
-		client, err := newClient(id)
-		if err != nil {
-			failures = append(failures, fmt.Errorf("%s: ticket login failed: %w", dir, err))
-			continue
-		}
-		dirReadErrors, err := backup(client, newchunk, reusechunk, "", dir, usevss, excludes)
-		// Release the session even after a failure, otherwise PBS keeps the
-		// group locked until the connection times out.
-		client.Close()
-		readErrors = append(readErrors, dirReadErrors...)
-		if err != nil {
-			failures = append(failures, fmt.Errorf("%s: %w", dir, err))
-		}
-	}
-	return readErrors, errors.Join(failures...)
+	return backup_parallel(newClient, newchunk, reusechunk, dirs, baseID, usevss, excludes, max(parallel, 1))
 }
 
-// backup_parallel backs up dirs with up to parallel directories at a time, each
-// in its own backup group and PBS session. With VSS, ONE snapshot set covering
-// every directory is taken before any upload starts: concurrent snapshot
-// creations collide ("VSS busy"), and the busy-recovery path deletes every
-// shadow copy, which would pull the snapshot from under the other directories.
+// backup_parallel backs up dirs with up to parallel directories at a time (1:
+// one after the other), each in its own backup group and PBS session. With
+// VSS, ONE snapshot set covering every directory is taken before any upload
+// starts, so the directories are frozen together (one shadow copy per volume)
+// rather than each at its own turn. It also keeps concurrent runs safe:
+// concurrent snapshot creations collide ("VSS busy"), and the busy-recovery
+// path deletes every shadow copy, pulling it from under the other directories.
 func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dirs []string, baseID string, usevss bool, excludes []string, parallel int) ([]string, error) {
+	parallel = min(parallel, len(dirs))
 	fmt.Printf("Backing up %d directories, %d at a time\n", len(dirs), parallel)
 
 	run := func(readDirOf func(dir string) string) ([]string, error) {
@@ -448,7 +427,9 @@ func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, erro
 	}
 	var readErrors []string
 	var runErr error
+	called := false
 	err := snapshot.CreateVSSSnapshot(dirs, true, func(snaps map[string]snapshot.SnapShot) error {
+		called = true
 		readErrors, runErr = run(func(dir string) string {
 			if s, ok := snaps[dir]; ok {
 				return s.FullPath
@@ -464,6 +445,29 @@ func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, erro
 		// copies right away (Windows only does it on an error).
 		return runErr
 	})
+	if err != nil && !called {
+		// The set could not be taken (e.g. one volume refuses VSS): fall back
+		// to one snapshot per directory, one directory at a time, so those on
+		// healthy volumes are still backed up. Never in parallel: concurrent
+		// snapshot creations collide.
+		fmt.Printf("One snapshot for every directory failed (%v): falling back to one snapshot per directory, one at a time\n", err)
+		var failures []error
+		for _, dir := range dirs {
+			id := clientcommon.GenerateBackupID(baseID, dir)
+			client, cerr := newClient(id)
+			if cerr != nil {
+				failures = append(failures, fmt.Errorf("%s: ticket login failed: %w", dir, cerr))
+				continue
+			}
+			dirReadErrors, derr := backup(client, newchunk, reusechunk, "", dir, true, excludes)
+			client.Close()
+			readErrors = append(readErrors, dirReadErrors...)
+			if derr != nil {
+				failures = append(failures, fmt.Errorf("%s: %w", dir, derr))
+			}
+		}
+		return readErrors, errors.Join(failures...)
+	}
 	return readErrors, err
 }
 
