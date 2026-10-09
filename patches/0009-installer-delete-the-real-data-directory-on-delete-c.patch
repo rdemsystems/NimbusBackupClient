@@ -1,7 +1,7 @@
 From 1d8a967d75c00feb1996aef64eaf54d59a5c83db Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:05:19 +0200
-Subject: [PATCH 09/49] installer: delete the real data directory on "delete
+Subject: [PATCH 09/51] installer: delete the real data directory on "delete
  configuration"
 
 The uninstall cleanup removed %ProgramData%\$(var.ExeName) (e.g.

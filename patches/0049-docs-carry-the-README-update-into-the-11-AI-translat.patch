@@ -1,7 +1,7 @@
 From d925a63248b5bc33e48b26cff2131cdf50f31850 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 15:55:43 +0200
-Subject: [PATCH 49/49] docs: carry the README update into the 11 AI
+Subject: [PATCH 49/51] docs: carry the README update into the 11 AI
  translations
 
 Signing note (0.4.1), GUI features, CI gates and the upstream section, as in

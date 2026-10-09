@@ -1,7 +1,7 @@
 From 7495cf704fa9a625e0192e8fefce4561783b1fc1 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 14:58:37 +0200
-Subject: [PATCH 43/49] feat(gui): back up several folders in parallel (issue
+Subject: [PATCH 43/51] feat(gui): back up several folders in parallel (issue
  #6)
 
 "Folders backed up in parallel" in the backup form, stored in config.json

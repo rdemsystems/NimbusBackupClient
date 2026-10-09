@@ -1,7 +1,7 @@
 From 0ecaaead9f04e8cd027a5d062fce165d56335814 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:01:31 +0200
-Subject: [PATCH 03/49] gui: migrate data from the legacy
+Subject: [PATCH 03/51] gui: migrate data from the legacy
  ProgramData\NimbusBackup folder
 
 The data directory moved from ProgramData\NimbusBackup to the

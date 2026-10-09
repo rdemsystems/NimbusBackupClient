@@ -1,7 +1,7 @@
 From 6290d3040de0bce9ed9a21fb57ff9d9bf9b33a90 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 14:44:57 +0200
-Subject: [PATCH 40/49] feat(cli): exclusions in proxmoxbackup-directory (issue
+Subject: [PATCH 40/51] feat(cli): exclusions in proxmoxbackup-directory (issue
  #4)
 
 -exclude PATTERN (repeatable), -exclude-from FILE and "exclude" /

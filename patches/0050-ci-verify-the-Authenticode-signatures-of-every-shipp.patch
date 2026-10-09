@@ -1,0 +1,53 @@
+From b3a5ed36ada2d97dc22705daee682640641654f5 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 15:58:09 +0200
+Subject: [PATCH 50/51] ci: verify the Authenticode signatures of every shipped
+ Windows file
+
+After signing, Get-AuthenticodeSignature must report Valid, a CN=RDEM SYSTEMS
+signer and a timestamp for NimbusBackup.exe, NimbusBackupSVC.exe, the MSI and
+the executables the MSI installs (administrative install). One annotation per
+file; the build fails otherwise.
+---
+ .github/workflows/build-and-release.yml | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index c5608e8..7af42ec 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -545,6 +545,31 @@ jobs:
+           exclude-azure-developer-cli-credential: true
+           exclude-interactive-browser-credential: true
+ 
++      # Proof, not trust: every shipped Windows file must carry a Valid
++      # Authenticode signature from RDEM SYSTEMS, with a timestamp, including
++      # the executables the MSI installs (extracted with an administrative
++      # install). Results are annotations, readable without the job log.
++      - name: Verify signatures
++        if: ${{ vars.AZURE_SIGNING_PROFILE != '' }}
++        shell: pwsh
++        run: |
++          $extract = Join-Path $env:RUNNER_TEMP 'msi-extract'
++          Start-Process msiexec.exe -Wait -NoNewWindow -ArgumentList @('/a', "$PWD\dist\NimbusBackup.msi", '/qn', "TARGETDIR=$extract")
++          $files = @('dist\NimbusBackup.exe', 'dist\NimbusBackupSVC.exe', 'dist\NimbusBackup.msi')
++          $files += Get-ChildItem -Path $extract -Recurse -Filter *.exe | ForEach-Object { $_.FullName }
++          $bad = 0
++          foreach ($f in $files) {
++            $s = Get-AuthenticodeSignature -FilePath $f
++            $signer = if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { 'none' }
++            $stamp = if ($s.TimeStamperCertificate) { 'timestamped' } else { 'NO timestamp' }
++            $name = if ($f.StartsWith($extract)) { 'MSI:' + (Split-Path $f -Leaf) } else { Split-Path $f -Leaf }
++            $ok = $s.Status -eq 'Valid' -and $signer -match '(^|, )CN=RDEM SYSTEMS(,|$)' -and $s.TimeStamperCertificate
++            $level = if ($ok) { 'notice' } else { 'error' }
++            Write-Output "::$level title=Signature ${name}::$($s.Status) - $signer - $stamp"
++            if (-not $ok) { $bad++ }
++          }
++          if ($bad -gt 0) { throw "$bad file(s) are not validly signed by RDEM SYSTEMS" }
++
+       - name: Upload GUI artifacts
+         uses: actions/upload-artifact@v4
+         with:
+-- 
+2.47.3
+

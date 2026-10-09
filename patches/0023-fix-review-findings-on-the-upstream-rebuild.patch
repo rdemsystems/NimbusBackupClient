@@ -1,7 +1,7 @@
 From ab822a6ad7418b90907127850cbdbc2cc2d3cf24 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 09:58:26 +0200
-Subject: [PATCH 23/49] fix: review findings on the upstream rebuild
+Subject: [PATCH 23/51] fix: review findings on the upstream rebuild
 
 - EncryptionKeyField: await InspectEncryptionKeyFile (a Wails Promise) and
   drop stale answers, so the fingerprint, the reason and the paper key

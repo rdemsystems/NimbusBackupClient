@@ -1,7 +1,7 @@
 From 10c4f08820e999c31bbfd25b8a707d840d3e16f5 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 09:48:09 +0200
-Subject: [PATCH 19/49] fix(gui): dedicated Proxmox VM ID for "vm" machine
+Subject: [PATCH 19/51] fix(gui): dedicated Proxmox VM ID for "vm" machine
  backups
 
 A "vm" machine backup is filed as vm/<ID> and needs a numeric Proxmox

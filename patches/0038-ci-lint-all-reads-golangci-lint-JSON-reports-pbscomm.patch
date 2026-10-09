@@ -1,7 +1,7 @@
 From 10a6d83d523af13d43e39a83c1e0e6f4125bbf96 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 14:34:53 +0200
-Subject: [PATCH 38/49] ci: lint-all reads golangci-lint JSON reports;
+Subject: [PATCH 38/51] ci: lint-all reads golangci-lint JSON reports;
  pbscommon errcheck fixes
 
 The console output of golangci-lint became 10 capped, path-less annotations

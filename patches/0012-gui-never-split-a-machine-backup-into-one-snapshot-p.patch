@@ -1,7 +1,7 @@
 From 04a226dc6a88ce82b155084f99fad25c49d190ab Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:14:03 +0200
-Subject: [PATCH 12/49] gui: never split a machine backup into one snapshot per
+Subject: [PATCH 12/51] gui: never split a machine backup into one snapshot per
  disk
 
 All selected disks of a machine backup belong to ONE snapshot: for the

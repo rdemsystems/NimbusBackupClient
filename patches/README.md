@@ -70,6 +70,8 @@ carry the Nimbus identity, docs and CI.
 | 0047 | docs: credit the client-side encryption to upstream in every README | fork-only |  |
 | 0048 | docs: 0.4.1 is signed; issue #9 in full; README features and upstream section | fork-only | Also removes CHANGELOG duplicates a sed in 0039 had inserted under every released "Fixed" section. |
 | 0049 | docs: carry the README update into the 11 AI translations | fork-only |  |
+| 0050 | ci: verify the Authenticode signatures of every shipped Windows file | fork-only | Valid + CN=RDEM SYSTEMS + timestamp on the exe, service, MSI and the exes the MSI installs; the build fails otherwise. |
+| 0051 | docs(fa): Windows menu names in Persian, English in parentheses | fork-only |  |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

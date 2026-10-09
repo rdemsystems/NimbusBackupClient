@@ -1,7 +1,7 @@
 From 972c0fff26c531817d6407ec66e3f5252bcb6266 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 14:01:15 +0200
-Subject: [PATCH 32/49] ci: run Build GUI in the 'signing' environment for a
+Subject: [PATCH 32/51] ci: run Build GUI in the 'signing' environment for a
  single Azure federated credential
 
 ---
