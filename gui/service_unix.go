@@ -68,6 +68,10 @@ func (s *BackupService) run() {
 	// Clean up any abandoned jobs from previous crash
 	s.app.CleanupAbandonedJobs()
 
+	// Apply any schedule declared inline in config.json (single-file /
+	// unattended deployment) into the scheduler store before computing runs.
+	s.app.ReconcileProvisionedJobs()
+
 	// Recalculate stale nextRun values (e.g. after restart or missed window)
 	s.app.RecalculateNextRuns()
 

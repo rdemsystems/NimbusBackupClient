@@ -399,7 +399,7 @@ function App() {
       const done = data.done || 0
       const total = data.total || 0
       const gb = ((data.bytes || 0) / (1024 * 1024 * 1024)).toFixed(1)
-      showStatus(`📊 ${t('splitAnalyzing')} ${done}/${total} (${gb} GB)`, 'info')
+      showStatus(`📊 ${t('splitAnalyzing')} ${done}/${total} (${gb} GB)`, 'info', true)
     })
     return () => { if (unsub) unsub() }
   }, [])
