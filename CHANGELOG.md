@@ -44,6 +44,8 @@ replaces the fork's unreleased one.
   also stores these facts in `machine-info.json.blob`.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Maximising the window filled the screen only up to 1680×1008** (issue #1): the window maximum size is gone, so "maximise" fills the screen; on small screens the startup window is shrunk to fit instead.
 - **Encrypted backups made by `proxmox-backup-client` now restore.** The official
   client compresses then encrypts chunks by default (`ENCR_COMPR` blobs), which
@@ -88,6 +90,8 @@ series (see `patches/README.md`). Existing installs upgrade in place.
   still be restored to their original location.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - `-tags service` build and machine backups via the service (`/backup/machine`
   was not routed; scheduled machine jobs treated `\\.\PhysicalDriveN` as a folder).
 - Username/password PBS servers could list snapshots but not browse/restore them.
@@ -144,11 +148,15 @@ series; nothing in a normal interactive workflow changes.
 ## [0.2.118] - 2026-06-12
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Release build restored** — the module-test CI job (0.2.116/0.2.117) blocked the build because some library modules don't build standalone under `GOWORK=off`. It is now informational (non-blocking) while that is finished, so the build completes and ships the fixes again — including B-1 (opt-in split honours your exclusions), which 0.2.116/0.2.117 never produced a binary for.
 
 ## [0.2.117] - 2026-06-12
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **CI build/release restored** — the new non-GUI module test job (added in 0.2.116) failed because `pbscommon` imports a dependency it doesn't list in its own `go.mod` (resolved only via the workspace), so a standalone test build couldn't find it. The job now runs `go mod tidy` first, like the GUI test job. 0.2.116 produced no binaries because this job gates the build; 0.2.117 carries the same fixes plus this CI repair.
 
 (Includes the 0.2.116 change below: opt-in split no longer backs up excluded top-level folders.)
@@ -156,6 +164,8 @@ series; nothing in a normal interactive workflow changes.
 ## [0.2.116] - 2026-06-12
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **An opt-in split backup no longer backs up folders you excluded** — when you split a large backup, a top-level folder on your exclusion list was still sized, turned into its own part, and uploaded in full (exclusion patterns only apply to files *inside* the backup root, not to the root itself). Your exclusions are now applied to the split analysis, so an excluded top-level folder is neither counted nor backed up.
 
 ### Internal
@@ -166,6 +176,8 @@ series; nothing in a normal interactive workflow changes.
 Third wave of audit fixes — split-backup honesty and service/scheduler hygiene.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **A split backup now reports the real result of each part** — the parts are run one after another and the app waits for each one to actually finish before starting the next. Previously every part was launched at once and the app announced "all parts completed successfully" without checking, so a failed part could still show success. You now get a per-part result, a retry prompt on failure, and an honest "X/N OK" summary when something fails.
 - **Scheduled times are correct across daylight-saving changes** — the next run is computed by calendar day instead of adding 24 hours, so a job at e.g. 02:30 no longer drifts to 01:30/03:30 on the switch day.
 - **Service status is accurate and stable over time** — the service now reports its real version and active-job count (instead of a hardcoded value), the internal progress table is cleaned up after each backup so it can't grow indefinitely on a long-running service, and a status read can no longer race with a backup updating it.
@@ -178,6 +190,8 @@ Third wave of audit fixes — split-backup honesty and service/scheduler hygiene
 Second wave of audit fixes — backup reliability and diagnostics.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **The completion message and history now report the real backed-up size** — "X MB backed up", the result sidecar and the machine-readable `[RESULT]` support line always showed `0` because the byte counter was only ever written to a per-directory local. They now reflect the actual archived bytes.
 - **A failed folder no longer drags down the rest of a multi-folder backup** — when one directory failed, its PBS session was left open and kept the backup-group lock (until the server reaped it ~16 min later), so every remaining directory then failed with "locked backup group". The session is now closed on error before moving on.
 - **Backing up no longer crashes on a damaged previous-backup index** — a truncated or odd-length previous index (or a tiny error response) could panic the chunk-dedup step (a hard crash in the command-line tool, a "backup panic" in the GUI). It now safely falls back to re-uploading all chunks.
@@ -188,6 +202,8 @@ Second wave of audit fixes — backup reliability and diagnostics.
 Reliability and result-honesty hardening from a full code audit. No behaviour change to a healthy backup/restore — these fixes are about not silently losing scheduled runs, not reporting a failed or incomplete job as success, and not crashing on damaged data.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Scheduled backups no longer stop running after the machine sleeps, hibernates, or misses a window** — the scheduler used a 2-minute fire window, so a tick delayed past it (laptop lid closed, heavy load) left the job permanently stuck until the service was restarted. Missed runs are now caught up on the next tick, and the startup recovery no longer pushes an overdue run forward (which silently skipped the backup a rebooted/off machine had missed).
 - **The Windows service now picks up configuration changes without a restart** — a rotated PBS token, a changed default PBS server, or a fingerprint pinned from a standalone GUI were ignored because the service ran on the config it loaded at startup. It now reloads the config before each backup.
 - **A transient read error can no longer wipe all scheduled jobs or truncate the job history** — a failed read while updating `scheduled_jobs.json` / `job_history.json` previously caused the file to be rewritten empty. The update is now skipped if the existing state cannot be read.
@@ -195,6 +211,8 @@ Reliability and result-honesty hardening from a full code audit. No behaviour ch
 - **Browsing, searching or restoring a damaged snapshot no longer crashes or hangs the app** — malformed archive headers and corrupt chunk indexes are now rejected with an error instead of panicking or looping; directory entries from archives written by the official `proxmox-backup-client` are also classified correctly.
 
 ### Fixed (command-line tools)
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **`directorybackup` now exits non-zero and reports a partial result honestly** — a failed backup could exit `0` (so schedulers saw success) when no mail server was configured, and read-skipped files were reported as a full success. Failures now exit non-zero; runs that skipped unreadable files are reported as "Partial". Stream (`-backupstream`) backups no longer abort before committing the snapshot (a double index-close), and a non-EOF read error no longer loops forever.
 - **Whole-machine (`machinebackup`) backups are correct on more disk layouts** — fixed volume-to-drive-letter mapping (a folder-mounted volume could be backed up as the wrong volume), backups of disks with two or more mounted volumes (the VSS snapshotter was reused and always failed the second volume), and a VSS partition read that panicked when the shadow size equalled the partition.
 - **Mail notifications** — deliver to multiple recipients (one `RCPT` per address), surface STARTTLS failures instead of silently continuing in plaintext, and stop crashing when `-mail-subject-template` / `-mail-body-template` are passed without a config-file template.
@@ -205,17 +223,23 @@ Reliability and result-honesty hardening from a full code audit. No behaviour ch
 - **Splitting a backup into parts is now an explicit, opt-in choice instead of automatic** — a new "Split this backup into multiple parts" checkbox (one-shot directory backups) lets you split the *first* backup of a large volume into smaller, resumable parts, then run normal full backups afterwards. When it's left unchecked, no size analysis runs at all and the backup starts immediately. This removes the automatic pre-backup size scan that, on a whole-drive root like `C:\`, could walk the entire system tree before the backup even began (and ran on every scheduled run). Scheduled/recurring backups are now always full (unsplit). When you do opt into splitting, the size analysis reports folder-by-folder progress and is bounded by a generous runaway guard (a legitimate large volume — e.g. ~5 min for 1 TB — completes well within it).
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Opt-in split no longer drops files sitting directly under the selected root** — if you ticked split but the volume turned out not to need splitting (below the threshold, scan incomplete, or splitting disabled), the run now falls back to a normal full backup of the selected folders instead of backing up only their subfolders.
 - **The in-backup background size estimator (progress %) is now bounded too** — it can no longer leave a goroutine walking a whole drive indefinitely; a partial size just makes the percentage approximate.
 
 ## [0.2.111] - 2026-06-02
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **A whole-drive backup (e.g. `C:\`) no longer stalls on "Analyse de la taille…" and never starts** — before launching a one-shot directory backup the app sizes the selected folders to decide whether to auto-split. On a system-drive root this meant recursively walking the entire `C:\Windows`/`C:\Users` tree, which on a server (where antivirus scans every file open) effectively never returned, so the backup never began — the analysis just hung with no message. The size scan is now bounded by a deadline and can no longer block a backup: the backend caps the whole analysis at 30s, and the GUI caps the call at 45s, both falling back to a normal single (unsplit) backup. A timed-out, partial size estimate is treated as "incomplete" and never triggers a split. The size scan also no longer descends into directory junctions / reparse points (e.g. `C:\ProgramData\Application Data` → `C:\ProgramData`), matching what the archive writer already skips.
 
 ## [0.2.110] - 2026-05-28
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Certificate trust-on-first-use (TOFU) now persists when running as a service** — when the app runs as a privileged Windows service alongside an unprivileged GUI, `config.json` (under `ProgramData`) is owned by the service, so the GUI could not overwrite it: clicking **OK** on the self-signed-certificate fingerprint dialog appeared to do nothing and the connection test kept reporting the server offline. The GUI now delegates the fingerprint write to the service over the existing authenticated local API, so the service — the single privileged writer of `config.json` — persists the pinned fingerprint. Standalone installs (no service) keep writing directly. The pin now also logs a disk read-back so any future write failure is unambiguous in the service log.
 
 ## [0.2.109] - 2026-05-28
@@ -228,6 +252,8 @@ Reliability and result-honesty hardening from a full code audit. No behaviour ch
 > Restore fixes from a tester's field report on v0.2.107 (service+GUI mode): wildcard search, folder picker, and path display.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **File search now honours wildcards** — a query like `Prix*` was matched as a literal substring (asterisk included), so it never hit anything. Queries containing `*` or `?` are now treated as case-insensitive globs in the "file name" and "path" search modes; plain queries keep their substring behaviour.
 - **Folder picker available in the GUI when a service is installed** — "Browse" for the restore destination was disabled whenever a service was present, not only in the headless service process. The interactive GUI now opens the native picker and hands the chosen path to the service; only the real session-0 service process (where the picker crashes) falls back to manual entry.
 - **Destination path placeholder** now shows `C:\Restore` instead of `C:\\Restore` (the doubled backslash was a JSX literal artefact and led users to type escaped paths).
@@ -261,6 +287,8 @@ Reliability and result-honesty hardening from a full code audit. No behaviour ch
 ## [0.2.105] - 2026-05-26
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Recherche de fichiers qui « patine » sans fin sur une partie de split de données (rapport testeur, blocage à ~96 %, appli à tuer)** — sur une recherche avec « assembler aussi les snapshots non consultés », le listing via catalogue était instantané, mais la lecture du sidecar meta (`readSnapshotMetaCheap` → `ReadVirtualFile`) parcourait l'archive de données jusqu'à *trouver* le fichier racine `.nimbus_backup_meta.json`. Sur une partie de split de données (ex. `*_D_DATA_*`), ce sidecar n'existe pas (il n'est injecté que dans l'archive de tête) : le parcours allait donc jusqu'au bout, retéléchargeant les chunks d'en-têtes répartis sur toute l'archive multi-Go, sans progression affichée — d'où l'impression de gel. La lecture du sidecar n'est désormais tentée que si le catalogue le liste réellement à la racine ; le catalogue étant construit à partir du même arbre, sa présence fait foi. Absence ⇒ meta nil, aucun parcours.
 - **Bouton « Annuler » de la recherche sans effet (appli à tuer)** — l'indicateur d'annulation n'était relu qu'entre deux snapshots, jamais pendant le téléchargement d'un snapshot en cours. Une recherche bloquée sur un gros snapshot ignorait donc « Annuler ». Le lecteur d'archive à la demande (`DIDXReaderAt`) accepte maintenant un prédicat d'annulation, vérifié à chaque lecture / récupération de chunk ; l'annulation interrompt le snapshot en cours et s'affiche comme annulation utilisateur (et non comme erreur). Restauration et listing ne sont pas affectés.
 - **Bouton « Parcourir » de la destination de restauration qui plante l'application en mode service** — le sélecteur de dossier natif Windows (IFileDialog) provoquait un crash COM natif (SEH/access violation) que `recover()` ne peut pas intercepter ; le durcissement précédent (recover + dossier par défaut valide) était donc insuffisant. En mode service, le sélecteur natif n'est plus ouvert : le champ de saisie du chemin de destination (déjà présent) reste le moyen fiable, et un message d'aide explicite est affiché.
@@ -268,16 +296,22 @@ Reliability and result-honesty hardening from a full code audit. No behaviour ch
 ## [0.2.104] - 2026-05-22
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Reconnexion des serveurs PBS en certificat auto-signé (régression H-02) via épinglage à la première connexion (TOFU)** — depuis le durcissement TLS H-02 (post-0.2.97), un serveur PBS sans empreinte configurée passe en validation CA stricte ; un certificat auto-signé (qui fonctionnait en 0.2.88) est alors rejeté avec `x509: certificate signed by unknown authority` et le serveur apparaît « offline » dans la GUI, sans moyen de s'en sortir depuis l'application (rapport client Clear C2, 0.2.88 → 0.2.102). Le test de connexion détecte désormais ce cas : il récupère l'empreinte SHA-256 du certificat présenté (`pbscommon.FetchServerFingerprint`, lecture seule via une connexion non vérifiée), l'affiche dans une boîte de confirmation pour que l'utilisateur la vérifie côté PBS, puis l'épingle (`App.PinPBSServerFingerprint`, persistance côté serveur — le secret ne transite jamais, M-04) et relance le test. La lecture non vérifiée ne sert qu'à *afficher* le certificat ; l'épinglage exige une confirmation explicite, donc H-02 n'est pas régressé.
 
 ## [0.2.103] - 2026-05-22
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Recherche/listing de fichiers : lecture du catalogue compact au lieu de toute l'archive de données (rapport client : ~6h pour ~800 Go sur une fenêtre de 3 jours)** — `SearchFilesInline`, `ListSnapshotContentsInline` et `ReadSnapshotMetaInline` ouvraient `backup.pxar.didx` (l'archive de données complète) et parcouraient **tout** le flux PXAR juste pour énumérer les noms de fichiers. Comme les en-têtes d'entrée sont entrelacés avec les payloads, cela retéléchargeait la quasi-totalité des chunks — par snapshot, sans réutilisation de cache d'un snapshot à l'autre — d'où des recherches de plusieurs heures. Le listing lit désormais le `catalog.pcat1.didx` compact (quelques Mo : arbre des fichiers seul) que la sauvegarde téléverse déjà, via un nouveau parseur du format `pcat1` (`pbscommon/catalog_reader.go`, durci contre les catalogues malformés). Le sidecar meta reste lu en tête de l'archive de données (parcours early-stop). Repli sur l'ancien parcours PXAR uniquement pour les snapshots legacy sans catalogue. Gain : ~heures → secondes par snapshot.
 
 ## [0.2.102] - 2026-05-22
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Écritures d'état atomiques (M-03)** — `scheduled_jobs.json` / `job_history.json` / `config.json` étaient écrits par un `os.WriteFile` (truncate+write) : un crash ou une coupure en cours d'écriture laissait un fichier tronqué/à moitié écrit, illisible au démarrage suivant (perte des jobs/de l'historique). Désormais via fichier temporaire + `fsync` + `rename` atomique. *(La sérialisation des écritures concurrentes GUI+service — lost-update — reste un correctif séparé.)*
 
 ### Added
@@ -286,6 +320,8 @@ Reliability and result-honesty hardening from a full code audit. No behaviour ch
 ## [0.2.101] - 2026-05-22
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Backups en échec « PBS connection parameters required » en mode service avec une config multi-PBS (rapport client)** — le binaire service construisait les options de backup depuis les champs PBS legacy (`baseurl`/`authid`/`secret`/`datastore`), **vides** quand la configuration n'utilise que `pbs_servers` + `default_pbs_id`. Comme le chemin GUI standalone, il résout désormais le serveur PBS effectif via `EffectivePBS()`. Affectait le scheduler **et** les backups manuels en mode service. (Audit M-01/M-04 — divergence service/GUI.)
 
 ## [0.2.100] - 2026-05-22
@@ -293,6 +329,8 @@ Reliability and result-honesty hardening from a full code audit. No behaviour ch
 Finitions audit v2 (2 correctifs, 1 release).
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Catalogue PXAR : plus d'entrées fantômes sur skip (M-06)** — un fichier/sous-dossier ignoré (illisible, junction) faisait quand même ajouter une entrée `CatalogFile{}`/`CatalogDir{}` à zéro + un item goodbye de longueur nulle. La boucle n'ajoute désormais l'entrée que si quelque chose a réellement été écrit (`a.pos` a avancé) ; un dossier vide légitime avance `a.pos` et reste enregistré.
 - **Restore : fichier temporaire aléatoire et exclusif (v2-H-08)** — l'extraction écrivait dans un `<fichier>.nimbus-part` prévisible ouvert en `O_TRUNC` (un process local pouvait le pré-créer/deviner). Elle utilise désormais `os.CreateTemp` (nom aléatoire, `O_EXCL`) dans le dossier de destination, puis renommage atomique. *(Le confinement d'un symlink/reparse point dans la chaîne parente de la destination reste un durcissement Windows séparé, noté dans le code.)*
 
@@ -302,6 +340,8 @@ Finitions audit v2 (2 correctifs, 1 release).
 ## [0.2.99] - 2026-05-22
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Lint rouge (staticcheck ST1016)** — noms de receiver rendus cohérents : `PBSServer.sanitized` (`p`→`pbs`) et `BackupStatus.merge` (`agg`→`s`), pour matcher les autres méthodes de ces types. La CI golangci-lint échouait sur 0.2.97/0.2.98 (aucun changement de comportement).
 
 ## [0.2.98] - 2026-05-22
@@ -309,6 +349,8 @@ Finitions audit v2 (2 correctifs, 1 release).
 Couverture backup honnête + preuve de restore (audit Codex v2 — 6 correctifs, 1 release).
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Chunk/index fail-closed (C3 / v2-H-04 — critique)** — un échec d'upload de chunk indexait quand même le digest et fermait l'index → snapshot référençant un chunk absent (non restaurable), tout en s'auto-signalant échec *après coup*. Désormais : un chunk n'est marqué connu et indexé qu'**après upload confirmé**, et tout échec d'upload **abandonne le writer avant** `CloseDynamicIndex`/`Finish` — aucun snapshot corrompu n'est committé, et seeder le dedup depuis l'index précédent (toujours vérifié) redevient sûr.
 - **Auto-split n'oublie plus les fichiers racine (v2-H-01 — perte silencieuse)** — quand un dossier sélectionné dépassait le seuil via ses sous-dossiers, les fichiers posés **directement à la racine** n'entraient dans aucun snapshot, run « réussi ». Un job « reste racine » sauvegarde désormais la racine en excluant les sous-dossiers déjà couverts ; `AnalyzeBackupDirs` honore les exclusions (pas de re-split/double-couverture).
 - **Agrégation auto-split + continuité (v2-H-03)** — le chemin auto-split émettait des callbacks de complétion intermédiaires et s'arrêtait au 1er split en échec. Il agrège désormais un résultat unique (helpers partagés avec le multi-dossiers), **continue les splits indépendants**, et n'émet la complétion qu'après le dernier.
@@ -340,6 +382,8 @@ Durcissement sécurité (Groupe 4 — 5 correctifs, 1 release).
 Correctifs suite à la revue Codex des commits du jour.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Backup-id custom non retrouvable en multi-dossiers (régression 0.2.94)** — le fix de grouping remplaçait le backup-id custom par un id dérivé du chemin, donc un `backup-id` configuré (ex. `client-prod`) ne retrouvait plus ses snapshots (la recherche restore filtre par sous-chaîne). Les ids enfants sont désormais dérivés du base id (`client-prod_C_Users`…), donc le base reste une sous-chaîne et le restore les retrouve.
 - **Sidecar de statut : chemins VSS** — sous VSS, le sidecar et les listes exclus/ignorés affichaient des chemins de shadow copy (`\\?\GLOBALROOT\…`). Ils sont désormais ramenés au chemin logique d'origine.
 
@@ -364,6 +408,8 @@ Auto-split configurable (Groupe 3, tranche 2).
 Grouping par dossier (Groupe 3, tranche 1) : rétention PBS correcte pour les backups multi-dossiers.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Backup multi-dossiers entassé dans un seul groupe PBS (rétention cassée)** — quand plusieurs dossiers étaient sélectionnés sans découpage par taille, ils partageaient tous un seul backup-id (dérivé du premier) et atterrissaient comme snapshots successifs d'un même groupe. La prune par groupe (keep-last/keep-daily) traitait alors des dossiers différents comme des versions du même objet → elle pouvait conserver N snapshots d'un dossier et **perdre les autres**. Désormais **chaque dossier sélectionné est sauvegardé dans son propre groupe** (backup-id dérivé de son chemin), donc la rétention s'applique correctement par dossier. Un dossier unique conserve le backup-id fourni (ex. job planifié). Les callbacks de complétion par dossier sont agrégés en **un seul** résultat honnête pour tout le run, préservant le contrat de statut du Groupe 0.
 
 ### Notes
@@ -384,6 +430,8 @@ Restauration par lecture paresseuse — prérequis du splitting configurable (Gr
 Exclusions utilisateur (audit H-04) + sidecar de statut, et correctif du build cassé en 0.2.91.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Build cassé en 0.2.91 (`undefined: onStats`)** — le paramètre `onStats` ajouté en 0.2.91 avait été placé sur le wrapper `backupDirectory` mais utilisé dans `backupReal`, qui ne le recevait pas → `go build` échouait. `onStats` (et la nouvelle liste d'exclusions) sont désormais threadés jusqu'à `backupReal`.
 
 ### Added
@@ -395,6 +443,8 @@ Exclusions utilisateur (audit H-04) + sidecar de statut, et correctif du build c
 Contrat de résultat de backup honnête (audit H-03) et avancement structuré dans la GUI.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Backup partiel/échoué rapporté « réussi » en mode service (H-03 — critique)** — `runBackupInlineInternal` calculait le succès puis renvoyait `nil` ; le stub service ne propageait pas le statut et l'API concluait `Success=true` sur retour nil. Le moteur construit désormais un `BackupStatus` (outcome `success`/`partial`/`failed`) et **renvoie une erreur non-nil sur partiel ou échoué**, propagée jusqu'au fallback de l'API et à l'historique du scheduler en mode service. Un chunk échoué (index corrompu, non restaurable) compte comme `failed`, pas comme succès.
 
 ### Added
@@ -413,6 +463,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 - **Secret PBS écrit en clair dans les logs** — le dump de la requête d'upgrade (`pbsapi.go`) journalisait `Authorization: PBSAPIToken=<id>:<secret>` via `fmt.Printf`. Le secret est désormais masqué (`:<redacted>`) dans la trace.
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Backup avec chunks échoués marqué « réussi » (intégrité — critique)** — un échec d'upload de chunk incrémentait `failedchunk` mais le digest restait indexé, l'index était fermé et `Finish()` committait le snapshot, tandis que `success := !partial` **ignorait `failed`**. Un snapshot référençant des chunks jamais uploadés (donc non restaurable) était rapporté comme réussi. Désormais `success := !partial && failed == 0` : tout chunk échoué fait échouer le backup. *(NB : le correctif complet — ne pas indexer/committer les chunks échoués et ne pas déduire la dédup d'un index non vérifié — reste à faire.)*
 - **Restauration sans vérification d'intégrité** — `AssembleDIDXToFile` ne validait que la *taille* décompressée des chunks. Chaque chunk est maintenant vérifié par SHA-256 contre son digest d'index ; un chunk corrompu/altéré fait échouer la restauration au lieu d'écrire des données silencieusement fausses.
 - **Panic à la restauration sur réponse de chunk tronquée** — `GetChunkData` faisait `ret[:8]`/`ret[12:]` sans contrôle de longueur (panic sur un corps d'erreur court : proxy 502, coupure réseau). Garde `len(ret) < 12` ajoutée.
@@ -426,6 +478,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.89] - 2026-05-22
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Corruption d'archive sur fichier modifié pendant le backup (intégrité — critique)** — `PXARArchive.WriteFile` déclarait la taille du payload PXAR depuis le `Lstat` (`fileInfo.Size()`) puis streamait les octets *réellement lus*, sans réconciliation. Un fichier qui changeait de taille entre le stat et la fin de lecture — cas courant d'un fichier en cours d'utilisation **sans VSS** (logs, `.pst`, `.mdf` SQL, `.evtx`) — produisait un en-tête `PXAR_PAYLOAD` mensonger, désynchronisant le flux pxar et corrompant **toutes les entrées suivantes** de l'archive, donc une restauration cassée, silencieusement. Désormais on émet **exactement** la taille déclarée : lectures plafonnées à `declaredSize`, et tout déficit (fichier rétréci / lecture courte) est complété par des zéros et signalé dans la liste des fichiers ignorés (« content may be inconsistent »). Le bug `(n>0, io.EOF)` de la boucle de lecture (qui pouvait faire échouer un fichier lu en une passe) est corrigé au passage.
 - **Pinning de certificat TLS inopérant (sécurité)** — dans `PBSClient.Connect`, la fonction `VerifyPeerCertificate` (posée uniquement quand une empreinte est configurée, avec `InsecureSkipVerify=true`) gardait sa comparaison d'empreinte derrière `&& !pbs.Insecure`, condition **toujours fausse** à cet endroit. Résultat : l'empreinte n'était jamais vérifiée et **n'importe quel certificat était accepté** (MITM possible), alors que l'utilisateur croyait épingler son serveur. La comparaison est désormais réellement appliquée (insensible à la casse) et un écart d'empreinte est une erreur dure.
 - **Redémarrage du service VSS au démarrage (casse les autres logiciels de backup)** — `VSSCleanup`, exécuté à chaque démarrage du service, faisait `net stop/start VSS`, ce qui impacte **tous** les consommateurs VSS de la machine. Sur un contrôleur de domaine ou un hôte faisant tourner un autre logiciel de sauvegarde (Veritas Backup Exec, Windows Server Backup, agents SQL/Exchange), cela pouvait avorter leurs snapshots en cours et corrompre leur état. Le bounce inconditionnel au démarrage est supprimé ; le nettoyage des shadows orphelins est conservé. La récupération d'un contexte `IVssBackupComponents` resté bloqué (« shadow copy creation already in progress ») se fait désormais **paresseusement**, uniquement quand elle nous bloque réellement, via `vssForceReset()` au prochain `CreateSnapshot` — juste avant notre propre backup.
@@ -433,11 +487,15 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.88] - 2026-05-20
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Lint CI (errcheck)** — `restore_inline.go` ne vérifiait pas la valeur de retour de `f.Close()` sur l'archive assemblée. Enveloppé dans un `defer func() { _ = f.Close() }()` pour aligner sur le `os.Remove` voisin et débloquer le build.
 
 ## [0.2.87] - 2026-05-20
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Crash à la restauration d'un gros split (OOM)** — `AssembleDIDX` reconstruisait l'archive entière en mémoire (`make([]byte, totalSize)`), soit jusqu'à ~100 Go pour un job auto-split, ce qui saturait la RAM et tuait le process. Le crash était indépendant du mode (in-place comme « autre emplacement ») car l'assemblage précède toute logique de destination.
 - **Bouton « Parcourir » (destination) qui crashe** — `OpenRestoreDestDialog` ouvrait le sélecteur natif sans `DefaultDirectory`, déclencheur connu de plantage du picker Windows. Ajout d'un dossier initial garanti existant (home, sinon temp), d'un `recover()` et de logs avant/après l'appel pour diagnostiquer un éventuel crash natif résiduel.
 
@@ -449,11 +507,15 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.86] - 2026-05-19
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Lint ST1005 (staticcheck)** — 4 messages d'erreur du module restore in-place se terminaient par un point, ce que staticcheck refuse (les chaînes d'erreur Go ne portent ni majuscule initiale ni ponctuation finale). Reformulation pour conserver le sens et passer le lint.
 
 ## [0.2.85] - 2026-05-19
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Build cassé en 0.2.84** — `gui/restore_inline.go` appelait `normalizeIncludes` (non-exporté de `pbscommon`) depuis le package `main`, ce qui faisait échouer `go test` avec `undefined: normalizeIncludes`. La fonction est exportée en `pbscommon.NormalizeIncludes` et le call site corrigé.
 
 ## [0.2.84] - 2026-05-19
@@ -503,6 +565,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.81] - 2026-05-13
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Restauration : crash GUI au clic sur un snapshot** — `ListSnapshotContentsInline` et `RestoreSnapshotInline` téléchargeaient `backup.pxar.didx` via `DownloadToBytes` puis tentaient de parser le résultat comme du PXAR. Le `.didx` est en réalité l'index (en-tête 4096 octets + entrées de 40 octets : offset cumulé + SHA-256) et non l'archive assemblée. Le parser PXAR lisait des octets aléatoires comme des en-têtes, déclenchait une panic et fermait la fenêtre Wails.
 
 ### Added
@@ -528,6 +592,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
   - `pbscommon.PXARReader.ListEntries()` et `ExtractFiltered()` (extraction sélective)
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **PXAR reader: descente correcte dans les sous-dossiers** — l'ancien walker ne descendait pas dans les sous-répertoires (fichiers nichés extraits à plat à la racine de destination, dossiers vides perdus). Le nouveau walker maintient une pile de dossiers et utilise `PXAR_GOODBYE` comme marqueur de remontée.
 - **PXAR reader: dates de modification correctement restaurées** — `binary.Read` sur `*MTime` (struct à champs non-exportés) était silencieusement no-op via reflection, laissant `mtime = 0`. Lecture passée en `binary.LittleEndian.Uint64` direct par offset.
 - **Restauration: connexion PBS fermée** — `defer client.Close()` ajouté pour libérer immédiatement le verrou de snapshot sans attendre la fin du keepalive TCP.
@@ -538,6 +604,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.12] - 2026-03-23
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Better responsive design for very small screens** - Improved approach for low-res displays
   - Reduced MinWidth from 600 to 400 (supports 800x600 and smaller screens)
   - Reduced MinHeight from 500 to 300 (supports low-resolution displays)
@@ -552,6 +620,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.11] - 2026-03-23
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **UI overflow on small screens** - Window too small causes UI elements to be cut off
   - Added MinWidth: 600 and MinHeight: 500 to Wails window options
   - Prevents close button from being inaccessible
@@ -564,6 +634,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.10] - 2026-03-23
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **MSI build error** - Incorrect service exe path in Product.wxs
   - Changed path from `../../cmd/service/` to `../../gui/build/bin/`
   - Workflow builds service to gui/build/bin/ProxmoxBackupClientSVC.exe
@@ -572,6 +644,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.9] - 2026-03-23
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Service build error** - app.App missing BackupHandler interface methods
   - Implemented all 6 required methods as stubs (StartBackup, GetConfigWithHostname, etc.)
   - Fixes "*app.App does not implement api.BackupHandler"
@@ -579,6 +653,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.8] - 2026-03-23
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **GUI build error** - Missing gui/api in go.mod
   - Added gui/api to require and replace directives
   - Fixes "module @latest found, but does not contain package gui/api"
@@ -587,6 +663,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.7] - 2026-03-23
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Missing gui/api/go.mod** - Service build error
   - Created gui/api/go.mod module definition
   - Fixes "reading go.mod: file not found" error
@@ -594,6 +672,8 @@ Issues de l'audit complet des flux VSS, des interactions inter-process (GUI ↔ 
 ## [0.2.6] - 2026-03-23
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Service build error** - "gui is a program, not an importable package"
   - Extracted App struct to new `gui/app` package
   - Service now imports `gui/app` instead of `gui` (package main)
@@ -623,6 +703,8 @@ Current version uses minimal stubs to unblock service build.
 ## [0.2.4] - 2026-03-23
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Service build error** - Missing replace directives in cmd/service/go.mod
   - Added replace directives for all local modules (clientcommon, pbscommon, retry, security, snapshot)
   - Paths adjusted relative to cmd/service/ directory
@@ -671,6 +753,8 @@ Current version uses minimal stubs to unblock service build.
   - Prevents backing up large system files that shouldn't be in backups
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **CI/CD build error** - Service executable not built before MSI creation
   - Added build step for `ProxmoxBackupClientSVC.exe` in GitHub Actions workflow
   - Service now built from `cmd/service` before WiX packaging
@@ -774,6 +858,8 @@ Voulez-vous le découper en 9 backups ?
   - User-friendly behavior (no error dialog, just focus existing window)
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Long backup reliability** - Critical keep-alive timeout fix
   - Changed keep-alive interval from 5 minutes to 30 seconds
   - Prevents "dynamic writer not registered" HTTP/2 errors
@@ -832,6 +918,8 @@ Voulez-vous le découper en 9 backups ?
 ## [0.1.32] - 2026-03-19
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **CI/CD duplication** - Désactivé trigger tags sur release.yml
   - Évite 2 pipelines simultanées sur chaque tag
   - build-and-release.yml gère tous les builds (CLI + GUI + tests)
@@ -852,6 +940,8 @@ Voulez-vous le découper en 9 backups ?
   - Version dynamique dans paramètres UTM
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Build CLI macOS** - NBD skip sur macOS (Linux/Windows uniquement)
   - Détection GOOS dans Makefile
   - NBD build uniquement sur plateformes supportées
@@ -860,6 +950,8 @@ Voulez-vous le découper en 9 backups ?
 ## [0.1.30] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Build CLI complet** - Fix tous les modules CLI (directorybackup, machinebackup, nbd)
   - Retiré tous les usages de slices.Collect (Go 1.23+)
   - machinebackup: Collect keys manuellement avec make() + append()
@@ -869,6 +961,8 @@ Voulez-vous le découper en 9 backups ?
 ## [0.1.29] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Progression qui recule** - Fix calcul de progression pendant backup
   - Cause: totalSize mis à jour en arrière-plan par scan de fichiers
   - Solution: lastProgressPercent pour garantir progression monotone
@@ -903,6 +997,8 @@ Voulez-vous le découper en 9 backups ?
 ## [0.1.28] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Critical file access error handling** - Gracefully skip inaccessible files/directories
   - Changed file/directory access errors from fatal to warning + skip
   - Backup continues when encountering locked, permission-denied, or inaccessible files
@@ -949,6 +1045,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.27] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Build error** - Removed unused encoding/json import
 - **HTTP/2 connection cleanup** - Close idle connections before reconnecting
   - Prevents reusing stale/broken connections from failed backups
@@ -963,6 +1061,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.26] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Junction point handling** - Critical fix for Windows backup failures
   - Added detection of junction points/symlinks using os.Lstat()
   - Automatically skip junction points with log message
@@ -984,6 +1084,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.25] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Version always showing "dev"** - CRITICAL FIX
   - os.ReadFile("wails.json") doesn't work in compiled binary
   - wails.json is not embedded in the executable
@@ -1014,6 +1116,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.23] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Version display hardcoded in frontend**
   - Version was hardcoded as "0.0.16" in App.jsx line 670
   - Added GetVersion() backend function to read from wails.json
@@ -1042,6 +1146,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.21] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **HTTP/1.1 Host header missing** - PBS returned 400 Bad Request
   - Added required Host header to upgrade request (line 565)
   - HTTP/1.1 spec requires Host header, PBS enforces it strictly
@@ -1057,6 +1163,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.20] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **CRITICAL: PBS authentication error now shows real HTTP response**
   - AuthErr struct modified to capture StatusCode and ResponseBody
   - DialTLSContext function (line 587-594) now passes actual PBS error details
@@ -1073,6 +1181,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.19] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Build error** - Removed remaining errors.New reference
   - Line 370 still had errors.New after import removal
   - Changed to fmt.Errorf("%s", errMsg)
@@ -1081,6 +1191,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.18] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Critical bug in PBS error handling** - Fixed nil error return in CreateDynamicIndex
   - When PBS returns HTTP error, the function was returning `nil` instead of actual error
   - Bug existed since original code but was silently masking PBS authentication errors
@@ -1101,6 +1213,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.17] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **All SA1006 linting errors resolved** - Changed fmt.Errorf(variable) to errors.New(variable)
   - backup_inline.go:306 - fmt.Errorf(errMsg) → errors.New(errMsg)
   - backup_inline.go:349 - fmt.Errorf(errMsg) → errors.New(errMsg)
@@ -1121,6 +1235,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.16] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **CI/CD linting** - Direct golangci-lint execution for better error reporting
   - Replaced golangci-lint-action with direct installation
   - Action was forcing github-actions format, ignoring .golangci.yml
@@ -1134,6 +1250,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.15] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Error handling** - Fixed 6 errcheck linting errors
   - config_test.go: Check os.Setenv return values (4 occurrences)
   - main.go: Check logFile.Close() and f.Close() return values
@@ -1147,6 +1265,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.14] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Lint error reporting** - Added golangci-lint configuration for better diagnostics
   - Created gui/.golangci.yml with line-number output format
   - Enabled print-issued-lines and sort-results
@@ -1160,6 +1280,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.13] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Linting errors** - Fixed remaining fmt.Fprintf SA1006 warnings
   - gui/main.go:105: fmt.Fprintf → fmt.Fprint (crash message)
   - gui/main.go:163: fmt.Fprintf → fmt.Fprint (startup failure message)
@@ -1175,6 +1297,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.12] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **CI/CD workflow improvements**
   - Added GOWORK=off to golangci-lint step to prevent workspace-wide linting
   - Fixed hardcoded v0.4.0 in release notes (now uses dynamic version from tag)
@@ -1190,6 +1314,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.11] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Final Printf linting issues** - Fixed remaining SA1006 warnings in machinebackup
   - machinebackup/windows.go:452: log.Printf → log.Print
   - machinebackup/windows.go:462: log.Printf → log.Print
@@ -1202,6 +1328,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.10] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Final linting issue** - Fixed last SA1006 staticcheck warning
   - snapshot/nop_snapshot.go: log.Printf → log.Print
   - All 3 Printf formatting issues now resolved
@@ -1215,6 +1343,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.9] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Linting issues** - Fixed staticcheck SA1006 warnings
   - Changed Printf to Print for non-format strings
   - pbscommon/pbsapi.go: Printf → Print
@@ -1253,6 +1383,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.6] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **GitHub Actions workflow** - Automated dependency management
   - Added `go mod tidy` step before tests and linting
   - Automatic generation of go.sum in CI/CD
@@ -1266,6 +1398,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.5] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Go version consistency** - Fixed remaining Go 1.24.4 references
   - directorybackup/go.mod: 1.24.4 → 1.22
   - machinebackup/go.mod: 1.24.4 → 1.22
@@ -1280,6 +1414,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.4] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **Module resolution** - Fixed Go module imports for CI/CD
   - Created go.mod files for all pkg modules (logger, retry, security)
   - Simplified module names (pkg/retry → retry, pkg/security → security)
@@ -1332,6 +1468,8 @@ Bug #2 - HTTP/2 Connection State:
 ## [0.1.1] - 2026-03-18
 
 ### Fixed
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
 - **GitHub Actions CI/CD** - Fixed go.work compatibility issues
   - Added `gui` module to go.work workspace
   - Set `GOWORK: off` environment variable in all workflow jobs

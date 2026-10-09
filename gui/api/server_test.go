@@ -27,9 +27,19 @@ type fakeHandler struct {
 	updatedJob map[string]interface{}
 	deletedID  string
 	ranID      string
+
+	// StartBackup runs on the route's goroutine: started is signalled after
+	// the arguments are recorded.
+	started          chan struct{}
+	startCompression string
+	startPBSID       string
 }
 
-func (f *fakeHandler) StartBackup(string, []string, []string, []string, string, bool, string, string) error {
+func (f *fakeHandler) StartBackup(_ string, _, _, _ []string, _ string, _ bool, compression, pbsID string) error {
+	f.startCompression, f.startPBSID = compression, pbsID
+	if f.started != nil {
+		f.started <- struct{}{}
+	}
 	return nil
 }
 func (f *fakeHandler) GetConfigWithHostname() map[string]interface{} {
@@ -192,6 +202,28 @@ func TestJobRunRoute(t *testing.T) {
 	}
 	if out["success"] != true {
 		t.Errorf("response = %v, want success", out)
+	}
+}
+
+// The /backup route hands the compression level and the selected PBS server
+// to the backup in the right order: they were swapped, so a service-run backup
+// got the PBS id as its compression level and the level as its PBS id.
+func TestBackupRouteForwardsCompressionAndPBS(t *testing.T) {
+	h := &fakeHandler{started: make(chan struct{}, 1)}
+	_, url, _ := newTestServer(t, h)
+
+	resp := doAuthed(t, http.MethodPost, url+"/backup",
+		`{"backup_type":"directory","backup_id":"pc1","backup_dirs":["C:\\Data"],"compression":"better","pbs_id":"pbs-2"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	select {
+	case <-h.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("StartBackup was not called")
+	}
+	if h.startCompression != "better" || h.startPBSID != "pbs-2" {
+		t.Errorf("StartBackup got compression %q, pbsID %q; want \"better\", \"pbs-2\"", h.startCompression, h.startPBSID)
 	}
 }
 

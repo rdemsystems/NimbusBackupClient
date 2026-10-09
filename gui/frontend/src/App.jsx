@@ -1094,7 +1094,8 @@ function App() {
           excludeList.split('\n').filter(l => l.trim()),
           config['backup-id'],
           config.usevss,
-          ''
+          '',
+          backupPBSID
         )
         showStatus(`⏳ ${t('statusBackupRunning')}`, 'info')
         return
@@ -1138,7 +1139,8 @@ function App() {
             [...excludeList.split('\n').filter(l => l.trim()), ...(job.exclude_list || [])],
             job.backup_id,
             config.usevss,
-            ''
+            '',
+            backupPBSID
           )
         } catch (err) {
           // The part never started (validation / dispatch error): no completion

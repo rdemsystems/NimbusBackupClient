@@ -90,11 +90,13 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
 		pbsBackupType = "vm"
 	}
 
-	// Resolve the EFFECTIVE PBS config: a multi-PBS-only config keeps the legacy
-	// BaseURL/AuthID/Secret/Datastore fields empty, so building options from those
-	// directly yielded "PBS connection parameters required" in service mode (the GUI
-	// standalone path already used EffectivePBS — audit M-01/M-04, reported in prod).
-	pbsCfg, err := a.withAuth(a.config.EffectivePBS())
+	// Resolve the PBS server the job selected, or the EFFECTIVE default one: a
+	// multi-PBS-only config keeps the legacy BaseURL/AuthID/Secret/Datastore
+	// fields empty, so building options from those directly yielded "PBS
+	// connection parameters required" in service mode (audit M-01/M-04). The
+	// selected server used to be ignored here: every directory backup run by
+	// the service went to the default PBS (StartMachineBackup already did this).
+	pbsCfg, err := a.resolveBackupPBS(pbsID)
 	if err != nil {
 		return err
 	}

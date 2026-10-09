@@ -316,8 +316,8 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 			req.ExcludeList,
 			req.BackupID,
 			req.UseVSS,
-			req.PBSID,
 			compression,
+			req.PBSID,
 		)
 
 		// Update final status if callbacks didn't fire
