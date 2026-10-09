@@ -166,6 +166,16 @@ The service reads its configuration from `C:\ProgramData\ProxmoxBackupClient\`
 4. Select directories to back up
 5. Start the backup — or schedule it
 
+### 🔑 PBS user and permissions
+
+The client only needs the **`DatastoreBackup`** role on the target datastore — no admin account:
+
+1. In the PBS UI, create a user (e.g. `nimbus@pbs`) and an API token for it (e.g. `nimbus@pbs!laptop01`).
+2. In **Datastore → Permissions** (or **Configuration → Access Control → Permissions**), grant `DatastoreBackup` on `/datastore/<name>` — or on `/datastore/<name>/<namespace>` if you back up into a namespace.
+3. **Privilege-separated token** ("Privilege Separation" checked, the default): grant the role to the **token** itself (`nimbus@pbs!laptop01`), not only to the user — the effective rights are the intersection of both. This is the most common cause of "permission denied".
+
+`DatastoreBackup` lets the client create backups and list and restore its own backup groups. Deleting or pruning snapshots needs `DatastorePowerUser`.
+
 ## ⬆️ Upgrading from ≤ 0.3.0
 
 Installing 0.4.0 or later over an existing install upgrades it in place (same MSI identity, same `NimbusBackup` service). The data folder moves from `C:\ProgramData\NimbusBackup` to the shared `C:\ProgramData\ProxmoxBackupClient`: on first start, your configuration, scheduled jobs, history and API token are copied over once (existing files are never overwritten). The old folder is kept, marked with `COPIED-TO-ProxmoxBackupClient.txt`, so a downgrade still works. Snapshots taken by older versions can still be restored to their original location.

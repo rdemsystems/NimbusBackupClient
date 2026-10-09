@@ -170,6 +170,16 @@ Le service lit sa configuration dans `C:\ProgramData\ProxmoxBackupClient\`
 4. Sélectionnez les dossiers à sauvegarder
 5. Lancez la sauvegarde — ou planifiez-la
 
+### 🔑 Utilisateur PBS et droits
+
+Le client n'a besoin que du rôle **`DatastoreBackup`** sur le datastore cible — pas d'un compte administrateur :
+
+1. Dans l'interface PBS, créez un utilisateur (ex. `nimbus@pbs`) et un jeton d'API pour lui (ex. `nimbus@pbs!laptop01`).
+2. Dans **Datastore → Permissions** (ou **Configuration → Contrôle d'accès → Permissions**), attribuez `DatastoreBackup` sur `/datastore/<nom>` — ou sur `/datastore/<nom>/<namespace>` si vous sauvegardez dans un namespace.
+3. **Jeton à privilèges séparés** (« Privilege Separation » cochée, le défaut) : attribuez le rôle au **jeton** lui-même (`nimbus@pbs!laptop01`), pas seulement à l'utilisateur — les droits effectifs sont l'intersection des deux. C'est la cause la plus fréquente de « permission denied ».
+
+`DatastoreBackup` permet de créer des sauvegardes, de lister et de restaurer ses propres groupes de sauvegarde. Supprimer ou purger des snapshots demande `DatastorePowerUser`.
+
 ## ⬆️ Mise à jour depuis ≤ 0.3.0
 
 Installer la 0.4.0 ou une version ultérieure par-dessus une installation existante la met à jour sur place (même identité MSI, même service `NimbusBackup`). Le dossier de données passe de `C:\ProgramData\NimbusBackup` au dossier partagé `C:\ProgramData\ProxmoxBackupClient` : au premier démarrage, la configuration, les tâches planifiées, l'historique et le jeton API y sont copiés une seule fois (aucun fichier existant n'est écrasé). L'ancien dossier est conservé et marqué par `COPIED-TO-ProxmoxBackupClient.txt`, ce qui permet encore un retour arrière. Les snapshots pris par les anciennes versions restent restaurables à leur emplacement d'origine.
