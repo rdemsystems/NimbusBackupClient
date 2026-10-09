@@ -3,9 +3,7 @@
 
 package clientcommon
 
-type Locking struct {
-	mutexid uintptr
-}
+type Locking struct{}
 
 func (l *Locking) AcquireProcessLock() bool {
 	return true

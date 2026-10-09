@@ -10,18 +10,21 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/alphadose/haxmap"
+	"github.com/klauspost/compress/zstd"
 	"golang.org/x/net/http2"
 )
 
@@ -94,28 +97,115 @@ type FixedIndexCreateReq struct {
 
 type Unprotected struct {
 	ChunkUploadStats ChunkUploadStats `json:"chunk_upload_stats"`
-	// KeyFingerprint names the encryption key of an encrypted backup
-	// ("aa:bb:..."), empty for unencrypted ones. Set by EncodeManifest.
-	KeyFingerprint   string           `json:"key-fingerprint,omitempty"`
+
+	// KeyFingerprint carries the colon-hex fingerprint of the encryption key
+	// that signed this snapshot, mirroring proxmox-backup's
+	// `unprotected["key-fingerprint"]`. It is deliberately *outside* the
+	// signature (proxmox-backup removes `unprotected` before computing the
+	// auth tag), so a restore can pick the right key before verifying.
+	KeyFingerprint *string `json:"key-fingerprint,omitempty"`
 }
 
+// BackupManifest mirrors proxmox-backup's `BackupManifest` (src/backup/
+// manifest.rs) field for field.
+//
+// The field set must match exactly. PBS does not store the index.json.blob we
+// upload byte for byte: at /finish it parses the blob into its own struct and
+// re-serializes it, which drops every key that struct does not declare and
+// reformats the document (the stored blob is always serde_json pretty-printed).
+// Since the official restore client verifies the manifest signature against that
+// re-serialized shape, any extra key we add here would be signed but never
+// stored, and every encrypted restore would fail with "wrong signature in
+// manifest". Comment is therefore kept in memory but never serialized - PBS
+// does not persist it anyway, so writing it out only ever broke signing.
 type BackupManifest struct {
 	BackupID    string      `json:"backup-id"`
 	BackupTime  int64       `json:"backup-time"`
 	BackupType  string      `json:"backup-type"`
-	Comment     string      `json:"comment"`
+	Comment     string      `json:"-"`
 	Files       []File      `json:"files"`
 	Signature   interface{} `json:"signature"`
 	Unprotected Unprotected `json:"unprotected"`
 }
 
+// AuthErr is returned when PBS refuses to upgrade the connection to the
+// backup or reader protocol. Despite its name, that is not always an
+// authentication problem: PBS also refuses with 400 ("backup owner check
+// failed"), 403 (missing privilege) or 404 ("namespace not found"), with the
+// reason as plain text in the body.
 type AuthErr struct {
-	StatusCode   string
-	ResponseBody string
+	StatusCode   int    // HTTP status code
+	Status       string // reason phrase of the status line, e.g. "Bad Request"
+	ResponseBody string // response body only, whitespace-collapsed
 }
 
 func (e *AuthErr) Error() string {
-	return fmt.Sprintf("PBS authentication failed: HTTP %s - %s", e.StatusCode, e.ResponseBody)
+	reason := e.ResponseBody
+	if reason == "" {
+		reason = e.Status
+	}
+	if reason == "" {
+		reason = http.StatusText(e.StatusCode)
+	}
+	what := "PBS refused the backup"
+	switch e.StatusCode {
+	case http.StatusUnauthorized:
+		what = "PBS authentication failed"
+	case http.StatusForbidden:
+		what = "PBS access denied"
+	}
+	return fmt.Sprintf("%s (HTTP %d): %s", what, e.StatusCode, reason)
+}
+
+// upgradeRejection builds the error for a refused protocol upgrade from the
+// response status line ("HTTP/1.1 400 Bad Request") and body. The response
+// headers are left out: they only go to the debug log.
+func upgradeRejection(statusLine string, body []byte) *AuthErr {
+	e := &AuthErr{}
+	toks := strings.SplitN(strings.TrimSpace(statusLine), " ", 3)
+	if len(toks) > 1 {
+		e.StatusCode, _ = strconv.Atoi(toks[1])
+	}
+	if len(toks) > 2 {
+		e.Status = toks[2]
+	}
+	text := strings.TrimSpace(string(body))
+	// PBS answers API errors in JSON ({"message": ...}) and the upgrade
+	// refusal in plain text; accept both.
+	var j struct {
+		Message string `json:"message"`
+	}
+	if strings.HasPrefix(text, "{") && json.Unmarshal([]byte(text), &j) == nil && j.Message != "" {
+		text = j.Message
+	}
+	e.ResponseBody = strings.Join(strings.Fields(text), " ")
+	return e
+}
+
+// NamespaceNotFoundErr is returned when the server rejects a request because
+// the requested namespace does not exist yet.
+//
+// Namespaces are a server-side object and have to be created before they can be
+// used. Every other PBS client behaves the same way, but the raw server answer
+// ("404 namespace not found") arriving as an *AuthErr* on the HTTP/2 upgrade
+// handshake is genuinely misleading: it reads like a credential problem. This
+// type exists purely to turn that into an actionable message.
+type NamespaceNotFoundErr struct {
+	Namespace string
+	Datastore string
+}
+
+func (e *NamespaceNotFoundErr) Error() string {
+	return fmt.Sprintf("PBS namespace %q does not exist on datastore %q: create it first, "+
+		"e.g. POST /api2/json/admin/datastore/%s/namespace with name=%s "+
+		"(note: the parameter is \"name\", not \"ns\"; proxmox-backup-manager has no "+
+		"\"namespace\" command, use the API)", e.Namespace, e.Datastore, e.Datastore, e.Namespace)
+}
+
+// namespaceNotFound reports whether a PBS error body means "that namespace
+// does not exist" rather than a genuine authentication failure.
+func namespaceNotFound(body string) bool {
+	return strings.Contains(strings.ToLower(body), "namespace not found")
 }
 
 type PBSClient struct {
@@ -149,10 +239,13 @@ type PBSClient struct {
 	ReadErrors       []string         // Outcome-affecting read failures + content instability (v2-H-02)
 	CompressionLevel CompressionLevel // Zstd compression level (default: fastest)
 
-	// Crypt, when set, encrypts every chunk and blob of the backup (and
-	// decrypts them on restore) with a proxmox-backup-client compatible key;
-	// nil means an unencrypted backup. Chunk digests must then be computed
-	// with Crypt.ChunkDigest (nil-safe) so they are keyed.
+	// Crypt, when non-nil, puts every chunk and blob this client uploads
+	// into AES-256-GCM DataBlobs and switches chunk digests to
+	// sha256(plaintext || id_key) — the exact scheme proxmox-backup-server
+	// and the official proxmox-backup-client expect for `--crypt-mode
+	// encrypt`. It is also the decryption key when reading (GetChunkData /
+	// DownloadBlob), so a restore of an encrypted snapshot needs nothing
+	// else. Nil (the default) keeps the pre-existing unencrypted framing.
 	Crypt *CryptConfig
 
 	// activeConn is the raw TLS socket underlying the HTTP/2 transport for
@@ -201,6 +294,12 @@ func CloseAllActive() {
 
 const PBS_FIXED_CHUNK_SIZE = 4 * 1024 * 1024
 
+var blobCompressedMagic = []byte{49, 185, 88, 66, 111, 182, 163, 127}
+var blobUncompressedMagic = []byte{66, 171, 56, 7, 190, 131, 112, 161}
+
+// ManifestBlobName is the well-known name PBS and the official client use
+// for the snapshot manifest. It is never encrypted — see UploadManifest.
+const ManifestBlobName = "index.json.blob"
 
 type SnapshotsResp struct {
 	Data []BackupManifest `json:"data"`
@@ -267,7 +366,7 @@ func FetchServerFingerprint(baseURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to reach server: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) == 0 {
 		return "", fmt.Errorf("server presented no certificate")
@@ -376,7 +475,7 @@ func (pbs *PBSClient) ObtainTicket() error {
 	if err != nil {
 		return fmt.Errorf("ticket request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("ticket login failed: HTTP %d - %s", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -393,6 +492,16 @@ func (pbs *PBSClient) ObtainTicket() error {
 	return nil
 }
 
+// serverSupportsNamespace is gone on purpose.
+//
+// It used to gate the `ns` parameter on the server major version being "2",
+// on the assumption that PBS 3.x dropped namespaces. That assumption was wrong
+// and the gate silently disabled namespaces on exactly the servers that do
+// support them (verified against PBS 4.2.0, which serves
+// /api2/json/admin/datastore/{store}/namespace and accepts `ns` on the backup
+// upgrade). Namespaces must simply exist on the server; see
+// NamespaceHint in missingNamespaceErr.
+
 func (pbs *PBSClient) ListSnapshots() ([]BackupManifest, error) {
 	client := &http.Client{
 		Timeout:   10 * time.Second,
@@ -402,7 +511,9 @@ func (pbs *PBSClient) ListSnapshots() ([]BackupManifest, error) {
 	ret := make([]BackupManifest, 0)
 	var r SnapshotsResp
 	params := url.Values{}
-	params.Add("ns", pbs.Namespace)
+	if pbs.Namespace != "" {
+		params.Add("ns", pbs.Namespace)
+	}
 	fullURL := fmt.Sprintf("%s/api2/json/admin/datastore/%s/snapshots?%s", pbs.BaseURL, pbs.Datastore, params.Encode())
 
 	req, err := http.NewRequest(http.MethodGet, fullURL, nil)
@@ -415,7 +526,7 @@ func (pbs *PBSClient) ListSnapshots() ([]BackupManifest, error) {
 	if err != nil {
 		return ret, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return ret, fmt.Errorf("HTTP error: %d - %s", resp.StatusCode, string(body))
@@ -485,9 +596,9 @@ func (pbs *PBSClient) CreateFixedIndex(fic FixedIndexCreateReq) (uint64, error) 
 		return 0, err
 	}
 	fmt.Println("Writer id: ", R.WriterID)
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	f := File{
-		CryptMode: pbs.cryptMode(),
+		CryptMode: pbs.defaultCryptMode(),
 		Csum:      "",
 		Filename:  fic.ArchiveName,
 		Size:      0,
@@ -520,7 +631,7 @@ func (pbs *PBSClient) AssignFixedChunks(writerid uint64, digests []string, offse
 		fmt.Println("Error making request:", err)
 		return err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	if resp2.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp2.Body)
@@ -553,7 +664,7 @@ func (pbs *PBSClient) CloseFixedIndex(writerid uint64, checksum string, totalsiz
 		fmt.Println("Error making request:", err)
 		return err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	if resp2.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp2.Body)
@@ -621,7 +732,7 @@ func (pbs *PBSClient) CreateDynamicIndex(name string) (uint64, error) {
 		fmt.Printf("ERROR: Error type: %T\n", err)
 		return 0, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	fmt.Printf("Response status: %d %s\n", resp2.StatusCode, resp2.Status)
 	fmt.Printf("Response proto: %s\n", resp2.Proto)
@@ -645,9 +756,9 @@ func (pbs *PBSClient) CreateDynamicIndex(name string) (uint64, error) {
 		return 0, err
 	}
 	fmt.Println("Writer id: ", R.WriterID)
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	f := File{
-		CryptMode: pbs.cryptMode(),
+		CryptMode: pbs.defaultCryptMode(),
 		Csum:      "",
 		Filename:  name,
 		Size:      0,
@@ -670,13 +781,98 @@ func (pbs *PBSClient) UploadFixedCompressedChunk(writerid uint64, digest string,
 	return pbs.UploadChunk(writerid, digest, chunkdata, false, true)
 }
 
-func (pbs *PBSClient) UploadChunk(writerid uint64, digest string, chunkdata []byte, dynamic bool, compressed bool) error {
-	// digest must come from pbs.Crypt.ChunkDigest(chunkdata): with encryption
-	// it is keyed, and PBS stores the chunk under that name.
-	outBuffer, err := EncodeBlob(chunkdata, pbs.Crypt, compressed, pbs.CompressionLevel)
-	if err != nil {
-		return err
+// ChunkDigest returns the digest a chunk's *plaintext* must be published
+// under. With encryption enabled that is sha256(plaintext || id_key), not a
+// bare sha256 — the chunk store and both index formats key chunks by this
+// value, so every producer of a digest has to go through here. Without
+// encryption it is a plain sha256, i.e. exactly the pre-encryption scheme.
+func (pbs *PBSClient) ChunkDigest(chunkdata []byte) [32]byte {
+	if pbs.Crypt != nil {
+		return pbs.Crypt.ComputeDigest(chunkdata)
 	}
+	return sha256.Sum256(chunkdata)
+}
+
+// ChunkDigestHex is ChunkDigest in the hex form the PBS API and our index
+// files expect.
+func (pbs *PBSClient) ChunkDigestHex(chunkdata []byte) string {
+	if pbs.Crypt != nil {
+		return pbs.Crypt.ComputeDigestHex(chunkdata)
+	}
+	sum := sha256.Sum256(chunkdata)
+	return hex.EncodeToString(sum[:])
+}
+
+// defaultCryptMode is the crypt-mode a freshly created index archive entry
+// gets. UploadManifest re-derives it for every archive before signing, so
+// this is only about keeping the in-memory manifest honest between creation
+// and upload.
+func (pbs *PBSClient) defaultCryptMode() string {
+	if pbs.Crypt != nil {
+		return CryptModeEncrypt
+	}
+	return CryptModeNone
+}
+
+// zstdLevel maps the configured compression level onto the zstd encoder.
+func (pbs *PBSClient) zstdLevel() zstd.EncoderLevel {
+	switch pbs.CompressionLevel {
+	case CompressionFastest:
+		return zstd.SpeedFastest
+	case CompressionBetter:
+		return zstd.SpeedBetterCompression
+	case CompressionBest:
+		return zstd.SpeedBestCompression
+	default: // CompressionDefault or empty
+		return zstd.SpeedDefault
+	}
+}
+
+func (pbs *PBSClient) UploadChunk(writerid uint64, digest string, chunkdata []byte, dynamic bool, compressed bool) error {
+	var outBuffer []byte
+	var err error
+
+	if pbs.Crypt != nil {
+		// Encrypted chunk: MAGIC || crc32 || IV || TAG || AES-256-GCM(data),
+		// where data is the zstd-compressed plaintext (ENCR_COMPR, what
+		// proxmox-backup-client writes by default) when compression is on
+		// and helps, the plaintext otherwise.
+		//
+		// `size` stays the *plaintext* length and `encoded-size` the framed
+		// length, matching backup_writer.rs's "size": chunk_len.
+		if compressed {
+			outBuffer, err = pbs.Crypt.EncodeEncryptedCompressed(chunkdata, pbs.zstdLevel())
+		} else {
+			outBuffer, err = pbs.Crypt.EncodeEncrypted(chunkdata)
+		}
+		if err != nil {
+			return err
+		}
+	} else if compressed {
+		outBuffer = append(outBuffer, blobCompressedMagic...)
+		compressedData := make([]byte, 0)
+
+		w, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(pbs.zstdLevel()))
+		compressedData = w.EncodeAll(chunkdata, compressedData)
+		checksum := crc32.Checksum(compressedData, crc32.IEEETable)
+		//binary.Write(outBuffer, binary.LittleEndian, checksum)
+		outBuffer = binary.LittleEndian.AppendUint32(outBuffer, checksum)
+
+		//fmt.Printf("Appended checksum %08x , len: %d\n", checksum, len(outBuffer))
+
+		outBuffer = append(outBuffer, compressedData...)
+
+		if len(compressedData) > len(chunkdata) {
+			return pbs.UploadChunk(writerid, digest, chunkdata, dynamic, false)
+		}
+	} else {
+		outBuffer = append(outBuffer, blobUncompressedMagic...)
+		checksum := crc32.Checksum(chunkdata, crc32.IEEETable)
+		outBuffer = binary.LittleEndian.AppendUint32(outBuffer, checksum)
+		outBuffer = append(outBuffer, chunkdata...)
+	}
+
+	//fmt.Printf("Compressed: %d , Orig: %d\n", len(compressedData), len(chunkdata))
 
 	q := &url.Values{}
 	q.Add("digest", digest)
@@ -687,10 +883,10 @@ func (pbs *PBSClient) UploadChunk(writerid uint64, digest string, chunkdata []by
 	if !dynamic {
 		suburl = "/fixed_chunk?"
 	}
-	req, err := http.NewRequest("POST", pbs.BaseURL+suburl+q.Encode(), bytes.NewBuffer(outBuffer))
-	if err != nil {
-		fmt.Println("Error making request:", err)
-		return err
+	req, err2 := http.NewRequest("POST", pbs.BaseURL+suburl+q.Encode(), bytes.NewBuffer(outBuffer))
+	if err2 != nil {
+		fmt.Println("Error making request:", err2)
+		return err2
 	}
 	resp2, err := pbs.Client.Do(req)
 	if err != nil {
@@ -729,7 +925,7 @@ func (pbs *PBSClient) AssignDynamicChunks(writerid uint64, digests []string, off
 		fmt.Println("Error making request:", err)
 		return err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	if resp2.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp2.Body)
@@ -762,7 +958,7 @@ func (pbs *PBSClient) CloseDynamicIndex(writerid uint64, checksum string, totals
 		fmt.Println("Error making request:", err)
 		return err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	if resp2.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp2.Body)
@@ -776,23 +972,31 @@ func (pbs *PBSClient) CloseDynamicIndex(writerid uint64, checksum string, totals
 	return nil
 }
 
-// cryptMode is the manifest "crypt-mode" of the files this session uploads.
-func (pbs *PBSClient) cryptMode() string {
-	if pbs.Crypt != nil {
-		return "encrypt"
-	}
-	return "none"
-}
-
-// UploadBlob uploads a stand-alone blob file (encrypted when pbs.Crypt is set).
+// UploadBlob uploads a top-level blob, encrypting it when the client has a
+// CryptConfig (index.json.blob excepted — see UploadManifest).
 func (pbs *PBSClient) UploadBlob(name string, data []byte) error {
-	return pbs.uploadBlob(name, data, pbs.Crypt)
+	return pbs.uploadBlob(name, data, pbs.Crypt != nil)
 }
 
-func (pbs *PBSClient) uploadBlob(name string, data []byte, crypt *CryptConfig) error {
-	out, err := EncodeBlob(data, crypt, false, pbs.CompressionLevel)
-	if err != nil {
-		return err
+func (pbs *PBSClient) uploadBlob(name string, data []byte, encrypt bool) error {
+	var out []byte
+	cryptMode := CryptModeNone
+
+	if encrypt && pbs.Crypt != nil {
+		var err error
+		// Compressed when it helps, as proxmox-backup-client uploads blobs.
+		out, err = pbs.Crypt.EncodeEncryptedCompressed(data, pbs.zstdLevel())
+		if err != nil {
+			return fmt.Errorf("failed to encrypt blob %s: %w", name, err)
+		}
+		cryptMode = CryptModeEncrypt
+	} else {
+		out = make([]byte, 0, 12+len(data))
+		out = append(out, blobUncompressedMagic...)
+
+		checksum := crc32.ChecksumIEEE(data)
+		out = binary.LittleEndian.AppendUint32(out, checksum)
+		out = append(out, data...)
 	}
 
 	q := &url.Values{}
@@ -832,12 +1036,8 @@ func (pbs *PBSClient) uploadBlob(name string, data []byte, crypt *CryptConfig) e
 	// before the manifest is serialized, its broken entry lands in
 	// the persisted JSON and /finish rejects it.
 	sum := sha256.Sum256(out)
-	mode := "none"
-	if crypt != nil {
-		mode = "encrypt"
-	}
 	pbs.Manifest.Files = append(pbs.Manifest.Files, File{
-		CryptMode: mode,
+		CryptMode: cryptMode,
 		Csum:      hex.EncodeToString(sum[:]),
 		Filename:  name,
 		Size:      int64(len(out)),
@@ -846,14 +1046,81 @@ func (pbs *PBSClient) uploadBlob(name string, data []byte, crypt *CryptConfig) e
 	return nil
 }
 
-// UploadManifest uploads index.json.blob. The manifest is never encrypted;
-// for encrypted backups it is signed and records the key fingerprint.
+// DownloadBlob fetches a top-level blob previously written by UploadBlob
+// (e.g. the NTFS ACL/attributes side-car) from the current snapshot and
+// decodes it back to its raw payload — the inverse of UploadBlob's framing.
+// Deliberately a standalone call site (it does not share FetchChunk's code)
+// so this newer, less-proven path can't put that already-proven one at risk.
+//
+// Encrypted blobs are decrypted with pbs.Crypt, which must be populated for
+// snapshots taken with `--crypt-mode encrypt`. The digest argument is nil
+// here because PBS does not publish a per-blob digest; integrity still rests
+// on the DataBlob CRC32 that DecodeEncryptedBlob verifies.
+func (pbs *PBSClient) DownloadBlob(name string) ([]byte, error) {
+	raw, err := pbs.DownloadToBytes(name)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) < DataBlobHeaderSize {
+		return nil, fmt.Errorf("short blob response for %s: %d bytes", name, len(raw))
+	}
+	if IsEncryptedBlob(raw) && pbs.Crypt == nil {
+		return nil, fmt.Errorf("blob %s is encrypted but no encryption key was provided", name)
+	}
+	return DecodeEncryptedBlob(raw, pbs.Crypt, nil)
+}
+
+// UploadManifest serializes, signs and stores index.json.blob.
+//
+// Following proxmox-backup ("manifests are never encrypted, but include a
+// signature"), the manifest blob itself is always uploaded unencrypted —
+// otherwise nobody could read the key fingerprint and file list needed to
+// bootstrap decryption. With pbs.Crypt set we additionally
+//
+//   - mark every archive we uploaded as crypt-mode "encrypt" so the server
+//     and the official client know its chunks need the key, and
+//   - sign the manifest, storing the hex HMAC in "signature" and the key's
+//     colon-hex fingerprint in "unprotected"."key-fingerprint".
+//
+// Both are computed over the canonical JSON of the manifest with
+// "signature" and "unprotected" removed — byte-for-byte what
+// proxmox-backup's json_signature() feeds to its auth tag.
 func (pbs *PBSClient) UploadManifest() error {
-	manifestBin, err := EncodeManifest(pbs.Manifest, pbs.Crypt)
+	if pbs.Crypt != nil {
+		for i := range pbs.Manifest.Files {
+			// index.json.blob's own entry is appended by uploadBlob below,
+			// i.e. after this loop and after serialization — matching
+			// proxmox-backup, which never lists the manifest in files[].
+			if pbs.Manifest.Files[i].Filename == ManifestBlobName {
+				continue
+			}
+			pbs.Manifest.Files[i].CryptMode = CryptModeEncrypt
+		}
+	}
+
+	manifestBin, err := json.Marshal(pbs.Manifest)
 	if err != nil {
 		return err
 	}
-	return pbs.uploadBlob("index.json.blob", manifestBin, nil)
+
+	if pbs.Crypt != nil {
+		signed, err := canonicalJSONBytes(manifestBin)
+		if err != nil {
+			return fmt.Errorf("failed to canonicalize manifest for signing: %w", err)
+		}
+		pbs.Manifest.Signature = hex.EncodeToString(pbs.Crypt.ComputeAuthTag(signed))
+		fingerprint := pbs.Crypt.Fingerprint()
+		pbs.Manifest.Unprotected.KeyFingerprint = &fingerprint
+
+		// Re-marshal: the signature and the fingerprint only become visible
+		// to the official client through the stored bytes.
+		manifestBin, err = json.Marshal(pbs.Manifest)
+		if err != nil {
+			return err
+		}
+	}
+
+	return pbs.uploadBlob(ManifestBlobName, manifestBin, false)
 }
 
 func (pbs *PBSClient) Finish() error {
@@ -867,7 +1134,7 @@ func (pbs *PBSClient) Finish() error {
 	if err != nil {
 		return fmt.Errorf("finish request failed: %w", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	// CRITICAL: Check HTTP status code
 	if resp2.StatusCode != http.StatusOK {
@@ -914,7 +1181,7 @@ func (pbs *PBSClient) TestConnection() error {
 	if err != nil {
 		return fmt.Errorf("connection failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Check HTTP status
 	if resp.StatusCode == 401 {
@@ -1039,7 +1306,9 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 				fmt.Printf("=== SENDING HTTP REQUEST TO PBS ===\n%s=== END REQUEST ===\n", redactedRequest)
 
 				// Send the request
-				conn.Write([]byte(fullRequest))
+				if _, err := conn.Write([]byte(fullRequest)); err != nil {
+					return nil, fmt.Errorf("send upgrade request: %w", err)
+				}
 				fmt.Print("Reading response to upgrade...\n")
 				buf := make([]byte, 0)
 				for !strings.HasSuffix(string(buf), "\r\n\r\n") && !strings.HasSuffix(string(buf), "\n\n") {
@@ -1070,7 +1339,7 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 						for _, line := range lines {
 							line = strings.TrimSpace(line)
 							if strings.HasPrefix(strings.ToLower(line), "content-length:") {
-								fmt.Sscanf(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), "%d", &contentLength)
+								_, _ = fmt.Sscanf(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), "%d", &contentLength)
 							}
 						}
 						var responseBody string
@@ -1088,14 +1357,15 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 							fmt.Printf("PBS error body: %s\n", responseBody)
 						}
 
-						errBody := string(buf)
-						if responseBody != "" {
-							errBody = errBody + "\nBody: " + responseBody
+						// A missing namespace is reported as HTTP 404 on
+						// the upgrade handshake; give it its own error.
+						if pbs.Namespace != "" && namespaceNotFound(responseBody) {
+							return nil, &NamespaceNotFoundErr{
+								Namespace: pbs.Namespace,
+								Datastore: pbs.Datastore,
+							}
 						}
-						return nil, &AuthErr{
-							StatusCode:   statusCode,
-							ResponseBody: errBody,
-						}
+						return nil, upgradeRejection(lines[0], []byte(responseBody))
 					}
 				}
 
@@ -1157,7 +1427,7 @@ func (pbs *PBSClient) DownloadPreviousToBytes(archivename string) ([]byte, error
 		fmt.Println("Error making request:", err)
 		return nil, err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	ret, err := io.ReadAll(resp2.Body)
 
@@ -1184,7 +1454,7 @@ func (pbs *PBSClient) DownloadToBytes(archivename string) ([]byte, error) { //In
 		fmt.Println("Error making request:", err)
 		return nil, err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	ret, err := io.ReadAll(resp2.Body)
 
@@ -1227,16 +1497,6 @@ func (pbs *PBSClient) GetKnownSha265FromFIDX(archivename string) (*haxmap.Map[st
 }
 
 func (pbs *PBSClient) GetChunkData(digest string) ([]byte, error) {
-	ret, err := pbs.getChunkRaw(digest)
-	if err != nil {
-		return nil, err
-	}
-	// Decrypts encrypted chunks with pbs.Crypt (ErrEncryptedNoKey without one).
-	return DecodeBlob(ret, pbs.Crypt)
-}
-
-// getChunkRaw downloads a chunk's raw (encoded) blob.
-func (pbs *PBSClient) getChunkRaw(digest string) ([]byte, error) {
 	q := &url.Values{}
 
 	q.Add("digest", digest)
@@ -1251,7 +1511,7 @@ func (pbs *PBSClient) getChunkRaw(digest string) ([]byte, error) {
 		fmt.Println("Error making request:", err)
 		return nil, err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	ret, err := io.ReadAll(resp2.Body)
 
@@ -1265,49 +1525,47 @@ func (pbs *PBSClient) getChunkRaw(digest string) ([]byte, error) {
 		return nil, fmt.Errorf("short chunk response for %s: %d bytes", digest, len(ret))
 	}
 
-	return ret, nil
-}
+	if slices.Equal(ret[:8], blobUncompressedMagic) {
+		return ret[12:], nil
+	} else if slices.Equal(ret[:8], blobCompressedMagic) {
+		// zstd.NewReader(nil), not NewReader(bytes.NewReader(...)): decoding
+		// below is done entirely via DecodeAll on the byte slice, so the
+		// decoder is never Read() from. Passing a real io.Reader here (as
+		// this used to) starts klauspost/compress/zstd's background
+		// streaming-decode goroutines (startStreamDecoder), which then sit
+		// parked forever on a channel receive waiting for a Read() call that
+		// never comes — confirmed 2026-09-24 via a SIGQUIT goroutine dump of
+		// a real hung restore: two goroutines blocked in exactly
+		// zstd.(*Decoder).startStreamDecoder for 8+ minutes. A restore fetches
+		// thousands of chunks, each constructing (and Close()ing) one of
+		// these, so this leaked/wedged a small fraction of the time — the
+		// exact "stalls at a different point every time, no error, nothing
+		// in the retry/reconnect logs" symptom chased most of this session.
+		// The fetch/retry/reconnect machinery in nbd/fidxserver.go and
+		// DIDXReaderAt never had a chance against this: by the time it hangs,
+		// the network read is long done, so no context timeout on the HTTP
+		// request can touch it.
+		dec, err := zstd.NewReader(nil)
 
-// VerifySnapshotKey reads the snapshot's manifest (reader session) and checks
-// it against pbs.Crypt, so restoring an encrypted snapshot without its key, or
-// with the wrong one, fails up front with a clear error instead of on the
-// first chunk. A manifest that cannot be fetched or decoded is not reported
-// here: the archive read that follows surfaces the real problem.
-func (pbs *PBSClient) VerifySnapshotKey() error {
-	raw, err := pbs.DownloadToBytes("index.json.blob")
-	if err != nil {
-		return nil
-	}
-	data, err := DecodeBlob(raw, nil)
-	if err != nil {
-		return nil
-	}
-	return VerifyManifest(data, pbs.Crypt)
-}
-
-// GetVerifiedChunk fetches and decodes a chunk, then checks it against its
-// digest: plain SHA-256 for an unencrypted chunk, SHA256(data || id_key) for
-// an encrypted one. The mode comes from the chunk itself, not from whether a
-// key is configured, so a client holding a key still restores older
-// unencrypted snapshots.
-func (pbs *PBSClient) GetVerifiedChunk(digest string) ([]byte, error) {
-	raw, err := pbs.getChunkRaw(digest)
-	if err != nil {
-		return nil, err
-	}
-	data, encrypted, err := decodeBlob(raw, pbs.Crypt)
-	if err != nil {
-		return nil, err
-	}
-	var sum [32]byte
-	if encrypted {
-		sum = pbs.Crypt.ChunkDigest(data)
+		if err != nil {
+			return nil, err
+		}
+		defer dec.Close()
+		ret2 := make([]byte, 0)
+		ret2, err = dec.DecodeAll(ret[12:], ret2)
+		if err != nil {
+			return nil, err
+		}
+		return ret2, nil
 	} else {
-		sum = sha256.Sum256(data)
+		// Encrypted chunk (or a magic we don't know). DecodeEncryptedBlob
+		// owns the IV/TAG/CRC framing and the sha256(plaintext || id_key)
+		// digest check; it needs pbs.Crypt to be populated, which the
+		// restore-side callers arrange from the snapshot key file.
+		if IsEncryptedBlob(ret) && pbs.Crypt == nil {
+			return nil, fmt.Errorf("chunk %s is encrypted but no encryption key was provided", digest)
+		}
+		return DecodeEncryptedBlob(ret, pbs.Crypt, nil)
 	}
-	if hex.EncodeToString(sum[:]) != digest {
-		return nil, fmt.Errorf("chunk %s: content hash mismatch", digest)
-	}
-	return data, nil
-}
 
+}

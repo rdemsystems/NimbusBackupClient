@@ -364,7 +364,9 @@ func BuildQemuConfig(mi *MachineInfo, vmid int64, disks []BackupDisk) string {
 		boot = disks[0].Index
 	}
 
-	if mi.Firmware == "uefi" {
+	// A GPT boot disk only boots under OVMF ("no bootable device" under the
+	// default SeaBIOS), even when firmware detection came back empty.
+	if mi.Firmware == "uefi" || diskIsGPT(disks, boot) {
 		b.WriteString("bios: ovmf\n")
 	}
 	if boot >= 0 {
@@ -405,14 +407,31 @@ func BuildQemuConfig(mi *MachineInfo, vmid int64, disks []BackupDisk) string {
 	b.WriteString("numa: 0\n")
 	b.WriteString("onboot: 0\n")
 	fmt.Fprintf(&b, "ostype: %s\n", mi.PVEOSType)
+	// The "#qmdump#map:<drive>:<devname>:<storage>:<format>:" line per disk is
+	// what makes Proxmox VE restore the disk image at all: PVE's restore only
+	// allocates and fills drives declared by these lines (without them a
+	// restore ends "TASK OK" in a second and writes no data). Storage is left
+	// empty so the storage chosen in the restore dialog applies.
 	for _, d := range disks {
-		fmt.Fprintf(&b, "sata%d: local:%d/vm-%d-disk-%d.raw,discard=on,size=%d\n", d.Index, vmid, vmid, d.Index, d.Size)
+		fmt.Fprintf(&b, "sata%d: local:%d/vm-%d-disk-%d.raw,cache=writeback,discard=on,size=%d\n", d.Index, vmid, vmid, d.Index, d.Size)
+		fmt.Fprintf(&b, "#qmdump#map:sata%d:drive-sata%d::raw:\n", d.Index, d.Index)
 	}
 	b.WriteString("scsihw: virtio-scsi-single\n")
 	b.WriteString("smbios1: " + smbios1Value(mi.SMBIOS) + "\n")
 	b.WriteString("sockets: 1\n")
 	fmt.Fprintf(&b, "vmgenid: %s\n", uuid.New().String())
 	return b.String()
+}
+
+// diskIsGPT reports whether the disk with BackupDisk.Index index (the boot
+// disk the config selects) has a GPT partition table.
+func diskIsGPT(disks []BackupDisk, index int) bool {
+	for _, d := range disks {
+		if d.Index == index {
+			return d.GPT
+		}
+	}
+	return false
 }
 
 // smbios1Value builds the PVE smbios1 option: the source UUID (a fresh one

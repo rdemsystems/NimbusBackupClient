@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/pojntfx/go-nbd/pkg/client"
 	"github.com/pojntfx/go-nbd/pkg/server"
 	"github.com/rivo/tview"
+	"golang.org/x/term"
 )
 
 // requireRoot verifies the process runs with root privileges, which is needed
@@ -49,31 +51,31 @@ func ensureNBDModule() error {
 }
 
 func setReadOnly(dev *os.File, readonly bool) error {
-    // BLKROSET constant from <linux/fs.h>
-    const BLKROSET = 4701  // ioctl command to set read-only flag
-    
-    // Convert bool to int (1 for true, 0 for false)
-    value := 0
-    if readonly {
-        value = 1
-    }
-    
-    // Call ioctl with a pointer to the integer value
-    _, _, errno := syscall.Syscall(
-        syscall.SYS_IOCTL,
-        dev.Fd(),
-        BLKROSET,
-        uintptr(unsafe.Pointer(&value)),
-    )
-    
-    if errno != 0 {
-        return fmt.Errorf("ioctl BLKROSET failed: %v", errno)
-    }
-    return nil
+	// BLKROSET constant from <linux/fs.h>
+	const BLKROSET = 4701 // ioctl command to set read-only flag
+
+	// Convert bool to int (1 for true, 0 for false)
+	value := 0
+	if readonly {
+		value = 1
+	}
+
+	// Call ioctl with a pointer to the integer value
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_IOCTL,
+		dev.Fd(),
+		BLKROSET,
+		uintptr(unsafe.Pointer(&value)),
+	)
+
+	if errno != 0 {
+		return fmt.Errorf("ioctl BLKROSET failed: %v", errno)
+	}
+	return nil
 }
 
 func nbdStart(pbsclient *pbscommon.PBSClient, fidxdata []byte, nbd_index int) {
-	os.Remove("/tmp/pbsnbd")
+	_ = os.Remove("/tmp/pbsnbd")
 	l, err := net.Listen("unix", "/tmp/pbsnbd")
 	if err != nil {
 		panic(err)
@@ -81,6 +83,14 @@ func nbdStart(pbsclient *pbscommon.PBSClient, fidxdata []byte, nbd_index int) {
 	backend, err := NewFIDXServer(fidxdata, pbsclient)
 	if err != nil {
 		panic(err)
+	}
+	// Fail before the NBD device is attached: a missing or wrong key would
+	// otherwise leave a dead /dev/nbdN that blocks every reader in D state.
+	if len(backend.chunks) > 0 {
+		if _, err := pbsclient.GetChunkData(backend.chunks[0]); err != nil {
+			fmt.Fprintf(os.Stderr, "pbsnbd: cannot read the first chunk of the image: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	go func() {
@@ -111,12 +121,12 @@ func nbdStart(pbsclient *pbscommon.PBSClient, fidxdata []byte, nbd_index int) {
 			}()
 		}
 	}()
-	time.Sleep(100*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	conn, err := net.Dial("unix", "/tmp/pbsnbd")
 	if err != nil {
 		panic(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	nbddev := fmt.Sprintf("/dev/nbd%d", nbd_index)
 	if _, err := os.Stat(nbddev); err != nil {
 		panic(fmt.Errorf("%s does not exist: the nbd module provides fewer instances than requested; try a lower -nbd index or increase nbds_max", nbddev))
@@ -125,9 +135,9 @@ func nbdStart(pbsclient *pbscommon.PBSClient, fidxdata []byte, nbd_index int) {
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
-	client.Disconnect(f)
+	_ = client.Disconnect(f)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
@@ -142,8 +152,8 @@ func nbdStart(pbsclient *pbscommon.PBSClient, fidxdata []byte, nbd_index int) {
 		}
 	}()
 
-	setReadOnly(f, true)
-    fmt.Printf("Starting NBD on %s...\n", nbddev)
+	_ = setReadOnly(f, true)
+	fmt.Printf("Starting NBD on %s...\n", nbddev)
 	if err := client.Connect(conn, f, &client.Options{
 		ExportName: "FIDX",
 		BlockSize:  512,
@@ -166,11 +176,21 @@ func main() {
 	nbdFlag := flag.Int("nbd", 0, "NBD number")
 	backupPath := flag.String("path", "", "Path to backup, eg. vm/100/2026-03-01T00:07:00Z/drive-scsi0.img.fidx")
 	listFlag := flag.Bool("list", false, "List available fidx images as 'type/id/time/file' lines and exit (no TUI)")
+	keyFileFlag := flag.String("keyfile", "", "Path to a Proxmox Backup Server encryption key file (required to restore a snapshot taken with encryption enabled)")
+	keyFilePassphraseFlag := flag.String("keyfile-passphrase", "", "Passphrase for a scrypt/PBKDF2 protected -keyfile (prompted for when omitted)")
 	helpFlag := flag.Bool("help", false, "Show help")
 	flag.Parse()
 	if *helpFlag {
 		flag.PrintDefaults()
 		return
+	}
+
+	// An encrypted .fidx only yields plaintext through NewFIDXServer's
+	// GetChunkData calls, which need the key on the client.
+	crypt, err := loadCryptConfig(*keyFileFlag, *keyFilePassphraseFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "pbsnbd:", err)
+		os.Exit(1)
 	}
 
 	// Mounting an NBD device requires root and the nbd kernel module; only
@@ -197,6 +217,7 @@ func main() {
 			Datastore:       *datastoreFlag,
 			Namespace:       *namespaceFlag,
 			Insecure:        true,
+			Crypt:           crypt,
 		}
 		if *usernameFlag != "" {
 			if err := client.ObtainTicket(); err != nil {
@@ -240,6 +261,7 @@ func main() {
 			Datastore:       *datastoreFlag,
 			Namespace:       *namespaceFlag,
 			Insecure:        true,
+			Crypt:           crypt,
 		}
 		if *usernameFlag != "" {
 			if err := client.ObtainTicket(); err != nil {
@@ -257,6 +279,9 @@ func main() {
 
 		client.Connect(true, parts[0])
 		data, err := client.DownloadToBytes(parts[3])
+		if err != nil {
+			panic(err)
+		}
 		fmt.Println(len(data))
 		nbdStart(client, data, *nbdFlag)
 		return
@@ -374,4 +399,53 @@ func main() {
 		}
 	*/
 
+}
+
+// loadCryptConfig reads a PBS encryption key file, prompting for a passphrase
+// when the key is scrypt/PBKDF2 protected and none was given on the command
+// line. Returns (nil, nil) for an empty path, meaning "no key needed" — but
+// note that exporting an encrypted .fidx then still fails, per chunk, because
+// the chunks cannot be decrypted.
+func loadCryptConfig(keyPath, passphrase string) (*pbscommon.CryptConfig, error) {
+	if keyPath == "" {
+		return nil, nil
+	}
+
+	keyCfg, err := pbscommon.LoadKeyConfig(keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading key file %s: %w", keyPath, err)
+	}
+
+	if passphrase == "" && keyCfg.KDF != nil {
+		passphrase, err = promptPassphrase(fmt.Sprintf("Passphrase for %s: ", keyPath))
+		if err != nil {
+			return nil, fmt.Errorf("cannot read key passphrase from console: %w", err)
+		}
+	}
+
+	crypt, err := keyCfg.CryptConfig([]byte(passphrase))
+	if err != nil {
+		return nil, fmt.Errorf("unlocking key file %s: %w", keyPath, err)
+	}
+	return crypt, nil
+}
+
+// promptPassphrase reads a line from stdin without echoing it when stdin is a
+// terminal, and as a plain line otherwise (scripts, pipes, CI).
+func promptPassphrase(label string) (string, error) {
+	_, _ = fmt.Fprint(os.Stdout, label)
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		b, err := term.ReadPassword(fd)
+		fmt.Println()
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	}
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }

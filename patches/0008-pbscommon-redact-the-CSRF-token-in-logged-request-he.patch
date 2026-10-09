@@ -1,7 +1,7 @@
-From c42f68b488d80db9135f2dd5990983a8da7fb19f Mon Sep 17 00:00:00 2001
+From 7de22ee509e4bd815d4ee3ae4b5b981f51ff195d Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:05:03 +0200
-Subject: [PATCH 08/15] pbscommon: redact the CSRF token in logged request
+Subject: [PATCH 08/58] pbscommon: redact the CSRF token in logged request
  headers
 
 setAuth stores the header via Header.Set, which canonicalizes
@@ -13,10 +13,10 @@ request dumps. Compare canonical header keys.
  1 file changed, 5 insertions(+), 2 deletions(-)
 
 diff --git a/pbscommon/pbsapi.go b/pbscommon/pbsapi.go
-index 7629096..c1d042a 100644
+index 808bafe..1b94dab 100644
 --- a/pbscommon/pbsapi.go
 +++ b/pbscommon/pbsapi.go
-@@ -568,12 +568,15 @@ func (pbs *PBSClient) CloseFixedIndex(writerid uint64, checksum string, totalsiz
+@@ -638,12 +638,15 @@ func (pbs *PBSClient) CloseFixedIndex(writerid uint64, checksum string, totalsiz
  func redactedHeaders(h http.Header) http.Header {
  	out := make(http.Header, len(h))
  	for k, v := range h {

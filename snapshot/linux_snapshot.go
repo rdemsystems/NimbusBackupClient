@@ -19,17 +19,8 @@ import (
 	"time"
 )
 
-type snapControl struct {
-	name      string
-	bin       string
-	devPrefix string
-	module    string
-	ctlDevice string
-	infoFile  string
-}
-
 type linuxSnapshot struct {
-	control    snapControl
+	control    SnapControl
 	minor      int
 	device     string
 	mountpoint string
@@ -41,22 +32,17 @@ var (
 	tracked   []*linuxSnapshot
 )
 
-func detectControl() (snapControl, bool) {
-	candidates := []snapControl{
-		{name: "elastio-snap", bin: "elioctl", devPrefix: "/dev/elastio-snap", module: "elastio-snap", ctlDevice: "/dev/elastio-snap-ctl", infoFile: "/proc/elastio-snap-info"},
-		{name: "dattobd", bin: "dbdctl", devPrefix: "/dev/datto", module: "dattobd", ctlDevice: "/dev/datto-ctl", infoFile: "/proc/datto-info"},
+func DetectControl() (SnapControl, bool) {
+	candidates := []SnapControl{
+		{Name: "elastio-snap", DevPrefix: "/dev/elastio-snap", Module: "elastio-snap", CtlDevice: "/dev/elastio-snap-ctl", InfoFile: "/proc/elastio-snap-info"},
+		{Name: "dattobd", DevPrefix: "/dev/datto", Module: "dattobd", CtlDevice: "/dev/datto-ctl", InfoFile: "/proc/datto-info"},
 	}
 	for _, c := range candidates {
-		if _, err := exec.LookPath(c.bin); err != nil {
-			continue
+		if ensureModule(c) {
+			return c, true
 		}
-		if !ensureModule(c) {
-			log.Printf("Warning: %s control tool (%s) is installed but its kernel module is not usable; skipping", c.name, c.bin)
-			continue
-		}
-		return c, true
 	}
-	return snapControl{}, false
+	return SnapControl{}, false
 }
 
 func moduleLoaded(module string) bool {
@@ -64,7 +50,7 @@ func moduleLoaded(module string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	want := strings.ReplaceAll(module, "-", "_")
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
@@ -76,19 +62,19 @@ func moduleLoaded(module string) bool {
 	return false
 }
 
-func ensureModule(c snapControl) bool {
-	if !moduleLoaded(c.module) {
-		if out, err := exec.Command("modprobe", c.module).CombinedOutput(); err != nil {
-			log.Printf("Warning: modprobe %s failed: %v: %s", c.module, err, strings.TrimSpace(string(out)))
+func ensureModule(c SnapControl) bool {
+	if !moduleLoaded(c.Module) {
+		if out, err := exec.Command("modprobe", c.Module).CombinedOutput(); err != nil {
+			log.Printf("Warning: modprobe %s failed: %v: %s", c.Module, err, strings.TrimSpace(string(out)))
 			return false
 		}
 	}
-	if !moduleLoaded(c.module) {
+	if !moduleLoaded(c.Module) {
 		return false
 	}
-	if c.ctlDevice != "" {
-		if _, err := os.Stat(c.ctlDevice); err != nil {
-			log.Printf("Warning: %s module is loaded but control device %s is missing", c.name, c.ctlDevice)
+	if c.CtlDevice != "" {
+		if _, err := os.Stat(c.CtlDevice); err != nil {
+			log.Printf("Warning: %s module is loaded but control device %s is missing", c.Name, c.CtlDevice)
 			return false
 		}
 	}
@@ -118,7 +104,7 @@ func findMount(path string) (mountpoint, device, fstype string, err error) {
 	if err != nil {
 		return "", "", "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	bestLen := -1
 	sc := bufio.NewScanner(f)
@@ -162,11 +148,11 @@ func findMount(path string) (mountpoint, device, fstype string, err error) {
 	return mountpoint, device, fstype, nil
 }
 
-func allocMinor(c snapControl) (int, error) {
+func allocMinor(c SnapControl) (int, error) {
 	trackedMu.Lock()
 	inUse := make(map[int]bool)
 	for _, t := range tracked {
-		if t.control.devPrefix == c.devPrefix {
+		if t.control.DevPrefix == c.DevPrefix {
 			inUse[t.minor] = true
 		}
 	}
@@ -176,7 +162,7 @@ func allocMinor(c snapControl) (int, error) {
 		if inUse[n] {
 			continue
 		}
-		if _, err := os.Stat(fmt.Sprintf("%s%d", c.devPrefix, n)); os.IsNotExist(err) {
+		if _, err := os.Stat(fmt.Sprintf("%s%d", c.DevPrefix, n)); os.IsNotExist(err) {
 			return n, nil
 		}
 	}
@@ -199,20 +185,20 @@ func isOurCowFile(cowFile string) bool {
 // destroyStaleTracers removes tracers of a previous crashed run that are still
 // attached to device. Failing to do so means the device tracer state cannot be
 // trusted, so every failure is propagated to the caller.
-func destroyStaleTracers(c snapControl, device, originMount string) error {
-	if c.infoFile == "" {
+func destroyStaleTracers(c SnapControl, device, originMount string) error {
+	if c.InfoFile == "" {
 		return nil
 	}
-	data, err := os.ReadFile(c.infoFile)
+	data, err := os.ReadFile(c.InfoFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return fmt.Errorf("reading %s state: %w", c.infoFile, err)
+		return fmt.Errorf("reading %s state: %w", c.InfoFile, err)
 	}
 	var info snapInfo
 	if err := json.Unmarshal(data, &info); err != nil {
-		return fmt.Errorf("parsing %s state: %w", c.infoFile, err)
+		return fmt.Errorf("parsing %s state: %w", c.InfoFile, err)
 	}
 	var errs []error
 	for _, d := range info.Devices {
@@ -220,18 +206,18 @@ func destroyStaleTracers(c snapControl, device, originMount string) error {
 			continue
 		}
 		log.Printf("Removing stale %s snapshot %d left tracing %s by a previous run",
-			c.name, d.Minor, device)
-		if out, err := exec.Command(c.bin, "destroy", strconv.Itoa(d.Minor)).CombinedOutput(); err != nil {
-			errs = append(errs, fmt.Errorf("could not destroy stale %s snapshot %d on %s: %v: %s",
-				c.name, d.Minor, device, err, strings.TrimSpace(string(out))))
+			c.Name, d.Minor, device)
+		if err := ioctlDestroySnapshot(c.CtlDevice, c.Name, d.Minor); err != nil {
+			errs = append(errs, fmt.Errorf("could not destroy stale %s snapshot %d on %s: %w",
+				c.Name, d.Minor, device, err))
 			continue
 		}
-		os.Remove(filepath.Join(originMount, filepath.Base(d.CowFile)))
+		_ = os.Remove(filepath.Join(originMount, filepath.Base(d.CowFile)))
 	}
 	return errors.Join(errs...)
 }
 
-func createOne(c snapControl, absPath string, needFiles bool) (*linuxSnapshot, string, error) {
+func createOne(c SnapControl, absPath string, needFiles bool) (*linuxSnapshot, string, error) {
 	mountpoint, device, fstype, err := findMount(absPath)
 	if err != nil {
 		return nil, "", err
@@ -247,17 +233,16 @@ func createOne(c snapControl, absPath string, needFiles bool) (*linuxSnapshot, s
 	}
 
 	cowFile := filepath.Join(mountpoint, fmt.Sprintf(".pbs_snapshot_%d.cow", minor))
-	os.Remove(cowFile)
+	_ = os.Remove(cowFile)
 
 	syscall.Sync()
 
-	out, err := exec.Command(c.bin, "setup-snapshot", device, cowFile, strconv.Itoa(minor)).CombinedOutput()
-	if err != nil {
-		os.Remove(cowFile)
-		return nil, "", fmt.Errorf("%s setup-snapshot %s: %v: %s", c.bin, device, err, strings.TrimSpace(string(out)))
+	if err := ioctlSetupSnapshot(c.CtlDevice, c.Name, device, cowFile, minor); err != nil {
+		_ = os.Remove(cowFile)
+		return nil, "", err
 	}
 
-	snapDev := fmt.Sprintf("%s%d", c.devPrefix, minor)
+	snapDev := fmt.Sprintf("%s%d", c.DevPrefix, minor)
 	ls := &linuxSnapshot{control: c, minor: minor, device: snapDev, cowFile: cowFile}
 
 	if err := waitForDevice(snapDev, 5*time.Second); err != nil {
@@ -273,7 +258,7 @@ func createOne(c snapControl, absPath string, needFiles bool) (*linuxSnapshot, s
 
 	if !needFiles {
 		log.Printf("Created %s snapshot of %s (%s) -> %s (raw block device)",
-			c.name, device, absPath, snapDev)
+			c.Name, device, absPath, snapDev)
 		return ls, subPath, nil
 	}
 
@@ -282,13 +267,13 @@ func createOne(c snapControl, absPath string, needFiles bool) (*linuxSnapshot, s
 		return nil, "", errors.Join(err, cleanupOne(ls))
 	}
 	if err := mountReadOnly(snapDev, tmpMount, fstype); err != nil {
-		os.Remove(tmpMount)
+		_ = os.Remove(tmpMount)
 		return nil, "", errors.Join(err, cleanupOne(ls))
 	}
 	ls.mountpoint = tmpMount
 
 	log.Printf("Created %s snapshot of %s (%s) -> %s mounted at %s",
-		c.name, device, absPath, snapDev, tmpMount)
+		c.Name, device, absPath, snapDev, tmpMount)
 	return ls, subPath, nil
 }
 
@@ -328,18 +313,17 @@ func cleanupOne(ls *linuxSnapshot) error {
 	if ls.mountpoint != "" {
 		if err := syscall.Unmount(ls.mountpoint, 0); err != nil {
 
-			syscall.Unmount(ls.mountpoint, syscall.MNT_DETACH)
+			_ = syscall.Unmount(ls.mountpoint, syscall.MNT_DETACH)
 		}
-		os.Remove(ls.mountpoint)
+		_ = os.Remove(ls.mountpoint)
 		ls.mountpoint = ""
 	}
 	var retErr error
-	if out, err := exec.Command(ls.control.bin, "destroy", strconv.Itoa(ls.minor)).CombinedOutput(); err != nil {
-		retErr = fmt.Errorf("failed to destroy %s snapshot %d: %v: %s",
-			ls.control.name, ls.minor, err, strings.TrimSpace(string(out)))
+	if err := ioctlDestroySnapshot(ls.control.CtlDevice, ls.control.Name, ls.minor); err != nil {
+		retErr = fmt.Errorf("failed to destroy %s snapshot %d: %w", ls.control.Name, ls.minor, err)
 	}
 	if ls.cowFile != "" {
-		os.Remove(ls.cowFile)
+		_ = os.Remove(ls.cowFile)
 	}
 
 	trackedMu.Lock()
@@ -357,13 +341,17 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("consistent snapshot requires root: refusing to proceed with an inconsistent full-system snapshot")
 	}
-	control, ok := detectControl()
+	control, ok := DetectControl()
 	if !ok {
-		return fmt.Errorf("no usable block snapshot module loaded (install and enable elastio-snap or dattobd): refusing to proceed with an inconsistent full-system snapshot")
+		return fmt.Errorf("no usable block snapshot module loaded: install and load elastio-snap or dattobd first (see \"Linux machine backup prerequisites\" in this project's README for build/install steps) - refusing to proceed with an inconsistent full-system snapshot")
 	}
 
 	snapshots := make(map[string]SnapShot, len(paths))
 	var created []*linuxSnapshot
+	// One snapshot per block device: paths on the same filesystem share it.
+	// Creating a second one would destroy the first (destroyStaleTracers
+	// treats our existing tracer on the device as a leftover).
+	byDevice := make(map[string]*linuxSnapshot)
 
 	defer func() {
 		for i := len(created) - 1; i >= 0; i-- {
@@ -376,11 +364,22 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
 		if err != nil {
 			absPath = path
 		}
-		ls, subPath, err := createOne(control, absPath, needFiles)
+		mountpoint, device, _, err := findMount(absPath)
 		if err != nil {
 			return fmt.Errorf("could not snapshot %s: %w: refusing to proceed with an inconsistent full-system snapshot", absPath, err)
 		}
-		created = append(created, ls)
+		ls, shared := byDevice[device]
+		var subPath string
+		if shared {
+			subPath = strings.TrimPrefix(strings.TrimPrefix(absPath, strings.TrimRight(mountpoint, "/")), "/")
+		} else {
+			ls, subPath, err = createOne(control, absPath, needFiles)
+			if err != nil {
+				return fmt.Errorf("could not snapshot %s: %w: refusing to proceed with an inconsistent full-system snapshot", absPath, err)
+			}
+			created = append(created, ls)
+			byDevice[device] = ls
+		}
 		sn := SnapShot{
 			ObjectPath: ls.device,
 			Id:         strconv.Itoa(ls.minor),

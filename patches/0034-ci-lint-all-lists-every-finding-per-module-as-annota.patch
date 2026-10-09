@@ -1,0 +1,66 @@
+From b53deab0277ad76690a4db69812ecbb57fb2b0d5 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 14:25:36 +0200
+Subject: [PATCH 34/58] ci: lint-all lists every finding, per module, as
+ annotations
+
+---
+ .github/workflows/build-and-release.yml | 42 +++++++++++++++++++++++--
+ 1 file changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index 09f943d..081574f 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -112,8 +112,46 @@ jobs:
+       - name: Install golangci-lint
+         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+ 
+-      - name: make lint
+-        run: make lint
++      # Same module loop as `make lint`, but with no per-linter / same-issue
++      # caps, and every finding prefixed with its module. A step shows at most
++      # 10 annotations per level, each cut at 4 KB: the full list is packed
++      # into error + warning + notice annotations so it is readable without
++      # downloading the job log.
++      - name: Lint every module
++        run: |
++          lint_bin=$(command -v golangci-lint || echo "$HOME/go/bin/golangci-lint")
++          ws=$(sed -nE 's/^WORKSPACE_MODULES *:= *//p' Makefile)
++          sa=$(sed -nE 's/^STANDALONE_MODULES *:= *//p' Makefile)
++          : > "$RUNNER_TEMP/lint.txt"
++          rc=0
++          for m in $ws $sa; do
++            gowork=auto
++            case " $sa " in *" $m "*) gowork=off ;; esac
++            echo "==> $m"
++            ( cd "$m" && GOWORK=$gowork "$lint_bin" run --max-issues-per-linter=0 --max-same-issues=0 ./... ) > "$RUNNER_TEMP/lint-one.txt" 2>&1 || rc=1
++            cat "$RUNNER_TEMP/lint-one.txt"
++            grep -E '^[^ ]+\.go:[0-9]+(:[0-9]+)?: ' "$RUNNER_TEMP/lint-one.txt" | sed "s|^|$m/|" >> "$RUNNER_TEMP/lint.txt" || true
++          done
++          python3 - "$RUNNER_TEMP/lint.txt" <<'PY'
++          import collections, re, sys
++          lines = [l.rstrip("\n") for l in open(sys.argv[1], encoding="utf-8", errors="replace") if l.strip()]
++          if not lines:
++              sys.exit(0)
++          per = collections.Counter(m.group(1) if (m := re.search(r"\((\w+)\)$", l)) else "?" for l in lines)
++          head = f"{len(lines)} findings: " + ", ".join(f"{k} {v}" for k, v in per.most_common())
++          chunks, cur = [], head + "\n"
++          for l in lines:
++              if len((cur + l + "\n").encode()) > 3500:
++                  chunks.append(cur)
++                  cur = ""
++              cur += l[:3400] + "\n"
++          chunks.append(cur)
++          levels = ["error"] * 10 + ["warning"] * 10 + ["notice"] * 10
++          for n, (lvl, c) in enumerate(zip(levels, chunks), 1):
++              msg = c.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
++              print(f"::{lvl} title=Lint {n}/{len(chunks)}::{msg}")
++          PY
++          exit $rc
+ 
+   # Unit tests
+   test:
+-- 
+2.47.3
+

@@ -66,9 +66,20 @@ jobs:
       - name: Run gosec
         env:
           GOWORK: off
+        # Findings are also emitted as annotations (readable without access
+        # to the job logs).
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
-          cd gui && gosec -severity high -confidence high ./...
+          cd gui
+          rc=0
+          gosec -severity high -confidence high -fmt json -out "$RUNNER_TEMP/gosec.json" -stdout -verbose text ./... || rc=$?
+          python3 - "$RUNNER_TEMP/gosec.json" <<'PY' || true
+          import json, os, sys
+          for i in json.load(open(sys.argv[1])).get("Issues") or []:
+              f = os.path.relpath(i.get("file", ""), os.environ["GITHUB_WORKSPACE"])
+              print(f"::error file={f},line={i.get('line','1').split('-')[0]}::gosec {i.get('rule_id')}: {i.get('details')}")
+          PY
+          exit $rc
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
@@ -78,6 +89,92 @@ jobs:
           args: --timeout=5m
         env:
           GOWORK: off
+
+  # Upstream's `make lint`: golangci-lint over EVERY module, not only gui.
+  # Informational until the existing findings outside gui are cleaned up:
+  # it reports, it does not block.
+  lint-all:
+    name: Lint all modules (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+
+      # Same module loop as `make lint`, with no per-linter / same-issue caps.
+      # golangci-lint writes JSON to a file and its console output stays out
+      # of the log (it was turned into 10 capped, path-less annotations). The
+      # findings, prefixed with their module, are packed into error + warning
+      # + notice annotations (10 per level, 4 KB each) so the whole list is
+      # readable without downloading the job log.
+      - name: Lint every module
+        run: |
+          lint_bin=$(command -v golangci-lint || echo "$HOME/go/bin/golangci-lint")
+          ws=$(sed -nE 's/^WORKSPACE_MODULES *:= *//p' Makefile)
+          sa=$(sed -nE 's/^STANDALONE_MODULES *:= *//p' Makefile)
+          out="$RUNNER_TEMP/lint"
+          mkdir -p "$out"
+          rc=0
+          for m in $ws $sa; do
+            gowork=auto
+            case " $sa " in *" $m "*) gowork=off ;; esac
+            name=$(echo "$m" | tr / _)
+            echo "==> $m"
+            ( cd "$m" && GOWORK=$gowork "$lint_bin" run --max-issues-per-linter=0 --max-same-issues=0 \
+                --output.json.path="$out/$name.json" ./... ) > "$out/$name.log" 2>&1 || rc=1
+            echo "$m" > "$out/$name.module"
+          done
+          python3 - "$out" <<'PY'
+          import collections, glob, json, os, sys
+          out = sys.argv[1]
+          lines = []
+          for mod_file in sorted(glob.glob(os.path.join(out, "*.module"))):
+              base = mod_file[: -len(".module")]
+              mod = open(mod_file).read().strip()
+              try:
+                  issues = json.load(open(base + ".json")).get("Issues") or []
+              except Exception:
+                  tail = open(base + ".log", errors="replace").read()[-600:].replace("\n", " / ")
+                  lines.append(f"{mod}: no JSON report ({tail}) (run)")
+                  continue
+              for i in issues:
+                  p = i.get("Pos", {})
+                  # Paths are relative to the module, or to the directory of the
+                  # .golangci.yml in use (gui/api reads gui's): keep the one
+                  # that exists.
+                  fn = p.get("Filename", "")
+                  path = next((c for c in (os.path.join(mod, fn), os.path.join(os.path.dirname(mod), fn)) if os.path.exists(c)), os.path.join(mod, fn))
+                  lines.append(f"{path}:{p.get('Line')}: {i.get('Text')} ({i.get('FromLinter')})")
+          # "| " keeps setup-go's Go problem matcher off these lines.
+          print("\n".join("| " + l for l in lines))
+          if not lines:
+              sys.exit(0)
+          per = collections.Counter(l.rsplit("(", 1)[-1].rstrip(")") for l in lines)
+          head = f"{len(lines)} findings: " + ", ".join(f"{k} {v}" for k, v in per.most_common())
+          chunks, cur = [], head + "\n"
+          for l in lines:
+              if len((cur + l + "\n").encode()) > 3500:
+                  chunks.append(cur)
+                  cur = ""
+              cur += l[:3400] + "\n"
+          chunks.append(cur)
+          levels = ["error"] * 10 + ["warning"] * 10 + ["notice"] * 10
+          for n, (lvl, c) in enumerate(zip(levels, chunks), 1):
+              msg = c.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+              print(f"::{lvl} title=Lint {n}/{len(chunks)}::{msg}")
+          PY
+          exit $rc
 
   # Unit tests
   test:
@@ -184,6 +281,14 @@ jobs:
           ( cd snapshot && go mod tidy && go test ./... )
           echo "::endgroup::"
 
+  # Upstream's end-to-end suite against a real PBS in Docker (testing/e2e):
+  # our backups restored by the official proxmox-backup-client, encrypted ones
+  # included, and official encrypted backups read back by our code. Gates the
+  # release.
+  e2e:
+    name: End-to-end (real PBS)
+    uses: ./.github/workflows/e2e.yml
+
   # Build CLI for all platforms
   build-cli:
     name: Build CLI
@@ -216,6 +321,24 @@ jobs:
     name: Build GUI
     needs: [security, test, test-modules]
     runs-on: windows-latest
+    # The environment pins the OIDC subject to
+    # repo:rdemsystems/NimbusBackupClient:environment:signing, so one Azure
+    # federated credential covers every branch and tag (a ref-based subject
+    # cannot wildcard v* tags).
+    environment: signing
+    # id-token: OIDC login to Azure for code signing (no stored secret).
+    permissions:
+      contents: read
+      id-token: write
+    # Azure Artifact Signing. The account is not secret; the signing steps run
+    # only once the repository variable AZURE_SIGNING_PROFILE (Public Trust
+    # certificate profile) is set, with AZURE_CLIENT_ID / AZURE_TENANT_ID of
+    # the app registration that has a federated credential for this repo and
+    # the "Artifact Signing Certificate Profile Signer" role on the profile.
+    env:
+      SIGNING_ENDPOINT: https://swn.codesigning.azure.net/
+      SIGNING_ACCOUNT: github-nimbus
+      SIGNING_SUBSCRIPTION: 8d9f8b1c-7a41-46e2-a4de-d51407239a8a
 
     steps:
       - uses: actions/checkout@v4
@@ -339,6 +462,39 @@ jobs:
           go build -tags service -trimpath -buildmode=pie -ldflags "-s -w -X main.appVersion=${{ steps.version.outputs.VERSION }}" -o build/bin/NimbusBackupSVC.exe
         shell: pwsh
 
+      - name: Azure login (code signing)
+        if: ${{ vars.AZURE_SIGNING_PROFILE != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.SIGNING_SUBSCRIPTION }}
+
+      # Sign the binaries BEFORE the MSI packs them (ProductBody.wxi takes
+      # them from gui/build/bin), then the MSI itself below.
+      - name: Sign executables
+        if: ${{ vars.AZURE_SIGNING_PROFILE != '' }}
+        uses: Azure/artifact-signing-action@v2.0.0
+        with:
+          endpoint: ${{ env.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\gui\build\bin
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
       - name: Copy binaries to dist
         run: |
           New-Item -ItemType Directory -Force -Path dist
@@ -366,6 +522,129 @@ jobs:
           Copy-Item NimbusBackup.msi ../../dist/
         shell: pwsh
 
+      - name: Sign MSI
+        if: ${{ vars.AZURE_SIGNING_PROFILE != '' }}
+        uses: Azure/artifact-signing-action@v2.0.0
+        with:
+          endpoint: ${{ env.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist
+          files-folder-filter: msi
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      # Proof, not trust: every shipped Windows file must carry a Valid
+      # Authenticode signature from RDEM SYSTEMS, with a timestamp, including
+      # the executables the MSI installs (extracted with an administrative
+      # install). Results are annotations, readable without the job log.
+      - name: Verify signatures
+        if: ${{ vars.AZURE_SIGNING_PROFILE != '' }}
+        shell: pwsh
+        run: |
+          $extract = Join-Path $env:RUNNER_TEMP 'msi-extract'
+          Start-Process msiexec.exe -Wait -NoNewWindow -ArgumentList @('/a', "$PWD\dist\NimbusBackup.msi", '/qn', "TARGETDIR=$extract")
+          $files = @('dist\NimbusBackup.exe', 'dist\NimbusBackupSVC.exe', 'dist\NimbusBackup.msi')
+          $files += Get-ChildItem -Path $extract -Recurse -Filter *.exe | ForEach-Object { $_.FullName }
+          $bad = 0
+          foreach ($f in $files) {
+            $s = Get-AuthenticodeSignature -FilePath $f
+            $signer = if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { 'none' }
+            $stamp = if ($s.TimeStamperCertificate) { 'timestamped' } else { 'NO timestamp' }
+            $name = if ($f.StartsWith($extract)) { 'MSI:' + (Split-Path $f -Leaf) } else { Split-Path $f -Leaf }
+            $ok = $s.Status -eq 'Valid' -and $signer -match '(^|, )CN=RDEM SYSTEMS(,|$)' -and $s.TimeStamperCertificate
+            $level = if ($ok) { 'notice' } else { 'error' }
+            Write-Output "::$level title=Signature ${name}::$($s.Status) - $signer - $stamp"
+            if (-not $ok) { $bad++ }
+          }
+          if ($bad -gt 0) { throw "$bad file(s) are not validly signed by RDEM SYSTEMS" }
+
+      # Install for real on this Windows runner, both ways users get it:
+      # 1. a fresh install of this build's MSI on a clean machine;
+      # 2. the published 0.4.0 MSI upgraded with this build's MSI.
+      # Each time: one product at this version, the NimbusBackup service
+      # pointing at a signed executable, then a clean uninstall.
+      - name: Install and upgrade test
+        shell: pwsh
+        timeout-minutes: 30
+        run: |
+          # Waits for msiexec itself only (Start-Process -Wait also waits for
+          # every descendant), 10 minutes at most; on a timeout or a failure
+          # the end of the MSI log is published as an annotation. Start-Process
+          # does not quote arguments: paths are quoted here, otherwise a space
+          # breaks the command line and msiexec waits on its usage dialog.
+          function Invoke-Msi([string]$action, [string]$msi, [string]$log, [string]$what) {
+            Write-Output "$what ..."
+            $p = Start-Process msiexec.exe -PassThru -NoNewWindow -ArgumentList "$action `"$msi`" /qn /norestart /l*v `"$log`""
+            $null = $p.Handle  # keeps the handle, otherwise ExitCode can read as null
+            $done = $p.WaitForExit(600000)
+            if (-not $done -or ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010)) {
+              $why = if ($done) { "msiexec exit code $($p.ExitCode)" } else { 'timed out after 10 minutes' }
+              if (-not $done) { $p.Kill() }
+              $tail = if (Test-Path $log) { (Get-Content $log -Tail 40 -Encoding Unicode) -join "`n" } else { 'no MSI log' }
+              if ($tail.Length -gt 3400) { $tail = $tail.Substring($tail.Length - 3400) }
+              $msg = ($tail -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A')
+              Write-Output "::error title=$what ($why)::$msg"
+              throw "${what}: $why"
+            }
+          }
+          function Get-Nimbus {
+            Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+              Where-Object { $_.DisplayName -eq 'Nimbus Backup' }
+          }
+          $expected = '${{ steps.version.outputs.VERSION_MSI }}'
+          function Test-Installed([string]$label) {
+            $products = @(Get-Nimbus)
+            if ($products.Count -ne 1) { throw "${label}: expected one Nimbus Backup product, found $($products.Count): $($products.DisplayVersion -join ', ')" }
+            if ($products[0].DisplayVersion -ne $expected) { throw "${label}: installed version $($products[0].DisplayVersion), expected $expected" }
+            $svc = Get-CimInstance Win32_Service -Filter "Name='NimbusBackup'"
+            if (-not $svc) { throw "${label}: the NimbusBackup service is not registered" }
+            $svcExe = $svc.PathName.Trim('"').Split('"')[0].Trim()
+            $bad = 0
+            foreach ($f in @($svcExe, (Join-Path (Split-Path $svcExe) 'NimbusBackup.exe'))) {
+              $s = Get-AuthenticodeSignature -FilePath $f
+              if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch '(^|, )CN=RDEM SYSTEMS(,|$)') { $bad++ }
+              Write-Output "::notice title=${label}: installed $(Split-Path $f -Leaf)::$($s.Status) - $($s.SignerCertificate.Subject)"
+            }
+            if ($bad -gt 0) { throw "${label}: $bad installed file(s) are not validly signed by RDEM SYSTEMS" }
+            Write-Output "::notice title=${label}::one product at $expected, service NimbusBackup -> $svcExe ($($svc.StartMode), $($svc.State))"
+          }
+          function Test-Uninstall([string]$label) {
+            $logName = ($label -replace '[^A-Za-z0-9.]+', '-')
+            Invoke-Msi '/x' "$PWD\dist\NimbusBackup.msi" "$logs\uninstall-$logName.log" "${label}: uninstall"
+            if (Get-Service -Name NimbusBackup -ErrorAction SilentlyContinue) { throw "${label}: the NimbusBackup service is still registered after uninstall" }
+            if (@(Get-Nimbus).Count -ne 0) { throw "${label}: Nimbus Backup is still listed as installed after uninstall" }
+            Write-Output "::notice title=${label}: uninstall::service and product removed"
+          }
+          $logs = Join-Path $env:RUNNER_TEMP 'msi-logs'
+          New-Item -ItemType Directory -Force -Path $logs | Out-Null
+
+          if (@(Get-Nimbus).Count -ne 0) { throw 'the runner is not clean: Nimbus Backup is already installed' }
+          Invoke-Msi '/i' "$PWD\dist\NimbusBackup.msi" "$logs\install-fresh.log" 'Fresh install'
+          Test-Installed 'Fresh install'
+          Test-Uninstall 'Fresh install'
+
+          $old = Join-Path $env:RUNNER_TEMP 'NimbusBackup-0.4.0.msi'
+          Invoke-WebRequest -Uri 'https://github.com/rdemsystems/NimbusBackupClient/releases/download/v0.4.0/NimbusBackup.msi' -OutFile $old
+          Invoke-Msi '/i' $old "$logs\install-0.4.0.log" 'Installing 0.4.0'
+          if (-not (Get-Service -Name NimbusBackup -ErrorAction SilentlyContinue)) { throw '0.4.0 did not register the NimbusBackup service' }
+          Write-Output "::notice title=Install 0.4.0::installed, service NimbusBackup registered"
+
+          Invoke-Msi '/i' "$PWD\dist\NimbusBackup.msi" "$logs\upgrade.log" 'Upgrading to this build'
+          Test-Installed "Upgrade 0.4.0 -> $expected"
+          Test-Uninstall 'Upgrade'
+
       - name: Upload GUI artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -378,7 +657,7 @@ jobs:
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-cli, build-gui]
+    needs: [build-cli, build-gui, e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -518,20 +797,27 @@ jobs:
           cat > RELEASE_BODY.md << 'EOFNOTES'
           # 🚀 Nimbus Backup ${{ steps.version.outputs.VERSION }}
 
-          > ⚠️ **Windows flagged the download as a virus?** This is a known false positive (unsigned Go/Wails binary) — *not* a virus. See [why this happens and how to verify the download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/) · [🇫🇷 FR](https://nimbus.rdem-systems.com/faux-positif-antivirus/). Code signing: the Azure (Trusted Signing) account creation is still blocked on Azure's side — signed builds are targeted for 0.4.1.
+          > 🔏 **Signed by RDEM SYSTEMS.** `NimbusBackup.exe`, its service and `NimbusBackup.msi` are Authenticode-signed (Azure Artifact Signing): *Properties → Digital Signatures* shows RDEM SYSTEMS. SmartScreen may still warn on a new release until its reputation is established: check that the publisher is RDEM SYSTEMS, then *More info → Run anyway*. The command-line tools are not signed yet. Antivirus false positive? See [why this happens and how to verify the download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/) · [🇫🇷 FR](https://nimbus.rdem-systems.com/faux-positif-antivirus/).
 
           ## 📝 What's in this release
 
           EOFNOTES
 
-          # Get commits since last tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            echo "### Changes since ${PREV_TAG}" >> RELEASE_BODY.md
-            echo "" >> RELEASE_BODY.md
-            git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges >> RELEASE_BODY.md
-            echo "" >> RELEASE_BODY.md
+          # This version's CHANGELOG section (## [x.y.z] up to the next ## [).
+          # Not "git log since the previous tag": the fork is rebuilt on
+          # upstream, so the previous Nimbus tag is not an ancestor and the
+          # log would list hundreds of upstream commits.
+          awk -v v="${VERSION#v}" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > changelog-section.md
+          if [ -s changelog-section.md ]; then
+            cat changelog-section.md >> RELEASE_BODY.md
+          else
+            echo "See [CHANGELOG.md](CHANGELOG.md)." >> RELEASE_BODY.md
           fi
+          echo "" >> RELEASE_BODY.md
 
           # Publish the SHA-256 checksums on the release page itself so users
           # can verify integrity without downloading SHA256SUMS.txt first.

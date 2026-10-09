@@ -4,6 +4,7 @@
 package machinebackuplib
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -17,6 +18,9 @@ import (
 	"github.com/tawesoft/golib/v2/dialog"
 	"golang.org/x/sys/windows"
 )
+
+// errUploadAborted stops the disk reader once a chunk upload has failed.
+var errUploadAborted = errors.New("upload aborted")
 
 type DISK_EXTENT struct {
 	DiskNumber     uint32
@@ -473,6 +477,9 @@ func BackupWindowsDisk(client *pbscommon.PBSClient, index int, progressCallback 
 			if progressCallback == nil {
 				return false
 			}
+			if total == 0 {
+				return progressCallback(0, fmt.Sprintf("%s: Block %d", diskdev, b))
+			}
 			return progressCallback(float64(pos)/float64(total), fmt.Sprintf("%s: Block %d", diskdev, b))
 		}
 
@@ -533,7 +540,7 @@ func BackupWindowsDisk(client *pbscommon.PBSClient, index int, progressCallback 
 						pos += uint64(nbytes)
 					}
 					if report(pos) {
-						return errCancelled
+						return ErrCancelled
 					}
 					b++
 					if rerr == io.EOF {
@@ -570,7 +577,7 @@ func BackupWindowsDisk(client *pbscommon.PBSClient, index int, progressCallback 
 				for pos < P.EndByte {
 					nbytes, rerr := snapshot_file.Read(block[:min(uint64(len(block)), P.EndByte-pos)])
 					if report(pos) {
-						return errCancelled
+						return ErrCancelled
 					}
 					b++
 					if nbytes > 0 {
@@ -611,9 +618,13 @@ func BackupWindowsDisk(client *pbscommon.PBSClient, index int, progressCallback 
 
 		go func() {
 			var rerr error
+			// errCh is buffered and holds exactly one value, and it is sent
+			// BEFORE close(ch): uploadWorker drains ch and only then reads
+			// readErrCh, so this ordering guarantees it sees a cancelled run
+			// and returns without committing a partial fixed index.
 			defer func() {
-				close(ch)
 				errCh <- rerr
+				close(ch)
 			}()
 			for idx, P := range parts {
 				fmt.Printf("Partition: %d\n", idx)
@@ -627,11 +638,22 @@ func BackupWindowsDisk(client *pbscommon.PBSClient, index int, progressCallback 
 			}
 		}()
 
-		// uploadWorker is the only consumer of errCh (see its contract) and
-		// returns the reader's error when the reader failed or was cancelled.
-		upErr := uploadWorker(client, fmt.Sprintf("drive-sata%d.img.fidx", index), uint64(total), ch, errCh)
-		close(uploadDone)
-		return upErr
+		var uploadErr error
+		go func() {
+			defer close(uploadDone)
+			uploadErr = uploadWorker(client, fmt.Sprintf("drive-sata%d.img.fidx", index), uint64(total), ch, errCh)
+		}()
+
+		// uploadWorker is the SOLE consumer of errCh (see its doc comment) and
+		// returns the reader's terminal error — including ErrCancelled from a
+		// user Stop — through its own return value. Reading errCh a second
+		// time here raced it: the caller usually won the receive, which left
+		// uploadWorker taking its empty-channel path and committing a partial
+		// fixed index (PBS then failed the close with "unexpected chunk
+		// count"); in the other interleaving this receive never returned and
+		// the job hung with the VSS snapshots still held.
+		<-uploadDone
+		return uploadErr
 	})
 }
 
@@ -641,6 +663,6 @@ func SysTraySetup() {
 
 // backupWholeDisk is Linux-only (see linux.go). On Windows whole disks are
 // handled through the \\\\.\\PhysicalDriveN path, so this reports "not handled".
-func backupWholeDisk(client *pbscommon.PBSClient, dev string, index int, progressCallback ProgressCallback) (bool, int64, error) {
+func backupWholeDisk(client *pbscommon.PBSClient, dev string, index int, useSnapshot bool, progressCallback ProgressCallback) (bool, int64, error) {
 	return false, 0, nil
 }

@@ -1,0 +1,138 @@
+From e84f8eac53c21ae88678b2f835dd3445a6d2ef4c Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 14:32:33 +0200
+Subject: [PATCH 37/58] fix(gui): maximise fills the screen (issue #1)
+
+The window had MaxWidth/MaxHeight 1680x1008, so Windows capped the maximised
+window at that size and only moved it to the top-left corner. Drop the cap and
+shrink the startup window to 90% of a smaller screen instead.
+---
+ CHANGELOG.md           |  1 +
+ gui/main.go            | 51 +++++++++++++++++++++++++++++++++++++-----
+ gui/window_fit_test.go | 29 ++++++++++++++++++++++++
+ 3 files changed, 76 insertions(+), 5 deletions(-)
+ create mode 100644 gui/window_fit_test.go
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 4176157..4b1b968 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -44,6 +44,7 @@ replaces the fork's unreleased one.
+   also stores these facts in `machine-info.json.blob`.
+ 
+ ### Fixed
++- **Maximising the window filled the screen only up to 1680×1008** (issue #1): the window maximum size is gone, so "maximise" fills the screen; on small screens the startup window is shrunk to fit instead.
+ - **Encrypted backups made by `proxmox-backup-client` now restore.** The official
+   client compresses then encrypts chunks by default (`ENCR_COMPR` blobs), which
+   could not be decoded. Our encrypted chunks and blobs are now compressed the
+diff --git a/gui/main.go b/gui/main.go
+index 955f932..953a854 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -152,15 +152,16 @@ func main() {
+ 		app.hydrateFromService()
+ 	}
+ 
+-	// Create application options
++	// Create application options. No MaxWidth/MaxHeight: Windows caps a
++	// maximised window at the max size, so "maximise" only moved the window
++	// to the top-left corner (issue #1). Small screens are handled by
++	// fitWindowToScreen instead.
+ 	appOptions := &options.App{
+ 		Title:     fmt.Sprintf("%s v%s", BrandFromExecutable().Title, appVersion),
+ 		Width:     1200,
+ 		Height:    840,
+-		MaxWidth:  1680, // Prevent window from being too large
+-		MaxHeight: 1008, // Prevent title bar from going off-screen
+-		MinWidth:  480,  // Allow very small windows for low-res screens
+-		MinHeight: 360,  // Allow very small windows for low-res screens
++		MinWidth:  480, // Allow very small windows for low-res screens
++		MinHeight: 360, // Allow very small windows for low-res screens
+ 		AssetServer: &assetserver.Options{
+ 			Assets: assets,
+ 		},
+@@ -348,6 +349,46 @@ func (a *App) startup(ctx context.Context) {
+ // domReady is called after front-end resources have been loaded
+ func (a *App) domReady(ctx context.Context) {
+ 	writeDebugLog("App.domReady() called - UI loaded successfully")
++	fitWindowToScreen(ctx)
++}
++
++// fitWindowToScreen shrinks the startup window to fit a small screen, so the
++// title bar never starts off-screen. It replaces the old MaxWidth/MaxHeight,
++// which also capped the maximised window.
++func fitWindowToScreen(ctx context.Context) {
++	screens, err := runtime.ScreenGetAll(ctx)
++	if err != nil || len(screens) == 0 {
++		return
++	}
++	screen := screens[0]
++	for _, s := range screens {
++		if s.IsCurrent {
++			screen = s
++			break
++		}
++	}
++	w, h := runtime.WindowGetSize(ctx)
++	if fw, fh, changed := fitWindowSize(w, h, screen.Size.Width, screen.Size.Height); changed {
++		writeDebugLog(fmt.Sprintf("Window %dx%d does not fit the %dx%d screen: resized to %dx%d", w, h, screen.Size.Width, screen.Size.Height, fw, fh))
++		runtime.WindowSetSize(ctx, fw, fh)
++		runtime.WindowCenter(ctx)
++	}
++}
++
++// fitWindowSize returns the window size capped at 90% of the screen (room for
++// the taskbar and the window frame), never below the window's minimum size.
++func fitWindowSize(w, h, screenW, screenH int) (int, int, bool) {
++	if screenW <= 0 || screenH <= 0 {
++		return w, h, false
++	}
++	fw, fh := w, h
++	if limit := screenW * 9 / 10; fw > limit {
++		fw = max(limit, 480)
++	}
++	if limit := screenH * 9 / 10; fh > limit {
++		fh = max(limit, 360)
++	}
++	return fw, fh, fw != w || fh != h
+ }
+ 
+ // beforeClose is called when the application is about to quit.
+diff --git a/gui/window_fit_test.go b/gui/window_fit_test.go
+new file mode 100644
+index 0000000..bbffcb3
+--- /dev/null
++++ b/gui/window_fit_test.go
+@@ -0,0 +1,29 @@
++//go:build !service
++
++package main
++
++import "testing"
++
++func TestFitWindowSize(t *testing.T) {
++	cases := []struct {
++		name         string
++		w, h, sw, sh int
++		wantW, wantH int
++		wantChanged  bool
++	}{
++		{"fits a full HD screen", 1200, 840, 1920, 1080, 1200, 840, false},
++		{"shrinks on a 1366x768 laptop", 1200, 840, 1366, 768, 1200, 691, true},
++		{"shrinks both on a small screen", 1200, 840, 1024, 600, 921, 540, true},
++		{"never below the minimum size", 1200, 840, 400, 300, 480, 360, true},
++		{"unknown screen size", 1200, 840, 0, 0, 1200, 840, false},
++	}
++	for _, c := range cases {
++		t.Run(c.name, func(t *testing.T) {
++			w, h, changed := fitWindowSize(c.w, c.h, c.sw, c.sh)
++			if w != c.wantW || h != c.wantH || changed != c.wantChanged {
++				t.Fatalf("fitWindowSize(%d, %d, %d, %d) = %d, %d, %v; want %d, %d, %v",
++					c.w, c.h, c.sw, c.sh, w, h, changed, c.wantW, c.wantH, c.wantChanged)
++			}
++		})
++	}
++}
+-- 
+2.47.3
+

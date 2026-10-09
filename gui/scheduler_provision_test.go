@@ -97,6 +97,25 @@ func TestMergeProvisionedJobs_ScheduleChangeRecomputesNextRun(t *testing.T) {
 	}
 }
 
+// A declared job copied from a scheduled_jobs.json still carries its old
+// nextRun: a changed schedule time must win over it.
+func TestMergeProvisionedJobs_ScheduleChangeIgnoresStaleNextRun(t *testing.T) {
+	stored := time.Now().Add(6 * time.Hour).Format(time.RFC3339)
+	existing := []ScheduledJob{
+		{ID: "nightly", Name: "Nightly", ScheduleTime: "02:30", Enabled: true, NextRun: stored},
+	}
+	prov := []ScheduledJob{
+		{ID: "nightly", Name: "Nightly", ScheduleTime: "04:00", Enabled: true, NextRun: stored},
+	}
+	got := mergeProvisionedJobs(existing, prov)
+	if got[0].NextRun == stored {
+		t.Errorf("nextRun kept the old schedule's time %q", stored)
+	}
+	if want := calculateNextRun("04:00"); got[0].NextRun != want {
+		t.Errorf("nextRun = %q, want %q", got[0].NextRun, want)
+	}
+}
+
 func TestMergeProvisionedJobs_LeavesGUIJobsUntouched(t *testing.T) {
 	existing := []ScheduledJob{
 		{ID: "1720000000", Name: "GUI job", ScheduleTime: "12:00", Enabled: true},

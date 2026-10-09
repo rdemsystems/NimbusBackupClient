@@ -1,0 +1,55 @@
+From 69689b1559249bbd3d96617bdbc74d7ac2b8f151 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 14:21:49 +0200
+Subject: [PATCH 33/58] docs: PBS user, token and DatastoreBackup permissions
+
+---
+ README.fr.md | 10 ++++++++++
+ README.md    | 10 ++++++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/README.fr.md b/README.fr.md
+index de01fa2..d6f23ac 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -170,6 +170,16 @@ Le service lit sa configuration dans `C:\ProgramData\ProxmoxBackupClient\`
+ 4. Sélectionnez les dossiers à sauvegarder
+ 5. Lancez la sauvegarde — ou planifiez-la
+ 
++### 🔑 Utilisateur PBS et droits
++
++Le client n'a besoin que du rôle **`DatastoreBackup`** sur le datastore cible — pas d'un compte administrateur :
++
++1. Dans l'interface PBS, créez un utilisateur (ex. `nimbus@pbs`) et un jeton d'API pour lui (ex. `nimbus@pbs!laptop01`).
++2. Dans **Datastore → Permissions** (ou **Configuration → Contrôle d'accès → Permissions**), attribuez `DatastoreBackup` sur `/datastore/<nom>` — ou sur `/datastore/<nom>/<namespace>` si vous sauvegardez dans un namespace.
++3. **Jeton à privilèges séparés** (« Privilege Separation » cochée, le défaut) : attribuez le rôle au **jeton** lui-même (`nimbus@pbs!laptop01`), pas seulement à l'utilisateur — les droits effectifs sont l'intersection des deux. C'est la cause la plus fréquente de « permission denied ».
++
++`DatastoreBackup` permet de créer des sauvegardes, de lister et de restaurer ses propres groupes de sauvegarde. Supprimer ou purger des snapshots demande `DatastorePowerUser`.
++
+ ## ⬆️ Mise à jour depuis ≤ 0.3.0
+ 
+ Installer la 0.4.0 ou une version ultérieure par-dessus une installation existante la met à jour sur place (même identité MSI, même service `NimbusBackup`). Le dossier de données passe de `C:\ProgramData\NimbusBackup` au dossier partagé `C:\ProgramData\ProxmoxBackupClient` : au premier démarrage, la configuration, les tâches planifiées, l'historique et le jeton API y sont copiés une seule fois (aucun fichier existant n'est écrasé). L'ancien dossier est conservé et marqué par `COPIED-TO-ProxmoxBackupClient.txt`, ce qui permet encore un retour arrière. Les snapshots pris par les anciennes versions restent restaurables à leur emplacement d'origine.
+diff --git a/README.md b/README.md
+index 17e55a2..2c04ee3 100644
+--- a/README.md
++++ b/README.md
+@@ -166,6 +166,16 @@ The service reads its configuration from `C:\ProgramData\ProxmoxBackupClient\`
+ 4. Select directories to back up
+ 5. Start the backup — or schedule it
+ 
++### 🔑 PBS user and permissions
++
++The client only needs the **`DatastoreBackup`** role on the target datastore — no admin account:
++
++1. In the PBS UI, create a user (e.g. `nimbus@pbs`) and an API token for it (e.g. `nimbus@pbs!laptop01`).
++2. In **Datastore → Permissions** (or **Configuration → Access Control → Permissions**), grant `DatastoreBackup` on `/datastore/<name>` — or on `/datastore/<name>/<namespace>` if you back up into a namespace.
++3. **Privilege-separated token** ("Privilege Separation" checked, the default): grant the role to the **token** itself (`nimbus@pbs!laptop01`), not only to the user — the effective rights are the intersection of both. This is the most common cause of "permission denied".
++
++`DatastoreBackup` lets the client create backups and list and restore its own backup groups. Deleting or pruning snapshots needs `DatastorePowerUser`.
++
+ ## ⬆️ Upgrading from ≤ 0.3.0
+ 
+ Installing 0.4.0 or later over an existing install upgrades it in place (same MSI identity, same `NimbusBackup` service). The data folder moves from `C:\ProgramData\NimbusBackup` to the shared `C:\ProgramData\ProxmoxBackupClient`: on first start, your configuration, scheduled jobs, history and API token are copied over once (existing files are never overwritten). The old folder is kept, marked with `COPIED-TO-ProxmoxBackupClient.txt`, so a downgrade still works. Snapshots taken by older versions can still be restored to their original location.
+-- 
+2.47.3
+

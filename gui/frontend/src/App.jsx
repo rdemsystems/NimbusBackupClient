@@ -2,15 +2,16 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from './i18n/i18nContext'
 import LanguageSwitcher from './components/LanguageSwitcher'
 import MachineBackupConfig from './components/MachineBackupConfig'
+import EncryptionKeyField from './components/EncryptionKeyField'
 import logo from './assets/logo.webp'
 // Wails runtime imports (will be available when built with Wails)
-let GetConfigWithHostname, SaveConfig, TestConnection, StartBackup, StartMachineBackup, ListSnapshots, ListSnapshotContents, GetSnapshotMeta, RestoreSnapshot, OpenRestoreDestDialog, ListPhysicalDisks, GetVersion, EventsOn, SearchFiles, CancelSearch, CancelBackup, GetBrand, OpenBrowser
-let SaveScheduledJob, UpdateScheduledJob, GetScheduledJobs, DeleteScheduledJob, GetJobHistory, GetSystemInfo, GetLastBackupDirs
+let GetConfigWithHostname, SaveConfig, TestConnection, StartBackup, StartMachineBackup, ListSnapshots, ListSnapshotContents, GetSnapshotMeta, RestoreSnapshot, OpenRestoreDestDialog, OpenDirectoryPicker, ListPhysicalDisks, GetVersion, EventsOn, SearchFiles, CancelSearch, CancelBackup, ListBackupJobs, GetBrand, OpenBrowser, RequestElevation, CanModifyJobs, RequestJobModificationElevation
+let SaveScheduledJob, UpdateScheduledJob, GetScheduledJobs, DeleteScheduledJob, GetJobHistory, GetSystemInfo, GetLastBackupDirs, RunScheduledJobNow
 // Multi-PBS functions
 let ListPBSServers, GetPBSServer, AddPBSServer, UpdatePBSServer, DeletePBSServer, SetDefaultPBSServer, GetDefaultPBSID, TestPBSConnection
 let GetServerFingerprint, PinPBSServerFingerprint
-// Client-side encryption (per PBS server)
-let GetEncryptionKeyInfo, GenerateEncryptionKey, ImportEncryptionKey, ExportEncryptionKey, GetEncryptionKeyFile, RemoveEncryptionKey
+// Encryption key management
+let InspectEncryptionKeyFile, GenerateEncryptionKeyFile, OpenEncryptionKeyDialog, OpenEncryptionKeySaveDialog
 
 // Check if we're running in Wails
 if (window.go) {
@@ -24,16 +25,22 @@ if (window.go) {
   GetSnapshotMeta = window.go.main.App.GetSnapshotMeta
   RestoreSnapshot = window.go.main.App.RestoreSnapshot
   OpenRestoreDestDialog = window.go.main.App.OpenRestoreDestDialog
+  OpenDirectoryPicker = window.go.main.App.OpenDirectoryPicker
   SearchFiles = window.go.main.App.SearchFiles
   CancelSearch = window.go.main.App.CancelSearch
   CancelBackup = window.go.main.App.CancelBackup
+  ListBackupJobs = window.go.main.App.ListBackupJobs
   ListPhysicalDisks = window.go.main.App.ListPhysicalDisks
   GetVersion = window.go.main.App.GetVersion
   GetBrand = window.go.main.App.GetBrand
+  RequestElevation = window.go.main.App.RequestElevation
+  CanModifyJobs = window.go.main.App.CanModifyJobs
+  RequestJobModificationElevation = window.go.main.App.RequestJobModificationElevation
   SaveScheduledJob = window.go.main.App.SaveScheduledJob
   UpdateScheduledJob = window.go.main.App.UpdateScheduledJob
   GetScheduledJobs = window.go.main.App.GetScheduledJobs
   DeleteScheduledJob = window.go.main.App.DeleteScheduledJob
+  RunScheduledJobNow = window.go.main.App.RunScheduledJobNow
   GetJobHistory = window.go.main.App.GetJobHistory
   GetSystemInfo = window.go.main.App.GetSystemInfo
   GetLastBackupDirs = window.go.main.App.GetLastBackupDirs
@@ -48,12 +55,11 @@ if (window.go) {
   TestPBSConnection = window.go.main.App.TestPBSConnection
   GetServerFingerprint = window.go.main.App.GetServerFingerprint
   PinPBSServerFingerprint = window.go.main.App.PinPBSServerFingerprint
-  GetEncryptionKeyInfo = window.go.main.App.GetEncryptionKeyInfo
-  GenerateEncryptionKey = window.go.main.App.GenerateEncryptionKey
-  ImportEncryptionKey = window.go.main.App.ImportEncryptionKey
-  ExportEncryptionKey = window.go.main.App.ExportEncryptionKey
-  GetEncryptionKeyFile = window.go.main.App.GetEncryptionKeyFile
-  RemoveEncryptionKey = window.go.main.App.RemoveEncryptionKey
+  // Encryption key management
+  InspectEncryptionKeyFile = window.go.main.App.InspectEncryptionKeyFile
+  GenerateEncryptionKeyFile = window.go.main.App.GenerateEncryptionKeyFile
+  OpenEncryptionKeyDialog = window.go.main.App.OpenEncryptionKeyDialog
+  OpenEncryptionKeySaveDialog = window.go.main.App.OpenEncryptionKeySaveDialog
 }
 
 // Wails events + runtime (open external URLs in the system browser)
@@ -83,6 +89,9 @@ function App() {
     secret: '',
     datastore: '',
     namespace: '',
+    // Path to the PBS encryption key file (NOT the key itself). Round-tripped on
+    // save because SaveConfig replaces the whole Config on the Go side.
+    encryption_key_file: '',
     backupdir: '',
     'backup-id': '',
     usevss: true
@@ -104,21 +113,23 @@ function App() {
     password: '',
     datastore: '',
     namespace: '',
+    encryption_key_file: '',
     description: ''
   })
   const [serverStatus, setServerStatus] = useState({}) // Map of server ID -> connection status
   const [serverTab, setServerTab] = useState('server') // active category tab in the server form
-  // Encryption tab of the server form (key operations need a saved server)
-  const [encInfo, setEncInfo] = useState(null)
-  const [encImportText, setEncImportText] = useState('')
-  const [encImportPass, setEncImportPass] = useState('')
-  const [encExportPass, setEncExportPass] = useState('')
-  const [encShownKey, setEncShownKey] = useState('')
 
   const [backupType, setBackupType] = useState('directory')
-  // Disk (machine) backups are filed by PBS as "vm/<VMID>" so Proxmox VE can
-  // restore them: they need a numeric VM ID, kept apart from the folder-backup
-  // Backup ID (which defaults to the hostname) and remembered per machine.
+  const [backupDirs, setBackupDirs] = useState('')
+  const [selectedDrives, setSelectedDrives] = useState([])
+  const [physicalDisks, setPhysicalDisks] = useState([])
+  const [excludeList, setExcludeList] = useState('')
+  const [progress, setProgress] = useState(0)
+  const [backupPBSID, setBackupPBSID] = useState('')
+  const [machineBackupKind, setMachineBackupKind] = useState('host')
+  // A "vm" machine backup is filed by PBS as "vm/<VMID>" so Proxmox VE can
+  // restore it: it needs a numeric VM ID, kept apart from the Backup ID (which
+  // defaults to the hostname) and remembered per machine.
   const [machineVMID, setMachineVMIDState] = useState(() => {
     try { return localStorage.getItem('machineVMID') || '' } catch { return '' }
   })
@@ -126,20 +137,20 @@ function App() {
     setMachineVMIDState(v)
     try { localStorage.setItem('machineVMID', v) } catch { /* storage unavailable */ }
   }
-  const [backupDirs, setBackupDirs] = useState('')
-  const [selectedDrives, setSelectedDrives] = useState([])
-  const [physicalDisks, setPhysicalDisks] = useState([])
-  const [excludeList, setExcludeList] = useState('')
-  const [progress, setProgress] = useState(0)
   // Opt-in: split this backup into parts (for the first backup of a large volume).
   // Off by default → no size analysis, the backup starts immediately.
   const [splitFirstBackup, setSplitFirstBackup] = useState(false)
+  // Folders of a multi-folder backup run at the same time (config "parallel",
+  // shared by one-shot and scheduled backups). No maximum; CPUs / 4 is advised.
+  const [parallelFolders, setParallelFolders] = useState(1)
+  const [recommendedParallel, setRecommendedParallel] = useState(1)
 
   // Scheduling states
   const [backupMode, setBackupMode] = useState('oneshot') // 'oneshot' or 'scheduled'
   const [scheduleTime, setScheduleTime] = useState('02:00')
   const [runAtStartup, setRunAtStartup] = useState(false)
   const [scheduledJobs, setScheduledJobs] = useState([])
+  const [runningJobs, setRunningJobs] = useState([])
   const [jobHistory, setJobHistory] = useState([])
   const [editingJobId, setEditingJobId] = useState(null) // Track which job is being edited
   const [backupStats, setBackupStats] = useState({
@@ -179,8 +190,8 @@ function App() {
   const [restoreOptions, setRestoreOptions] = useState({
     overwrite: false,
     timestamps: true,
-    acls: false, // disabled in UI until NTFS sidecar lands
-    ads: false   // disabled in UI until NTFS sidecar lands
+    acls: false, // opt-in — off by default even though the ACL/attributes sidecar now exists
+    ads: false   // disabled in UI until an ADS sidecar lands
   })
   const [restoreLoading, setRestoreLoading] = useState(false)
   const [restoreProgress, setRestoreProgress] = useState(0)
@@ -409,6 +420,24 @@ function App() {
     return () => { if (unsub) unsub() }
   }, [])
 
+  // The backend flips Standalone -> Service when the privileged service shows
+  // up after the GUI started (re-detected when a backup starts) and pushes the
+  // refreshed system info. Re-reading it keeps the mode badge, the VSS notice
+  // and the machine-backup elevation warning truthful: without this they kept
+  // the value read once on mount, so service mode still asked for admin rights.
+  useEffect(() => {
+    if (!EventsOn || !GetSystemInfo) return
+    const unsub = EventsOn('mode:changed', async (info) => {
+      try {
+        const fresh = info || (await GetSystemInfo())
+        if (fresh) setSystemInfo(prev => ({ ...prev, ...fresh }))
+      } catch (err) {
+        console.error('mode:changed refresh failed:', err)
+      }
+    })
+    return () => { if (unsub) unsub() }
+  }, [])
+
   // Load config with hostname on mount
   useEffect(() => {
     const loadData = async () => {
@@ -462,10 +491,17 @@ function App() {
               secret: data.secret || '',
               datastore: data.datastore || '',
               namespace: data.namespace || '',
+              encryption_key_file: data.encryption_key_file || '',
               backupdir: data.backupdir || '',
               'backup-id': data['backup-id'] || hn,
               usevss: data.usevss !== undefined ? data.usevss : true
             })
+            setParallelFolders(data.parallel > 0 ? data.parallel : 1)
+            if (window.go?.main?.App?.GetRecommendedParallel) {
+              window.go.main.App.GetRecommendedParallel()
+                .then(n => setRecommendedParallel(n > 0 ? n : 1))
+                .catch(() => {})
+            }
 
             // Initialize backupDirs from config if available
             if (data.backupdir) {
@@ -577,9 +613,13 @@ function App() {
 
     const isUserPass = !!(serverFormData.username || '').trim()
     try {
-      // Generate ID from name if not provided
-      const id = serverFormData.id ||
-        serverFormData.name.toLowerCase().replace(/[^a-z0-9]/g, '-')
+      const name = (serverFormData.name || '').trim()
+      if (!name) {
+        showStatus(`❌ ${t('errServerNameRequired')}`, 'error')
+        return
+      }
+      // Generate ID from name if not provided (never dereference an empty name).
+      const id = serverFormData.id || name.toLowerCase().replace(/[^a-z0-9]/g, '-')
 
       // Only one auth method is persisted: user/pass drops the token, token drops username.
       const payload = {
@@ -604,6 +644,7 @@ function App() {
         password: '',
         datastore: '',
         namespace: '',
+        encryption_key_file: '',
         description: ''
       })
       setEditingServer(null)
@@ -643,6 +684,7 @@ function App() {
         password: '',
         datastore: '',
         namespace: '',
+        encryption_key_file: '',
         description: ''
       })
       setEditingServer(null)
@@ -686,6 +728,52 @@ function App() {
       showStatus(`❌ Erreur: ${err}`, 'error')
     }
   }
+
+  // Manual "run now": starts a stored scheduled job immediately, ignoring its
+  // schedule (an overdue or disabled job still runs — this is an explicit user
+  // action). In service mode the run happens inside the service, which owns the
+  // job files and the history; the GUI only asks for it. The backup runs in the
+  // background, so a rejected start (unknown job, already running) is the only
+  // thing reported back synchronously.
+  const handleRunJobNow = async (job) => {
+    if (!RunScheduledJobNow) {
+      showStatus(t('wailsRuntimeUnavailable'), 'error')
+      return
+    }
+    try {
+      await RunScheduledJobNow(job.id)
+      showStatus(`▶️ ${t('statusJobStarted').replace('{name}', job.name)}`, 'success')
+      // lastRun/nextRun are written when the run finishes: refresh once so the
+      // list does not keep showing a stale state.
+      setTimeout(() => {
+        if (GetScheduledJobs) {
+          GetScheduledJobs().then(jobs => setScheduledJobs(jobs || [])).catch(() => {})
+        }
+      }, 2000)
+    } catch (err) {
+      showStatus(`❌ ${err}`, 'error')
+    }
+  }
+
+  // Fetch running backup jobs from service
+  const fetchRunningJobs = async () => {
+    if (!ListBackupJobs) return
+    try {
+      const jobs = await ListBackupJobs()
+      setRunningJobs(jobs || [])
+    } catch (err) {
+      console.error('Failed to fetch running jobs:', err)
+    }
+  }
+
+  // Auto-refresh running jobs when in service mode
+  useEffect(() => {
+    if (!systemInfo.standalone && systemInfo.service_available) {
+      fetchRunningJobs()
+      const interval = setInterval(fetchRunningJobs, 5000)
+      return () => clearInterval(interval)
+    }
+  }, [systemInfo.standalone, systemInfo.service_available])
 
   // True when a connection failure is an unverified-certificate error (self-signed
   // PBS with no fingerprint pinned). These are recoverable via trust-on-first-use.
@@ -737,7 +825,6 @@ function App() {
     })
     setServerTab(server.username ? 'userpass' : (server.authid ? 'token' : 'server'))
     setEditingServer(server.id)
-    resetEncryptionState()
   }
 
   const handleCancelEdit = () => {
@@ -752,153 +839,15 @@ function App() {
       password: '',
       datastore: '',
       namespace: '',
+      encryption_key_file: '',
       description: ''
     })
     setServerTab('server')
     setEditingServer(null)
-    resetEncryptionState()
-  }
-
-  // ==================== CLIENT-SIDE ENCRYPTION ====================
-
-  const resetEncryptionState = () => {
-    setEncInfo(null)
-    setEncImportText('')
-    setEncImportPass('')
-    setEncExportPass('')
-    setEncShownKey('')
-  }
-
-  const loadEncInfo = async (id) => {
-    if (!GetEncryptionKeyInfo || !id) return
-    try {
-      setEncInfo(await GetEncryptionKeyInfo(id))
-    } catch (err) {
-      showStatus(`❌ ${err}`, 'error')
-    }
-  }
-
-  const handleGenerateKey = async () => {
-    if (!GenerateEncryptionKey) return
-    try {
-      setEncInfo(await GenerateEncryptionKey(editingServer))
-      showStatus(`🔒 ${t('encGenerated')}`, 'success', true)
-      loadPBSServers()
-    } catch (err) {
-      showStatus(`❌ ${err}`, 'error')
-    }
-  }
-
-  const handleImportKey = async () => {
-    if (!ImportEncryptionKey || !encImportText.trim()) return
-    try {
-      setEncInfo(await ImportEncryptionKey(editingServer, encImportText, encImportPass))
-      setEncImportText('')
-      setEncImportPass('')
-      showStatus(`🔒 ${t('encImported')}`, 'success')
-      loadPBSServers()
-    } catch (err) {
-      showStatus(`❌ ${err}`, 'error')
-    }
-  }
-
-  const handleExportKey = async () => {
-    if (!ExportEncryptionKey) return
-    try {
-      const path = await ExportEncryptionKey(editingServer, encExportPass)
-      if (path) showStatus(`✅ ${t('encExported')} ${path}`, 'success', true)
-    } catch (err) {
-      showStatus(`❌ ${err}`, 'error')
-    }
-  }
-
-  const handleToggleShowKey = async () => {
-    if (encShownKey) {
-      setEncShownKey('')
-      return
-    }
-    if (!GetEncryptionKeyFile) return
-    try {
-      setEncShownKey(await GetEncryptionKeyFile(editingServer, encExportPass))
-    } catch (err) {
-      showStatus(`❌ ${err}`, 'error')
-    }
-  }
-
-  const handleRemoveKey = async () => {
-    if (!RemoveEncryptionKey || !window.confirm(t('encRemoveConfirm'))) return
-    try {
-      await RemoveEncryptionKey(editingServer)
-      setEncShownKey('')
-      await loadEncInfo(editingServer)
-      showStatus(`🔓 ${t('encRemoved')}`, 'success')
-      loadPBSServers()
-    } catch (err) {
-      showStatus(`❌ ${err}`, 'error')
-    }
-  }
-
-  const renderEncryptionTab = () => {
-    if (!editingServer) {
-      return <div className="info-box">💡 {t('encSaveServerFirst')}</div>
-    }
-    const warnBox = {borderColor: '#f59e0b', background: '#fffbeb', color: '#92400e'}
-    return (
-      <>
-        <div className="info-box">🔒 {t('encIntro')}</div>
-        {encInfo && !encInfo.enabled && (
-          <>
-            <div className="info-box" style={warnBox}>🔓 {t('encDisabled')}</div>
-            <button onClick={handleGenerateKey} style={{width: '100%', marginBottom: '15px'}}>🔑 {t('encGenerate')}</button>
-            <h4>{t('encImportTitle')}</h4>
-            <div className="form-group">
-              <textarea value={encImportText} onChange={(e) => setEncImportText(e.target.value)} placeholder={t('encImportPlaceholder')} rows="5" style={{fontFamily: 'monospace', fontSize: '0.85em'}} />
-            </div>
-            <div className="form-group">
-              <input type="password" value={encImportPass} onChange={(e) => setEncImportPass(e.target.value)} placeholder={t('encImportPassphrase')} />
-            </div>
-            <button onClick={handleImportKey} disabled={!encImportText.trim()} style={{width: '100%'}}>📥 {t('encImport')}</button>
-            <div className="info-box" style={{marginTop: '15px'}}>ℹ️ {t('encWarnDedup')}</div>
-          </>
-        )}
-        {encInfo && encInfo.enabled && (
-          <>
-            {encInfo.error ? (
-              <div className="info-box" style={{borderColor: '#ef4444', background: '#fef2f2', color: '#991b1b', fontWeight: '600'}}>
-                ⚠️ {t('encKeyInvalid')} {encInfo.error}
-              </div>
-            ) : (
-              <div className="info-box" style={{borderColor: '#10b981', background: '#ecfdf5', color: '#065f46', fontWeight: '600'}}>
-                🔒 {t('encEnabled')} <code>{encInfo.fingerprint}</code>
-              </div>
-            )}
-            <div className="info-box" style={{...warnBox, fontWeight: '600'}}>⚠️ {t('encWarnLoss')}</div>
-            <h4>{t('encExportTitle')}</h4>
-            <div className="form-group">
-              <input type="password" value={encExportPass} onChange={(e) => setEncExportPass(e.target.value)} placeholder={t('encExportPassphrase')} />
-            </div>
-            <div style={{display: 'flex', gap: '10px'}}>
-              <button onClick={handleExportKey} style={{flex: 1}}>💾 {t('encExport')}</button>
-              <button onClick={handleToggleShowKey} style={{flex: 1, backgroundColor: '#64748b'}}>{encShownKey ? `🙈 ${t('encHide')}` : `👁️ ${t('encShow')}`}</button>
-            </div>
-            {encShownKey && (
-              <div className="form-group" style={{marginTop: '10px'}}>
-                <textarea readOnly value={encShownKey} rows="8" style={{fontFamily: 'monospace', fontSize: '0.8em'}} onFocus={(e) => e.target.select()} />
-              </div>
-            )}
-            <button onClick={handleRemoveKey} style={{width: '100%', marginTop: '15px', backgroundColor: '#ef4444', color: 'white'}}>🗑️ {t('encRemove')}</button>
-          </>
-        )}
-      </>
-    )
   }
 
   const switchServerTab = (key) => {
     setServerTab(key)
-    if (key === 'encryption') {
-      loadEncInfo(editingServer)
-      return
-    }
     // Choosing an auth method clears the other so the two never mix on save.
     if (key === 'userpass') {
       setServerFormData(f => ({ ...f, authid: '', secret: '' }))
@@ -915,8 +864,7 @@ function App() {
     const tabs = [
       ['server', `🌐 ${t('srvTabServer')}`],
       ['userpass', `👤 ${t('srvTabUserpass')}`],
-      ['token', `🔑 ${t('srvTabToken')}`],
-      ['encryption', `🔒 ${t('srvTabEncryption')}`]
+      ['token', `🔑 ${t('srvTabToken')}`]
     ]
     return (
       <div className="card">
@@ -967,6 +915,11 @@ function App() {
               <label>{t('namespace')}</label>
               <input type="text" value={serverFormData.namespace} onChange={(e) => setServerFormData({...serverFormData, namespace: e.target.value})} placeholder={t('phNamespace')} />
             </div>
+            {/* Encryption key is per-server: snapshots are encrypted per PBS target. */}
+            <EncryptionKeyField
+              value={serverFormData.encryption_key_file}
+              onChange={(v) => setServerFormData({...serverFormData, encryption_key_file: v})}
+            />
             <div className="form-group">
               <label>{t('certFingerprint')}</label>
               <input type="text" value={serverFormData.certfingerprint} onChange={(e) => setServerFormData({...serverFormData, certfingerprint: e.target.value})} placeholder={t('phCert')} />
@@ -1011,8 +964,6 @@ function App() {
           </>
         )}
 
-        {serverTab === 'encryption' && renderEncryptionTab()}
-
         <div style={{display: 'flex', gap: '10px', marginTop: '20px'}}>
           {editingServer ? (
             <>
@@ -1044,6 +995,7 @@ function App() {
         secret: (config.secret || '').trim(),
         datastore: (config.datastore || '').trim(),
         namespace: (config.namespace || '').trim(),
+        encryption_key_file: (config.encryption_key_file || '').trim(),
         backupdir: (config.backupdir || '').trim(),
         'backup-id': (config['backup-id'] || '').trim() || hostname, // Use hostname if empty
         usevss: config.usevss !== undefined ? config.usevss : true
@@ -1071,6 +1023,7 @@ function App() {
       secret: (config.secret || '').trim(),
       datastore: (config.datastore || '').trim(),
       namespace: (config.namespace || '').trim(),
+      encryption_key_file: (config.encryption_key_file || '').trim(),
       backupdir: (config.backupdir || '').trim(),
       'backup-id': (config['backup-id'] || '').trim() || hostname, // Use hostname if empty
       usevss: config.usevss !== undefined ? config.usevss : true
@@ -1151,7 +1104,8 @@ function App() {
           excludeList.split('\n').filter(l => l.trim()),
           config['backup-id'],
           config.usevss,
-          ''
+          '',
+          backupPBSID
         )
         showStatus(`⏳ ${t('statusBackupRunning')}`, 'info')
         return
@@ -1195,7 +1149,8 @@ function App() {
             [...excludeList.split('\n').filter(l => l.trim()), ...(job.exclude_list || [])],
             job.backup_id,
             config.usevss,
-            ''
+            '',
+            backupPBSID
           )
         } catch (err) {
           // The part never started (validation / dispatch error): no completion
@@ -1264,12 +1219,13 @@ function App() {
     }
 
     // PVE VM IDs are 100..999999999; anything else fails in the backend.
+    const usesVMID = backupType === 'machine' && machineBackupKind === 'vm'
     const machineID = machineVMID.trim()
-    if (backupType === 'machine' && !(/^\d+$/.test(machineID) && Number(machineID) >= 100 && Number(machineID) <= 999999999)) {
+    if (usesVMID && !(/^\d+$/.test(machineID) && Number(machineID) >= 100 && Number(machineID) <= 999999999)) {
       showStatus(`❌ ${t('vmidInvalid')}`, 'error')
       return
     }
-    const effectiveBackupID = backupType === 'machine' ? machineID : config['backup-id']
+    const effectiveBackupID = usesVMID ? machineID : config['backup-id']
 
     // Splitting is now an explicit, opt-in choice (the "split this backup" toggle),
     // intended for the first backup of a large volume. When it's off we never size
@@ -1289,6 +1245,28 @@ function App() {
         return
       }
 
+      // Check if user has permission to modify scheduled jobs
+      if (CanModifyJobs) {
+        try {
+          const canModify = await CanModifyJobs()
+          if (!canModify) {
+            // Request elevation
+            if (RequestJobModificationElevation) {
+              showStatus('⚠️ Privilèges administrateur requis pour modifier les jobs planifiés', 'warning')
+              try {
+                await RequestJobModificationElevation()
+              } catch (err) {
+                showStatus(`❌ Échec de l'élévation des privilèges: ${err}`, 'error')
+              }
+            }
+            return
+          }
+        } catch (err) {
+          showStatus(`❌ Erreur vérification privilèges: ${err}`, 'error')
+          return
+        }
+      }
+
       // For machine backups, we need to use a different approach for scheduled jobs
       // We'll pass drive letters in a separate field or structure based on backup type
       const jobData = {
@@ -1301,7 +1279,9 @@ function App() {
         useVSS: config.usevss,
         backupType: backupType,
         excludeList: backupType === 'directory' ? excludeList.split('\n').filter(l => l.trim()) : [],
-        driveLetters: backupType === 'machine' ? selectedDrives : []
+        driveLetters: backupType === 'machine' ? selectedDrives : [],
+        pbs_id: backupPBSID,
+        backup_kind: machineBackupKind
       }
 
       // Save or update to backend
@@ -1322,6 +1302,8 @@ function App() {
         setScheduleTime('02:00')
         setRunAtStartup(false)
         setBackupDirs('')
+        setBackupPBSID('')
+        setMachineBackupKind('host')
       } catch (err) {
         showStatus(`❌ Erreur: ${err}`, 'error')
       }
@@ -1347,7 +1329,8 @@ function App() {
           excludeListToSend,
           config['backup-id'],
           config.usevss,
-          ''
+          '',
+          backupPBSID
         )
       } else {
         // Filter out any empty drives to prevent empty string issues
@@ -1355,9 +1338,11 @@ function App() {
         await StartMachineBackup(
           backupType,
           validDrives,
-          machineID,
+          effectiveBackupID,
           config.usevss,
-          ''
+          '',
+          backupPBSID,
+          machineBackupKind
         )
       }
       // Backup started in background - progress will be shown via events
@@ -1365,7 +1350,8 @@ function App() {
     } catch (err) {
       setProgress(0)
       setBackupRunning(false)
-      showStatus(`❌ ${err}`, 'error')
+      const errorMessage = err?.message || err?.toString() || 'Unknown error'
+      showStatus(`❌ ${errorMessage}`, 'error')
     }
   }
 
@@ -1378,7 +1364,7 @@ function App() {
       await CancelBackup()
       showStatus(`⏹️ ${t('stopBackupInProgress')}`, 'info')
     } catch (err) {
-      showStatus(`❌ ${err}`, 'error')
+      showStatus(`❌ ${err?.message || err?.toString() || 'Unknown error'}`, 'error')
     }
   }
 
@@ -1674,6 +1660,16 @@ function App() {
     return `${n.toFixed(1)} ${units[i]}`
   }
 
+  const formatDuration = (seconds) => {
+    if (!seconds || seconds < 0) return '--:--'
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    const s = Math.floor(seconds % 60)
+    if (h > 0) return `${h}h ${m}m ${s}s`
+    if (m > 0) return `${m}m ${s}s`
+    return `${s}s`
+  }
+
   // Reconstruct the absolute on-disk location a file came from, by joining the
   // backup's original_path (from the meta sidecar) with the archive-relative
   // path. Critical for split backups, where each part is a separate backup-id
@@ -1771,6 +1767,12 @@ function App() {
           <div className={`tab ${activeTab === 'backup' ? 'active' : ''}`} onClick={() => setActiveTab('backup')}>
             {t('tabBackup')}
           </div>
+          <div className={`tab ${activeTab === 'running' ? 'active' : ''}`} onClick={() => setActiveTab('running')}>
+            {t('tabRunning')}
+            {runningJobs.filter(j => j.running).length > 0 && (
+              <span className="badge">{runningJobs.filter(j => j.running).length}</span>
+            )}
+          </div>
           <div className={`tab ${activeTab === 'restore' ? 'active' : ''}`} onClick={() => setActiveTab('restore')}>
             {t('tabRestore')}
           </div>
@@ -1778,6 +1780,32 @@ function App() {
             {t('tabAbout')}
           </div>
         </div>
+
+        {/* Standalone mode notice banner */}
+        {systemInfo.standalone && (
+          <div className="info-box" style={{
+            backgroundColor: '#fff3cd',
+            borderColor: '#ffc107',
+            color: '#856404',
+            padding: '12px 16px',
+            marginTop: '16px',
+            marginBottom: '16px',
+            borderLeft: '4px solid #ffc107',
+            borderRadius: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px'
+          }}>
+            <span style={{fontSize: '20px'}}>⚠️</span>
+            <div>
+              <strong>{t('standaloneNoticeTitle')}</strong><br/>
+              <span>{t('standaloneNoticeText')}</span>
+              {systemInfo.standalone_reason === 'forced' && <span style={{marginTop: '4px', display: 'block', fontSize: '0.9em'}}>{t('standaloneReasonForced')}</span>}
+              {systemInfo.standalone_reason === 'no_service' && <span style={{marginTop: '4px', display: 'block', fontSize: '0.9em'}}>{t('standaloneReasonNoService')}</span>}
+              {systemInfo.standalone_reason === 'auth_failed' && <span style={{marginTop: '4px', display: 'block', fontSize: '0.9em'}}>{t('standaloneReasonAuthFailed')}</span>}
+            </div>
+          </div>
+        )}
 
         {/* PBS Configuration Tab */}
         <div className={`tab-content ${activeTab === 'servers' ? 'active' : ''}`}>
@@ -1848,9 +1876,6 @@ function App() {
                         <td>
                           <strong>{server.name}</strong>
                           {server.id === defaultPBSID && <span style={{marginLeft: '5px', color: '#fbbf24'}}>⭐ {t('default')}</span>}
-                          {server.encryption_key_set && (
-                            <span style={{marginLeft: '5px', color: '#10b981'}} title={server.encryption_fingerprint || ''}>🔒 {t('encBadge')}</span>
-                          )}
                           {server.description && <div style={{fontSize: '0.85em', color: '#999'}}>{server.description}</div>}
                         </td>
                         <td>{server.baseurl}</td>
@@ -1905,21 +1930,59 @@ function App() {
             </select>
           </div>
 
+          {/* PBS Server Selection */}
+          {pbsServers.length > 0 && (
+            <div className="form-group">
+              <label>{t('backupPBS')}</label>
+              <select
+                value={backupPBSID}
+                onChange={(e) => setBackupPBSID(e.target.value)}
+              >
+                <option value="">{t('defaultPBS')}</option>
+                {pbsServers.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} {s.id === defaultPBSID ? '⭐' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Machine Backup Kind Selection */}
+          {backupType === 'machine' && (
+            <div className="form-group">
+              <label>{t('machineBackupKind')}</label>
+              <select
+                value={machineBackupKind}
+                onChange={(e) => setMachineBackupKind(e.target.value)}
+              >
+                <option value="host">{t('machineBackupKindHost')}</option>
+                <option value="vm">{t('machineBackupKindVM')}</option>
+              </select>
+              <div className="info-box" style={{marginTop: '8px', backgroundColor: '#eef2ff', borderColor: '#c7d2fe'}}>
+                ℹ️ <strong>{t('machineBackupKindInfoTitle')}</strong><br/>
+                {t('machineBackupKindInfo')}
+              </div>
+            </div>
+          )}
+
           {/* Backup Mode Toggle */}
           <div className="form-group">
             <label>{t('executionMode')}</label>
             <div style={{display: 'flex', gap: '10px', marginTop: '10px'}}>
               <button
                 onClick={() => setBackupMode('oneshot')}
+                disabled={systemInfo.standalone}
                 style={{
                   flex: 1,
                   padding: '10px',
-                  backgroundColor: backupMode === 'oneshot' ? 'var(--accent)' : '#e2e8f0',
-                  color: backupMode === 'oneshot' ? 'white' : '#4a5568',
+                  backgroundColor: backupMode === 'oneshot' ? 'var(--accent)' : systemInfo.standalone ? '#e2e8f0' : '#e2e8f0',
+                  color: backupMode === 'oneshot' ? 'white' : systemInfo.standalone ? '#a0aec0' : '#4a5568',
                   border: 'none',
                   borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold'
+                  cursor: systemInfo.standalone ? 'not-allowed' : 'pointer',
+                  fontWeight: 'bold',
+                  opacity: systemInfo.standalone ? 0.7 : 1
                 }}
               >
                 <span className="compact-text-long">⚡ {t('oneshotMode')}</span>
@@ -1927,25 +1990,32 @@ function App() {
               </button>
               <button
                 onClick={() => setBackupMode('scheduled')}
+                disabled={systemInfo.standalone}
                 style={{
                   flex: 1,
                   padding: '10px',
-                  backgroundColor: backupMode === 'scheduled' ? 'var(--accent)' : '#e2e8f0',
-                  color: backupMode === 'scheduled' ? 'white' : '#4a5568',
+                  backgroundColor: backupMode === 'scheduled' ? 'var(--accent)' : systemInfo.standalone ? '#e2e8f0' : '#e2e8f0',
+                  color: backupMode === 'scheduled' ? 'white' : systemInfo.standalone ? '#a0aec0' : '#4a5568',
                   border: 'none',
                   borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold'
+                  cursor: systemInfo.standalone ? 'not-allowed' : 'pointer',
+                  fontWeight: 'bold',
+                  opacity: systemInfo.standalone ? 0.7 : 1
                 }}
               >
                 <span className="compact-text-long">📅 {t('scheduledMode')}</span>
                 <span className="compact-text-short">📅 {t('scheduledModeShort')}</span>
               </button>
             </div>
+            {systemInfo.standalone && (
+              <p style={{marginTop: '8px', fontSize: '0.85em', color: '#a0aec0'}}>
+                {t('standaloneSchedulingDisabled')}
+              </p>
+            )}
           </div>
 
           {/* Scheduling Options */}
-          {backupMode === 'scheduled' && (
+          {!systemInfo.standalone && backupMode === 'scheduled' && (
             <div className="card" style={{marginTop: '20px', padding: '20px'}}>
               <h3 style={{marginTop: 0}}>⏰ {t('schedulingConfig')}</h3>
 
@@ -1996,19 +2066,47 @@ function App() {
                   setConfig({...config, backupdir: dirs[0] || ''})
                 }}
                 rows="4"
-                placeholder="C:\Data&#10;C:\Users&#10;D:\Documents"
+                placeholder="C:\Data&#10;/home/user&#10;/var/lib"
               />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{marginTop: '8px'}}
+                onClick={async () => {
+                  if (!OpenDirectoryPicker) {
+                    showStatus('❌ File picker unavailable', 'error')
+                    return
+                  }
+                  try {
+                    const dir = await OpenDirectoryPicker()
+                    if (dir) {
+                      const dirs = backupDirs.split('\n').map(d => d.trim()).filter(d => d)
+                      if (!dirs.includes(dir)) {
+                        dirs.push(dir)
+                        const newVal = dirs.join('\n')
+                        setBackupDirs(newVal)
+                        setConfig({...config, backupdir: dirs[0] || ''})
+                        showStatus('✅ Added directory', 'success')
+                      }
+                    }
+                  } catch (err) {
+                    showStatus(`❌ ${err}`, 'error')
+                  }
+                }}
+              >
+                📁 Add directory
+              </button>
             </div>
           )}
           {backupType === 'machine' && (
             <MachineBackupConfig 
-              config={config}
-              setConfig={setConfig}
               backupType={backupType}
-              setBackupType={setBackupType}
               physicalDisks={physicalDisks}
               setSelectedDrives={setSelectedDrives}
               selectedDrives={selectedDrives}
+              systemInfo={systemInfo}
+              t={t}
+              RequestElevation={RequestElevation}
             />
           )}
 
@@ -2024,7 +2122,7 @@ function App() {
                 </div>
               )}
 
-          {backupType === 'machine' ? (
+          {backupType === 'machine' && machineBackupKind === 'vm' ? (
             <div className="form-group">
               <label>{t('machineVMID')}</label>
               <input
@@ -2055,7 +2153,7 @@ function App() {
                 checked={config.usevss}
                 onChange={(e) => setConfig({...config, usevss: e.target.checked})}
               />
-              {t('useVSS')}
+              {t('useSnapshotting')}
             </label>
             {config.usevss && systemInfo.mode === 'Standalone' && !systemInfo.is_admin && (
               <div className="info-box" style={{marginTop: '10px', backgroundColor: '#fff3cd', borderColor: '#ffc107'}}>
@@ -2083,6 +2181,34 @@ function App() {
               </label>
               <div className="info-box" style={{marginTop: '10px', backgroundColor: '#f8f9fa', borderColor: '#dee2e6'}}>
                 ℹ️ {t('splitFirstBackupHint')}
+              </div>
+            </div>
+          )}
+
+          {backupType === 'directory' && (
+            <div className="form-group">
+              <label htmlFor="parallel-folders">{t('parallelFolders')}</label>
+              <input
+                id="parallel-folders"
+                type="number"
+                min="1"
+                step="1"
+                value={parallelFolders}
+                onChange={(e) => setParallelFolders(e.target.value)}
+                onBlur={async () => {
+                  const n = Math.max(1, Math.floor(Number(parallelFolders)) || 1)
+                  setParallelFolders(n)
+                  if (!window.go?.main?.App?.SetParallelFolders) return
+                  try {
+                    await window.go.main.App.SetParallelFolders(n)
+                  } catch (err) {
+                    showStatus(`❌ ${err}`, 'error')
+                  }
+                }}
+                style={{maxWidth: '120px'}}
+              />
+              <div className="info-box" style={{marginTop: '10px', backgroundColor: '#f8f9fa', borderColor: '#dee2e6'}}>
+                ℹ️ {t('parallelFoldersHint').replace('{n}', recommendedParallel)}
               </div>
             </div>
           )}
@@ -2171,6 +2297,8 @@ function App() {
               setBackupDirs('')
               setExcludeList('')
               setBackupType('directory')
+              setBackupPBSID('')
+              setMachineBackupKind('host')
               setActiveTab('scheduled')
               showStatus(`✖️ ${t('statusEditCancelled')}`, 'info')
             }}>
@@ -2197,10 +2325,17 @@ function App() {
                         ⏰ {job.scheduleTime} {job.runAtStartup && '• 🚀 Au démarrage'}
                       </div>
                       <div style={{fontSize: '13px', color: '#6c757d', marginTop: '3px'}}>
-                        📁 {job.backupDirs.join(', ')}
+                        📁 {(job.backupDirs || []).join(', ')}
                       </div>
                     </div>
                     <div style={{display: 'flex', gap: '10px'}}>
+                      <button
+                        className="btn"
+                        style={{padding: '8px 15px', fontSize: '14px', backgroundColor: '#e6f4ea', color: '#137333'}}
+                        onClick={() => handleRunJobNow(job)}
+                      >
+                        ▶️ {t('runNow')}
+                      </button>
                       <button
                         className="btn"
                         style={{padding: '8px 15px', fontSize: '14px'}}
@@ -2210,17 +2345,21 @@ function App() {
                           setBackupMode('scheduled')
                           setScheduleTime(job.scheduleTime)
                           setRunAtStartup(job.runAtStartup)
-                          setBackupDirs(job.backupDirs.join('\n'))
-                          if (job.backupType === 'machine') {
-                            // The job's backup ID is the VM ID; keep the folder Backup ID intact.
+                          setBackupDirs((job.backupDirs || []).join('\n'))
+                          if (job.backupType === 'machine' && job.backup_kind === 'vm') {
+                            // The job's backup ID is the VM ID; keep the Backup ID intact.
                             setMachineVMID(job.backupId || '')
-                            setSelectedDrives(job.driveLetters || [])
                             setConfig({...config, usevss: job.useVSS})
                           } else {
                             setConfig({...config, 'backup-id': job.backupId, usevss: job.useVSS})
                           }
+                          if (job.backupType === 'machine') {
+                            setSelectedDrives(job.driveLetters || [])
+                          }
                           setBackupType(job.backupType)
-                          setExcludeList(job.excludeList.join('\n'))
+                          setBackupPBSID(job.pbs_id || '')
+                          setMachineBackupKind(job.backup_kind || 'host')
+                          setExcludeList((job.excludeList || []).join('\n'))
                           // Switch to backup tab to show the form
                           setActiveTab('backup')
                           showStatus(`✏️ ${t('editModeInfo')}`, 'info')
@@ -2249,6 +2388,66 @@ function App() {
                         🗑️ {t('deleteJob')}
                       </button>
                     </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Running Backup Jobs */}
+          {false && runningJobs.length > 0 && (
+            <div className="card" style={{marginTop: '30px'}}>
+              <h3 style={{marginTop: 0}}>⏳ {t('runningJobs')}</h3>
+              {[...runningJobs].sort((a, b) => {
+                  if (a.running !== b.running) return a.running ? -1 : 1
+                  const sa = a.success ? (a.complete ? 1 : 0) : -1
+                  const sb = b.success ? (b.complete ? 1 : 0) : -1
+                  if (sa !== sb) return sa - sb
+                  const ta = a.start_time ? new Date(a.start_time).getTime() : 0
+                  const tb = b.start_time ? new Date(b.start_time).getTime() : 0
+                  return tb - ta
+                }).map(job => (
+                <div key={job.job_id} style={{
+                  padding: '15px',
+                  marginBottom: '10px',
+                  backgroundColor: job.running ? '#e7f3ff' : job.success ? '#d4edda' : '#f8d7da',
+                  borderRadius: '8px',
+                  border: `1px solid ${job.running ? '#b6d7ff' : job.success ? '#c3e6cb' : '#f5c6cb'}`
+                }}>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                    <div>
+                      <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                        <span style={{fontSize: '20px'}}>
+                          {job.running ? '⏳' : job.success ? '✅' : '❌'}
+                        </span>
+                        <strong>{job.message || `Job ${job.job_id}`}</strong>
+                      </div>
+                      <div style={{fontSize: '13px', color: '#6c757d', marginTop: '5px'}}>
+                        {job.start_time && `🕐 Started: ${new Date(job.start_time).toLocaleString()}`}
+                        {job.running && job.progress > 0 && (
+                          <span style={{marginLeft: '15px', fontWeight: 'bold', color: '#0066cc'}}>
+                            {Math.round(job.progress)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {job.running && (
+                      <button
+                        className="btn btn-secondary"
+                        style={{padding: '8px 15px', fontSize: '14px'}}
+                        onClick={async () => {
+                          try {
+                            await CancelBackup(job.job_id)
+                            showStatus(`${t('statusCancelRequested')}`, 'info')
+                            fetchRunningJobs()
+                          } catch (err) {
+                            showStatus(`❌ ${err}`, 'error')
+                          }
+                        }}
+                      >
+                        🛑 {t('cancelJob')}
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -2291,7 +2490,7 @@ function App() {
                           style={{padding: '8px 15px', fontSize: '14px'}}
                           onClick={() => {
                             // Re-run failed job
-                            setBackupDirs(job.backupDirs.join('\n'))
+                            setBackupDirs((job.backupDirs || []).join('\n'))
                             setConfig({...config, 'backup-id': job.backupId, usevss: job.useVSS})
                             showStatus(t('configLoaded'), 'success')
                             window.scrollTo({top: 0, behavior: 'smooth'})
@@ -2309,6 +2508,76 @@ function App() {
 
           {status.visible && activeTab === 'backup' && (
             <div className={`status ${status.type} visible`}>{status.message}</div>
+          )}
+        </div>
+
+        {/* Running Jobs Tab */}
+        <div className={`tab-content ${activeTab === 'running' ? 'active' : ''}`}>
+          <h2>⏳ {t('tabRunning')}</h2>
+
+          {runningJobs.filter(j => j.running).length === 0 ? (
+            <div className="info-box" style={{backgroundColor: '#f8f9fa', borderColor: '#dee2e6'}}>
+              📭 {t('noRunningJobs')}
+            </div>
+          ) : (
+            <div>
+              <div style={{marginBottom: '15px', padding: '12px', backgroundColor: '#e7f3ff', borderRadius: '8px', border: '1px solid #b6d7ff'}}>
+                <strong>{runningJobs.filter(j => j.running).length}</strong> {t('of')} <strong>{runningJobs.length}</strong>
+              </div>
+              {[...runningJobs].sort((a, b) => {
+                  if (a.running !== b.running) return a.running ? -1 : 1
+                  const sa = a.success ? (a.complete ? 1 : 0) : -1
+                  const sb = b.success ? (b.complete ? 1 : 0) : -1
+                  if (sa !== sb) return sa - sb
+                  const ta = a.start_time ? new Date(a.start_time).getTime() : 0
+                  const tb = b.start_time ? new Date(b.start_time).getTime() : 0
+                  return tb - ta
+                }).map(job => (
+                <div key={job.job_id} style={{
+                  padding: '15px',
+                  marginBottom: '10px',
+                  backgroundColor: job.running ? '#e7f3ff' : job.success ? '#d4edda' : '#f8d7da',
+                  borderRadius: '8px',
+                  border: `1px solid ${job.running ? '#b6d7ff' : job.success ? '#c3e6cb' : '#f5c6cb'}`
+                }}>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                    <div>
+                      <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                        <span style={{fontSize: '20px'}}>
+                          {job.running ? '⏳' : job.success ? '✅' : '❌'}
+                        </span>
+                        <strong>{job.message || `Job ${job.job_id}`}</strong>
+                      </div>
+                      <div style={{fontSize: '13px', color: '#6c757d', marginTop: '5px'}}>
+                        {job.start_time && `🕐 Started: ${new Date(job.start_time).toLocaleString()}`}
+                        {job.running && job.progress > 0 && (
+                          <span style={{marginLeft: '15px', fontWeight: 'bold', color: '#0066cc'}}>
+                            {Math.round(job.progress)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {job.running && (
+                      <button
+                        className="btn btn-secondary"
+                        style={{padding: '8px 15px', fontSize: '14px'}}
+                        onClick={async () => {
+                          try {
+                            await CancelBackup(job.job_id)
+                            showStatus(`${t('statusCancelRequested')}`, 'info')
+                            fetchRunningJobs()
+                          } catch (err) {
+                            showStatus(`❌ ${err}`, 'error')
+                          }
+                        }}
+                      >
+                        🛑 {t('cancelJob')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
@@ -2751,9 +3020,13 @@ function App() {
                     />
                     {t('optionTimestamps')}
                   </label>
-                  <label style={{display: 'flex', alignItems: 'center', gap: '6px', opacity: 0.5}} title={t('optionComingSoon')}>
-                    <input type="checkbox" disabled checked={false} />
-                    {t('optionACLs')} <span style={{fontSize: '11px'}}>({t('comingSoon')})</span>
+                  <label style={{display: 'flex', alignItems: 'center', gap: '6px'}} title={t('optionACLsHint')}>
+                    <input
+                      type="checkbox"
+                      checked={restoreOptions.acls}
+                      onChange={(e) => setRestoreOptions(o => ({...o, acls: e.target.checked}))}
+                    />
+                    {t('optionACLs')}
                   </label>
                   <label style={{display: 'flex', alignItems: 'center', gap: '6px', opacity: 0.5}} title={t('optionComingSoon')}>
                     <input type="checkbox" disabled checked={false} />

@@ -4,8 +4,8 @@
 # Usage: packaging/fedora/build-rpm.sh [output-dir]     (default: dist/)
 #
 # Requirements: docker, plus network access from the container (dnf +
-# Go module downloads). The host only needs git and docker; Go, GTK and
-# WebKit are installed inside the container.
+# Go module downloads). The host only needs a POSIX shell, tar and
+# docker; Go, GTK and WebKit are installed inside the container.
 #
 # The container image can be overridden with $PBSGO_FEDORA_IMAGE
 # (default: fedora:44).
@@ -21,19 +21,22 @@ case "$OUT_DIR" in
 esac
 IMAGE=${PBSGO_FEDORA_IMAGE:-fedora:44}
 
-VERSION=$(sed -n 's/.*"productVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT/gui/wails.json")
-[ -n "$VERSION" ] || { echo "error: cannot read productVersion from gui/wails.json" >&2; exit 1; }
+# Read version from git tag (exact match) or git short SHA
+# Falls back to wails.json if not in a git repo
+if [ -f "$ROOT/scripts/get-version.sh" ]; then
+    VERSION=$(bash "$ROOT/scripts/get-version.sh" "$ROOT")
+else
+    VERSION=$(sed -n 's/.*"productVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT/gui/wails.json")
+fi
+[ -n "$VERSION" ] || { echo "error: cannot determine version" >&2; exit 1; }
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
 echo "==> staging source tree ($VERSION)"
-mkdir -p "$WORK/stage"
-git -C "$ROOT" archive --format=tar HEAD | tar -x -C "$WORK/stage"
-mkdir -p "$WORK/src"
-mv "$WORK/stage" "$WORK/src/pbsgo-$VERSION"
-tar -C "$WORK/src" -czf "$WORK/pbsgo-$VERSION.tar.gz" "pbsgo-$VERSION"
-rmdir "$WORK/src" "$WORK/stage" 2>/dev/null || true
+# Built from the CURRENT working tree (uncommitted changes included) rather
+# than a commit fetched from GitHub: what is packaged is what was built.
+sh "$ROOT/packaging/stage-source.sh" "$WORK/pbsgo-$VERSION.tar.gz"
 
 echo "==> preparing rpmbuild tree"
 RPM=$WORK/rpmbuild
@@ -50,7 +53,9 @@ docker run --rm -i \
     "$IMAGE" \
     bash -s <<'DOCKER'
 set -eux
-dnf -y install golang gcc gtk3-devel webkit2gtk4.1-devel tar rpm-build
+# systemd: matches the spec's BuildRequires (unit dir macro + scriptlets);
+# base images normally ship it, but $PBSGO_FEDORA_IMAGE overrides may not
+dnf -y install golang gcc gtk3-devel webkit2gtk4.1-devel tar rpm-build systemd
 export HOME=/root
 cp -r /src /root/rpmbuild
 rpmbuild --define "_topdir /root/rpmbuild" -ba /root/rpmbuild/SPECS/pbsgo.spec

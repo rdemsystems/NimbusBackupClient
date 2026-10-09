@@ -24,6 +24,9 @@ func (a *App) GetConfigWithHostname() map[string]interface{} {
 		result["datastore"] = a.config.Datastore
 		result["certfingerprint"] = a.config.CertFingerprint
 		result["backup-id"] = a.config.BackupID
+		// Reported (path only, never the key) so the service's own status/config
+		// output shows whether scheduled backups are encrypted.
+		result["encryption_key_file"] = a.config.EncryptionKeyFile
 	}
 
 	return result
@@ -45,8 +48,8 @@ func (a *App) ReloadConfig() {
 
 // StartBackup starts a backup job
 // Service implementation using RunBackupInline
-func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeList []string, backupID string, useVSS bool, compression string) error {
-	writeDebugLog(fmt.Sprintf("[Service] StartBackup called: type=%s, dirs=%v, id=%s, vss=%v, compression=%s", backupType, backupDirs, backupID, useVSS, compression))
+func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeList []string, backupID string, useVSS bool, compression string, pbsID string) error {
+	writeDebugLog(fmt.Sprintf("[Service] StartBackup called: type=%s, dirs=%v, id=%s, vss=%v, compression=%s, pbsID=%s", backupType, backupDirs, backupID, useVSS, compression, pbsID))
 
 	// Re-read config from disk so this run uses the current token / default PBS /
 	// pinned fingerprint rather than the snapshot loaded when the service started.
@@ -76,13 +79,42 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
 		allDirs = driveLetters
 	}
 
-	// Resolve the EFFECTIVE PBS config: a multi-PBS-only config keeps the legacy
-	// BaseURL/AuthID/Secret/Datastore fields empty, so building options from those
-	// directly yielded "PBS connection parameters required" in service mode (the GUI
-	// standalone path already used EffectivePBS — audit M-01/M-04, reported in prod).
-	pbsCfg, err := a.withAuth(a.config.EffectivePBS())
+	// Kind/BackupType follow the GUI direct path (startBackupDirect /
+	// startMachineBackupDirect): empty Kind + "host" = directory backup,
+	// "machine" + "vm" = whole-disk machine backup (runBackupInlineInternal
+	// dispatches on Kind).
+	kind := ""
+	pbsBackupType := "host"
+	if backupType == "machine" {
+		kind = "machine"
+		pbsBackupType = "vm"
+	}
+
+	// Resolve the PBS server the job selected, or the EFFECTIVE default one: a
+	// multi-PBS-only config keeps the legacy BaseURL/AuthID/Secret/Datastore
+	// fields empty, so building options from those directly yielded "PBS
+	// connection parameters required" in service mode (audit M-01/M-04). The
+	// selected server used to be ignored here: every directory backup run by
+	// the service went to the default PBS (StartMachineBackup already did this).
+	pbsCfg, err := a.resolveBackupPBS(pbsID)
 	if err != nil {
 		return err
+	}
+
+	// Unlock the configured encryption key. Without this, SCHEDULED backups ran
+	// unencrypted even when a key was configured: the scheduler goes through
+	// StartBackup, which resolves to this file under -tags service, and the GUI
+	// build's copy of StartBackup (main.go, !service) is the one that already
+	// did this. A scheduled backup silently dropping the key also makes its own
+	// snapshots unrestorable from the GUI later.
+	if err := pbsCfg.loadCryptConfig(); err != nil {
+		return err
+	}
+
+	// Machine backups take no exclusion list (same as the GUI direct path).
+	excludes := excludeList
+	if kind == "machine" {
+		excludes = []string{}
 	}
 
 	// Prepare backup options
@@ -95,17 +127,21 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
 		Datastore:       pbsCfg.Datastore,
 		Namespace:       pbsCfg.Namespace,
 		CertFingerprint: pbsCfg.CertFingerprint,
-		EncryptionKey:   pbsCfg.EncryptionKey,
+		Crypt:           pbsCfg.Crypt,
 		BackupObjects:   allDirs,
 		BackupID:        backupID,
-		BackupType:      "host",
+		Kind:            kind,
+		BackupType:      pbsBackupType,
 		UseVSS:          useVSS,
 		Compression:     compression,
-		ExcludeList:     excludeList,
+		ExcludeList:     excludes,
 		DisableSplit:    pbsCfg.DisableSplit,
 		SplitSizeBytes:  pbsCfg.SplitSizeBytes(),
+		Parallel:        a.config.Parallel,
 		OnProgress: func(percent float64, message string) {
-			writeDebugLog(fmt.Sprintf("[Backup Progress] %.1f%% - %s", percent, message))
+			writeDebugLog(fmt.Sprintf("[Backup Progress] %.1f%% - %s", percent*100, message))
+			// Feed the API server's progress map so the GUI's polling sees it.
+			a.dispatchProgress(percent, message)
 		},
 		OnComplete: func(success bool, message string) {
 			if success {
@@ -113,26 +149,152 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
 			} else {
 				writeDebugLog(fmt.Sprintf("[Backup Complete] FAILED - %s", message))
 			}
+			a.dispatchComplete(success, message)
 		},
 	}
 
-	// Machine backups take the block-device path (same as the GUI's
-	// startBackupDirect / startMachineBackupDirect): Kind selects it in
-	// RunBackupInline and PBS files the snapshot under the "vm" type.
-	if backupType == "machine" {
-		opts.Kind = "machine"
-		opts.BackupType = "vm"
-		opts.ExcludeList = nil
-	}
+	// Use the backup context that was set via SetBackupContext for this job
+	a.backupCtxMu.RLock()
+	opts.Ctx = a.backupCtx
+	a.backupCtxMu.RUnlock()
 
 	// Execute backup using inline implementation
 	writeDebugLog("[Service] Executing backup via RunBackupInline")
 	return RunBackupInline(opts)
 }
 
-// StartMachineBackup is required by api.BackupHandler (the GUI posts machine
-// backups to /backup/machine). The service runs them through StartBackup, the
-// same path scheduled machine jobs use.
-func (a *App) StartMachineBackup(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error {
-	return a.StartBackup("machine", nil, backupDevices, nil, backupID, useVSS, compression)
+// StartMachineBackup starts a whole-disk machine backup job. The service
+// implementation mirrors the GUI direct path (startMachineBackupDirect):
+// Kind "machine" + BackupType "host" or "vm", no exclusion list.
+func (a *App) StartMachineBackup(backupType string, backupDevices []string, backupID string, useVSS bool, compression string, pbsID string, backupKind string) error {
+	writeDebugLog(fmt.Sprintf("[Service] StartMachineBackup called: type=%s, devices=%v, id=%s, vss=%v, compression=%s, pbsID=%s, backupKind=%s",
+		backupType, backupDevices, backupID, useVSS, compression, pbsID, backupKind))
+
+	// Re-read config from disk (see StartBackup above).
+	a.ReloadConfig()
+
+	if a.config == nil {
+		return fmt.Errorf("configuration not loaded")
+	}
+
+	// Use hostname as fallback if backupID is empty
+	if backupID == "" {
+		backupID, _ = os.Hostname()
+		writeDebugLog(fmt.Sprintf("[Backup ID] Empty backup-id, using hostname: %s", backupID))
+	}
+
+	// Default to "fastest" if compression is empty
+	if compression == "" {
+		compression = "fastest"
+		writeDebugLog("[Compression] Using default: fastest")
+	}
+
+	// Resolve PBS config using the specified PBS ID (or default).
+	pbsCfg, err := a.resolveBackupPBS(pbsID)
+	if err != nil {
+		return err
+	}
+
+	// Unlock the configured encryption key for machine backups too.
+	if err := pbsCfg.loadCryptConfig(); err != nil {
+		return err
+	}
+
+	// Map the saved selection (\\.\PhysicalDriveN) onto the disks present now
+	// through Config.PinnedDisks and refresh those pins (diskpin.go). This is
+	// the path scheduled jobs take, which is exactly where a stale drive number
+	// would otherwise back up the wrong disk unattended.
+	resolvedDevices, err := a.resolveMachineBackupDevices(backupDevices)
+	if err != nil {
+		return err
+	}
+	backupDevices = resolvedDevices
+
+	// Prepare backup options
+	opts := BackupOptions{
+		BaseURL:         pbsCfg.BaseURL,
+		AuthID:          pbsCfg.AuthID,
+		Secret:          pbsCfg.Secret,
+		Ticket:          pbsCfg.Ticket,
+		CSRFToken:       pbsCfg.CSRFToken,
+		Datastore:       pbsCfg.Datastore,
+		Namespace:       pbsCfg.Namespace,
+		CertFingerprint: pbsCfg.CertFingerprint,
+		Crypt:           pbsCfg.Crypt,
+		BackupObjects:   backupDevices,
+		BackupID:        backupID,
+		Kind:            "machine",
+		BackupType:      backupKind, // "host" or "vm" based on user selection
+		UseVSS:          useVSS,
+		Compression:     compression,
+		ExcludeList:     []string{},
+		DisableSplit:    pbsCfg.DisableSplit,
+		SplitSizeBytes:  pbsCfg.SplitSizeBytes(),
+		OnProgress: func(percent float64, message string) {
+			writeDebugLog(fmt.Sprintf("[Machine Backup Progress] %.1f%% - %s", percent*100, message))
+			// Feed the API server's progress map so the GUI's polling sees it.
+			a.dispatchProgress(percent, message)
+		},
+		OnComplete: func(success bool, message string) {
+			if success {
+				writeDebugLog(fmt.Sprintf("[Machine Backup Complete] SUCCESS - %s", message))
+			} else {
+				writeDebugLog(fmt.Sprintf("[Machine Backup Complete] FAILED - %s", message))
+			}
+			a.dispatchComplete(success, message)
+		},
+	}
+
+	// Use the backup context that was set via SetBackupContext for this job
+	a.backupCtxMu.RLock()
+	opts.Ctx = a.backupCtx
+	a.backupCtxMu.RUnlock()
+
+	// Execute backup using inline implementation
+	writeDebugLog("[Service] Executing machine backup via RunBackupInline")
+	return RunBackupInline(opts)
+}
+// resolveBackupPBS picks the PBS server to use for backup operations.
+// When pbsID is empty the default PBS server is used.
+// Falls back to legacy single-server fields when no multi-PBS entry is configured.
+func (a *App) resolveBackupPBS(pbsID string) (*Config, error) {
+	var cfg *Config
+
+	// In service mode the GUI doesn't hold PBS credentials — it asks the
+	// service for a short-lived ticket and uses that for backup.
+	if a.isDelegatedToService() {
+		ticket, err := a.apiClient.MintPBSTicket(pbsID)
+		if err != nil {
+			return nil, fmt.Errorf("service failed to mint PBS ticket: %w", err)
+		}
+		// Build a Config with the ticket + non-secret connection params.
+		cfg := &Config{
+			BaseURL:         ticket.BaseURL,
+			CertFingerprint: ticket.CertFingerprint,
+			Datastore:       ticket.Datastore,
+			Namespace:       ticket.Namespace,
+			Ticket:          ticket.Ticket,
+			CSRFToken:       ticket.CSRFToken,
+		}
+		return cfg, nil
+	}
+
+	if pbsID != "" {
+		pbs, err := a.config.GetPBSServer(pbsID)
+		if err != nil {
+			return nil, err
+		}
+		cfg = pbs.ToConfig()
+	} else {
+		effective := a.config.EffectivePBS()
+		if err := effective.Validate(); err != nil {
+			return nil, err
+		}
+		cfg = effective
+	}
+	cfg, err := a.withAuth(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }

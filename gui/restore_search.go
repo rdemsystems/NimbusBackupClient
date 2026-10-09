@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -59,7 +58,6 @@ type SearchOptions struct {
 	Datastore       string
 	Namespace       string
 	CertFingerprint string
-	EncryptionKey   json.RawMessage // server's client-side encryption key, if any
 
 	HostPrefix      string
 	Query           string
@@ -67,6 +65,10 @@ type SearchOptions struct {
 	From            time.Time
 	To              time.Time
 	AssembleMissing bool
+
+	// Crypt unlocks encrypted snapshots, carried into every per-snapshot
+	// RestoreOptions so the archive walk can decrypt and verify chunks.
+	Crypt *pbscommon.CryptConfig
 
 	OnProgress func(percent float64, message string)
 }
@@ -195,8 +197,7 @@ func joinOriginPath(meta *BackupMeta, archivePath string) string {
 // listings are searched for free; uncached snapshots are assembled only when
 // AssembleMissing is set. Results are newest-snapshot-first.
 func SearchFilesInline(opts SearchOptions) (*SearchResult, error) {
-	hasCreds := (opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "" // API token or u/p ticket
-	if opts.BaseURL == "" || !hasCreds {
+	if opts.BaseURL == "" || ((opts.AuthID == "" || opts.Secret == "") && opts.Ticket == "") {
 		return nil, fmt.Errorf("paramètres de connexion PBS requis")
 	}
 	if opts.Datastore == "" {
@@ -264,9 +265,9 @@ func SearchFilesInline(opts SearchOptions) (*SearchResult, error) {
 			Datastore:       opts.Datastore,
 			Namespace:       opts.Namespace,
 			CertFingerprint: opts.CertFingerprint,
-			EncryptionKey:   opts.EncryptionKey,
 			BackupID:        tg.backupID,
 			SnapshotTime:    tg.at,
+			Crypt:           opts.Crypt,
 		}
 		cacheKey := buildSnapshotCacheKey(ropts)
 

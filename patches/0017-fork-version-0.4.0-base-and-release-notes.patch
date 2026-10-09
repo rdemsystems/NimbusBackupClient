@@ -1,0 +1,54 @@
+From b58a293a99b85104a89cdf91db446e79830b046e Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 09:45:34 +0200
+Subject: [PATCH 17/58] fork: version 0.4.0 base and release notes
+
+---
+ RELEASE_NOTES.md | 6 ++++--
+ gui/wails.json   | 2 +-
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/RELEASE_NOTES.md b/RELEASE_NOTES.md
+index b75575e..0c82c6e 100644
+--- a/RELEASE_NOTES.md
++++ b/RELEASE_NOTES.md
+@@ -4,13 +4,13 @@
+ 
+ ## 📦 Available builds
+ 
+-### ProxmoxBackupClient.msi (installer — recommended for production)
++### NimbusBackup.msi (installer — recommended for production)
+ - ✅ **Windows service**: starts automatically at system boot
+ - ✅ **Persistent admin privileges**: the service runs as LocalSystem (VSS guaranteed)
+ - ✅ **Scheduled backups**: run automatically, even after a reboot
+ - ✅ **Clean uninstall**: full cleanup via Control Panel
+ 
+-### ProxmoxBackupClient.exe (standalone)
++### NimbusBackup.exe (standalone)
+ - ✅ **Manual and scheduled backups**: work as long as the app is running
+ - ❌ **No persistence across reboots**: no service → prefer the MSI in production
+ - 💡 **Use case**: one-off backups or testing
+@@ -33,5 +33,7 @@
+ - PBS configuration with connection test, **certificate fingerprint pinning (TOFU)** and namespaces
+ 
+ ## 📌 Known issues
++- ⚠️ **Unsigned binaries**: Windows may flag the download (false positive). Creating the Azure account for code signing (Azure Trusted Signing) is blocked on Azure's side; signed builds are targeted for **0.4.1** if Azure answers / the account is created.
++- ℹ️ **Upgrading from <= 0.3.0**: the configuration folder is merged from `ProgramData\NimbusBackup` into `ProgramData\ProxmoxBackupClient` on first start (copied once, nothing overwritten, old folder kept).
+ - ⚠️ The **standalone .exe** does not persist across reboots → use the **MSI** in production.
+ - ⚠️ The exclusion format is not validated on input.
+diff --git a/gui/wails.json b/gui/wails.json
+index df2667e..bb61e82 100644
+--- a/gui/wails.json
++++ b/gui/wails.json
+@@ -14,7 +14,7 @@
+   "info": {
+     "companyName": "Proxmox Backup Client",
+     "productName": "Proxmox Backup Client",
+-    "productVersion": "0.2.119",
++    "productVersion": "0.4.0",
+     "copyright": "© 2024-2026 Proxmox Backup Client GO Contributors and RDEM Systems.",
+     "comments": "Backup client for Proxmox Backup Server"
+   },
+-- 
+2.47.3
+

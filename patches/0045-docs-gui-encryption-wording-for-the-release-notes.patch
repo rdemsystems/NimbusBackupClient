@@ -1,0 +1,190 @@
+From 4603041d34f5f3c66bc9b40fa71989e1144b40ea Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 15:11:37 +0200
+Subject: [PATCH 45/58] docs, gui: encryption wording for the release notes
+
+- Compatibility with proxmox-backup-client is stated as verified in CI (e2e
+  tests 3 and 9: official key, official restore, refused without the key; our
+  read-back of an official encrypted disk backup).
+- "signed manifest" dropped from the public text: AES-256-GCM and the
+  compatibility say what users need.
+- Importing a passphrase-protected key in the GUI saves the new key file
+  without a passphrase: said in the CHANGELOG and READMEs, and shown as a
+  warning in the import panel (5 languages).
+---
+ CHANGELOG.md                                   | 18 ++++++++++++------
+ README.fr.md                                   | 12 +++++++++---
+ README.md                                      | 13 +++++++++----
+ .../src/components/EncryptionKeyField.jsx      |  3 +++
+ gui/frontend/src/i18n/translations.js          |  5 +++++
+ 5 files changed, 38 insertions(+), 13 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 2e3075d..f8974c2 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -14,10 +14,14 @@ replaces the fork's unreleased one.
+ 
+ ### Added (from upstream)
+ - **Client-side encryption, compatible with `proxmox-backup-client`**: AES-256-GCM
+-  chunks and blobs, keyed chunk digests, signed manifest. The GUI points each PBS
+-  server at a key file (create one or pick an existing one, fingerprint shown;
+-  passphrase-protected key files are CLI-only), the CLIs take `-keyfile` and
+-  `-keyfile-passphrase` (or prompt). Restore, search, browse and the NBD server
++  chunks and blobs, keyed chunk digests. Compatibility is verified in CI on every
++  build against a real PBS: a folder encrypted by Nimbus Backup with a key created
++  by `proxmox-backup-client` is restored by the official client with the same
++  key (and refused without it), and an encrypted disk backup made by the official
++  client is read back by Nimbus Backup. The GUI points each PBS server at an
++  unprotected key file (create one or pick an existing one, fingerprint shown);
++  the CLIs also take passphrase-protected key files (`-keyfile` and
++  `-keyfile-passphrase`, or prompt). Restore, search, browse and the NBD server
+   decrypt; the patched Clonezilla ISO restores encrypted disk backups.
+ - Linux packages (Debian, Fedora, Arch) with a systemd service, a Running jobs
+   tab (progress, ETA, cancel), a PBS server choice per job, disks pinned by
+@@ -33,8 +37,10 @@ replaces the fork's unreleased one.
+   format of `proxmox-backup-client key paperkey` (the QR code holds the key
+   file), optionally protected by a passphrase; the key and its QR code can also
+   be shown in the GUI. **Import a key from text or a QR code** rebuilds a key
+-  file from a scanned QR code, a paper key or a pasted key file (protected keys
+-  are unlocked with their passphrase).
++  file from a scanned QR code, a paper key or a pasted key file. **A protected
++  key is unlocked with its passphrase and saved without one** (the GUI only
++  uses unprotected key files): the import says so, keep that file as safe as
++  the key itself.
+ - **Disk backups restore in Proxmox VE as a VM that matches the machine.** The
+   VM config stored with "vm" snapshots is generated from the real machine:
+   logical CPU count, RAM, firmware (UEFI or GPT boot disk → `bios: ovmf`), guest
+diff --git a/README.fr.md b/README.fr.md
+index 342c2d4..d4a6f3c 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -115,7 +115,7 @@ Lors de la sauvegarde d'un disque entier (ex. `D:\`), Nimbus Backup exclut autom
+ ### 🔒 Chiffrement côté client
+ Les sauvegardes peuvent être chiffrées **sur le poste** avant de le quitter, avec
+ le même schéma que le client officiel `proxmox-backup-client` (AES-256-GCM,
+-empreintes de blocs à clé, manifeste signé). Le serveur PBS ne stocke que des
++empreintes de blocs à clé). Le serveur PBS ne stocke que des
+ données opaques et ne voit jamais la clé — idéal sur un PBS mutualisé ou infogéré.
+ 
+ - **Interface** : *Serveurs → Modifier → Clé de chiffrement* — créez un fichier
+@@ -126,14 +126,20 @@ données opaques et ne voit jamais la clé — idéal sur un PBS mutualisé ou i
+   code (le format de `proxmox-backup-client key paperkey`), éventuellement
+   protégée par une phrase secrète. **Importer une clé depuis un texte ou un QR
+   code** refait un fichier de clé à partir d'un QR code scanné ou d'une copie papier.
++  L'interface n'utilise que des fichiers de clé non protégés : importer une clé
++  protégée par une phrase secrète la déverrouille et enregistre le nouveau fichier
++  **sans** phrase secrète — conservez ce fichier aussi soigneusement que la clé.
+ - **Ligne de commande** : `-keyfile chemin/vers/cle.json` (ou `"keyfile"` dans le
+   fichier JSON) ; une clé protégée prend `-keyfile-passphrase`, sinon la phrase
+   secrète est demandée.
+ - **Restauration bare-metal** : l'ISO Clonezilla modifiée restaure aussi les
+   sauvegardes de disque chiffrées (clé sur clé USB, avec sa phrase secrète le cas
+   échéant) — voir [PATCH-CLONEZILLA.md](PATCH-CLONEZILLA.md).
+-- **Interopérable** : une sauvegarde chiffrée se restaure avec
+-  `proxmox-backup-client` ou Proxmox VE avec le même fichier de clé, et inversement.
++- **Compatible avec `proxmox-backup-client`, vérifié par la CI à chaque build**
++  sur un vrai PBS : un dossier chiffré par Nimbus Backup avec une clé créée par
++  `proxmox-backup-client` est restauré par le client officiel avec la même clé
++  (et refusé sans elle), et une sauvegarde de disque chiffrée par le client
++  officiel est relue par Nimbus Backup. Proxmox VE utilise les mêmes fichiers de clé.
+ 
+ > ⚠️ **Sans la clé, les sauvegardes chiffrées sont irrécupérables.** La première
+ > sauvegarde chiffrée renvoie toutes les données (pas de déduplication avec les
+diff --git a/README.md b/README.md
+index 6b33fb3..df80b9c 100644
+--- a/README.md
++++ b/README.md
+@@ -115,7 +115,7 @@ When backing up an entire drive (e.g. `D:\`), Nimbus Backup automatically exclud
+ ### 🔒 Client-side encryption
+ Backups can be encrypted **on the client** before they leave the machine, with
+ the same scheme as the official `proxmox-backup-client` (AES-256-GCM, keyed chunk
+-digests, signed manifest). The PBS server only stores opaque data and never sees
++digests). The PBS server only stores opaque data and never sees
+ the key — useful on a shared or managed PBS.
+ 
+ - **GUI**: *Servers → Edit → Encryption key* — create a key file or pick an
+@@ -124,14 +124,19 @@ the key — useful on a shared or managed PBS.
+   **Print (paper key)** saves a printable page with the key and its QR code (the
+   format of `proxmox-backup-client key paperkey`), optionally passphrase-protected.
+   **Import a key from text or a QR code** turns a scanned QR code or a paper key
+-  back into a key file.
++  back into a key file. The GUI only uses unprotected key files: importing a
++  passphrase-protected key unlocks it and saves the new key file **without** a
++  passphrase — keep that file as safe as the key itself.
+ - **CLI**: `-keyfile path/to/key.json` (or `"keyfile"` in the JSON config); a
+   passphrase-protected key takes `-keyfile-passphrase`, or prompts for it.
+ - **Bare-metal restore**: the patched Clonezilla ISO restores encrypted disk
+   backups too (key from a USB stick, with its passphrase if any) — see
+   [PATCH-CLONEZILLA.md](PATCH-CLONEZILLA.md).
+-- **Interoperable**: an encrypted backup restores with `proxmox-backup-client`
+-  or Proxmox VE using the same key file, and vice versa.
++- **Compatible with `proxmox-backup-client`, verified in CI on every build**
++  against a real PBS: a folder encrypted by Nimbus Backup with a key created by
++  `proxmox-backup-client` is restored by the official client with the same key
++  (and refused without it), and an encrypted disk backup made by the official
++  client is read back by Nimbus Backup. Proxmox VE uses the same key files.
+ 
+ > ⚠️ **Without the key, encrypted backups are unrecoverable.** The first
+ > encrypted backup uploads everything again (no deduplication with unencrypted
+diff --git a/gui/frontend/src/components/EncryptionKeyField.jsx b/gui/frontend/src/components/EncryptionKeyField.jsx
+index 26c9d19..d8ca9ce 100644
+--- a/gui/frontend/src/components/EncryptionKeyField.jsx
++++ b/gui/frontend/src/components/EncryptionKeyField.jsx
+@@ -218,6 +218,9 @@ export default function EncryptionKeyField({ value, onChange, className = '' })
+           <div style={{ marginTop: '6px' }}>
+             <textarea value={importText} onChange={(e) => setImportText(e.target.value)} placeholder={t('encImportPlaceholder')} rows="5" style={{ fontFamily: 'monospace', fontSize: '0.85em', width: '100%' }} />
+             <input type="password" value={importPass} onChange={(e) => setImportPass(e.target.value)} placeholder={t('encImportPassphrase')} style={{ marginTop: '6px' }} />
++            <div className="info-box" style={{ marginTop: '6px', backgroundColor: '#fff3cd', borderColor: '#ffeeba' }}>
++              ⚠️ {t('encImportUnprotectedWarning')}
++            </div>
+             <button type="button" className="btn" onClick={handleImportText} disabled={!importText.trim() || busy} style={{ marginTop: '6px' }}>
+               {t('encImport')}
+             </button>
+diff --git a/gui/frontend/src/i18n/translations.js b/gui/frontend/src/i18n/translations.js
+index 38a30c4..e8c9064 100644
+--- a/gui/frontend/src/i18n/translations.js
++++ b/gui/frontend/src/i18n/translations.js
+@@ -116,6 +116,7 @@ const translations = {
+       encImportTitle: "Importer une clé depuis un texte ou un QR code",
+       encImportPlaceholder: "Collez ici le fichier de clé (JSON), le texte d'un QR code scanné ou d'une copie papier (marqueurs BEGIN/END compris)",
+       encImportPassphrase: "Phrase secrète (uniquement si la clé est protégée)",
++      encImportUnprotectedWarning: "Le fichier de clé enregistré n'est PAS protégé par une phrase secrète, même si la clé importée l'était : l'interface n'utilise que des fichiers de clé non protégés. Conservez ce fichier aussi soigneusement que la clé elle-même.",
+       encImport: "Enregistrer comme fichier de clé…",
+ 
+       // Multi-PBS
+@@ -510,6 +511,7 @@ const translations = {
+       encImportTitle: "Import a key from text or a QR code",
+       encImportPlaceholder: "Paste the key file (JSON), the text of a scanned QR code or of a paper key (BEGIN/END markers included)",
+       encImportPassphrase: "Passphrase (only if the key is protected)",
++      encImportUnprotectedWarning: "The saved key file is NOT protected by a passphrase, even if the imported key was: the GUI only uses unprotected key files. Keep this file as safe as the key itself.",
+       encImport: "Save as a key file…",
+ 
+       // Multi-PBS
+@@ -905,6 +907,7 @@ const translations = {
+       encImportTitle: "Importa una chiave da testo o codice QR",
+       encImportPlaceholder: "Incolla il file di chiave (JSON), il testo di un codice QR scansionato o di una copia cartacea (marcatori BEGIN/END inclusi)",
+       encImportPassphrase: "Passphrase (solo se la chiave è protetta)",
++      encImportUnprotectedWarning: "Il file di chiave salvato NON è protetto da passphrase, anche se la chiave importata lo era: l'interfaccia usa solo file di chiave non protetti. Conserva questo file con la stessa cura della chiave stessa.",
+       encImport: "Salva come file di chiave…",
+ 
+       // Multi-PBS
+@@ -1300,6 +1303,7 @@ const translations = {
+       encImportTitle: "Schlüssel aus Text oder QR-Code importieren",
+       encImportPlaceholder: "Schlüsseldatei (JSON), den Text eines gescannten QR-Codes oder einer Papierkopie (inkl. BEGIN/END-Markierungen) hier einfügen",
+       encImportPassphrase: "Passphrase (nur wenn der Schlüssel geschützt ist)",
++      encImportUnprotectedWarning: "Die gespeicherte Schlüsseldatei ist NICHT durch eine Passphrase geschützt, auch wenn der importierte Schlüssel es war: die Oberfläche verwendet nur ungeschützte Schlüsseldateien. Bewahren Sie diese Datei so sorgfältig auf wie den Schlüssel selbst.",
+       encImport: "Als Schlüsseldatei speichern…",
+ 
+       // Multi-PBS
+@@ -1695,6 +1699,7 @@ const translations = {
+       encImportTitle: "Importuj klucz z tekstu lub kodu QR",
+       encImportPlaceholder: "Wklej plik klucza (JSON), tekst zeskanowanego kodu QR lub kopii papierowej (wraz ze znacznikami BEGIN/END)",
+       encImportPassphrase: "Hasło (tylko jeśli klucz jest chroniony)",
++      encImportUnprotectedWarning: "Zapisany plik klucza NIE jest chroniony hasłem, nawet jeśli importowany klucz był: interfejs używa tylko niechronionych plików kluczy. Przechowuj ten plik równie starannie jak sam klucz.",
+       encImport: "Zapisz jako plik klucza…",
+ 
+       // Multi-PBS
+-- 
+2.47.3
+

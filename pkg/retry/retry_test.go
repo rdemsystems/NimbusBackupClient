@@ -175,7 +175,7 @@ func TestRetry_MaxDelayRespected(t *testing.T) {
 
 	start := time.Now()
 
-	retry.Do(context.Background(), cfg, nil, func() error {
+	_ = retry.Do(context.Background(), cfg, nil, func() error {
 		return errors.New("temporary failure")
 	})
 
@@ -228,7 +228,7 @@ func TestRetry_WithJitter(t *testing.T) {
 	durations := make([]time.Duration, 5)
 	for i := 0; i < 5; i++ {
 		start := time.Now()
-		retry.DoWithJitter(context.Background(), cfg, nil, func() error {
+		_ = retry.DoWithJitter(context.Background(), cfg, nil, func() error {
 			return errors.New("temporary failure")
 		})
 		durations[i] = time.Since(start)

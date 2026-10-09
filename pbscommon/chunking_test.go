@@ -286,7 +286,6 @@ func chunkData(t *testing.T, data []byte, avgSize uint64) []uint64 {
 
 		if pos == 0 {
 			// No chunk boundary found, feed more data
-			offset = len(data)
 			break
 		}
 

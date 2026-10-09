@@ -1,0 +1,197 @@
+From f91d037c5d63927ebed3a1fad82d5d800ddd2e89 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 15:48:24 +0200
+Subject: [PATCH 47/58] docs: credit the client-side encryption to upstream in
+ every README
+
+The encryption was developed upstream by Tiziano Bacocco; the paper key, the
+QR code export and the key import are Nimbus Backup additions. Said in the
+encryption section of the 13 READMEs (11 in AI translation).
+---
+ README.ar.md | 2 ++
+ README.de.md | 2 ++
+ README.el.md | 2 ++
+ README.es.md | 2 ++
+ README.fa.md | 2 ++
+ README.fr.md | 2 ++
+ README.it.md | 2 ++
+ README.ja.md | 2 ++
+ README.md    | 2 ++
+ README.ro.md | 2 ++
+ README.ru.md | 2 ++
+ README.sv.md | 2 ++
+ README.zh.md | 2 ++
+ 13 files changed, 26 insertions(+)
+
+diff --git a/README.ar.md b/README.ar.md
+index 73de543..18c8515 100644
+--- a/README.ar.md
++++ b/README.ar.md
+@@ -127,6 +127,8 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ مقاطع مرتبطة بالمفتاح). لا يخزّن خادم PBS سوى بيانات معتمة ولا يرى
+ المفتاح أبدًا — وهذا مفيد على خادم PBS مشترك أو مُدار.
+ 
++طوّر Tiziano Bacocco التشفير في المشروع الأصلي ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go))؛ أما المفتاح الورقي وتصدير رمز QR واستيراد المفتاح فهي إضافات من Nimbus Backup.
++
+ - **الواجهة الرسومية**: *Servers → Edit → Encryption key* — أنشئ ملف مفتاح أو اختر
+   ملفًا موجودًا (من `proxmox-backup-client key create --kdf none` أو من تخزين
+   PVE)؛ وتُعرض بصمته. ثم احتفظ بنسخة منه خارج الجهاز:
+diff --git a/README.de.md b/README.de.md
+index 10e9382..a2c65fc 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -121,6 +121,8 @@ demselben Verfahren wie der offizielle `proxmox-backup-client` (AES-256-GCM, sch
+ Chunk-Digests). Der PBS-Server speichert nur undurchsichtige Daten und bekommt
+ den Schlüssel nie zu sehen — nützlich auf einem gemeinsam genutzten oder verwalteten PBS.
+ 
++Die Verschlüsselung wurde im Upstream-Projekt von Tiziano Bacocco entwickelt ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); der Papierschlüssel, der QR-Code-Export und der Schlüsselimport sind Ergänzungen von Nimbus Backup.
++
+ - **GUI**: *Server → Bearbeiten → Verschlüsselungsschlüssel* — erstellen Sie eine Schlüsseldatei oder wählen Sie eine
+   vorhandene aus (aus `proxmox-backup-client key create --kdf none` oder einem PVE-
+   Storage); ihr Fingerabdruck wird angezeigt. Bewahren Sie anschließend eine Kopie außerhalb der Maschine auf:
+diff --git a/README.el.md b/README.el.md
+index b0c492d..e9fc56e 100644
+--- a/README.el.md
++++ b/README.el.md
+@@ -121,6 +121,8 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ με κλειδί). Ο διακομιστής PBS αποθηκεύει μόνο αδιαφανή δεδομένα και δεν βλέπει ποτέ
+ το κλειδί — χρήσιμο σε κοινόχρηστο ή διαχειριζόμενο PBS.
+ 
++Η κρυπτογράφηση αναπτύχθηκε στο αρχικό έργο από τον Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go))· το χάρτινο κλειδί, η εξαγωγή σε κωδικό QR και η εισαγωγή κλειδιού είναι προσθήκες του Nimbus Backup.
++
+ - **GUI**: *Servers → Edit → Encryption key* — δημιουργήστε αρχείο κλειδιού ή επιλέξτε
+   ένα υπάρχον (από `proxmox-backup-client key create --kdf none` ή από storage
+   του PVE)· εμφανίζεται το αποτύπωμά του. Στη συνέχεια κρατήστε αντίγραφο εκτός του μηχανήματος:
+diff --git a/README.es.md b/README.es.md
+index 742978e..df9a940 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -121,6 +121,8 @@ el mismo esquema que el `proxmox-backup-client` oficial (AES-256-GCM, resúmenes
+ con clave). El servidor PBS solo almacena datos opacos y nunca ve
+ la clave — útil en un PBS compartido o gestionado.
+ 
++El cifrado fue desarrollado en el proyecto original por Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); la clave en papel, la exportación en código QR y la importación de claves son añadidos de Nimbus Backup.
++
+ - **GUI**: *Servidores → Editar → Clave de cifrado* — cree un archivo de clave o elija uno
+   existente (de `proxmox-backup-client key create --kdf none` o de un almacenamiento
+   PVE); se muestra su huella. Después, guarde una copia fuera de la máquina:
+diff --git a/README.fa.md b/README.fa.md
+index 11a8c54..d257d06 100644
+--- a/README.fa.md
++++ b/README.fa.md
+@@ -127,6 +127,8 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ قطعه‌ها وابسته به کلید). سرور PBS فقط داده‌های غیرقابل‌خواندن را ذخیره می‌کند و هرگز
+ کلید را نمی‌بیند — که روی یک PBS اشتراکی یا مدیریت‌شده مفید است.
+ 
++رمزگذاری را Tiziano Bacocco در پروژهٔ اصلی توسعه داده است ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go))؛ کلید کاغذی، خروجی کد QR و وارد کردن کلید افزوده‌های Nimbus Backup هستند.
++
+ - **رابط گرافیکی**: *Servers → Edit → Encryption key* — یک فایل کلید بسازید یا
+   یک فایل موجود را انتخاب کنید (ساخته‌شده با `proxmox-backup-client key create --kdf none` یا از یک
+   فضای ذخیره‌سازی PVE)؛ اثر انگشت آن نمایش داده می‌شود. سپس یک نسخه از آن را بیرون از ماشین نگه دارید:
+diff --git a/README.fr.md b/README.fr.md
+index 4b96664..1049c83 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -118,6 +118,8 @@ le même schéma que le client officiel `proxmox-backup-client` (AES-256-GCM,
+ empreintes de blocs à clé). Le serveur PBS ne stocke que des
+ données opaques et ne voit jamais la clé — idéal sur un PBS mutualisé ou infogéré.
+ 
++Le chiffrement a été développé en amont par Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)) ; la clé papier, l'export en QR code et l'import de clé sont des ajouts de Nimbus Backup.
++
+ - **Interface** : *Serveurs → Modifier → Clé de chiffrement* — créez un fichier
+   de clé ou choisissez-en un existant (créé par
+   `proxmox-backup-client key create --kdf none` ou issu d'un stockage PVE) ; son
+diff --git a/README.it.md b/README.it.md
+index 293b550..cb577f0 100644
+--- a/README.it.md
++++ b/README.it.md
+@@ -121,6 +121,8 @@ lo stesso schema del `proxmox-backup-client` ufficiale (AES-256-GCM, digest dei
+ con chiave). Il server PBS memorizza solo dati opachi e non vede mai
+ la chiave — utile su un PBS condiviso o gestito.
+ 
++La cifratura è stata sviluppata a monte da Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); la chiave cartacea, l'esportazione in codice QR e l'importazione della chiave sono aggiunte di Nimbus Backup.
++
+ - **GUI**: *Server → Modifica → Chiave di cifratura* — create un file di chiave o selezionatene uno
+   esistente (da `proxmox-backup-client key create --kdf none` o da uno storage
+   PVE); ne viene mostrata l'impronta. Conservatene poi una copia fuori dalla macchina:
+diff --git a/README.ja.md b/README.ja.md
+index 59e0060..87a9688 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -121,6 +121,8 @@ Proxmox Backup Server を自前でホストしたくないですか？ 私たち
+ ダイジェスト）。PBS サーバーは中身の見えないデータを保存するだけで、鍵を
+ 目にすることはありません — 共有 PBS やマネージド PBS で役立ちます。
+ 
++暗号化はアップストリームで Tiziano Bacocco 氏が開発しました（[tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)）。ペーパーキー、QR コードでのエクスポート、鍵のインポートは Nimbus Backup による追加機能です。
++
+ - **GUI**：*サーバー → 編集 → 暗号化キー* — 鍵ファイルを作成するか、
+   既存のもの（`proxmox-backup-client key create --kdf none` で作成したもの、または PVE
+   ストレージのもの）を選択します。そのフィンガープリントが表示されます。その後、マシン外にコピーを保管してください：
+diff --git a/README.md b/README.md
+index 389f615..d7f8747 100644
+--- a/README.md
++++ b/README.md
+@@ -118,6 +118,8 @@ the same scheme as the official `proxmox-backup-client` (AES-256-GCM, keyed chun
+ digests). The PBS server only stores opaque data and never sees
+ the key — useful on a shared or managed PBS.
+ 
++The encryption was developed upstream by Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); the paper key, the QR code export and the key import are Nimbus Backup additions.
++
+ - **GUI**: *Servers → Edit → Encryption key* — create a key file or pick an
+   existing one (from `proxmox-backup-client key create --kdf none` or a PVE
+   storage); its fingerprint is shown. Then keep a copy off the machine:
+diff --git a/README.ro.md b/README.ro.md
+index d8b1ddf..38622e0 100644
+--- a/README.ro.md
++++ b/README.ro.md
+@@ -121,6 +121,8 @@ aceeași schemă ca `proxmox-backup-client` oficial (AES-256-GCM, digest-uri de
+ cu cheie). Serverul PBS stochează doar date opace și nu vede niciodată
+ cheia — util pe un PBS partajat sau gestionat.
+ 
++Criptarea a fost dezvoltată în proiectul original de Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); cheia pe hârtie, exportul ca cod QR și importul cheii sunt adăugiri Nimbus Backup.
++
+ - **GUI**: *Servers → Edit → Encryption key* — creați un fișier cheie sau alegeți
+   unul existent (din `proxmox-backup-client key create --kdf none` sau dintr-un storage
+   PVE); amprenta sa este afișată. Apoi păstrați o copie în afara mașinii:
+diff --git a/README.ru.md b/README.ru.md
+index 2de27e4..9590096 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -121,6 +121,8 @@ GUI Nimbus Backup работает только в Windows (инструмент
+ фрагментов с ключом). Сервер PBS хранит только непрозрачные данные и никогда не видит
+ ключ — это полезно на общем или управляемом PBS.
+ 
++Шифрование разработано в исходном проекте Тициано Бакокко (Tiziano Bacocco, [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); бумажная копия ключа, экспорт в QR-код и импорт ключа — дополнения Nimbus Backup.
++
+ - **GUI**: *Серверы → Изменить → Ключ шифрования* — создайте файл ключа или выберите
+   существующий (созданный `proxmox-backup-client key create --kdf none` или из хранилища
+   PVE); отображается его отпечаток. Затем сохраните копию вне машины:
+diff --git a/README.sv.md b/README.sv.md
+index 20d9c9a..ed9f02f 100644
+--- a/README.sv.md
++++ b/README.sv.md
+@@ -121,6 +121,8 @@ samma schema som den officiella `proxmox-backup-client` (AES-256-GCM, nyckelbase
+ chunk-digests). PBS-servern lagrar endast ogenomskinliga data och ser aldrig
+ nyckeln — användbart på en delad eller hanterad PBS.
+ 
++Krypteringen har utvecklats i originalprojektet av Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); papperskopian av nyckeln, QR-kodsexporten och nyckelimporten är tillägg i Nimbus Backup.
++
+ - **GUI**: *Servers → Edit → Encryption key* — skapa en nyckelfil eller välj
+   en befintlig (från `proxmox-backup-client key create --kdf none` eller en PVE-
+   storage); dess fingeravtryck visas. Spara sedan en kopia utanför maskinen:
+diff --git a/README.zh.md b/README.zh.md
+index f96b4bf..e7ba749 100644
+--- a/README.zh.md
++++ b/README.zh.md
+@@ -121,6 +121,8 @@ Nimbus Backup GUI 仅支持 Windows（CLI 工具也可为 Linux 和 macOS 构建
+ 摘要）。PBS 服务器只存储不透明的数据，永远看不到
+ 密钥——这在共享或托管的 PBS 上非常有用。
+ 
++加密功能由 Tiziano Bacocco 在上游项目中开发（[tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)）；纸质密钥、二维码导出和密钥导入是 Nimbus Backup 新增的功能。
++
+ - **GUI**：*服务器 → 编辑 → 加密密钥* — 创建密钥文件或选择
+   已有的密钥文件（来自 `proxmox-backup-client key create --kdf none` 或 PVE
+   存储）；界面会显示其指纹。然后请在机器之外保留一份副本：
+-- 
+2.47.3
+

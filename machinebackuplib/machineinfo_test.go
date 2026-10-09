@@ -100,8 +100,10 @@ func TestBuildQemuConfig(t *testing.T) {
 		"net0: e1000e=B4:96:91:00:11:22,bridge=vmbr0\n",
 		"net1: e1000e=B4:96:91:00:11:23,bridge=vmbr0\n",
 		"ostype: win11\n",
-		"sata0: local:105/vm-105-disk-0.raw,discard=on,size=1099511627776\n",
-		"sata1: local:105/vm-105-disk-1.raw,discard=on,size=274877906944\n",
+		"sata0: local:105/vm-105-disk-0.raw,cache=writeback,discard=on,size=1099511627776\n",
+		"#qmdump#map:sata0:drive-sata0::raw:\n",
+		"sata1: local:105/vm-105-disk-1.raw,cache=writeback,discard=on,size=274877906944\n",
+		"#qmdump#map:sata1:drive-sata1::raw:\n",
 		"smbios1: uuid=4c4c4544-0035-4e10-8033-b4c04f4d3233,manufacturer=" + base64.StdEncoding.EncodeToString([]byte("Dell Inc.")) +
 			",serial=" + base64.StdEncoding.EncodeToString([]byte("ABC1234")) + ",base64=1\n",
 		"EFI Disk with pre-enrolled keys",

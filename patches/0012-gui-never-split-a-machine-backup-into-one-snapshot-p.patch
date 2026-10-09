@@ -1,0 +1,32 @@
+From 04a226dc6a88ce82b155084f99fad25c49d190ab Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 23 Sep 2026 10:14:03 +0200
+Subject: [PATCH 12/58] gui: never split a machine backup into one snapshot per
+ disk
+
+All selected disks of a machine backup belong to ONE snapshot: for the
+"vm" type its backup-id is the numeric VM ID, which a per-disk split
+would turn into non-numeric ids. (The reader/uploader handoff and the
+early VM ID check of the former patch are fixed upstream.)
+---
+ gui/backup_inline.go | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/gui/backup_inline.go b/gui/backup_inline.go
+index 8887e9b..dc4a66d 100644
+--- a/gui/backup_inline.go
++++ b/gui/backup_inline.go
+@@ -575,7 +575,9 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
+ 	// first), landing as separate snapshots in a single group — which makes prune
+ 	// keep/drop the wrong folders. A single selected directory keeps the caller's
+ 	// backup-id (which may have been set explicitly, e.g. by a scheduled job).
+-	if len(opts.BackupObjects) <= 1 {
++	// Machine backups are never split: all selected disks belong to ONE "vm"
++	// snapshot whose backup-id is the numeric VM ID (see machinebackuplib).
++	if len(opts.BackupObjects) <= 1 || opts.Kind == "machine" {
+ 		return runBackupInlineInternal(opts)
+ 	}
+ 
+-- 
+2.47.3
+

@@ -1,7 +1,7 @@
-From 14782833d5b51b2a96c567fe1772dcc1358118e7 Mon Sep 17 00:00:00 2001
+From c1a301fdb611c6e8590436e03e1b19a612aaa797 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:06:21 +0200
-Subject: [PATCH 10/15] gui: per-language buy-storage link and label for brands
+Subject: [PATCH 10/58] gui: per-language buy-storage link and label for brands
 
 A brand could only set one BuyStorageURL/Text for every UI language, so
 a vendor with localized landing pages sent everyone to the same one.
@@ -14,7 +14,7 @@ to the single-value fields.
  2 files changed, 14 insertions(+), 5 deletions(-)
 
 diff --git a/gui/brand.go b/gui/brand.go
-index 59bee22..26e0f03 100644
+index 8168595..41da00a 100644
 --- a/gui/brand.go
 +++ b/gui/brand.go
 @@ -19,6 +19,13 @@ type Brand struct {
@@ -32,10 +32,10 @@ index 59bee22..26e0f03 100644
  	// "about", "help", "updates", "contact". Any key may be omitted; the
  	// frontend falls back to the upstream Proxmox destinations. These are the
 diff --git a/gui/frontend/src/App.jsx b/gui/frontend/src/App.jsx
-index 5e81f01..ac13796 100644
+index 9a0c447..ee1e53f 100644
 --- a/gui/frontend/src/App.jsx
 +++ b/gui/frontend/src/App.jsx
-@@ -55,15 +55,17 @@ if (window.runtime) {
+@@ -69,15 +69,17 @@ if (window.runtime) {
  }
  
  function App() {
@@ -56,7 +56,7 @@ index 5e81f01..ac13796 100644
    }
    const [systemInfo, setSystemInfo] = useState({ mode: 'Standalone', is_admin: false, service_available: false, os: '' })
    const [config, setConfig] = useState({
-@@ -1615,9 +1617,9 @@ function App() {
+@@ -1787,9 +1789,9 @@ function App() {
                    <>
                      <br/>
                      <strong>📦 {t('noPBSYet')}</strong><br/>

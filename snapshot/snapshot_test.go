@@ -107,7 +107,7 @@ func TestVSSCleanup(t *testing.T) {
 		}
 	}()
 
-	VSSCleanup()
+	_ = VSSCleanup()
 }
 
 // TestSnapshotPathHandling tests path manipulation logic

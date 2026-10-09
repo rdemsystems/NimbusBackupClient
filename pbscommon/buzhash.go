@@ -53,34 +53,34 @@ type Chunker struct {
 	window             []byte
 }
 
-func (self *Chunker) New(chunk_size_avg uint64) {
+func (c *Chunker) New(chunk_size_avg uint64) {
 	avg := float64(chunk_size_avg)
 	discriminator := uint32(avg / (-1.42888852e-7*avg + 1.33237515))
 	break_test_mask := uint32(chunk_size_avg*2 - 1)
 	break_test_minimum := break_test_mask - 2
 
-	self.h = 0
-	self.window_size = 0
-	self.chunk_size = 0
-	self.chunk_size_min = chunk_size_avg >> 2
-	self.chunk_size_max = chunk_size_avg << 2
-	self._chunk_size_avg = chunk_size_avg
-	self._discriminator = discriminator
-	self.break_test_mask = break_test_mask
-	self.break_test_minimum = break_test_minimum
-	self.window = make([]byte, 64)
+	c.h = 0
+	c.window_size = 0
+	c.chunk_size = 0
+	c.chunk_size_min = chunk_size_avg >> 2
+	c.chunk_size_max = chunk_size_avg << 2
+	c._chunk_size_avg = chunk_size_avg
+	c._discriminator = discriminator
+	c.break_test_mask = break_test_mask
+	c.break_test_minimum = break_test_minimum
+	c.window = make([]byte, 64)
 
-	fmt.Printf("Chunk size min is %d , max %d\n", self.chunk_size_min, self.chunk_size_max)
+	fmt.Printf("Chunk size min is %d , max %d\n", c.chunk_size_min, c.chunk_size_max)
 }
 
-func (self *Chunker) Scan(data []byte) uint64 {
-	window_len := uint64(len(self.window))
+func (c *Chunker) Scan(data []byte) uint64 {
+	window_len := uint64(len(c.window))
 	data_len := uint64(len(data))
 
 	pos := uint64(0)
 
-	if self.window_size < uint64(window_len) {
-		need := window_len - self.window_size
+	if c.window_size < uint64(window_len) {
+		need := window_len - c.window_size
 		copy_len := uint64(0)
 		if need < data_len {
 			copy_len = need
@@ -90,52 +90,52 @@ func (self *Chunker) Scan(data []byte) uint64 {
 
 		for _i := uint64(0); _i < copy_len; _i++ {
 			B := data[pos]
-			self.window[self.window_size] = B
-			self.h = bits.RotateLeft32(self.h, 1) ^ buzhash_table[B]
+			c.window[c.window_size] = B
+			c.h = bits.RotateLeft32(c.h, 1) ^ buzhash_table[B]
 			pos += 1
-			self.window_size += 1
+			c.window_size += 1
 		}
 
-		self.chunk_size += copy_len
+		c.chunk_size += copy_len
 
-		if self.window_size < window_len {
+		if c.window_size < window_len {
 			return 0
 		}
 	}
 
-	idx := self.chunk_size & 0x3f
+	idx := c.chunk_size & 0x3f
 
 	for pos < data_len {
 		enter := data[pos]
-		leave := self.window[idx]
-		self.h = bits.RotateLeft32(self.h, 1) ^ buzhash_table[leave] ^ buzhash_table[enter]
-		self.chunk_size += 1
+		leave := c.window[idx]
+		c.h = bits.RotateLeft32(c.h, 1) ^ buzhash_table[leave] ^ buzhash_table[enter]
+		c.chunk_size += 1
 		pos += 1
-		self.window[idx] = enter
+		c.window[idx] = enter
 
-		if self.shall_break() {
-			self.h = 0
-			self.chunk_size = 0
-			self.window_size = 0
+		if c.shall_break() {
+			c.h = 0
+			c.chunk_size = 0
+			c.window_size = 0
 			return pos
 		}
 
-		idx = self.chunk_size & 0x3f
+		idx = c.chunk_size & 0x3f
 	}
 
 	return 0
 
 }
 
-func (self *Chunker) shall_break() bool {
-	if self.chunk_size >= self.chunk_size_max {
+func (c *Chunker) shall_break() bool {
+	if c.chunk_size >= c.chunk_size_max {
 		return true
 	}
 
-	if self.chunk_size < self.chunk_size_min {
+	if c.chunk_size < c.chunk_size_min {
 		return false
 	}
 
-	//return (self.h % self._discriminator) == (self._discriminator - 1)
-	return (self.h & self.break_test_mask) >= self.break_test_minimum
+	//return (c.h % c._discriminator) == (c._discriminator - 1)
+	return (c.h & c.break_test_mask) >= c.break_test_minimum
 }

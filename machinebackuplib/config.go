@@ -2,7 +2,6 @@ package machinebackuplib
 
 import "pbscommon"
 
-
 type MailSendConfig struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -40,12 +39,26 @@ type Config struct {
 	SysTray         bool        `json:"systray"`
 	BackupType      string      `json:"backuptype"`
 
-	// EncryptionKeyFile is an optional proxmox-backup-client key file (CLI);
-	// the passphrase of a protected key comes from PBS_ENCRYPTION_PASSWORD.
-	EncryptionKeyFile string `json:"keyfile,omitempty"`
-	// Crypt is the unlocked key (GUI callers set it directly). When set,
-	// every chunk and blob is encrypted client-side.
+	// KeyFile is a Proxmox Backup Server encryption key (JSON, as produced by
+	// `proxmox-backup-client key create`). When set, every fixed-index chunk
+	// is AES-256-GCM encrypted and the snapshot manifest is signed — the same
+	// on-disk layout as `proxmox-backup-client backup --crypt-mode encrypt`.
+	KeyFile string `json:"keyfile"`
+
+	// KeyFilePassphrase unlocks a scrypt/PBKDF2 protected KeyFile. Empty means
+	// the caller prompts for it.
+	KeyFilePassphrase string `json:"keyfilepassphrase"`
+
+	// Crypt is KeyFile after it has been read and unlocked. Callers (the CLI,
+	// the GUI) fill this in — via clientcommon.LoadCryptConfig — so that the
+	// passphrase prompt stays with whoever owns the console. It is never
+	// serialized: a -config file carries KeyFile, not the unlocked key.
 	Crypt *pbscommon.CryptConfig `json:"-"`
+
+	// UseSnapshot controls whether to attempt creating block-level snapshots
+	// (via dattobd/elastio-snap on Linux, VSS on Windows) for crash-consistent
+	// images. When false, the backup reads raw disks (crash-consistent only).
+	UseSnapshot bool `json:"use_snapshot,omitempty"`
 }
 
 func (c *Config) Valid() bool {
@@ -71,4 +84,3 @@ func (c *Config) Valid() bool {
 
 	return true
 }
-

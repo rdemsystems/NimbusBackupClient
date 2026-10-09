@@ -1,0 +1,270 @@
+From 6290d3040de0bce9ed9a21fb57ff9d9bf9b33a90 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 14:44:57 +0200
+Subject: [PATCH 40/58] feat(cli): exclusions in proxmoxbackup-directory (issue
+ #4)
+
+-exclude PATTERN (repeatable), -exclude-from FILE and "exclude" /
+"exclude-from" in the JSON config, wired to the pxar exclusion matcher the
+GUI already uses (ExcludeRoot = the original directory, so absolute patterns
+still match under VSS). A missing exclusion file is an error rather than an
+unfiltered backup.
+---
+ CHANGELOG.md                   |  1 +
+ README.fr.md                   |  2 +-
+ README.md                      |  2 +-
+ directorybackup/config.go      | 39 ++++++++++++++++++++++++++++++++++
+ directorybackup/config_test.go | 33 ++++++++++++++++++++++++++++
+ directorybackup/main.go        | 27 ++++++++++++++++-------
+ 6 files changed, 94 insertions(+), 10 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 01fd6c1..e67101c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -26,6 +26,7 @@ replaces the fork's unreleased one.
+   and a real-PBS end-to-end test suite in CI.
+ 
+ ### Added
++- **Exclusions in `proxmoxbackup-directory`** (issue #4): `-exclude PATTERN` (repeatable), `-exclude-from FILE` (one pattern per line, `#` comments) and `"exclude"` / `"exclude-from"` in the JSON config, with the GUI's pattern syntax.
+ - **Paper key**: print an encryption key as a page with its QR code, in the
+   format of `proxmox-backup-client key paperkey` (the QR code holds the key
+   file), optionally protected by a passphrase; the key and its QR code can also
+diff --git a/README.fr.md b/README.fr.md
+index d6f23ac..910779a 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -81,7 +81,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
+ - Journalisation de débogage pour le diagnostic
+ 
+ ### Outils en ligne de commande
+-- `proxmoxbackup-directory` — sauvegarde de dossiers (PXAR) avec déduplication, sauvegarde de flux (`-backupstream`, ex. un `mysqldump` en pipe), notifications par e-mail, fichier de configuration JSON
++- `proxmoxbackup-directory` — sauvegarde de dossiers (PXAR) avec déduplication, sauvegarde de flux (`-backupstream`, ex. un `mysqldump` en pipe), exclusions (`-exclude "*.tmp"`, répétable, ou `-exclude-from fichier` ; `"exclude"` dans la config JSON), notifications par e-mail, fichier de configuration JSON
+ - `proxmoxbackup-machine` — sauvegarde à chaud d'une machine complète en image disque amorçable (FIDX) : VSS sous Windows, incrémentale, hachage parallélisé
+ - `proxmoxbackup-nbd` — serveur NBD pour monter une sauvegarde disque sous Linux (restauration de fichiers, restauration bare-metal depuis une [ISO Clonezilla live patchée](PATCH-CLONEZILLA.md))
+ 
+diff --git a/README.md b/README.md
+index 2c04ee3..dbd6ae6 100644
+--- a/README.md
++++ b/README.md
+@@ -81,7 +81,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite
+ - Debug logging for troubleshooting
+ 
+ ### Command-line tools
+-- `proxmoxbackup-directory` — directory (PXAR) backups with deduplication, stream backups (`-backupstream`, e.g. a `mysqldump` pipe), e-mail notifications, JSON config file
++- `proxmoxbackup-directory` — directory (PXAR) backups with deduplication, stream backups (`-backupstream`, e.g. a `mysqldump` pipe), exclusions (`-exclude "*.tmp"`, repeatable, or `-exclude-from file`; `"exclude"` in the JSON config), e-mail notifications, JSON config file
+ - `proxmoxbackup-machine` — full live machine backups as a bootable disk image (FIDX): VSS on Windows, incremental, parallel hashing
+ - `proxmoxbackup-nbd` — NBD server to mount a disk backup on Linux (file-level restore, bare-metal restore from a [patched Clonezilla live ISO](PATCH-CLONEZILLA.md))
+ 
+diff --git a/directorybackup/config.go b/directorybackup/config.go
+index eb4a0b5..a3102dd 100644
+--- a/directorybackup/config.go
++++ b/directorybackup/config.go
+@@ -55,6 +55,35 @@ type Config struct {
+ 	// PBKDF2 KDF. Left empty, the passphrase is asked for on the console.
+ 	// Ignored for `--kdf none` key files, which need nothing.
+ 	KeyFilePassphrase string `json:"keyfilepassphrase"`
++
++	// Exclude lists exclusion patterns, the same syntax as the GUI's exclusion
++	// list: a pattern without a separator matches a name anywhere in the tree
++	// ("*.tmp", "node_modules"); a pattern with a separator is anchored to the
++	// backup root ("logs/*.log", or an absolute "C:\\Data\\Cache").
++	Exclude []string `json:"exclude"`
++
++	// ExcludeFrom is a file with one pattern per line (blank lines and lines
++	// starting with # are ignored), added to Exclude.
++	ExcludeFrom string `json:"exclude-from"`
++}
++
++// ExcludePatterns returns the patterns of Exclude and of the ExcludeFrom file.
++func (c *Config) ExcludePatterns() ([]string, error) {
++	patterns := append([]string(nil), c.Exclude...)
++	if c.ExcludeFrom == "" {
++		return patterns, nil
++	}
++	data, err := os.ReadFile(c.ExcludeFrom) // #nosec G304 -- path given by the operator
++	if err != nil {
++		return nil, fmt.Errorf("read exclusion file: %w", err)
++	}
++	for _, line := range strings.Split(string(data), "\n") {
++		line = strings.TrimSpace(line)
++		if line != "" && !strings.HasPrefix(line, "#") {
++			patterns = append(patterns, line)
++		}
++	}
++	return patterns, nil
+ }
+ 
+ // Dirs returns every configured source directory: "backupdir" first (if set),
+@@ -115,6 +144,9 @@ func loadConfig() *Config {
+ 	backupIDFlag := flag.String("backup-id", "", "Backup ID (optional - if not specified, the hostname is used as the default)")
+ 	var backupSourceDirFlags dirListFlag
+ 	flag.Var(&backupSourceDirFlags, "backupdir", "Backup source directory, must not be symlink. Repeat the flag to back up several directories; each becomes its own backup group (backup-id <base>_<path>)")
++	var excludeFlags dirListFlag
++	flag.Var(&excludeFlags, "exclude", "Exclusion pattern, repeatable: a name anywhere in the tree (\"*.tmp\", \"node_modules\") or a path anchored to the backup root (\"logs/*.log\")")
++	excludeFromFlag := flag.String("exclude-from", "", "File with one exclusion pattern per line (# starts a comment)")
+ 	backupStreamNameFlag := flag.String("backupstream", "", "Filename for stream backup")
+ 	pxarOutFlag := flag.String("pxarout", "", "Output PXAR archive for debug purposes (optional)")
+ 	noVSSFlag := flag.Bool("novss", false, "Disable VSS ( For filesystems that don't support it, for example veracrypt )")
+@@ -184,6 +216,13 @@ func loadConfig() *Config {
+ 		config.BackupSourceDirs = backupSourceDirFlags[1:]
+ 	}
+ 
++	if len(excludeFlags) > 0 {
++		config.Exclude = append(config.Exclude, excludeFlags...)
++	}
++	if *excludeFromFlag != "" {
++		config.ExcludeFrom = *excludeFromFlag
++	}
++
+ 	if *backupStreamNameFlag != "" {
+ 		config.BackupStreamName = *backupStreamNameFlag
+ 	}
+diff --git a/directorybackup/config_test.go b/directorybackup/config_test.go
+index e8fe7dd..2905911 100644
+--- a/directorybackup/config_test.go
++++ b/directorybackup/config_test.go
+@@ -2,6 +2,8 @@ package main
+ 
+ import (
+ 	"encoding/json"
++	"os"
++	"path/filepath"
+ 	"reflect"
+ 	"testing"
+ )
+@@ -61,3 +63,34 @@ func TestConfigDirsWithKeyFile(t *testing.T) {
+ 		t.Error("config with several backupdirs and a keyfile should be valid")
+ 	}
+ }
++
++func TestConfigExcludePatterns(t *testing.T) {
++	file := filepath.Join(t.TempDir(), "exclude.txt")
++	content := "# caches\n*.tmp\n\n  node_modules  \r\nlogs/*.log\n"
++	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
++		t.Fatal(err)
++	}
++
++	var cfg Config
++	if err := json.Unmarshal([]byte(`{"exclude":["Thumbs.db"],"exclude-from":`+jsonString(file)+`}`), &cfg); err != nil {
++		t.Fatal(err)
++	}
++	got, err := cfg.ExcludePatterns()
++	if err != nil {
++		t.Fatal(err)
++	}
++	want := []string{"Thumbs.db", "*.tmp", "node_modules", "logs/*.log"}
++	if !reflect.DeepEqual(got, want) {
++		t.Errorf("ExcludePatterns() = %q, want %q", got, want)
++	}
++
++	cfg.ExcludeFrom = filepath.Join(t.TempDir(), "missing.txt")
++	if _, err := cfg.ExcludePatterns(); err == nil {
++		t.Error("a missing exclusion file must be an error, not an unfiltered backup")
++	}
++}
++
++func jsonString(s string) string {
++	b, _ := json.Marshal(s)
++	return string(b)
++}
+diff --git a/directorybackup/main.go b/directorybackup/main.go
+index 3b76972..87aa66d 100644
+--- a/directorybackup/main.go
++++ b/directorybackup/main.go
+@@ -250,6 +250,12 @@ func main() {
+ 		hostname = "unknown"
+ 	}
+ 
++	excludes, err := cfg.ExcludePatterns()
++	if err != nil {
++		fmt.Printf("Error: %v\n", err)
++		os.Exit(1)
++	}
++
+ 	dirs := cfg.Dirs()
+ 	var client *pbscommon.PBSClient
+ 	if len(dirs) <= 1 {
+@@ -263,13 +269,13 @@ func main() {
+ 	begin := time.Now()
+ 	var readErrors []string
+ 	if len(dirs) == 1 {
+-		readErrors, err = backup(client, newchunk, reusechunk, cfg.PxarOut, dirs[0], cfg.UseVSS)
++		readErrors, err = backup(client, newchunk, reusechunk, cfg.PxarOut, dirs[0], cfg.UseVSS, excludes)
+ 	} else if len(dirs) > 1 {
+ 		baseID := cfg.BackupID
+ 		if baseID == "" {
+ 			baseID = hostname
+ 		}
+-		readErrors, err = backup_many(newClient, newchunk, reusechunk, cfg.PxarOut, dirs, baseID, cfg.UseVSS)
++		readErrors, err = backup_many(newClient, newchunk, reusechunk, cfg.PxarOut, dirs, baseID, cfg.UseVSS, excludes)
+ 	} else if cfg.BackupStreamName != "" {
+ 		sn := cfg.BackupStreamName
+ 		if !strings.HasSuffix(sn, ".didx") {
+@@ -363,7 +369,7 @@ func main() {
+ // retention and restore treat every directory as an independent series. A
+ // directory that fails does not stop the others; the failures are joined into
+ // the returned error.
+-func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool) ([]string, error) {
++func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool, excludes []string) ([]string, error) {
+ 	if pxarOut != "" {
+ 		return nil, fmt.Errorf("-pxarout writes a single archive and cannot be combined with several -backupdir")
+ 	}
+@@ -388,7 +394,7 @@ func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error),
+ 			failures = append(failures, fmt.Errorf("%s: ticket login failed: %w", dir, err))
+ 			continue
+ 		}
+-		dirReadErrors, err := backup(client, newchunk, reusechunk, "", dir, usevss)
++		dirReadErrors, err := backup(client, newchunk, reusechunk, "", dir, usevss, excludes)
+ 		// Release the session even after a failure, otherwise PBS keeps the
+ 		// group locked until the connection times out.
+ 		client.Close()
+@@ -461,12 +467,17 @@ func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uin
+ 	return client.Finish()
+ }
+ 
+-func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string) ([]string, error) {
++// backup_real archives backupdir (the VSS snapshot path when VSS is used);
++// excludeRoot is the original directory, so absolute exclusion patterns match
++// whatever path is actually read.
++func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, excludeRoot string, excludes []string) ([]string, error) {
+ 	client.Connect(false, "host")
+ 	knownChunks := haxmap.New[string, bool]()
+ 
+ 	archive := &pbscommon.PXARArchive{}
+ 	archive.ArchiveName = "backup.pxar.didx"
++	archive.ExcludeList = excludes
++	archive.ExcludeRoot = excludeRoot
+ 
+ 	previousDidx, err := client.DownloadPreviousToBytes(archive.ArchiveName)
+ 	if err != nil {
+@@ -563,7 +574,7 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
+ 	return archive.ReadErrors, nil
+ }
+ 
+-func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, usevss bool) ([]string, error) {
++func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, usevss bool, excludes []string) ([]string, error) {
+ 
+ 	fmt.Printf("Starting backup of %s\n", backupdir)
+ 	var err error
+@@ -579,7 +590,7 @@ func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, px
+ 			}
+ 			//Remove VSS snapshot on windows, on linux for now NOP
+ 			var e error
+-			readErrors, e = backup_real(client, newchunk, reusechunk, pxarOut, snapshotDir)
++			readErrors, e = backup_real(client, newchunk, reusechunk, pxarOut, snapshotDir, originalDir, excludes)
+ 			return e
+ 
+ 		})
+@@ -588,7 +599,7 @@ func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, px
+ 			readErrors[i] = unmapSnapshotPathString(readErrors[i], snapshotDir, originalDir)
+ 		}
+ 	} else {
+-		readErrors, err = backup_real(client, newchunk, reusechunk, pxarOut, backupdir)
++		readErrors, err = backup_real(client, newchunk, reusechunk, pxarOut, backupdir, originalDir, excludes)
+ 	}
+ 
+ 	if err != nil {
+-- 
+2.47.3
+

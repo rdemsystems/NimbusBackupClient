@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	stdruntime "runtime"
@@ -57,8 +58,17 @@ func init() {
 }
 
 func main() {
+	// Elevated token-fetch child: this process was launched elevated ONLY to
+	// read the service token file and hand it back (see token_elevated.go).
+	// It must run before flag parsing, single-instance and everything else —
+	// the child never starts the GUI.
+	if handleElevatedTokenFetchChild(os.Args[1:]) {
+		return
+	}
+
 	// Parse command line flags
 	minimized := flag.Bool("minimized", false, "Start minimized to system tray")
+	forceStandalone := flag.Bool("standalone", false, "Force standalone mode (do not connect to the local service)")
 	flag.Parse()
 
 	// Check for single instance (GUI only)
@@ -104,19 +114,54 @@ func main() {
 	// (Task Scheduler or Registry entries before MSI service)
 	CleanupLegacyAutoStart()
 
+	// Resolve the execution mode BEFORE building the app: it decides where
+	// the configuration lives. In service mode the service owns the
+	// privileged state dir (config.json & co. are service-only readable);
+	// in standalone mode the GUI keeps everything in the user's home.
+	execMode, standaloneReason := resolveExecutionMode(*forceStandalone)
+	// A service token that expires or is rotated mid-session must be renewed
+	// with the same elevated fetch that got it at launch, instead of turning
+	// every call into a 401. Installed here (and on the late switch to service
+	// mode) so the launch probe above still sees the raw 401 and can fall back
+	// to standalone when the prompt is declined.
+	if execMode == api.ModeService {
+		installTokenRefreshHook()
+	}
+	switch execMode {
+	case api.ModeService:
+		SetConfigDir(serviceStateDir())
+	default:
+		SetConfigDir(standaloneConfigDir())
+		migrateStandaloneFromProgramData()
+	}
+	writeDebugLog(fmt.Sprintf("Execution mode: %s (standalone reason: %q)", execMode.String(), standaloneReason))
+
 	// Create app instance
 	app := NewApp()
+	app.mode = execMode
+	app.standaloneReason = standaloneReason
 	writeDebugLog("App instance created")
 
-	// Create application options
+	// Service mode: config.json lives in a root-only state directory (0700 via
+	// systemd StateDirectoryMode=), so LoadConfig() inside NewApp() could not
+	// read it — its result is empty. Fetch the sanitized document from the
+	// service BEFORE the window opens: the frontend asks for the server list on
+	// mount, and an async hydration would race it (saved servers "not showing
+	// up" after a restart of the GUI).
+	if execMode == api.ModeService {
+		app.hydrateFromService()
+	}
+
+	// Create application options. No MaxWidth/MaxHeight: Windows caps a
+	// maximised window at the max size, so "maximise" only moved the window
+	// to the top-left corner (issue #1). Small screens are handled by
+	// fitWindowToScreen instead.
 	appOptions := &options.App{
 		Title:     fmt.Sprintf("%s v%s", BrandFromExecutable().Title, appVersion),
 		Width:     1200,
 		Height:    840,
-		MaxWidth:  1680, // Prevent window from being too large
-		MaxHeight: 1008, // Prevent title bar from going off-screen
-		MinWidth:  480,  // Allow very small windows for low-res screens
-		MinHeight: 360,  // Allow very small windows for low-res screens
+		MinWidth:  480, // Allow very small windows for low-res screens
+		MinHeight: 360, // Allow very small windows for low-res screens
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
@@ -160,6 +205,66 @@ func main() {
 	writeDebugLog("Application shutdown normally")
 }
 
+// resolveExecutionMode probes the local service and decides how this GUI
+// process runs:
+//
+//	HTTP 200    -> service mode (the token presented is accepted)
+//	HTTP 401    -> service running, token missing: ONE elevated token fetch,
+//	               then re-probe; any failure falls back to standalone
+//	unreachable -> standalone (no service installed/started)
+//
+// The --standalone flag forces standalone unconditionally.
+// PBSGO_TOKEN_FETCH_FAILED=1 (set by the package launcher after its own
+// failed fetch attempt) suppresses the in-GUI elevation prompt so the user
+// is never asked twice for the same token.
+func resolveExecutionMode(forceStandalone bool) (api.ExecutionMode, string) {
+	return resolveExecutionModeWith(forceStandalone,
+		api.NewModeDetector(getAPITokenPath()).Probe,
+		elevatedFetchTokenWithHandoff)
+}
+
+// resolveExecutionModeWith is resolveExecutionMode with the probe and the
+// elevated fetch injected, so the decision table can be tested without a
+// running service or a real pkexec/UAC prompt.
+func resolveExecutionModeWith(forceStandalone bool, probe func() int, fetchToken func() (string, error)) (api.ExecutionMode, string) {
+	if forceStandalone {
+		writeDebugLog("Standalone mode forced by --standalone flag")
+		return api.ModeStandalone, "forced"
+	}
+
+	switch probe() {
+	case 200:
+		writeDebugLog("Local service is running and accepted the token")
+		return api.ModeService, ""
+	case 401:
+		if os.Getenv("PBSGO_TOKEN_FETCH_FAILED") != "" {
+			writeDebugLog("Service is running but the token is missing and the launcher already attempted an elevated fetch (PBSGO_TOKEN_FETCH_FAILED): not prompting again")
+			return api.ModeStandalone, "auth_failed"
+		}
+		writeDebugLog("Service is running but the token is missing: attempting one elevated token fetch")
+		token, err := fetchToken()
+		if err != nil {
+			writeDebugLog(fmt.Sprintf("Elevated token fetch failed: %v — falling back to standalone", err))
+			return api.ModeStandalone, "auth_failed"
+		}
+		// Keep the token in memory only; the root-owned file is never
+		// copied to a user-readable location.
+		api.SetTokenOverride(token)
+		if probe() == 200 {
+			writeDebugLog("Token acquired via elevated fetch; using service mode")
+			return api.ModeService, ""
+		}
+		writeDebugLog("Token acquired but still rejected; falling back to standalone")
+		// A token the service refuses must not linger: every later request
+		// would keep presenting it instead of asking for a fresh one.
+		api.SetTokenOverride("")
+		return api.ModeStandalone, "auth_failed"
+	default:
+		writeDebugLog("Local service not reachable: standalone mode")
+		return api.ModeStandalone, "no_service"
+	}
+}
+
 func writeCrashReport(message string) {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 
@@ -187,15 +292,12 @@ Please report this issue to the Proxmox Backup Client project:
 	}
 }
 
-// SetProgressCallbacks sets custom progress callbacks for API mode
-func (a *App) SetProgressCallbacks(jobID string, onProgress func(string, float64, string), onComplete func(string, bool, string)) {
-	writeDebugLog(fmt.Sprintf("[SetProgressCallbacks] Registered callbacks for jobID: %s", jobID))
-	a.callbacksMutex.Lock()
-	a.callbacksMap[jobID] = &progressCallbacks{
-		onProgress: onProgress,
-		onComplete: onComplete,
+// ListBackupJobs returns a list of all running/completed backup jobs from the service.
+func (a *App) ListBackupJobs() ([]*api.BackupProgress, error) {
+	if a.apiClient == nil {
+		return nil, fmt.Errorf("no API client available")
 	}
-	a.callbacksMutex.Unlock()
+	return a.apiClient.ListBackupJobs()
 }
 
 // startup is called when the app starts
@@ -203,13 +305,17 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	writeDebugLog("App.startup() called")
 
-	// Detect execution mode (Service vs Standalone)
-	detector := api.NewModeDetector(getAPITokenPath())
-	a.mode = detector.DetectMode()
+	// The execution mode was resolved in main() BEFORE the app was built —
+	// it determines where the configuration lives, so it cannot change once
+	// the config is loaded. If the service appears later, StartBackup()
+	// re-detects and switches to service mode lazily.
 	writeDebugLog(fmt.Sprintf("Execution mode: %s", a.mode.String()))
 
-	// If running in standalone mode, start local scheduler
-	// If in service mode, scheduler runs in the service
+	// Standalone mode: one-shot backups/restores work against the user's
+	// home config, but SCHEDULING requires the service, so the local
+	// scheduler is NOT started. The frontend shows a persistent notice and
+	// disables the scheduling UI. In service mode the scheduler runs in
+	// the service.
 	if a.mode == api.ModeStandalone {
 		// Cleanup any abandoned "running" jobs from previous session
 		a.CleanupAbandonedJobs()
@@ -222,18 +328,9 @@ func (a *App) startup(ctx context.Context) {
 			writeDebugLog(fmt.Sprintf("VSS cleanup at startup reported error: %v", err))
 		}
 
-		// Apply any schedule declared inline in config.json (single-file /
-		// unattended deployment) into the scheduler store before we compute runs.
-		a.ReconcileProvisionedJobs()
-
-		// Recalculate stale nextRun values (e.g. after restart or missed window)
-		a.RecalculateNextRuns()
-
-		// Start background job scheduler
-		a.StartScheduler()
-		writeDebugLog("Background scheduler started (standalone mode)")
+		writeDebugLog("Standalone mode: local scheduler NOT started (scheduling requires the service)")
 	} else {
-		writeDebugLog("Service mode detected - scheduler runs in service")
+		writeDebugLog("Service mode - scheduler runs in service")
 	}
 
 	// Execute startup jobs (jobs with runAtStartup=true)
@@ -252,6 +349,46 @@ func (a *App) startup(ctx context.Context) {
 // domReady is called after front-end resources have been loaded
 func (a *App) domReady(ctx context.Context) {
 	writeDebugLog("App.domReady() called - UI loaded successfully")
+	fitWindowToScreen(ctx)
+}
+
+// fitWindowToScreen shrinks the startup window to fit a small screen, so the
+// title bar never starts off-screen. It replaces the old MaxWidth/MaxHeight,
+// which also capped the maximised window.
+func fitWindowToScreen(ctx context.Context) {
+	screens, err := runtime.ScreenGetAll(ctx)
+	if err != nil || len(screens) == 0 {
+		return
+	}
+	screen := screens[0]
+	for _, s := range screens {
+		if s.IsCurrent {
+			screen = s
+			break
+		}
+	}
+	w, h := runtime.WindowGetSize(ctx)
+	if fw, fh, changed := fitWindowSize(w, h, screen.Size.Width, screen.Size.Height); changed {
+		writeDebugLog(fmt.Sprintf("Window %dx%d does not fit the %dx%d screen: resized to %dx%d", w, h, screen.Size.Width, screen.Size.Height, fw, fh))
+		runtime.WindowSetSize(ctx, fw, fh)
+		runtime.WindowCenter(ctx)
+	}
+}
+
+// fitWindowSize returns the window size capped at 90% of the screen (room for
+// the taskbar and the window frame), never below the window's minimum size.
+func fitWindowSize(w, h, screenW, screenH int) (int, int, bool) {
+	if screenW <= 0 || screenH <= 0 {
+		return w, h, false
+	}
+	fw, fh := w, h
+	if limit := screenW * 9 / 10; fw > limit {
+		fw = max(limit, 480)
+	}
+	if limit := screenH * 9 / 10; fh > limit {
+		fh = max(limit, 360)
+	}
+	return fw, fh, fw != w || fh != h
 }
 
 // beforeClose is called when the application is about to quit.
@@ -294,18 +431,181 @@ func (a *App) GetHostname() string {
 	return hostname
 }
 
+// needsLocalElevation reports whether THIS process has to be root/admin to do
+// privileged work (raw block devices and the kernel snapshot modules for
+// machine backups, VSS snapshots) — and, on Windows, simply to LIST the disks.
+// The rule is per platform, because what the GUI does with the disks differs:
+//
+//   - Windows: the GUI opens \\.\PhysicalDriveN itself to list and preview the
+//     disks, and that needs an elevated token — even when the backup would be
+//     executed by the service (the service can do everything else, it cannot
+//     hand the GUI a disk list it has no rights to open).
+//   - Linux: enumerating disks (sysfs) is unprivileged; only OPENING the
+//     devices for the backup needs root, which the service provides in service
+//     mode — so an unprivileged GUI is fine there.
+//
+// It is false when this process already is the privileged helper. The frontend
+// must not ask such a GUI to relaunch with pkexec — that is what made
+// "machine backup requires admin privileges" show up in service mode.
+func (a *App) needsLocalElevation() bool {
+	return needsElevationFor(stdruntime.GOOS, isAdmin(), a.isServiceProcess, a.mode)
+}
+
+// needsElevationFor is the pure decision rule behind needsLocalElevation,
+// split out so every platform combination can be tested on any host.
+func needsElevationFor(goos string, admin, serviceProcess bool, mode api.ExecutionMode) bool {
+	if serviceProcess {
+		return false // we ARE the privileged helper
+	}
+	if admin {
+		return false // already elevated
+	}
+	if goos == "windows" {
+		return true // disk listing alone demands it
+	}
+	return mode != api.ModeService
+}
+
+// switchToServiceMode flips the runtime mode after the late service
+// re-detection (the service may start after the GUI) and tells the frontend,
+// so everything derived from it — elevation warnings, the mode badge, the VSS
+// notice — updates instead of keeping the value read at startup.
+func (a *App) switchToServiceMode() {
+	if a.mode == api.ModeService {
+		return
+	}
+	a.mode = api.ModeService
+	// The "why am I standalone" reason is obsolete the moment the service
+	// takes over; leaving it set makes the frontend notice contradict itself.
+	a.standaloneReason = ""
+	// Now that this GUI talks to the service, its token can be rotated away
+	// under it: refresh through an elevated fetch instead of failing.
+	installTokenRefreshHook()
+	if a.ctx == nil {
+		return
+	}
+	runtime.EventsEmit(a.ctx, "mode:changed", a.GetSystemInfo())
+}
+
 // GetSystemInfo returns system information for UI (mode, admin status, etc.)
 func (a *App) GetSystemInfo() map[string]interface{} {
-	return map[string]interface{}{
-		"mode":              a.mode.String(),
-		"is_admin":          isAdmin(),
-		"hostname":          a.GetHostname(),
-		"service_available": a.mode == api.ModeService,
+	info := map[string]interface{}{
+		"mode":     a.mode.String(),
+		"is_admin": isAdmin(),
+		// needs_local_elevation: see needsLocalElevation. The frontend uses it
+		// (not is_admin) to decide whether to demand an elevated relaunch.
+		"needs_local_elevation": a.needsLocalElevation(),
+		"hostname":              a.GetHostname(),
+		"service_available":     a.mode == api.ModeService,
+		// standalone + standalone_reason drive the persistent top notice in
+		// the frontend ("running standalone, scheduling not available") and
+		// the disabling of the scheduling UI.
+		"standalone":        a.mode == api.ModeStandalone,
+		"standalone_reason": a.standaloneReason, // "forced" | "no_service" | "auth_failed" | ""
 		// os = runtime.GOOS ("windows", "linux", "darwin") — used by the
 		// restore UI to enable/disable the in-place mode when the snapshot
 		// was taken on a different platform.
 		"os": stdruntime.GOOS,
 	}
+
+	// On Linux, add snapshot module info for machine backups
+	if stdruntime.GOOS == "linux" {
+		if module := getSnapshotModule(); module != "" {
+			info["snapshot_module"] = module
+		}
+	}
+
+	return info
+}
+
+// getSnapshotModule detects which Linux block snapshot kernel module is available.
+// Returns "elastio-snap", "dattobd", or empty string if neither is loaded.
+// This function is only available on Linux due to build tags in snapshot package.
+func getSnapshotModule() string {
+	if stdruntime.GOOS != "linux" {
+		return ""
+	}
+	if control, ok := snapshot.DetectControl(); ok {
+		return control.Name
+	}
+	return ""
+}
+
+// RequestElevation re-launches the application with elevated privileges.
+// On Linux this uses pkexec or sudo. On Windows it uses the Wails "RunAsAdmin" mechanism.
+// On macOS it uses osascript with administrator privileges.
+// Returns an error if elevation cannot be requested or was denied.
+func (a *App) RequestElevation() error {
+	// Nothing to elevate when this process already has everything the job
+	// needs: in service mode on Linux the service runs the backup as root, so
+	// relaunching this unprivileged GUI with pkexec/sudo would only spawn a
+	// second copy of the same unprivileged process. On Windows the rule says
+	// otherwise (the GUI must open the disks itself to list them), so the
+	// relaunch happens there.
+	if !a.needsLocalElevation() {
+		writeDebugLog("RequestElevation: ignored (no local elevation needed)")
+		return nil
+	}
+	switch stdruntime.GOOS {
+	case "linux":
+		return requestElevationLinux()
+	case "windows":
+		return requestElevationWindows()
+	case "darwin":
+		return requestElevationDarwin()
+	default:
+		return fmt.Errorf("elevation not supported on %s", stdruntime.GOOS)
+	}
+}
+
+// CanModifyJobs returns true if the current user has permission to modify
+// scheduled jobs. On Windows, this requires running as administrator (UAC elevated).
+// On Linux, this requires being in the wheel/sudo group or having sudo privileges.
+//
+// In service mode neither applies: the privileged service owns the jobs file
+// and the GUI saves through its API, so an unprivileged GUI may edit jobs
+// without relaunching elevated.
+func (a *App) CanModifyJobs() bool {
+	if a.isDelegatedToService() {
+		return true
+	}
+	return canModifyJobs()
+}
+
+// RequestJobModificationElevation requests elevation specifically for job modification.
+// On Windows, this uses UAC. On Linux, this uses pkexec or sudo with a prompt for credentials.
+func (a *App) RequestJobModificationElevation() error {
+	return a.RequestElevation()
+}
+
+// requestElevationLinux re-launches the current executable with pkexec or sudo
+func requestElevationLinux() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot determine executable path: %w", err)
+	}
+
+	// Try pkexec first (policykit), then sudo
+	for _, cmd := range [][]string{
+		{"pkexec", exe},
+		{"sudo", exe},
+	} {
+		// Check if the command exists
+		if _, err := exec.LookPath(cmd[0]); err == nil {
+			// Launch detached so the current process can exit
+			return exec.Command(cmd[0], cmd[1:]...).Start()
+		}
+	}
+	return fmt.Errorf("neither pkexec nor sudo found; cannot elevate")
+}
+
+// requestElevationDarwin uses osascript to request admin privileges
+func requestElevationDarwin() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot determine executable path: %w", err)
+	}
+	return exec.Command("osascript", "-e", fmt.Sprintf(`do shell script "%s" with administrator privileges`, exe)).Start()
 }
 
 func (a *App) GetVersion() string {
@@ -345,10 +645,16 @@ func (a *App) GetConfigWithHostname() map[string]interface{} {
 		"secret_set": cfg.Secret != "",
 		"datastore":  cfg.Datastore,
 		"namespace":  cfg.Namespace,
-		"backupdir":  cfg.BackupDir,
-		"backup-id":  cfg.BackupID,
-		"usevss":     cfg.UseVSS,
-		"hostname":   hostname,
+		// Unlike Secret, the encryption key path is not a secret (only the path
+		// is stored; the unlocked key never leaves the backend), so it is handed
+		// to the frontend as-is. SaveConfig replaces the whole Config, so the
+		// frontend MUST round-trip this field or every config save would silently
+		// drop the key and restart encrypting with no way to read it back.
+		"encryption_key_file": cfg.EncryptionKeyFile,
+		"backupdir":           cfg.BackupDir,
+		"backup-id":           cfg.BackupID,
+		"usevss":              cfg.UseVSS,
+		"hostname":            hostname,
 	}
 
 	// Pre-fill backup-id with hostname if empty
@@ -382,63 +688,156 @@ func (a *App) DiagnoseConfig() map[string]interface{} {
 	}
 }
 
-// SaveConfig saves the configuration
+// hydrateFromService replaces the in-memory config with the sanitized document
+// the service holds. In service mode the config files are root/SYSTEM-only, so
+// the service API — not the local file — is the only source the GUI can read:
+// startup, ReloadConfig and a service-mode save all go through here. Returns
+// false when the service could not be reached, leaving the current config
+// untouched.
+func (a *App) hydrateFromService() bool {
+	if a.apiClient == nil {
+		return false
+	}
+	doc, err := a.apiClient.GetFullConfig()
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("hydrateFromService: %v", err))
+		return false
+	}
+	a.config = parseFullConfig(doc)
+	writeDebugLog(fmt.Sprintf("Config hydrated from the service (%d PBS server(s))", len(a.config.PBSServers)))
+	return true
+}
+
+// SaveConfig saves the configuration submitted by the legacy settings form.
+//
+// The form carries only the legacy top-level fields (the incoming value has a
+// nil PBS server map), so it is MERGED over the stored config: assigning it
+// directly would silently drop every saved server and the default server id.
+// An empty secret/password keeps the stored one (M-04).
 func (a *App) SaveConfig(config *Config) error {
-	// M-04: the frontend never receives the stored secrets (GetConfigWithHostname
-	// returns "" + a *_set marker), so an empty value here means "keep the existing
-	// one", not "clear it". Only overwrite when the user supplied a new value.
-	if a.config != nil {
-		if config.Secret == "" {
-			config.Secret = a.config.Secret
+	merged := a.config
+	if a.config != nil && config != nil {
+		next := *a.config
+		next.BaseURL = config.BaseURL
+		next.CertFingerprint = config.CertFingerprint
+		next.AuthID = config.AuthID
+		next.Datastore = config.Datastore
+		next.Namespace = config.Namespace
+		next.EncryptionKeyFile = config.EncryptionKeyFile
+		next.BackupDir = config.BackupDir
+		next.BackupID = config.BackupID
+		next.UseVSS = config.UseVSS
+		// M-04: the frontend never receives the stored secrets, so an empty
+		// value means "keep the existing one", not "clear it".
+		if config.Secret != "" {
+			next.Secret = config.Secret
 		}
-		if config.SMTPPassword == "" {
-			config.SMTPPassword = a.config.SMTPPassword
+		if config.SMTPPassword != "" {
+			next.SMTPPassword = config.SMTPPassword
 		}
-		// Encryption keys never reach the frontend and only change through the
-		// dedicated encryption-key methods: keep the stored ones. The frontend
-		// does not send the server map either, so an empty one means "unchanged"
-		// (saving it empty would drop every server, key and token).
-		config.EncryptionKey = a.config.EncryptionKey
-		if len(config.PBSServers) == 0 {
-			config.PBSServers = a.config.PBSServers
-			config.DefaultPBSID = a.config.DefaultPBSID
-		} else {
-			for id, srv := range config.PBSServers {
-				if srv == nil {
-					continue
-				}
-				srv.EncryptionKeySet = false
-				srv.EncryptionFingerprint = ""
-				srv.EncryptionKey = nil
-				if old, ok := a.config.PBSServers[id]; ok && old != nil {
-					srv.EncryptionKey = old.EncryptionKey
-				}
-			}
+		if next.AuthID != "" {
+			// One legacy method only, like every other save path.
+			next.Username = ""
+			next.Password = ""
 		}
+		merged = &next
 	}
 
 	// Log sanitized config (no secrets)
-	writeDebugLog(fmt.Sprintf("SaveConfig() called: URL=%s, AuthID=%s, Datastore=%s, BackupID=%s",
-		security.SanitizeURL(config.BaseURL),
-		config.AuthID,
-		config.Datastore,
-		config.BackupID))
+	if merged != nil {
+		writeDebugLog(fmt.Sprintf("SaveConfig() called: URL=%s, AuthID=%s, Datastore=%s, BackupID=%s",
+			security.SanitizeURL(merged.BaseURL),
+			merged.AuthID,
+			merged.Datastore,
+			merged.BackupID))
+	}
 
-	// Validate before saving
-	if err := config.Validate(); err != nil {
+	// In service mode the GUI delegates the write to the service, which owns
+	// the privileged config file (root/SYSTEM-only) and re-validates the whole
+	// document (including the per-server credentials) before storing it.
+	if a.isDelegatedToService() {
+		a.config = merged
+		return a.pushConfigToService()
+	}
+	if merged == nil {
+		return fmt.Errorf("configuration vide")
+	}
+
+	// Validate per part: a multi-PBS-only config has no legacy BaseURL and must
+	// not be rejected for missing legacy credentials (they live per server).
+	if err := merged.validatePBSFields(); err != nil {
 		writeDebugLog(fmt.Sprintf("Config validation failed: %v", err))
 		return err
 	}
 
+	// Unlock the key BEFORE persisting so the runtime-only Crypt matches what is
+	// about to be written, and so an unusable key is reported without having
+	// saved a config that cannot be used.
+	if err := merged.loadCryptConfig(); err != nil {
+		writeDebugLog(fmt.Sprintf("Encryption key load failed: %v", err))
+		return err
+	}
+
 	// Save to disk
-	if err := config.Save(); err != nil {
+	if err := merged.Save(); err != nil {
 		writeDebugLog(fmt.Sprintf("Config save to disk failed: %v", err))
 		return err
 	}
 
 	// Update in-memory config
-	a.config = config
+	a.config = merged
 	writeDebugLog("Config saved successfully and loaded into app")
+	return nil
+}
+
+// GetRecommendedParallel returns the suggested number of folders backed up at
+// the same time (CPUs / 4, at least 1) for the GUI's hint.
+func (a *App) GetRecommendedParallel() int {
+	return RecommendedParallel()
+}
+
+// SetParallelFolders stores how many folders of a multi-folder backup run at
+// the same time (1 = one after the other) and persists it: through the
+// service in service mode (it runs the backups), to config.json otherwise.
+func (a *App) SetParallelFolders(n int) error {
+	if n < 1 {
+		return fmt.Errorf("the number of parallel folders must be at least 1")
+	}
+	if a.config == nil {
+		return fmt.Errorf("configuration not loaded")
+	}
+	next := *a.config
+	next.Parallel = n
+	if a.isDelegatedToService() {
+		a.config = &next
+		return a.pushConfigToService()
+	}
+	if err := next.Save(); err != nil {
+		return err
+	}
+	a.config = &next
+	return nil
+}
+
+// pushConfigToService sends the current config document to the service via
+// /config POST. Credentials this GUI knows (typed in the current session) are
+// transmitted so the service can store them; empty ones mean "keep existing"
+// there — the stored secrets never leave the service.
+func (a *App) pushConfigToService() error {
+	if a.apiClient == nil {
+		return fmt.Errorf("no API client for service mode")
+	}
+	doc := a.config.fullConfigDocument()
+	if err := a.apiClient.SaveFullConfig(doc); err != nil {
+		return err
+	}
+	// Re-fetch the sanitized document so a.config stays in sync with the service
+	fetched, err := a.apiClient.GetFullConfig()
+	if err != nil {
+		return err
+	}
+	// Rehydrate from the fetched document (same code path as startup in service mode)
+	a.config = parseFullConfig(fetched)
 	return nil
 }
 
@@ -450,6 +849,17 @@ func (a *App) TestConnection(config *Config) error {
 	testConfig := config
 	if testConfig == nil {
 		testConfig = a.config
+	}
+
+	// In service mode the GUI delegates the test to the service, which has
+	// access to the stored credentials (the GUI never holds them).
+	if a.isDelegatedToService() {
+		// Convert the Config (or draft) to a map for the API.
+		// For per-server tests, the caller passes a config with the server ID
+		// in AuthID (legacy) or we need the server ID. We'll pass the draft
+		// fields as-is; the API merges non-empty fields over the stored entry.
+		draft := configToDraftMap(testConfig)
+		return a.apiClient.TestPBSServer("", draft)
 	}
 
 	// M-04: the frontend no longer holds the secret, so an empty secret in the
@@ -503,16 +913,59 @@ func (a *App) TestConnection(config *Config) error {
 	return nil
 }
 
+// configToDraftMap extracts the PBS-relevant fields from a Config for the
+// /pbs/test endpoint. In service mode the GUI sends a draft (partial) that
+// the service merges over the stored server entry.
+func configToDraftMap(cfg *Config) map[string]interface{} {
+	if cfg == nil {
+		return map[string]interface{}{}
+	}
+	draft := map[string]interface{}{}
+	if cfg.BaseURL != "" {
+		draft["baseurl"] = cfg.BaseURL
+	}
+	if cfg.CertFingerprint != "" {
+		draft["certfingerprint"] = cfg.CertFingerprint
+	}
+	if cfg.AuthID != "" {
+		draft["authid"] = cfg.AuthID
+	}
+	if cfg.Secret != "" {
+		draft["secret"] = cfg.Secret
+	}
+	if cfg.Username != "" {
+		draft["username"] = cfg.Username
+	}
+	if cfg.Password != "" {
+		draft["password"] = cfg.Password
+	}
+	if cfg.Datastore != "" {
+		draft["datastore"] = cfg.Datastore
+	}
+	if cfg.Namespace != "" {
+		draft["namespace"] = cfg.Namespace
+	}
+	return draft
+}
+
 // GetLastBackupDirs returns the last used backup directories
 func (a *App) GetLastBackupDirs() []string {
 	writeDebugLog(fmt.Sprintf("GetLastBackupDirs() returned %d directories", len(a.config.LastBackupDirs)))
 	return a.config.LastBackupDirs
 }
 
-// ReloadConfig reloads configuration from disk (for service when config changes)
+// ReloadConfig reloads the configuration. In service mode the state directory
+// is root-only, so reloading from disk would wipe the in-memory config (and
+// with it every saved server): the service API is the source of truth there.
 func (a *App) ReloadConfig() {
-	newConfig := LoadConfig()
-	a.config = newConfig
+	if a.isDelegatedToService() {
+		if a.hydrateFromService() {
+			return
+		}
+		writeDebugLog("ReloadConfig: service unreachable, keeping the in-memory config")
+		return
+	}
+	a.config = LoadConfig()
 	writeDebugLog("Config reloaded from disk")
 }
 
@@ -520,6 +973,14 @@ func (a *App) ReloadConfig() {
 
 // ListPBSServers returns all configured PBS servers
 func (a *App) ListPBSServers() []*PBSServer {
+	// An empty list in service mode means either "the user deleted everything"
+	// or "startup hydration failed" (service restarted, token rotated…). Ask the
+	// service once more instead of reporting an empty list, so saved servers
+	// always show up after a GUI restart.
+	if a.isDelegatedToService() && len(a.config.PBSServers) == 0 {
+		a.hydrateFromService()
+	}
+	// In service mode the config is hydrated from the service; return it directly.
 	servers := a.config.ListPBSServers()
 	writeDebugLog(fmt.Sprintf("ListPBSServers() returned %d servers", len(servers)))
 	// M-04: never hand PBS tokens to the frontend — return sanitized copies.
@@ -543,21 +1004,34 @@ func (a *App) GetPBSServer(id string) (*PBSServer, error) {
 // AddPBSServer adds a new PBS server to the configuration
 func (a *App) AddPBSServer(pbs *PBSServer) error {
 	writeDebugLog(fmt.Sprintf("AddPBSServer(%s) called", pbs.ID))
+
+	// In service mode the GUI modifies its in-memory config and then pushes
+	// the whole document to the service.
+	if a.isDelegatedToService() {
+		if err := a.config.AddPBSServerMem(pbs); err != nil {
+			return err
+		}
+		return a.pushConfigToService()
+	}
 	return a.config.AddPBSServer(pbs)
 }
 
 // UpdatePBSServer updates an existing PBS server
 func (a *App) UpdatePBSServer(pbs *PBSServer) error {
 	writeDebugLog(fmt.Sprintf("UpdatePBSServer(%s) called", pbs.ID))
-	// M-04: the frontend never receives the token (sanitized), so an empty secret
-	// on update means "keep the stored one", not "clear it".
-	if existing, err := a.config.GetPBSServer(pbs.ID); err == nil && existing != nil {
-		if pbs.Secret == "" {
-			pbs.Secret = existing.Secret
+
+	// The "empty = keep the stored credential" resolution happens inside
+	// UpdatePBSServerMem (normalizeServerAuth): it knows the auth method, so a
+	// switch to user/password no longer inherits the old token secret and a
+	// changed authid no longer silently reuses the old secret.
+	if a.isDelegatedToService() {
+		// This process never received the stored secret/password (M-04): an empty
+		// value here means "keep", and the service — which holds them — performs
+		// the final credential check while saving the pushed document.
+		if err := a.config.UpdatePBSServerMem(pbs, false); err != nil {
+			return err
 		}
-		// The encryption key never reaches the frontend and only changes through
-		// the dedicated encryption-key methods: always keep the stored one.
-		pbs.EncryptionKey = existing.EncryptionKey
+		return a.pushConfigToService()
 	}
 	return a.config.UpdatePBSServer(pbs)
 }
@@ -565,12 +1039,26 @@ func (a *App) UpdatePBSServer(pbs *PBSServer) error {
 // DeletePBSServer removes a PBS server
 func (a *App) DeletePBSServer(id string) error {
 	writeDebugLog(fmt.Sprintf("DeletePBSServer(%s) called", id))
+
+	if a.isDelegatedToService() {
+		if err := a.config.DeletePBSServerMem(id); err != nil {
+			return err
+		}
+		return a.pushConfigToService()
+	}
 	return a.config.DeletePBSServer(id)
 }
 
 // SetDefaultPBSServer sets the default PBS server
 func (a *App) SetDefaultPBSServer(id string) error {
 	writeDebugLog(fmt.Sprintf("SetDefaultPBSServer(%s) called", id))
+
+	if a.isDelegatedToService() {
+		if err := a.config.SetDefaultPBSMem(id); err != nil {
+			return err
+		}
+		return a.pushConfigToService()
+	}
 	return a.config.SetDefaultPBS(id)
 }
 
@@ -582,6 +1070,11 @@ func (a *App) GetDefaultPBSID() string {
 // TestPBSConnection tests connection to a specific PBS server
 func (a *App) TestPBSConnection(pbsID string) error {
 	writeDebugLog(fmt.Sprintf("TestPBSConnection(%s) called", pbsID))
+
+	// In service mode the GUI delegates to the service which has the credentials.
+	if a.isDelegatedToService() {
+		return a.apiClient.TestPBSServer(pbsID, map[string]interface{}{})
+	}
 
 	pbs, err := a.config.GetPBSServer(pbsID)
 	if err != nil {
@@ -654,8 +1147,8 @@ func (a *App) emitAnalysisProgress(done, total int, scannedBytes uint64) {
 }
 
 // StartBackup starts a backup operation (routes to service or direct based on mode)
-func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string) error {
-	writeDebugLog(fmt.Sprintf("StartBackup() called - mode: %s, VSS: %v, compression: %s, isServiceProcess: %v", a.mode.String(), useVSS, compression, a.isServiceProcess))
+func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string, pbsID string) error {
+	writeDebugLog(fmt.Sprintf("StartBackup() called - mode: %s, VSS: %v, compression: %s, pbsID: %s, isServiceProcess: %v", a.mode.String(), useVSS, compression, pbsID, a.isServiceProcess))
 
 	// Default to "fastest" if compression is empty
 	if compression == "" {
@@ -664,11 +1157,14 @@ func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters [
 	}
 
 	// Re-detect mode if currently Standalone (service may have started after GUI)
-	// IMPORTANT: Never re-detect if we ARE the service process (prevents infinite loop)
-	if !a.isServiceProcess && a.mode == api.ModeStandalone {
+	// IMPORTANT: Never re-detect if we ARE the service process (prevents
+	// infinite loop), and never when --standalone said "don't connect": the
+	// flag has to stay honoured for the whole session, otherwise the GUI would
+	// quietly join a service the user asked it to ignore.
+	if !a.isServiceProcess && a.mode == api.ModeStandalone && a.standaloneReason != "forced" {
 		if a.apiClient.IsServiceAvailable() {
 			writeDebugLog("[Mode Detection] Service now available, switching to Service mode")
-			a.mode = api.ModeService
+			a.switchToServiceMode()
 		}
 	}
 
@@ -676,21 +1172,21 @@ func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters [
 	switch a.mode {
 	case api.ModeService:
 		// Use HTTP API to communicate with service (service has admin rights as LocalSystem)
-		return a.startBackupViaService(backupType, backupDirs, driveLetters, excludeList, backupID, useVSS, compression)
+		return a.startBackupViaService(backupType, backupDirs, driveLetters, excludeList, backupID, useVSS, compression, pbsID)
 	case api.ModeStandalone:
 		// Direct execution - check admin if VSS requested
 		if useVSS && !isAdmin() {
 			return fmt.Errorf("VSS (Shadow Copy) nécessite les privilèges administrateur - veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS")
 		}
-		return a.startBackupDirect(backupType, backupDirs, driveLetters, excludeList, backupID, useVSS, compression)
+		return a.startBackupDirect(backupType, backupDirs, driveLetters, excludeList, backupID, useVSS, compression, pbsID)
 	default:
 		return fmt.Errorf("unknown execution mode: %v", a.mode)
 	}
 }
 
 // StartMachineBackup starts a machine backup operation
-func (a *App) StartMachineBackup(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error {
-	writeDebugLog(fmt.Sprintf("StartMachineBackup() called - mode: %s, VSS: %v, compression: %s, isServiceProcess: %v", a.mode.String(), useVSS, compression, a.isServiceProcess))
+func (a *App) StartMachineBackup(backupType string, backupDevices []string, backupID string, useVSS bool, compression string, pbsID string, backupKind string) error {
+	writeDebugLog(fmt.Sprintf("StartMachineBackup() called - mode: %s, VSS: %v, compression: %s, pbsID: %s, backupKind: %s, isServiceProcess: %v", a.mode.String(), useVSS, compression, pbsID, backupKind, a.isServiceProcess))
 
 	// Default to "fastest" if compression is empty
 	if compression == "" {
@@ -699,11 +1195,14 @@ func (a *App) StartMachineBackup(backupType string, backupDevices []string, back
 	}
 
 	// Re-detect mode if currently Standalone (service may have started after GUI)
-	// IMPORTANT: Never re-detect if we ARE the service process (prevents infinite loop)
-	if !a.isServiceProcess && a.mode == api.ModeStandalone {
+	// IMPORTANT: Never re-detect if we ARE the service process (prevents
+	// infinite loop), and never when --standalone said "don't connect": the
+	// flag has to stay honoured for the whole session, otherwise the GUI would
+	// quietly join a service the user asked it to ignore.
+	if !a.isServiceProcess && a.mode == api.ModeStandalone && a.standaloneReason != "forced" {
 		if a.apiClient.IsServiceAvailable() {
 			writeDebugLog("[Mode Detection] Service now available, switching to Service mode")
-			a.mode = api.ModeService
+			a.switchToServiceMode()
 		}
 	}
 
@@ -711,20 +1210,20 @@ func (a *App) StartMachineBackup(backupType string, backupDevices []string, back
 	switch a.mode {
 	case api.ModeService:
 		// Use HTTP API to communicate with service (service has admin rights as LocalSystem)
-		return a.startMachineBackupViaService(backupType, backupDevices, backupID, useVSS, compression)
+		return a.startMachineBackupViaService(backupType, backupDevices, backupID, useVSS, compression, pbsID, backupKind)
 	case api.ModeStandalone:
 		// Direct execution - check admin if VSS requested
 		if useVSS && !isAdmin() {
 			return fmt.Errorf("VSS (Shadow Copy) nécessite les privilèges administrateur - veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS")
 		}
-		return a.startMachineBackupDirect(backupType, backupDevices, backupID, useVSS, compression)
+		return a.startMachineBackupDirect(backupType, backupDevices, backupID, useVSS, compression, pbsID, backupKind)
 	default:
 		return fmt.Errorf("unknown execution mode: %v", a.mode)
 	}
 }
 
 // startBackupViaService sends backup request to the service via HTTP API
-func (a *App) startBackupViaService(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string) error {
+func (a *App) startBackupViaService(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string, pbsID string) error {
 	writeDebugLog("[Service Mode] Sending backup request to service")
 
 	req := &api.BackupRequest{
@@ -735,6 +1234,7 @@ func (a *App) startBackupViaService(backupType string, backupDirs []string, driv
 		ExcludeList:  excludeList,
 		UseVSS:       useVSS,
 		Compression:  compression,
+		PBSID:        pbsID,
 	}
 
 	resp, err := a.apiClient.StartBackup(req)
@@ -745,6 +1245,10 @@ func (a *App) startBackupViaService(backupType string, backupDirs []string, driv
 
 	writeDebugLog(fmt.Sprintf("[Service Mode] Backup started: %s (JobID: %s)", resp.Message, resp.JobID))
 
+	// Remember the job so the Stop button (which calls CancelBackup with no id)
+	// can cancel this service-side run.
+	a.setDelegatedJobID(resp.JobID)
+
 	// Start polling for progress updates
 	go a.pollBackupProgress(resp.JobID)
 
@@ -752,15 +1256,17 @@ func (a *App) startBackupViaService(backupType string, backupDirs []string, driv
 }
 
 // startMachineBackupViaService sends machine backup request to the service via HTTP API
-func (a *App) startMachineBackupViaService(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error {
+func (a *App) startMachineBackupViaService(backupType string, backupDevices []string, backupID string, useVSS bool, compression string, pbsID string, backupKind string) error {
 	writeDebugLog("[Service Mode] Sending machine backup request to service")
 
 	req := &api.BackupRequest{
 		BackupType:   backupType,
 		BackupID:     backupID,
-		DriveLetters: backupDevices, // Using DriveLetters field for machine backup devices
+		DriveLetters: backupDevices,
 		UseVSS:       useVSS,
 		Compression:  compression,
+		PBSID:        pbsID,
+		BackupKind:   backupKind,
 	}
 
 	resp, err := a.apiClient.StartMachineBackup(req)
@@ -770,6 +1276,10 @@ func (a *App) startMachineBackupViaService(backupType string, backupDevices []st
 	}
 
 	writeDebugLog(fmt.Sprintf("[Service Mode] Machine backup started: %s (JobID: %s)", resp.Message, resp.JobID))
+
+	// Remember the job so the Stop button (which calls CancelBackup with no id)
+	// can cancel this service-side run.
+	a.setDelegatedJobID(resp.JobID)
 
 	// Start polling for progress updates
 	go a.pollBackupProgress(resp.JobID)
@@ -796,6 +1306,7 @@ func (a *App) pollBackupProgress(jobID string) {
 			writeDebugLog(fmt.Sprintf("[Service Mode] Failed to get progress (%d/%d): %v", consecutiveErrors, maxConsecutiveErrors, err))
 			if consecutiveErrors >= maxConsecutiveErrors {
 				writeDebugLog("[Service Mode] Giving up polling after repeated failures")
+				a.clearDelegatedJobID()
 				if a.ctx != nil {
 					runtime.EventsEmit(a.ctx, "backup:complete", map[string]interface{}{
 						"success": false,
@@ -819,6 +1330,7 @@ func (a *App) pollBackupProgress(jobID string) {
 		// If backup completed, emit final event and stop polling
 		if progress.Complete {
 			writeDebugLog(fmt.Sprintf("[Service Mode] Backup completed: success=%v", progress.Success))
+			a.clearDelegatedJobID()
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "backup:complete", map[string]interface{}{
 					"success": progress.Success,
@@ -831,7 +1343,7 @@ func (a *App) pollBackupProgress(jobID string) {
 }
 
 // startBackupDirect performs backup directly (standalone mode)
-func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string) error {
+func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string, pbsID string) error {
 	// Use hostname as fallback if backupID is empty
 	if backupID == "" {
 		backupID = a.GetHostname()
@@ -840,8 +1352,8 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 
 	// Sanitize backup ID for logging
 	sanitizedID := security.SanitizeForLog(backupID)
-	writeDebugLog(fmt.Sprintf("[Standalone Mode] StartBackup: type=%s, id=%s, vss=%v, compression=%s, dir_count=%d",
-		backupType, sanitizedID, useVSS, compression, len(backupDirs)))
+	writeDebugLog(fmt.Sprintf("[Standalone Mode] StartBackup: type=%s, id=%s, vss=%v, compression=%s, pbsID=%s, dir_count=%d",
+		backupType, sanitizedID, useVSS, compression, pbsID, len(backupDirs)))
 
 	// Validate BackupID (now guaranteed to be non-empty)
 	if err := security.ValidateBackupID(backupID); err != nil {
@@ -858,14 +1370,20 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 	// Note: Admin check for VSS is done in StartBackup() routing layer
 	// If we're here via service, we're already running as LocalSystem
 
-	// Resolve PBS fields from multi-PBS default, minting a fresh ticket (u/p).
-	pbsCfg, err := a.withAuth(a.config.EffectivePBS())
+	// Resolve PBS fields from the specified PBS server (or default), minting a fresh ticket (u/p).
+	pbsCfg, err := a.resolveBackupPBS(pbsID)
 	if err != nil {
 		return err
 	}
 
 	// Validate PBS config
 	if err := pbsCfg.Validate(); err != nil {
+		return err
+	}
+
+	// Unlock the configured encryption key, if any, so every chunk this
+	// backup uploads is AES-256-GCM and the manifest is signed.
+	if err := pbsCfg.loadCryptConfig(); err != nil {
 		return err
 	}
 
@@ -895,7 +1413,6 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 		Datastore:       pbsCfg.Datastore,
 		Namespace:       pbsCfg.Namespace,
 		CertFingerprint: pbsCfg.CertFingerprint,
-		EncryptionKey:   pbsCfg.EncryptionKey,
 		BackupObjects:   targetDirs,
 		BackupID:        backupID,
 		BackupType:      "host", // "host" for directory, would be "vm" for machine
@@ -904,22 +1421,21 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 		ExcludeList:     excludeList,
 		DisableSplit:    a.config.DisableSplit,
 		SplitSizeBytes:  a.config.SplitSizeBytes(),
+		Parallel:        a.config.Parallel,
+		Crypt:           pbsCfg.Crypt,
+		// Use the backup context that was set via SetBackupContext for this job
+		Ctx: func() context.Context {
+			a.backupCtxMu.RLock()
+			defer a.backupCtxMu.RUnlock()
+			return a.backupCtx
+		}(),
 		OnProgress: func(percent float64, message string) {
 			writeDebugLog(fmt.Sprintf("Progress: %.1f%% - %s", percent*100, message))
 
-			// Check if there's a registered callback for any job (service mode)
-			a.callbacksMutex.RLock()
-			hasCallbacks := len(a.callbacksMap) > 0
-			if hasCallbacks {
-				// Call all registered callbacks (typically just one per backup)
-				for jobID, callbacks := range a.callbacksMap {
-					if callbacks.onProgress != nil {
-						writeDebugLog(fmt.Sprintf("[OnProgress] Calling custom callback for jobID: %s", jobID))
-						callbacks.onProgress(jobID, percent*100, message)
-					}
-				}
-			}
-			a.callbacksMutex.RUnlock()
+			// Forward to the API server's registered callbacks (service mode).
+			// The callback contract is a 0.0-1.0 fraction; the server scales it
+			// to 0-100 for its progress map.
+			hasCallbacks := a.dispatchProgress(percent, message)
 
 			// If no custom callbacks and we have Wails context, emit events (GUI standalone mode)
 			// NEVER emit events if we're the service process (no Wails runtime)
@@ -936,31 +1452,9 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 		OnComplete: func(success bool, message string) {
 			writeDebugLog(fmt.Sprintf("Backup complete: success=%v, %s", success, message))
 
-			// Check if there's a registered callback for any job (service mode)
-			a.callbacksMutex.RLock()
-			hasCallbacks := len(a.callbacksMap) > 0
-			var jobIDsToCleanup []string
-			if hasCallbacks {
-				// Call all registered callbacks and collect jobIDs for cleanup
-				for jobID, callbacks := range a.callbacksMap {
-					if callbacks.onComplete != nil {
-						writeDebugLog(fmt.Sprintf("[OnComplete] Calling custom callback for jobID: %s", jobID))
-						callbacks.onComplete(jobID, success, message)
-					}
-					jobIDsToCleanup = append(jobIDsToCleanup, jobID)
-				}
-			}
-			a.callbacksMutex.RUnlock()
-
-			// Clean up completed callbacks
-			if len(jobIDsToCleanup) > 0 {
-				a.callbacksMutex.Lock()
-				for _, jobID := range jobIDsToCleanup {
-					delete(a.callbacksMap, jobID)
-					writeDebugLog(fmt.Sprintf("[OnComplete] Cleaned up callbacks for jobID: %s", jobID))
-				}
-				a.callbacksMutex.Unlock()
-			}
+			// Forward to the API server's registered callbacks (service mode)
+			// and clean them up once the run is terminal.
+			hasCallbacks := a.dispatchComplete(success, message)
 
 			// If no custom callbacks and we have Wails context, emit events (GUI standalone mode)
 			// NEVER emit events if we're the service process (no Wails runtime)
@@ -1041,12 +1535,12 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 	go func() {
 		var err error
 		if backupType == "machine" {
-			// For machine backups, we need to set the backup type to "vm" for the inline backup function.
-			// Kind routes RunBackupInline to the block-device path; without it the
-			// devices (e.g. \\.\PhysicalDrive0) were walked as directories — this
-			// is the path scheduled machine jobs take (executeScheduledJob → StartBackup).
-			opts.Kind = "machine"
-			opts.BackupType = "vm"
+			// "host", not "vm": "vm" makes machinebackuplib generate a Proxmox VE
+			// VM config, which needs a numeric VMID as the backup ID. The GUI
+			// defaults to a hostname-style ID, so a "vm" backup transferred
+			// every disk and then failed at that last step. "host" has no such
+			// requirement and is the right type for a plain disk backup.
+			opts.BackupType = "host"
 			err = RunBackupInline(opts)
 		} else {
 			opts.BackupType = "host"
@@ -1061,7 +1555,7 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 }
 
 // startMachineBackupDirect performs machine backup directly (standalone mode)
-func (a *App) startMachineBackupDirect(backupType string, backupDevices []string, backupID string, useVSS bool, compression string) error {
+func (a *App) startMachineBackupDirect(backupType string, backupDevices []string, backupID string, useVSS bool, compression string, pbsID string, backupKind string) error {
 	// Use hostname as fallback if backupID is empty
 	if backupID == "" {
 		backupID = a.GetHostname()
@@ -1070,8 +1564,8 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 
 	// Sanitize backup ID for logging
 	sanitizedID := security.SanitizeForLog(backupID)
-	writeDebugLog(fmt.Sprintf("[Standalone Mode] StartMachineBackup: type=%s, id=%s, vss=%v, compression=%s, device_count=%d, devs=%v",
-		backupType, sanitizedID, useVSS, compression, len(backupDevices), backupDevices))
+	writeDebugLog(fmt.Sprintf("[Standalone Mode] StartMachineBackup: type=%s, id=%s, vss=%v, compression=%s, pbsID=%s, backupKind=%s, device_count=%d, devs=%v",
+		backupType, sanitizedID, useVSS, compression, pbsID, backupKind, len(backupDevices), backupDevices))
 
 	// Validate BackupID (now guaranteed to be non-empty)
 	if err := security.ValidateBackupID(backupID); err != nil {
@@ -1085,17 +1579,32 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 		}
 	}
 
+	// Map the saved selection (\\.\PhysicalDriveN) onto the disks present now,
+	// through the pins recorded by earlier runs (diskpin.go), and refresh those
+	// pins. Also dedupes two saved entries that resolve to one disk.
+	resolvedDevices, err := a.resolveMachineBackupDevices(backupDevices)
+	if err != nil {
+		return err
+	}
+	backupDevices = resolvedDevices
+
 	// Note: Admin check for VSS is done in StartMachineBackup() routing layer
 	// If we're here via service, we're already running as LocalSystem
 
-	// Resolve PBS fields from multi-PBS default, minting a fresh ticket (u/p).
-	pbsCfg, err := a.withAuth(a.config.EffectivePBS())
+	// Resolve PBS fields from the specified PBS server (or default), minting a fresh ticket (u/p).
+	pbsCfg, err := a.resolveBackupPBS(pbsID)
 	if err != nil {
 		return err
 	}
 
 	// Validate PBS config
 	if err := pbsCfg.Validate(); err != nil {
+		return err
+	}
+
+	// Unlock the configured encryption key, if any, so every chunk this
+	// backup uploads is AES-256-GCM and the manifest is signed.
+	if err := pbsCfg.loadCryptConfig(); err != nil {
 		return err
 	}
 
@@ -1109,32 +1618,29 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 		Datastore:       pbsCfg.Datastore,
 		Namespace:       pbsCfg.Namespace,
 		CertFingerprint: pbsCfg.CertFingerprint,
-		EncryptionKey:   pbsCfg.EncryptionKey,
 		BackupObjects:   backupDevices,
 		BackupID:        backupID,
 		Kind:            "machine",
-		BackupType:      "vm", // "vm" for machine backup
+		BackupType:      backupKind, // "host" or "vm" based on user selection
 		UseVSS:          useVSS,
 		Compression:     compression,
 		ExcludeList:     []string{}, // No exclude list for machine backups
 		DisableSplit:    a.config.DisableSplit,
 		SplitSizeBytes:  a.config.SplitSizeBytes(),
+		Crypt:           pbsCfg.Crypt,
+		// Use the backup context that was set via SetBackupContext for this job
+		Ctx: func() context.Context {
+			a.backupCtxMu.RLock()
+			defer a.backupCtxMu.RUnlock()
+			return a.backupCtx
+		}(),
 		OnProgress: func(percent float64, message string) {
 			writeDebugLog(fmt.Sprintf("Progress: %.1f%% - %s", percent*100, message))
 
-			// Check if there's a registered callback for any job (service mode)
-			a.callbacksMutex.RLock()
-			hasCallbacks := len(a.callbacksMap) > 0
-			if hasCallbacks {
-				// Call all registered callbacks (typically just one per backup)
-				for jobID, callbacks := range a.callbacksMap {
-					if callbacks.onProgress != nil {
-						writeDebugLog(fmt.Sprintf("[OnProgress] Calling custom callback for jobID: %s", jobID))
-						callbacks.onProgress(jobID, percent*100, message)
-					}
-				}
-			}
-			a.callbacksMutex.RUnlock()
+			// Forward to the API server's registered callbacks (service mode).
+			// The callback contract is a 0.0-1.0 fraction; the server scales it
+			// to 0-100 for its progress map.
+			hasCallbacks := a.dispatchProgress(percent, message)
 
 			// If no custom callbacks and we have Wails context, emit events (GUI standalone mode)
 			// NEVER emit events if we're the service process (no Wails runtime)
@@ -1151,31 +1657,9 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 		OnComplete: func(success bool, message string) {
 			writeDebugLog(fmt.Sprintf("Machine backup complete: success=%v, %s", success, message))
 
-			// Check if there's a registered callback for any job (service mode)
-			a.callbacksMutex.RLock()
-			hasCallbacks := len(a.callbacksMap) > 0
-			var jobIDsToCleanup []string
-			if hasCallbacks {
-				// Call all registered callbacks and collect jobIDs for cleanup
-				for jobID, callbacks := range a.callbacksMap {
-					if callbacks.onComplete != nil {
-						writeDebugLog(fmt.Sprintf("[OnComplete] Calling custom callback for jobID: %s", jobID))
-						callbacks.onComplete(jobID, success, message)
-					}
-					jobIDsToCleanup = append(jobIDsToCleanup, jobID)
-				}
-			}
-			a.callbacksMutex.RUnlock()
-
-			// Clean up completed callbacks
-			if len(jobIDsToCleanup) > 0 {
-				a.callbacksMutex.Lock()
-				for _, jobID := range jobIDsToCleanup {
-					delete(a.callbacksMap, jobID)
-					writeDebugLog(fmt.Sprintf("[OnComplete] Cleaned up callbacks for jobID: %s", jobID))
-				}
-				a.callbacksMutex.Unlock()
-			}
+			// Forward to the API server's registered callbacks (service mode)
+			// and clean them up once the run is terminal.
+			hasCallbacks := a.dispatchComplete(success, message)
 
 			// If no custom callbacks and we have Wails context, emit events (GUI standalone mode)
 			// NEVER emit events if we're the service process (no Wails runtime)
@@ -1259,18 +1743,95 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 // the default PBS server is used. Falls back to legacy single-server fields
 // when no multi-PBS entry is configured.
 func (a *App) resolveRestorePBS(pbsID string) (*Config, error) {
+	var cfg *Config
+
+	// In service mode the GUI doesn't hold PBS credentials — it asks the
+	// service for a short-lived ticket and uses that for restore/listing.
+	if a.isDelegatedToService() {
+		ticket, err := a.apiClient.MintPBSTicket(pbsID)
+		if err != nil {
+			return nil, fmt.Errorf("service failed to mint PBS ticket: %w", err)
+		}
+		// Build a Config with the ticket + non-secret connection params.
+		cfg := &Config{
+			BaseURL:         ticket.BaseURL,
+			CertFingerprint: ticket.CertFingerprint,
+			Datastore:       ticket.Datastore,
+			Namespace:       ticket.Namespace,
+			Ticket:          ticket.Ticket,
+			CSRFToken:       ticket.CSRFToken,
+		}
+		return cfg, nil
+	}
+
 	if pbsID != "" {
 		pbs, err := a.config.GetPBSServer(pbsID)
 		if err != nil {
 			return nil, err
 		}
-		return a.withAuth(pbs.ToConfig())
+		cfg = pbs.ToConfig()
+	} else {
+		effective := a.config.EffectivePBS()
+		if err := effective.Validate(); err != nil {
+			return nil, err
+		}
+		cfg = effective
 	}
-	cfg := a.config.EffectivePBS()
-	if err := cfg.Validate(); err != nil {
+	cfg, err := a.withAuth(cfg)
+	if err != nil {
 		return nil, err
 	}
-	return a.withAuth(cfg)
+	// An encrypted snapshot's chunks are unreadable without the key, so fail
+	// here with a clear message rather than deep inside the chunk fetcher.
+	if err := cfg.loadCryptConfig(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// resolveBackupPBS picks the PBS server to use for backup operations.
+// When pbsID is empty the default PBS server is used.
+// Falls back to legacy single-server fields when no multi-PBS entry is configured.
+func (a *App) resolveBackupPBS(pbsID string) (*Config, error) {
+	var cfg *Config
+
+	// In service mode the GUI doesn't hold PBS credentials — it asks the
+	// service for a short-lived ticket and uses that for backup.
+	if a.isDelegatedToService() {
+		ticket, err := a.apiClient.MintPBSTicket(pbsID)
+		if err != nil {
+			return nil, fmt.Errorf("service failed to mint PBS ticket: %w", err)
+		}
+		// Build a Config with the ticket + non-secret connection params.
+		cfg := &Config{
+			BaseURL:         ticket.BaseURL,
+			CertFingerprint: ticket.CertFingerprint,
+			Datastore:       ticket.Datastore,
+			Namespace:       ticket.Namespace,
+			Ticket:          ticket.Ticket,
+			CSRFToken:       ticket.CSRFToken,
+		}
+		return cfg, nil
+	}
+
+	if pbsID != "" {
+		pbs, err := a.config.GetPBSServer(pbsID)
+		if err != nil {
+			return nil, err
+		}
+		cfg = pbs.ToConfig()
+	} else {
+		effective := a.config.EffectivePBS()
+		if err := effective.Validate(); err != nil {
+			return nil, err
+		}
+		cfg = effective
+	}
+	cfg, err := a.withAuth(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // ListSnapshots lists available snapshots on a PBS server, optionally filtered
@@ -1336,9 +1897,9 @@ func (a *App) ListSnapshotContents(pbsID, backupID string, snapshotUnix int64, f
 		Datastore:       cfg.Datastore,
 		Namespace:       cfg.Namespace,
 		CertFingerprint: cfg.CertFingerprint,
-		EncryptionKey:   cfg.EncryptionKey,
 		BackupID:        backupID,
 		SnapshotTime:    time.Unix(snapshotUnix, 0),
+		Crypt:           cfg.Crypt,
 	}
 	return ListSnapshotContentsInline(opts, "", forceRefresh)
 }
@@ -1370,9 +1931,9 @@ func (a *App) GetSnapshotMeta(pbsID, backupID string, snapshotUnix int64) (*Back
 		Datastore:       cfg.Datastore,
 		Namespace:       cfg.Namespace,
 		CertFingerprint: cfg.CertFingerprint,
-		EncryptionKey:   cfg.EncryptionKey,
 		BackupID:        backupID,
 		SnapshotTime:    time.Unix(snapshotUnix, 0),
+		Crypt:           cfg.Crypt,
 	}
 	return ReadSnapshotMetaInline(opts, false)
 }
@@ -1451,7 +2012,6 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
 		Datastore:         cfg.Datastore,
 		Namespace:         cfg.Namespace,
 		CertFingerprint:   cfg.CertFingerprint,
-		EncryptionKey:     cfg.EncryptionKey,
 		BackupID:          backupID,
 		SnapshotTime:      timestamp,
 		DestPath:          destPath,
@@ -1462,6 +2022,7 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
 		RestoreACLs:       restoreACLs,
 		RestoreADS:        restoreADS,
 		RestoreTimestamps: restoreTimestamps,
+		Crypt:             cfg.Crypt,
 		OnProgress:        emit,
 	}
 
@@ -1495,14 +2056,43 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
 	return nil
 }
 
-// OpenRestoreDestDialog opens a native folder picker so the user can choose
-// where to restore files. Returns "" if the dialog was cancelled.
+// OpenDirectoryPicker opens a native folder picker (e.g. to choose where to
+// restore files). Returns "" if the dialog was cancelled.
 //
 // Hardened against a reported crash on the client: the native Windows folder
 // picker (IFileDialog) can fault when handed an empty/invalid initial folder,
 // so we seed DefaultDirectory with a path we know exists. A recover() turns any
 // Go-level panic into an error instead of taking the process down, and the
 // surrounding logging makes the next failure diagnosable from the debug log.
+func (a *App) OpenDirectoryPicker() (dir string, err error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("runtime non disponible")
+	}
+	if a.isServiceProcess {
+		writeDebugLog("OpenDirectoryPicker: native picker skipped in the headless service process")
+		return "", fmt.Errorf("sélecteur de dossier indisponible dans le service")
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("folder picker panic: %v", r)
+			writeDebugLog(fmt.Sprintf("CRITICAL: OpenDirectoryPicker panic: %v\n%s", r, debug.Stack()))
+		}
+	}()
+
+	defaultDir, herr := os.UserHomeDir()
+	if herr != nil || defaultDir == "" {
+		defaultDir = os.TempDir()
+	}
+
+	writeDebugLog(fmt.Sprintf("OpenDirectoryPicker: opening folder picker (default=%s)", defaultDir))
+	dir, err = runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            "Choisir un dossier",
+		DefaultDirectory: defaultDir,
+	})
+	writeDebugLog(fmt.Sprintf("OpenDirectoryPicker: returned dir=%q err=%v", dir, err))
+	return dir, err
+}
+
 func (a *App) OpenRestoreDestDialog() (dir string, err error) {
 	if a.ctx == nil {
 		return "", fmt.Errorf("runtime non disponible")
@@ -1584,13 +2174,13 @@ func (a *App) SearchFiles(pbsID, hostPrefix, query, mode string, fromUnix, toUni
 		Datastore:       cfg.Datastore,
 		Namespace:       cfg.Namespace,
 		CertFingerprint: cfg.CertFingerprint,
-		EncryptionKey:   cfg.EncryptionKey,
 		HostPrefix:      hostPrefix,
 		Query:           query,
 		Mode:            SearchMatchMode(mode),
 		From:            from,
 		To:              to,
 		AssembleMissing: assembleMissing,
+		Crypt:           cfg.Crypt,
 		OnProgress:      emit,
 	}
 	return SearchFilesInline(opts)

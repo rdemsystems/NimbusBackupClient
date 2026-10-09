@@ -18,7 +18,7 @@ func GetDiskSize(path string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Get the size by seeking to the end
 	size, err := file.Seek(0, io.SeekEnd)
@@ -30,7 +30,7 @@ func GetDiskSize(path string) (int64, error) {
 }
 
 func BackupWindowsDisk(client *pbscommon.PBSClient, index int,progressCallback ProgressCallback) (int64, error) {
-	return 0, fmt.Errorf("Not supported on this platform")
+	return 0, fmt.Errorf("not supported on this platform")
 }
 
 func SysTraySetup() {

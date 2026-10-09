@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
+	"strings"
 )
 
 type MailSendConfig struct {
@@ -38,23 +40,90 @@ type Config struct {
 	Namespace        string      `json:"namespace"`
 	BackupID         string      `json:"backup-id"`
 	BackupSourceDir  string      `json:"backupdir"`
+	BackupSourceDirs []string    `json:"backupdirs"`
 	BackupStreamName string      `json:"backupstreamname"`
 	PxarOut          string      `json:"pxarout"`
 	SMTP             *SMTPConfig `json:"smtp"`
-	UseVSS 			 bool        `json:"usevss"`
+	UseVSS           bool        `json:"usevss"`
 
-	// Optional proxmox-backup-client key file: when set the backup is
-	// encrypted client-side. A passphrase-protected key reads its passphrase
-	// from PBS_ENCRYPTION_PASSWORD, like the official client.
-	EncryptionKeyFile string `json:"keyfile,omitempty"`
+	// KeyFile is a Proxmox Backup Server encryption key (JSON, as produced by
+	// `proxmox-backup-client key create`). When set, chunks are AES-256-GCM
+	// encrypted and the snapshot manifest is signed — the same layout as
+	// `proxmox-backup-client backup --crypt-mode encrypt --keyfile`.
+	KeyFile string `json:"keyfile"`
+
+	// KeyFilePassphrase unlocks a KeyFile that was created with a scrypt or
+	// PBKDF2 KDF. Left empty, the passphrase is asked for on the console.
+	// Ignored for `--kdf none` key files, which need nothing.
+	KeyFilePassphrase string `json:"keyfilepassphrase"`
+
+	// Exclude lists exclusion patterns, the same syntax as the GUI's exclusion
+	// list: a pattern without a separator matches a name anywhere in the tree
+	// ("*.tmp", "node_modules"); a pattern with a separator is anchored to the
+	// backup root ("logs/*.log", or an absolute "C:\\Data\\Cache").
+	Exclude []string `json:"exclude"`
+
+	// ExcludeFrom is a file with one pattern per line (blank lines and lines
+	// starting with # are ignored), added to Exclude.
+	ExcludeFrom string `json:"exclude-from"`
+
+	// Parallel is how many directories of a multi-directory run are backed up
+	// at the same time (default 1, one after the other). No upper limit; the
+	// recommended value is the number of CPUs / 4 (RecommendedParallel).
+	Parallel int `json:"parallel"`
 }
+
+// RecommendedParallel is the suggested -parallel value: CPUs / 4, at least 1.
+func RecommendedParallel() int {
+	return max(runtime.NumCPU()/4, 1)
+}
+
+// ExcludePatterns returns the patterns of Exclude and of the ExcludeFrom file.
+func (c *Config) ExcludePatterns() ([]string, error) {
+	patterns := append([]string(nil), c.Exclude...)
+	if c.ExcludeFrom == "" {
+		return patterns, nil
+	}
+	data, err := os.ReadFile(c.ExcludeFrom) // #nosec G304 -- path given by the operator
+	if err != nil {
+		return nil, fmt.Errorf("read exclusion file: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			patterns = append(patterns, line)
+		}
+	}
+	return patterns, nil
+}
+
+// Dirs returns every configured source directory: "backupdir" first (if set),
+// then the entries of "backupdirs", without duplicates. With more than one,
+// each directory is backed up as its own backup group.
+func (c *Config) Dirs() []string {
+	var dirs []string
+	seen := map[string]bool{}
+	for _, d := range append([]string{c.BackupSourceDir}, c.BackupSourceDirs...) {
+		if d != "" && !seen[d] {
+			seen[d] = true
+			dirs = append(dirs, d)
+		}
+	}
+	return dirs
+}
+
+// dirListFlag is a repeatable string flag (-backupdir a -backupdir b).
+type dirListFlag []string
+
+func (d *dirListFlag) String() string     { return strings.Join(*d, ",") }
+func (d *dirListFlag) Set(v string) error { *d = append(*d, v); return nil }
 
 func (c *Config) valid() bool {
 	// Authentication is either an API token (authid+secret) or a PBS
 	// username (ticket login). The ticket password may be omitted: in that
 	// case the CLI asks for it interactively before connecting.
 	authOK := (c.AuthID != "" && c.Secret != "") || c.PBSUsername != ""
-	baseValid := c.BaseURL != "" && authOK && c.Datastore != "" && (c.BackupSourceDir != "" || c.BackupStreamName != "")
+	baseValid := c.BaseURL != "" && authOK && c.Datastore != "" && (len(c.Dirs()) > 0 || c.BackupStreamName != "")
 	if !baseValid {
 		return baseValid
 	}
@@ -84,11 +153,17 @@ func loadConfig() *Config {
 	datastoreFlag := flag.String("datastore", "", "Datastore name")
 	namespaceFlag := flag.String("namespace", "", "Namespace (optional)")
 	backupIDFlag := flag.String("backup-id", "", "Backup ID (optional - if not specified, the hostname is used as the default)")
-	backupSourceDirFlag := flag.String("backupdir", "", "Backup source directory, must not be symlink")
+	var backupSourceDirFlags dirListFlag
+	flag.Var(&backupSourceDirFlags, "backupdir", "Backup source directory, must not be symlink. Repeat the flag to back up several directories; each becomes its own backup group (backup-id <base>_<path>)")
+	var excludeFlags dirListFlag
+	flag.Var(&excludeFlags, "exclude", "Exclusion pattern, repeatable: a name anywhere in the tree (\"*.tmp\", \"node_modules\") or a path anchored to the backup root (\"logs/*.log\")")
+	excludeFromFlag := flag.String("exclude-from", "", "File with one exclusion pattern per line (# starts a comment)")
+	parallelFlag := flag.Int("parallel", 0, fmt.Sprintf("Number of directories backed up at the same time when several -backupdir are given (default 1; recommended: CPUs / 4 = %d on this machine)", RecommendedParallel()))
 	backupStreamNameFlag := flag.String("backupstream", "", "Filename for stream backup")
 	pxarOutFlag := flag.String("pxarout", "", "Output PXAR archive for debug purposes (optional)")
 	noVSSFlag := flag.Bool("novss", false, "Disable VSS ( For filesystems that don't support it, for example veracrypt )")
-	keyFileFlag := flag.String("keyfile", "", "Encryption key file (proxmox-backup-client format) to encrypt the backup client-side; passphrase from PBS_ENCRYPTION_PASSWORD (optional)")
+	keyFileFlag := flag.String("keyfile", "", "Path to a Proxmox Backup Server encryption key file (encrypts chunks and signs the manifest; same format as proxmox-backup-client key create)")
+	keyFilePassphraseFlag := flag.String("keyfile-passphrase", "", "Passphrase for a scrypt/PBKDF2 protected -keyfile (prompted for when omitted)")
 
 	mailHostFlag := flag.String("mail-host", "", "mail notification system: mail server host(optional)")
 	mailPortFlag := flag.String("mail-port", "", "mail notification system: mail server port(optional)")
@@ -148,8 +223,19 @@ func loadConfig() *Config {
 	if *backupIDFlag != "" {
 		config.BackupID = *backupIDFlag
 	}
-	if *backupSourceDirFlag != "" {
-		config.BackupSourceDir = *backupSourceDirFlag
+	if len(backupSourceDirFlags) > 0 {
+		config.BackupSourceDir = backupSourceDirFlags[0]
+		config.BackupSourceDirs = backupSourceDirFlags[1:]
+	}
+
+	if len(excludeFlags) > 0 {
+		config.Exclude = append(config.Exclude, excludeFlags...)
+	}
+	if *excludeFromFlag != "" {
+		config.ExcludeFrom = *excludeFromFlag
+	}
+	if *parallelFlag != 0 {
+		config.Parallel = *parallelFlag
 	}
 
 	if *backupStreamNameFlag != "" {
@@ -162,7 +248,10 @@ func loadConfig() *Config {
 		config.UseVSS = false
 	}
 	if *keyFileFlag != "" {
-		config.EncryptionKeyFile = *keyFileFlag
+		config.KeyFile = *keyFileFlag
+	}
+	if *keyFilePassphraseFlag != "" {
+		config.KeyFilePassphrase = *keyFilePassphraseFlag
 	}
 
 	initSmtpConfigIfNeeded := func() {

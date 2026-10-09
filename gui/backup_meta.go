@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
+	"io"
 	"runtime"
 	"time"
+
+	"pbscommon"
 )
 
 const (
-	BackupMetaFilename  = ".proxmox_backup_client_meta.json"
+	BackupMetaFilename = ".proxmox_backup_client_meta.json"
 	// LegacyBackupMetaFilename is the sidecar name written by Nimbus Backup
 	// <= 0.3.0. Snapshots taken by those releases must stay restorable to their
 	// original location, so readers accept it as a fallback.
@@ -18,33 +22,45 @@ const (
 	// file-name regex: bare basename, no leading dot, and end in ".blob".
 	// The payload is still gzipped JSON — the ".blob" suffix is the PBS
 	// container extension, the ".json.gz" inside describes the content.
-	BackupAclsFilename  = "proxmox-client-acls.json.gz.blob"
-	FileMetaFormatVers  = 1
+	BackupAclsFilename = "proxmox-client-acls.json.gz.blob"
+	FileMetaFormatVers = 1
 )
 
-// FileMetaEntry is the per-file/dir NTFS metadata captured before the PXAR walk.
-// Stored in a gzipped JSON side-car inside the archive root (as a VirtualFile).
+// FileMetaEntry is the per-file/dir NTFS (Windows) or extended-attribute
+// (Linux) metadata captured before the PXAR walk. Stored in a gzipped JSON
+// side-car inside the archive root (as a VirtualFile).
 //
 // Field names use short keys to keep the serialized size small: for a tree of
 // 500k files and 50 unique SDDLs, the whole file is typically 5-15 MB gzipped.
 type FileMetaEntry struct {
 	Path    string `json:"p"` // archive-relative path using forward slashes
 	IsDir   bool   `json:"d,omitempty"`
-	SDDLIdx int    `json:"s"`     // index into BackupFileMeta.SDDLs (dedup)
-	Attrs   uint32 `json:"a"`     // Windows file attributes bitmask
+	SDDLIdx int    `json:"s"`           // Windows: index into BackupFileMeta.SDDLs (dedup)
+	Attrs   uint32 `json:"a"`           // Windows file attributes bitmask
 	Reparse uint32 `json:"r,omitempty"` // reparse tag (0 if not a reparse point)
+	// Xattrs is Linux-only: every extended attribute captured on this file,
+	// name -> raw value (encoding/json base64-encodes []byte automatically).
+	// POSIX ACLs are included here under their real kernel xattr names
+	// (system.posix_acl_access, system.posix_acl_default) rather than
+	// decoded — the kernel already defines their binary layout as a stable
+	// ABI, so copying the raw bytes back via Setxattr on restore is exactly
+	// as correct as (and far simpler than) parsing and re-encoding them.
+	// No dedup: unlike Windows SDDLs, xattr values vary too much per-file
+	// for a dictionary to earn its complexity, and the blob is already
+	// gzip-compressed, which absorbs most of the repetition anyway.
+	Xattrs map[string][]byte `json:"x,omitempty"`
 }
 
 // BackupFileMeta is the root of the ACL side-car. SDDLs are deduplicated into
 // a string array and each entry references by index.
 type BackupFileMeta struct {
 	Version   int             `json:"version"`
-	Root      string          `json:"root"`    // filesystem root that was walked
+	Root      string          `json:"root"`     // filesystem root that was walked
 	Captured  string          `json:"captured"` // RFC3339 timestamp
 	Host      string          `json:"host"`
-	Collected int             `json:"collected"`  // count of entries
-	Errors    int             `json:"errors"`     // count of files that failed ACL lookup
-	SDDLs     []string        `json:"sddl"`       // dedup dictionary
+	Collected int             `json:"collected"` // count of entries
+	Errors    int             `json:"errors"`    // count of files that failed ACL lookup
+	SDDLs     []string        `json:"sddl"`      // dedup dictionary
 	Entries   []FileMetaEntry `json:"entries"`
 }
 
@@ -64,6 +80,48 @@ func SerializeFileMeta(meta *BackupFileMeta) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// downloadBackupFileMeta fetches and decodes the NTFS ACL/attributes blob
+// (BackupAclsFilename) for the snapshot the given client is currently
+// connected to. Returns (nil, nil) — not an error — when the blob is simply
+// absent, which is the normal case for a snapshot backed up before this
+// feature existed, or one with nothing to capture: restore must proceed
+// without ACL/attribute application either way, never fail because of it.
+func downloadBackupFileMeta(client *pbscommon.PBSClient) (*BackupFileMeta, error) {
+	raw, err := client.DownloadBlob(BackupAclsFilename)
+	if err != nil {
+		writeBackupLog(fmt.Sprintf("NTFS ACL/attributes blob not available for this snapshot (restoring without it): %v", err))
+		return nil, nil
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = gz.Close() }()
+	payload, err := io.ReadAll(gz)
+	if err != nil {
+		return nil, err
+	}
+	var meta BackupFileMeta
+	if err := json.Unmarshal(payload, &meta); err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+// buildFileMetaIndex turns a BackupFileMeta's Entries slice into a
+// path->entry lookup, built once instead of scanning the (potentially large)
+// slice for every restored file.
+func buildFileMetaIndex(meta *BackupFileMeta) map[string]FileMetaEntry {
+	if meta == nil {
+		return nil
+	}
+	idx := make(map[string]FileMetaEntry, len(meta.Entries))
+	for _, e := range meta.Entries {
+		idx[e.Path] = e
+	}
+	return idx
 }
 
 // BackupMeta stores metadata about the backup, injected as a virtual file

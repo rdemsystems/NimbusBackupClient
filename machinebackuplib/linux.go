@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"math"
 )
 
 const sectorSize = 512
@@ -49,7 +50,7 @@ func mountForMajMin(majmin string) string {
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	best := ""
 	bestIsRoot := false
@@ -125,7 +126,7 @@ func isBlockDevice(path string) bool {
 	return fi.Mode()&os.ModeDevice != 0 && fi.Mode()&os.ModeCharDevice == 0
 }
 
-func backupWholeDisk(client *pbscommon.PBSClient, dev string, index int, progressCallback ProgressCallback) (bool, int64, error) {
+func backupWholeDisk(client *pbscommon.PBSClient, dev string, index int, useSnapshot bool, progressCallback ProgressCallback) (bool, int64, error) {
 	if !strings.HasPrefix(dev, "/dev/") {
 		return false, 0, nil
 	}
@@ -140,7 +141,7 @@ func backupWholeDisk(client *pbscommon.PBSClient, dev string, index int, progres
 		return false, 0, err
 	}
 	total, err := df.Seek(0, io.SeekEnd)
-	df.Close()
+	_ = df.Close()
 	if err != nil {
 		return false, 0, err
 	}
@@ -162,13 +163,41 @@ func backupWholeDisk(client *pbscommon.PBSClient, dev string, index int, progres
 
 	fidxName := fmt.Sprintf("drive-sata%d.img.fidx", index)
 
-	err = snapshot.CreateVSSSnapshot(mountpoints, false, func(snapshots map[string]snapshot.SnapShot) error {
-		return streamStitchedDisk(client, dev, fidxName, uint64(total), parts, snapshots, progressCallback)
-	})
-	if err != nil {
-		return true, 0, err
+	if useSnapshot && len(mountpoints) > 0 {
+		// Try to create snapshots for mounted partitions
+		err := snapshot.CreateVSSSnapshot(mountpoints, false, func(snapshots map[string]snapshot.SnapShot) error {
+			return streamStitchedDisk(client, dev, fidxName, uint64(total), parts, snapshots, progressCallback)
+		})
+		if err != nil {
+			return false, 0, fmt.Errorf("snapshot creation failed (dattobd/elastio-snap required for crash-consistent backup): %w", err)
+		}
+		return true, total, nil
 	}
-	return true, total, nil
+
+	// useSnapshot is false: raw disk read (crash-consistent) - this is the explicit user choice
+	log.Printf("Reading raw disk %s (crash-consistent, snapshots disabled by user)", dev)
+	return readRawDisk(client, dev, fidxName, uint64(total), progressCallback)
+}
+
+func readRawDisk(client *pbscommon.PBSClient, dev, fidxName string, total uint64, progressCallback ProgressCallback) (bool, int64, error) {
+	// Get partitions for raw read
+	parts, err := enumeratePartitions(strings.TrimPrefix(dev, "/dev/"))
+	if err != nil {
+		return false, 0, err
+	}
+
+	// Create a dummy snapshot map with no valid snapshots - streamStitchedDisk
+	// will skip partitions without valid snapshots and read raw sectors
+	emptySnapshots := make(map[string]snapshot.SnapShot)
+	for _, p := range parts {
+		if p.mountpoint != "" {
+			emptySnapshots[p.mountpoint] = snapshot.SnapShot{}
+		}
+	}
+	if err := streamStitchedDisk(client, dev, fidxName, total, parts, emptySnapshots, progressCallback); err != nil {
+		return false, 0, err
+	}
+	return true, int64(total), nil
 }
 
 type diskSegment struct {
@@ -205,15 +234,24 @@ func streamStitchedDisk(client *pbscommon.PBSClient, dev, fidxName string, total
 
 	go func() {
 		err := writeSegments(dev, segments, total, ch, uploadDone, progressCallback)
-		close(ch)
+		// Publish the result BEFORE closing ch — see the ordering contract on
+		// uploadWorker. errCh is buffered, so this send never blocks.
 		errCh <- err
+		close(ch)
 	}()
 
-	// uploadWorker is the only consumer of errCh (see its contract) and returns
-	// the reader's error when the reader failed or was cancelled.
-	upErr := uploadWorker(client, fidxName, total, ch, errCh)
-	close(uploadDone)
-	return upErr
+	// uploadWorker is the sole consumer of errCh (it returns the reader error
+	// through its own return value), so this function must not read errCh
+	// itself — a second receive would block forever once the writer has
+	// exited.
+	var uploadErr error
+	go func() {
+		defer close(uploadDone)
+		uploadErr = uploadWorker(client, fidxName, total, ch, errCh)
+	}()
+
+	<-uploadDone
+	return uploadErr
 }
 
 func assembleSegments(total uint64, regions []diskSegment) []diskSegment {
@@ -250,7 +288,15 @@ func writeSegments(dev string, segments []diskSegment, total uint64, ch chan []b
 		if progressCallback == nil {
 			return false
 		}
-		return progressCallback(float64(pos)/float64(total), fmt.Sprintf("%s: Block %d", dev, b))
+		if total == 0 {
+			// Unknown total size; report with 0% to avoid NaN
+			return progressCallback(0, fmt.Sprintf("%s: Block %d", dev, b))
+		}
+		pct := float64(pos) / float64(total)
+		if math.IsNaN(pct) || math.IsInf(pct, 0) {
+			pct = 0
+		}
+		return progressCallback(pct, fmt.Sprintf("%s: Block %d", dev, b))
 	}
 
 	sendChunk := func(chunk []byte) bool {
@@ -301,7 +347,7 @@ func writeSegments(dev string, segments []diskSegment, total uint64, ch chan []b
 	if err != nil {
 		return err
 	}
-	defer disk.Close()
+	defer func() { _ = disk.Close() }()
 
 	block := make([]byte, pbscommon.PBS_FIXED_CHUNK_SIZE)
 	for _, seg := range segments {
@@ -320,14 +366,14 @@ func writeSegments(dev string, segments []diskSegment, total uint64, ch chan []b
 				return err
 			}
 			bad, ok = resilientCopy(sf, 0, length, block, emit, emitZeros)
-			sf.Close()
+			_ = sf.Close()
 			if bad > 0 {
 				log.Printf("\033[31;1mWarning: snapshot %s had %d unreadable sector(s) (~%s), zero-filled in the image\033[0m",
 					seg.snapDev, bad, BytesToString(int64(bad*sectorSize)))
 			}
 		}
 		if !ok {
-			return errCancelled
+			return ErrCancelled
 		}
 	}
 
@@ -339,7 +385,7 @@ func writeSegments(dev string, segments []diskSegment, total uint64, ch chan []b
 		chunk := make([]byte, n)
 		copy(chunk, buffer[:n])
 		if !sendChunk(chunk) {
-			return errCancelled
+			return ErrCancelled
 		}
 		buffer = buffer[n:]
 	}
@@ -369,7 +415,6 @@ func resilientCopy(src io.ReaderAt, srcOffset, length uint64, block []byte, emit
 				if !emitZeros(length - pos) {
 					return badSectors, false
 				}
-				pos = length
 			}
 			break
 		}
@@ -397,7 +442,6 @@ func resilientCopy(src io.ReaderAt, srcOffset, length uint64, block []byte, emit
 					}
 					pos = length
 				}
-				winEnd = pos
 				break
 			}
 			if rem := s - uint64(m); rem > 0 {

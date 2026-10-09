@@ -1,7 +1,7 @@
-From 03c63f25c118f43ce62fce28f1aed355c6c9ab7c Mon Sep 17 00:00:00 2001
+From 1d8a967d75c00feb1996aef64eaf54d59a5c83db Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:05:19 +0200
-Subject: [PATCH 09/15] installer: delete the real data directory on "delete
+Subject: [PATCH 09/58] installer: delete the real data directory on "delete
  configuration"
 
 The uninstall cleanup removed %ProgramData%\$(var.ExeName) (e.g.
@@ -15,10 +15,10 @@ the path and file names shown in the uninstall dialog.
  1 file changed, 8 insertions(+), 5 deletions(-)
 
 diff --git a/installer/wix/ProductBody.wxi b/installer/wix/ProductBody.wxi
-index d0a2c0c..bce0436 100644
+index aaa1f1e..40cc680 100644
 --- a/installer/wix/ProductBody.wxi
 +++ b/installer/wix/ProductBody.wxi
-@@ -158,10 +158,13 @@
+@@ -150,10 +150,13 @@
                    Impersonate="no"
                    Return="ignore" />
  
@@ -34,7 +34,7 @@ index d0a2c0c..bce0436 100644
                    Execute="deferred"
                    Impersonate="no"
                    Return="ignore" />
-@@ -188,12 +191,12 @@
+@@ -180,12 +183,12 @@
          </Control>
  
          <Control Id="ConfigInfo" Type="Text" X="25" Y="60" Width="320" Height="60" Transparent="yes" NoPrefix="yes">

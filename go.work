@@ -10,7 +10,15 @@ use ./clientcommon
 
 use ./snapshot
 
+use ./pkg/retry
+
+use ./pkg/security
+
+use ./directorybackup
+
 use (
 	./gui
 	./nbd
 )
+
+use ./gui/api

@@ -1,0 +1,729 @@
+From d925a63248b5bc33e48b26cff2131cdf50f31850 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 15:55:43 +0200
+Subject: [PATCH 49/58] docs: carry the README update into the 11 AI
+ translations
+
+Signing note (0.4.1), GUI features, CI gates and the upstream section, as in
+the English README.
+---
+ README.ar.md | 22 ++++++++++++----------
+ README.de.md | 22 ++++++++++++----------
+ README.el.md | 22 ++++++++++++----------
+ README.es.md | 22 ++++++++++++----------
+ README.fa.md | 22 ++++++++++++----------
+ README.it.md | 22 ++++++++++++----------
+ README.ja.md | 22 ++++++++++++----------
+ README.ro.md | 22 ++++++++++++----------
+ README.ru.md | 22 ++++++++++++----------
+ README.sv.md | 22 ++++++++++++----------
+ README.zh.md | 22 ++++++++++++----------
+ 11 files changed, 132 insertions(+), 110 deletions(-)
+
+diff --git a/README.ar.md b/README.ar.md
+index 18c8515..3b0ba36 100644
+--- a/README.ar.md
++++ b/README.ar.md
+@@ -29,7 +29,7 @@ Nimbus Backup هو إصدار RDEM Systems من [Proxmox Backup Client GO](https
+ - `SHA256SUMS.txt` — المجاميع الاختبارية
+ 
+ > ⚠️ **هل يُظهر Windows رسالة "تم اكتشاف فيروس" (مثل `Trojan:Win32/Sabsik.FL.A!ml`) أو تحذيرًا من SmartScreen؟**
+-> هذه **إيجابية كاذبة** معروفة لتطبيقات Go/Wails — وهي *ليست* فيروسًا. تعني اللاحقة `!ml` أن التنبيه صادر عن نموذج تعلّم آلي يُعلِّم الملفات التنفيذية *غير الموقّعة وقليلة الانتشار*.
++> هذه **إيجابية كاذبة** معروفة لتطبيقات Go/Wails — وهي *ليست* فيروسًا. تعني اللاحقة `!ml` أن التنبيه صادر عن نموذج تعلّم آلي يُعلِّم الملفات التنفيذية *قليلة الانتشار* (وحتى الإصدار 0.4.0، غير الموقّعة أيضًا).
+ > اقرأ [سبب حدوث ذلك وكيفية التحقق من الملف الذي نزّلته](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
+ 
+ ### 🔎 التحقق من أي ملف تم تنزيله
+@@ -50,7 +50,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **توقيع الشيفرة:** الملفات التنفيذية لنظام Windows **ليست موقّعة بعد بتوقيع Authenticode**، وهذا ما يُطلق تحذيرات SmartScreen / `!ml` المذكورة أعلاه. لم نتلقَّ أي رد على طلبنا لشهادة مجانية للمشاريع مفتوحة المصدر من [SignPath Foundation](https://signpath.org)؛ ويجري حاليًا إعداد التوقيع عبر Azure Artifact Signing، والهدف هو الإصدار **0.4.1**. وحتى ذلك الحين، يُثبَت المصدر عبر شهادة مصدر البناء والمجاميع الاختبارية المذكورة أعلاه.
++> 🔏 **توقيع الشيفرة:** منذ الإصدار 0.4.1، أصبحت `NimbusBackup.exe` وخدمته و`NimbusBackup.msi` **موقّعة بتوقيع Authenticode من RDEM SYSTEMS** (Azure Artifact Signing)؛ وتعرض *الخصائص ← التوقيعات الرقمية* اسم الناشر. قد يستمر SmartScreen في التحذير عند صدور إصدار جديد إلى أن تترسّخ سمعته: تحقّق من أن الناشر هو RDEM SYSTEMS، ثم اختر *مزيد من المعلومات ← التشغيل على أي حال*. أدوات سطر الأوامر ليست موقّعة بعد؛ وتغطي شهادة مصدر البناء والمجاميع الاختبارية المذكورة أعلاه جميع الملفات.
+ 
+ ### 🐧 على Linux؟ استخدم العميل الرسمي
+ 
+@@ -80,11 +80,12 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ ### الواجهة الرسومية (موصى بها)
+ - **🌍 متعددة اللغات** — واجهة بالإنجليزية والفرنسية والإيطالية والألمانية والبولندية
+ - إعداد سهل الاستخدام مع اختبار الاتصال (رمز API أو اسم المستخدم/كلمة المرور)
+-- عرض تقدّم النسخ الاحتياطي في الوقت الفعلي مع السرعة والوقت المتبقي المقدّر، وإمكانية الإلغاء في أي وقت
+-- دعم VSS (Volume Shadow Copy) لنسخ احتياطية متسقة
++- عرض تقدّم النسخ الاحتياطي في الوقت الفعلي مع السرعة والوقت المتبقي المقدّر، وإمكانية الإلغاء في أي وقت، وتبويب للمهام قيد التشغيل
++- VSS (Volume Shadow Copy) لنسخ احتياطية متسقة: لقطة واحدة لنسخة احتياطية كاملة متعددة المجلدات، ونسخة ظل واحدة لكل وحدة تخزين
+ - نسخ احتياطي لعدة مجلدات، ووضعا الملفات والقرص (الجهاز بالكامل)؛ ويمكن معالجة المجلدات بالتوازي (الموصى به: عدد المعالجات / 4)
+-- تصفح اللقطات، والبحث عن الملفات (بأحرف البدل) والاستعادة
+-- دعم عدة خوادم PBS، وتثبيت بصمة الشهادة (TOFU)
++- تُستعاد النسخ الاحتياطية للأقراص في Proxmox VE كآلة افتراضية مطابقة للجهاز (المعالجات، وذاكرة RAM، والبرنامج الثابت، وبطاقات الشبكة بعناوين MAC الخاصة بها، ومعرّف VM مخصّص)
++- تصفح اللقطات، والبحث عن الملفات (بأحرف البدل) والاستعادة، بما في ذلك قوائم NTFS ACL
++- دعم عدة خوادم PBS مع خادم PBS لكل مهمة، وتثبيت بصمة الشهادة (TOFU)
+ - **🔒 تشفير من جانب العميل** (AES-256-GCM)، بملفات مفاتيح متوافقة مع `proxmox-backup-client` وProxmox VE
+ - وضع خدمة Windows + نسخ احتياطية مجدولة، وسجل للنسخ الاحتياطية مع إعادة التشغيل بنقرة واحدة
+ - سجلات تصحيح (debug) لاستكشاف الأخطاء وإصلاحها
+@@ -119,7 +120,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ - التحقق من صحة المدخلات وتنقية بيانات الاعتماد (حجب الأسرار من السجلات)
+ - منع اجتياز المسارات (path traversal)
+ - منطق إعادة المحاولة مع تراجع أُسّي (exponential backoff)
+-- بوابات CI في كل بناء: الاختبارات، و`golangci-lint`، و`gosec`، و`go mod tidy`
++- بوابات CI في كل بناء: الاختبارات، و`golangci-lint`، و`gosec`، و`go mod tidy`، ومجموعة اختبارات شاملة (end-to-end) على خادم PBS حقيقي (عمليات استعادة باستخدام `proxmox-backup-client` الرسمي، والتحقق PBS verify)
+ 
+ ### 🔒 التشفير من جانب العميل
+ يمكن تشفير النسخ الاحتياطية **على جهاز العميل** قبل مغادرتها الجهاز، باستخدام
+@@ -227,11 +228,12 @@ wails build      # or: wails dev  (hot reload)
+ 
+ ## 🔗 العلاقة مع المشروع الأصلي (upstream)
+ 
+-بدأ Nimbus Backup كتفرّع (fork) من [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (عميل Proxmox Backup بلغة Go، من تطوير Tiziano Bacocco، بترخيص GPLv3)، وأضفنا إليه الواجهة الرسومية لـ Windows، والخدمة، والجدولة، ودعم عدة خوادم PBS، والاستعادة. في سبتمبر 2026، دمج المشروع الأصلي تلك الواجهة الرسومية وجعلها محايدة من حيث العلامة التجارية ("Proxmox Backup Client GUI"). ومنذ الإصدار 0.4.0، يُبنى Nimbus Backup من قاعدة الشيفرة نفسها: **أصبح المشروعان الآن متطابقين تقريبًا من الناحية الوظيفية.**
++بدأ Nimbus Backup كتفرّع (fork) من [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (عميل Proxmox Backup بلغة Go، من تطوير Tiziano Bacocco، بترخيص GPLv3)، وأضفنا إليه الواجهة الرسومية لـ Windows، والخدمة، والجدولة، ودعم عدة خوادم PBS، والاستعادة. في سبتمبر 2026، دمج المشروع الأصلي تلك الواجهة الرسومية وجعلها محايدة من حيث العلامة التجارية ("Proxmox Backup Client GUI"). وفي أكتوبر 2026 (0.4.1)، أُعيد بناء Nimbus Backup على الشيفرة الحالية للمشروع الأصلي، مع اعتماد التشفير من جانب العميل الخاص بالمشروع الأصلي: **يتشارك المشروعان قاعدة الشيفرة نفسها.**
+ 
+-ما يضيفه هذا المستودع فوق المشروع الأصلي هو سلسلة صغيرة وموثّقة من التصحيحات ([`patches/`](patches/README.md)):
++ما يضيفه هذا المستودع فوق المشروع الأصلي هو سلسلة موثّقة من التصحيحات ([`patches/`](patches/README.md))، عُرض معظمها على المشروع الأصلي:
+ 
+-- **إصلاحات لم تُدمج بعد في المشروع الأصلي** (بناء الخدمة، والاستعادة مع الخوادم التي تستخدم اسم المستخدم/كلمة المرور، ورموز الخروج، وحجب السجلات، وموثوقية نسخ الجهاز احتياطيًا…) — تُرسل إلى المشروع الأصلي تباعًا مع دمجها.
++- **الميزات**: المفتاح الورقي (paper key) واستيراد المفتاح (رمز QR)، والنسخ الاحتياطي المتوازي للمجلدات، ولقطة VSS واحدة لكل نسخة احتياطية متعددة المجلدات، والاستثناءات في سطر الأوامر، وإعداد آلة افتراضية لـ Proxmox VE مُولَّد من الجهاز الفعلي.
++- **إصلاحات لم تُدمج بعد في المشروع الأصلي** (استعادة النسخ الاحتياطية المضغوطة والمشفّرة الخاصة بـ `proxmox-backup-client`، وخادم PBS المختار لنسخة احتياطية عبر الخدمة، وأسباب رفض PBS، والاستعادة مع الخوادم التي تستخدم اسم المستخدم/كلمة المرور، وتكبير النافذة…) — تُرسل إلى المشروع الأصلي تباعًا مع دمجها.
+ - **هوية Nimbus Backup** — `NimbusBackup.exe`/`.msi`، وخدمة `NimbusBackup`، ورمز ترقية MSI للتثبيتات الموجودة، بحيث تستمر ترقيتها في مكانها.
+ - **مسار الترقية** من Nimbus Backup ≤ 0.3.0 (ترحيل مجلد البيانات، وبيانات تعريف اللقطات القديمة).
+ - **خط إنتاج الإصدارات** — شهادة مصدر البناء، والمجاميع الاختبارية، وتقارير VirusTotal.
+diff --git a/README.de.md b/README.de.md
+index a2c65fc..23ca056 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -27,7 +27,7 @@ Jede Version enthält:
+ - `SHA256SUMS.txt` — Prüfsummen
+ 
+ > ⚠️ **Windows meldet „Virus erkannt“ (z. B. `Trojan:Win32/Sabsik.FL.A!ml`) oder zeigt eine SmartScreen-Warnung?**
+-> Dies ist ein bekannter **Fehlalarm** bei Go/Wails-Anwendungen — es ist *kein* Virus. Das Suffix `!ml` bedeutet, dass die Meldung von einem Machine-Learning-Modell stammt, das *unsignierte, wenig verbreitete* ausführbare Dateien markiert.
++> Dies ist ein bekannter **Fehlalarm** bei Go/Wails-Anwendungen — es ist *kein* Virus. Das Suffix `!ml` bedeutet, dass die Meldung von einem Machine-Learning-Modell stammt, das *wenig verbreitete* ausführbare Dateien markiert (und, bis 0.4.0, unsignierte).
+ > Lesen Sie, [warum das passiert und wie Sie den Download überprüfen](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
+ 
+ ### 🔎 Jeden Download überprüfen
+@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **Codesignierung:** Die Windows-Binärdateien sind **noch nicht Authenticode-signiert**, was die oben genannten SmartScreen- / `!ml`-Warnungen auslöst. Unsere Anfrage nach einem kostenlosen OSS-Zertifikat bei der [SignPath Foundation](https://signpath.org) blieb unbeantwortet; die Signierung über Azure Artifact Signing wird gerade eingerichtet und ist für **0.4.1** geplant. Bis dahin wird die Herkunft über die Build-Provenienz-Attestierung und die oben genannten Prüfsummen nachgewiesen.
++> 🔏 **Codesignierung:** Seit 0.4.1 sind `NimbusBackup.exe`, sein Dienst und `NimbusBackup.msi` **von RDEM SYSTEMS Authenticode-signiert** (Azure Artifact Signing); *Eigenschaften → Digitale Signaturen* zeigt den Herausgeber. SmartScreen kann bei einem neuen Release weiterhin warnen, bis dessen Reputation aufgebaut ist: Prüfen Sie, dass der Herausgeber RDEM SYSTEMS ist, dann *Weitere Informationen → Trotzdem ausführen*. Die Kommandozeilenwerkzeuge sind noch nicht signiert; die oben genannte Build-Provenienz-Attestierung und die Prüfsummen decken jede Datei ab.
+ 
+ ### 🐧 Unter Linux? Verwenden Sie den offiziellen Client
+ 
+@@ -74,11 +74,12 @@ Sie möchten Proxmox Backup Server nicht selbst betreiben? Nutzen Sie unsere vol
+ ### GUI (empfohlen)
+ - **🌍 Mehrsprachig** — Oberfläche auf Englisch, Französisch, Italienisch, Deutsch und Polnisch
+ - Benutzerfreundliche Konfiguration mit Verbindungstest (API-Token oder Benutzername/Passwort)
+-- Sicherungsfortschritt in Echtzeit mit Geschwindigkeit und Restzeit, jederzeit abbrechbar
+-- VSS-Unterstützung (Volume Shadow Copy) für konsistente Sicherungen
++- Sicherungsfortschritt in Echtzeit mit Geschwindigkeit und Restzeit, jederzeit abbrechbar, ein Reiter „Laufende Jobs“
++- VSS (Volume Shadow Copy) für konsistente Sicherungen: ein Snapshot für eine ganze Sicherung mehrerer Ordner, eine Schattenkopie pro Volume
+ - Sicherung mehrerer Ordner, Datei- und Datenträgermodus (ganze Maschine); Ordner können parallel gesichert werden (empfohlen: CPUs / 4)
+-- Durchsuchen von Snapshots, Dateisuche (Platzhalter) und Wiederherstellung
+-- Unterstützung mehrerer PBS-Server, Pinning des Zertifikat-Fingerabdrucks (TOFU)
++- Datenträgersicherungen lassen sich in Proxmox VE als VM wiederherstellen, die der Maschine entspricht (CPUs, RAM, Firmware, Netzwerkkarten mit ihren MACs, eigene VM-ID)
++- Durchsuchen von Snapshots, Dateisuche (Platzhalter) und Wiederherstellung, einschließlich NTFS-ACLs
++- Unterstützung mehrerer PBS-Server mit einem PBS-Server pro Job, Pinning des Zertifikat-Fingerabdrucks (TOFU)
+ - **🔒 Clientseitige Verschlüsselung** (AES-256-GCM), Schlüsseldateien kompatibel mit `proxmox-backup-client` und Proxmox VE
+ - Windows-Dienstmodus + geplante Sicherungen, Sicherungsverlauf mit erneuter Ausführung per Klick
+ - Debug-Protokollierung zur Fehlersuche
+@@ -113,7 +114,7 @@ Beim Sichern eines ganzen Laufwerks (z. B. `D:\`) schließt Nimbus Backup automa
+ - Eingabevalidierung und Bereinigung von Anmeldedaten (Geheimnisse werden in Protokollen geschwärzt)
+ - Schutz vor Path Traversal
+ - Wiederholungslogik mit exponentiellem Backoff
+-- CI-Prüfungen bei jedem Build: Tests, `golangci-lint`, `gosec`, `go mod tidy`
++- CI-Prüfungen bei jedem Build: Tests, `golangci-lint`, `gosec`, `go mod tidy` sowie eine End-to-End-Testsuite gegen einen echten PBS (Wiederherstellungen mit dem offiziellen `proxmox-backup-client`, PBS-Verify)
+ 
+ ### 🔒 Clientseitige Verschlüsselung
+ Sicherungen können **auf dem Client** verschlüsselt werden, bevor sie die Maschine verlassen, mit
+@@ -216,11 +217,12 @@ Die Marke wird anhand des Namens der ausführbaren Datei gewählt: `NimbusBackup
+ 
+ ## 🔗 Beziehung zum Upstream-Projekt
+ 
+-Nimbus Backup begann als Fork von [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, von Tiziano Bacocco, GPLv3), dem wir die Windows-GUI, den Dienst, die Zeitplanung, Multi-PBS und die Wiederherstellung hinzugefügt haben. Im September 2026 hat das Upstream-Projekt diese GUI übernommen und markenneutral gestaltet („Proxmox Backup Client GUI“). Seit 0.4.0 wird Nimbus Backup aus derselben Codebasis gebaut: **Die beiden Projekte sind funktional inzwischen nahezu identisch.**
++Nimbus Backup begann als Fork von [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, von Tiziano Bacocco, GPLv3), dem wir die Windows-GUI, den Dienst, die Zeitplanung, Multi-PBS und die Wiederherstellung hinzugefügt haben. Im September 2026 hat das Upstream-Projekt diese GUI übernommen und markenneutral gestaltet („Proxmox Backup Client GUI“). Im Oktober 2026 (0.4.1) wurde Nimbus Backup auf dem aktuellen Code des Upstream-Projekts neu aufgebaut und hat dessen clientseitige Verschlüsselung übernommen: **Die beiden Projekte teilen dieselbe Codebasis.**
+ 
+-Was dieses Repository gegenüber dem Upstream-Projekt hinzufügt, ist eine kleine, dokumentierte Patch-Serie ([`patches/`](patches/README.md)):
++Was dieses Repository gegenüber dem Upstream-Projekt hinzufügt, ist eine dokumentierte Patch-Serie ([`patches/`](patches/README.md)), die größtenteils upstream angeboten wird:
+ 
+-- **Upstream noch nicht übernommene Korrekturen** (Build des Dienstes, Wiederherstellung bei Servern mit Benutzername/Passwort, Exit-Codes, Schwärzung in Protokollen, Zuverlässigkeit der Maschinensicherung…) — werden upstream eingereicht und dort nach und nach übernommen.
++- **Funktionen**: Papierschlüssel und Schlüsselimport (QR-Code), parallele Ordnersicherungen, ein VSS-Snapshot pro Sicherung mehrerer Ordner, Ausschlüsse in der Kommandozeile, eine aus der realen Maschine erzeugte Proxmox-VE-VM-Konfiguration.
++- **Upstream noch nicht übernommene Korrekturen** (Wiederherstellung komprimierter, verschlüsselter Sicherungen von `proxmox-backup-client`, der für eine Dienstsicherung gewählte PBS-Server, Ablehnungsgründe von PBS, Wiederherstellung bei Servern mit Benutzername/Passwort, Maximieren des Fensters…) — werden upstream eingereicht und dort nach und nach übernommen.
+ - **Die Nimbus-Backup-Identität** — `NimbusBackup.exe`/`.msi`, der Dienst `NimbusBackup` und der MSI-Upgrade-Code bestehender Installationen, damit diese weiterhin direkt aktualisiert werden.
+ - **Upgrade-Pfad** von Nimbus Backup ≤ 0.3.0 (Migration des Datenordners, Legacy-Snapshot-Metadaten).
+ - **Release-Pipeline** — Build-Provenienz-Attestierung, Prüfsummen, VirusTotal-Berichte.
+diff --git a/README.el.md b/README.el.md
+index e9fc56e..626f2b2 100644
+--- a/README.el.md
++++ b/README.el.md
+@@ -27,7 +27,7 @@
+ - `SHA256SUMS.txt` — αθροίσματα ελέγχου
+ 
+ > ⚠️ **Τα Windows αναφέρουν «εντοπίστηκε ιός» (π.χ. `Trojan:Win32/Sabsik.FL.A!ml`) ή εμφανίζουν προειδοποίηση SmartScreen;**
+-> Πρόκειται για γνωστό **ψευδώς θετικό** αποτέλεσμα για εφαρμογές Go/Wails — *δεν* είναι ιός. Η κατάληξη `!ml` σημαίνει ότι προέρχεται από μοντέλο μηχανικής μάθησης που επισημαίνει *μη υπογεγραμμένα, σπάνια* εκτελέσιμα αρχεία.
++> Πρόκειται για γνωστό **ψευδώς θετικό** αποτέλεσμα για εφαρμογές Go/Wails — *δεν* είναι ιός. Η κατάληξη `!ml` σημαίνει ότι προέρχεται από μοντέλο μηχανικής μάθησης που επισημαίνει *σπάνια* εκτελέσιμα αρχεία (και, έως την 0.4.0, μη υπογεγραμμένα).
+ > Διαβάστε [γιατί συμβαίνει αυτό και πώς να επαληθεύσετε τη λήψη](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
+ 
+ ### 🔎 Επαλήθευση οποιασδήποτε λήψης
+@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **Υπογραφή κώδικα:** τα εκτελέσιμα για Windows **δεν έχουν ακόμη υπογραφή Authenticode**, και αυτό προκαλεί τις παραπάνω προειδοποιήσεις SmartScreen / `!ml`. Το αίτημά μας για δωρεάν πιστοποιητικό OSS από το [SignPath Foundation](https://signpath.org) δεν έλαβε απάντηση· η υπογραφή μέσω Azure Artifact Signing βρίσκεται σε διαδικασία ρύθμισης, με στόχο την έκδοση **0.4.1**. Μέχρι τότε, η προέλευση τεκμηριώνεται μέσω της βεβαίωσης προέλευσης build και των αθροισμάτων ελέγχου παραπάνω.
++> 🔏 **Υπογραφή κώδικα:** από την 0.4.1, τα `NimbusBackup.exe`, η υπηρεσία του και το `NimbusBackup.msi` **φέρουν υπογραφή Authenticode από την RDEM SYSTEMS** (Azure Artifact Signing)· η καρτέλα *Ιδιότητες → Ψηφιακές υπογραφές* εμφανίζει τον εκδότη. Το SmartScreen ενδέχεται να εξακολουθεί να προειδοποιεί για μια νέα έκδοση έως ότου καθιερωθεί η φήμη της: ελέγξτε ότι ο εκδότης είναι η RDEM SYSTEMS και, στη συνέχεια, *Περισσότερες πληροφορίες → Εκτέλεση οπωσδήποτε*. Τα εργαλεία γραμμής εντολών δεν είναι ακόμη υπογεγραμμένα· η βεβαίωση προέλευσης build και τα αθροίσματα ελέγχου παραπάνω καλύπτουν κάθε αρχείο.
+ 
+ ### 🐧 Σε Linux; Χρησιμοποιήστε τον επίσημο client
+ 
+@@ -74,11 +74,12 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ ### GUI (συνιστάται)
+ - **🌍 Πολυγλωσσικό** — περιβάλλον στα αγγλικά, γαλλικά, ιταλικά, γερμανικά και πολωνικά
+ - Εύχρηστη διαμόρφωση με έλεγχο σύνδεσης (API token ή όνομα χρήστη/κωδικός)
+-- Πρόοδος αντιγράφου ασφαλείας σε πραγματικό χρόνο με ταχύτητα και εκτιμώμενο χρόνο, ακύρωση ανά πάσα στιγμή
+-- Υποστήριξη VSS (Volume Shadow Copy) για συνεπή αντίγραφα ασφαλείας
++- Πρόοδος αντιγράφου ασφαλείας σε πραγματικό χρόνο με ταχύτητα και εκτιμώμενο χρόνο, ακύρωση ανά πάσα στιγμή, καρτέλα εργασιών σε εξέλιξη
++- VSS (Volume Shadow Copy) για συνεπή αντίγραφα ασφαλείας: ένα στιγμιότυπο για ολόκληρο αντίγραφο πολλαπλών φακέλων, ένα σκιώδες αντίγραφο ανά τόμο
+ - Αντίγραφα ασφαλείας πολλαπλών φακέλων, λειτουργίες αρχείων και δίσκου (ολόκληρο μηχάνημα)· οι φάκελοι μπορούν να εκτελούνται παράλληλα (συνιστάται: CPU / 4)
+-- Περιήγηση στιγμιοτύπων, αναζήτηση αρχείων (wildcards) και επαναφορά
+-- Υποστήριξη πολλαπλών διακομιστών PBS, καρφίτσωμα αποτυπώματος πιστοποιητικού (TOFU)
++- Τα αντίγραφα δίσκου επαναφέρονται στο Proxmox VE ως VM που αντιστοιχεί στο μηχάνημα (CPU, RAM, firmware, κάρτες δικτύου με τις διευθύνσεις MAC τους, αποκλειστικό VM ID)
++- Περιήγηση στιγμιοτύπων, αναζήτηση αρχείων (wildcards) και επαναφορά, συμπεριλαμβανομένων των NTFS ACL
++- Υποστήριξη πολλαπλών διακομιστών PBS με διακομιστή PBS ανά εργασία, καρφίτσωμα αποτυπώματος πιστοποιητικού (TOFU)
+ - **🔒 Κρυπτογράφηση στην πλευρά του client** (AES-256-GCM), αρχεία κλειδιών συμβατά με `proxmox-backup-client` και Proxmox VE
+ - Λειτουργία υπηρεσίας Windows + προγραμματισμένα αντίγραφα ασφαλείας, ιστορικό αντιγράφων με επανεκτέλεση με ένα κλικ
+ - Καταγραφή αποσφαλμάτωσης για την αντιμετώπιση προβλημάτων
+@@ -113,7 +114,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ - Επικύρωση εισόδου και απολύμανση διαπιστευτηρίων (τα μυστικά αποκρύπτονται από τα αρχεία καταγραφής)
+ - Αποτροπή path traversal
+ - Λογική επανάληψης με εκθετική καθυστέρηση (exponential backoff)
+-- Έλεγχοι CI σε κάθε build: tests, `golangci-lint`, `gosec`, `go mod tidy`
++- Έλεγχοι CI σε κάθε build: tests, `golangci-lint`, `gosec`, `go mod tidy`, καθώς και σουίτα end-to-end έναντι πραγματικού PBS (επαναφορές με το επίσημο `proxmox-backup-client`, PBS verify)
+ 
+ ### 🔒 Κρυπτογράφηση στην πλευρά του client
+ Τα αντίγραφα ασφαλείας μπορούν να κρυπτογραφούνται **στον client** πριν φύγουν από το μηχάνημα, με
+@@ -216,11 +217,12 @@ wails build      # or: wails dev  (hot reload)
+ 
+ ## 🔗 Σχέση με το upstream
+ 
+-Το Nimbus Backup ξεκίνησε ως fork του [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client σε Go, από τον Tiziano Bacocco, GPLv3), στο οποίο προσθέσαμε το GUI για Windows, την υπηρεσία, τον προγραμματισμό, τα πολλαπλά PBS και την επαναφορά. Τον Σεπτέμβριο του 2026, το upstream ενσωμάτωσε αυτό το GUI και το έκανε ουδέτερο ως προς το brand («Proxmox Backup Client GUI»). Από την 0.4.0, το Nimbus Backup μεταγλωττίζεται από την ίδια βάση κώδικα: **τα δύο έργα είναι πλέον λειτουργικά σχεδόν ταυτόσημα.**
++Το Nimbus Backup ξεκίνησε ως fork του [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client σε Go, από τον Tiziano Bacocco, GPLv3), στο οποίο προσθέσαμε το GUI για Windows, την υπηρεσία, τον προγραμματισμό, τα πολλαπλά PBS και την επαναφορά. Τον Σεπτέμβριο του 2026, το upstream ενσωμάτωσε αυτό το GUI και το έκανε ουδέτερο ως προς το brand («Proxmox Backup Client GUI»). Τον Οκτώβριο του 2026 (0.4.1), το Nimbus Backup ανακατασκευάστηκε πάνω στον τρέχοντα κώδικα του upstream, υιοθετώντας την κρυπτογράφηση στην πλευρά του client του upstream: **τα δύο έργα μοιράζονται την ίδια βάση κώδικα.**
+ 
+-Αυτό που προσθέτει αυτό το αποθετήριο πάνω από το upstream είναι μια μικρή, τεκμηριωμένη σειρά patches ([`patches/`](patches/README.md)):
++Αυτό που προσθέτει αυτό το αποθετήριο πάνω από το upstream είναι μια τεκμηριωμένη σειρά patches ([`patches/`](patches/README.md)), το μεγαλύτερο μέρος της οποίας έχει προταθεί στο upstream:
+ 
+-- **Διορθώσεις που δεν έχουν ακόμη ενσωματωθεί στο upstream** (build της υπηρεσίας, επαναφορά με διακομιστές όνομα χρήστη/κωδικού, κωδικοί εξόδου, απόκρυψη στα αρχεία καταγραφής, αξιοπιστία αντιγράφων μηχανήματος…) — αποστέλλονται στο upstream καθώς ενσωματώνονται.
++- **Λειτουργίες**: paper key και εισαγωγή κλειδιού (κωδικός QR), παράλληλα αντίγραφα ασφαλείας φακέλων, ένα στιγμιότυπο VSS ανά αντίγραφο πολλαπλών φακέλων, εξαιρέσεις στο CLI, διαμόρφωση VM του Proxmox VE που παράγεται από το πραγματικό μηχάνημα.
++- **Διορθώσεις που δεν έχουν ακόμη ενσωματωθεί στο upstream** (επαναφορά των συμπιεσμένων κρυπτογραφημένων αντιγράφων του `proxmox-backup-client`, ο διακομιστής PBS που επιλέγεται για ένα αντίγραφο της υπηρεσίας, οι λόγοι απόρριψης του PBS, επαναφορά με διακομιστές όνομα χρήστη/κωδικού, μεγιστοποίηση παραθύρου…) — αποστέλλονται στο upstream καθώς ενσωματώνονται.
+ - **Η ταυτότητα Nimbus Backup** — `NimbusBackup.exe`/`.msi`, η υπηρεσία `NimbusBackup` και ο κωδικός αναβάθμισης MSI των υπαρχουσών εγκαταστάσεων, ώστε να συνεχίζουν να αναβαθμίζονται επί τόπου.
+ - **Διαδρομή αναβάθμισης** από Nimbus Backup ≤ 0.3.0 (μετεγκατάσταση φακέλου δεδομένων, παλαιά μεταδεδομένα στιγμιοτύπων).
+ - **Pipeline εκδόσεων** — βεβαίωση προέλευσης build, αθροίσματα ελέγχου, αναφορές VirusTotal.
+diff --git a/README.es.md b/README.es.md
+index df9a940..660ee1b 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -27,7 +27,7 @@ Cada versión incluye:
+ - `SHA256SUMS.txt` — sumas de verificación
+ 
+ > ⚠️ **¿Windows indica "virus detectado" (p. ej. `Trojan:Win32/Sabsik.FL.A!ml`) o muestra una advertencia de SmartScreen?**
+-> Se trata de un **falso positivo** conocido en aplicaciones Go/Wails — *no* es un virus. El sufijo `!ml` significa que proviene de un modelo de aprendizaje automático que marca los ejecutables *sin firmar y poco extendidos*.
++> Se trata de un **falso positivo** conocido en aplicaciones Go/Wails — *no* es un virus. El sufijo `!ml` significa que proviene de un modelo de aprendizaje automático que marca los ejecutables *poco extendidos* (y, hasta la 0.4.0, los no firmados).
+ > Lea [por qué ocurre y cómo verificar la descarga](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
+ 
+ ### 🔎 Verificar cualquier descarga
+@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **Firma de código:** los binarios de Windows **aún no están firmados con Authenticode**, que es lo que provoca las advertencias de SmartScreen / `!ml` mencionadas arriba. Nuestra solicitud de un certificado OSS gratuito a la [SignPath Foundation](https://signpath.org) no obtuvo respuesta; la firma mediante Azure Artifact Signing se está configurando y está prevista para la **0.4.1**. Hasta entonces, la procedencia se acredita mediante la atestación de procedencia de la compilación y las sumas de verificación indicadas arriba.
++> 🔏 **Firma de código:** desde la 0.4.1, `NimbusBackup.exe`, su servicio y `NimbusBackup.msi` están **firmados con Authenticode por RDEM SYSTEMS** (Azure Artifact Signing); *Propiedades → Firmas digitales* muestra el editor. SmartScreen puede seguir mostrando una advertencia en una nueva versión hasta que se establezca su reputación: compruebe que el editor es RDEM SYSTEMS y luego *Más información → Ejecutar de todas formas*. Las herramientas de línea de comandos aún no están firmadas; la atestación de procedencia de la compilación y las sumas de verificación indicadas arriba cubren todos los archivos.
+ 
+ ### 🐧 ¿En Linux? Use el cliente oficial
+ 
+@@ -74,11 +74,12 @@ La GUI de Nimbus Backup solo está disponible para Windows (las herramientas CLI
+ ### GUI (recomendada)
+ - **🌍 Multilingüe** — interfaz en inglés, francés, italiano, alemán y polaco
+ - Configuración sencilla con prueba de conexión (token de API o usuario/contraseña)
+-- Progreso de la copia en tiempo real con velocidad y tiempo estimado, cancelable en cualquier momento
+-- Soporte de VSS (Volume Shadow Copy) para copias coherentes
++- Progreso de la copia en tiempo real con velocidad y tiempo estimado, cancelable en cualquier momento, una pestaña de trabajos en curso
++- VSS (Volume Shadow Copy) para copias coherentes: un solo snapshot para toda una copia de varias carpetas, una instantánea (shadow copy) por volumen
+ - Copia de varias carpetas, modos archivo y disco (máquina completa); las carpetas pueden procesarse en paralelo (recomendado: CPU / 4)
+-- Exploración de snapshots, búsqueda de archivos (comodines) y restauración
+-- Soporte de varios servidores PBS, fijación de la huella del certificado (TOFU)
++- Las copias de disco se restauran en Proxmox VE como una VM que reproduce la máquina (CPU, RAM, firmware, tarjetas de red con sus MAC, VM ID dedicado)
++- Exploración de snapshots, búsqueda de archivos (comodines) y restauración, ACL de NTFS incluidas
++- Soporte de varios servidores PBS con un servidor PBS por trabajo, fijación de la huella del certificado (TOFU)
+ - **🔒 Cifrado del lado del cliente** (AES-256-GCM), archivos de clave compatibles con `proxmox-backup-client` y Proxmox VE
+ - Modo servicio de Windows + copias programadas, historial de copias con reejecución en un clic
+ - Registro de depuración para la resolución de problemas
+@@ -113,7 +114,7 @@ Al respaldar una unidad completa (p. ej. `D:\`), Nimbus Backup excluye automáti
+ - Validación de entradas y saneamiento de credenciales (secretos ocultados en los registros)
+ - Prevención de path traversal
+ - Lógica de reintentos con espera exponencial
+-- Controles de CI en cada compilación: pruebas, `golangci-lint`, `gosec`, `go mod tidy`
++- Controles de CI en cada compilación: pruebas, `golangci-lint`, `gosec`, `go mod tidy`, y una batería de pruebas de extremo a extremo contra un PBS real (restauraciones con el `proxmox-backup-client` oficial, verify de PBS)
+ 
+ ### 🔒 Cifrado del lado del cliente
+ Las copias pueden cifrarse **en el cliente** antes de salir de la máquina, con
+@@ -216,11 +217,12 @@ La marca se elige según el nombre del ejecutable: `NimbusBackup.exe` se ejecuta
+ 
+ ## 🔗 Relación con el proyecto upstream
+ 
+-Nimbus Backup nació como un fork de [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client en Go, de Tiziano Bacocco, GPLv3), al que añadimos la GUI de Windows, el servicio, la programación, el multi-PBS y la restauración. En septiembre de 2026, el proyecto upstream integró esa GUI y la hizo neutra en cuanto a marca ("Proxmox Backup Client GUI"). Desde la 0.4.0, Nimbus Backup se compila a partir de la misma base de código: **los dos proyectos son ahora casi idénticos en cuanto a funcionalidad.**
++Nimbus Backup nació como un fork de [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client en Go, de Tiziano Bacocco, GPLv3), al que añadimos la GUI de Windows, el servicio, la programación, el multi-PBS y la restauración. En septiembre de 2026, el proyecto upstream integró esa GUI y la hizo neutra en cuanto a marca ("Proxmox Backup Client GUI"). En octubre de 2026 (0.4.1), Nimbus Backup se reconstruyó sobre el código actual del proyecto upstream, adoptando su cifrado del lado del cliente: **los dos proyectos comparten la misma base de código.**
+ 
+-Lo que este repositorio añade sobre el proyecto upstream es una pequeña serie de parches documentada ([`patches/`](patches/README.md)):
++Lo que este repositorio añade sobre el proyecto upstream es una serie de parches documentada ([`patches/`](patches/README.md)), en su mayor parte propuesta upstream:
+ 
+-- **Correcciones aún no integradas upstream** (compilación del servicio, restauración con servidores de usuario/contraseña, códigos de salida, ocultación en los registros, fiabilidad de la copia de máquina…) — enviadas upstream a medida que se integran.
++- **Funcionalidades**: clave en papel e importación de claves (código QR), copias de carpetas en paralelo, un solo snapshot VSS por copia de varias carpetas, exclusiones en línea de comandos, una configuración de VM de Proxmox VE generada a partir de la máquina real.
++- **Correcciones aún no integradas upstream** (restauración de las copias cifradas y comprimidas de `proxmox-backup-client`, el servidor PBS elegido para una copia del servicio, motivos de rechazo de PBS, restauración con servidores de usuario/contraseña, maximización de la ventana…) — enviadas upstream a medida que se integran.
+ - **La identidad Nimbus Backup** — `NimbusBackup.exe`/`.msi`, el servicio `NimbusBackup` y el código de actualización MSI de las instalaciones existentes, para que sigan actualizándose en el mismo lugar.
+ - **Ruta de actualización** desde Nimbus Backup ≤ 0.3.0 (migración de la carpeta de datos, metadatos de snapshots heredados).
+ - **Cadena de publicación** — atestación de procedencia de la compilación, sumas de verificación, informes de VirusTotal.
+diff --git a/README.fa.md b/README.fa.md
+index d257d06..cc4ba48 100644
+--- a/README.fa.md
++++ b/README.fa.md
+@@ -29,7 +29,7 @@ Nimbus Backup نسخه‌ی RDEM Systems از [Proxmox Backup Client GO](https:/
+ - `SHA256SUMS.txt` — چک‌سام‌ها
+ 
+ > ⚠️ **Windows پیام «ویروس شناسایی شد» (مثلاً `Trojan:Win32/Sabsik.FL.A!ml`) یا هشدار SmartScreen نشان می‌دهد؟**
+-> این یک **مثبت کاذب** شناخته‌شده برای برنامه‌های Go/Wails است — و ویروس *نیست*. پسوند `!ml` یعنی هشدار از یک مدل یادگیری ماشین می‌آید که فایل‌های اجرایی *امضانشده و کم‌رواج* را علامت‌گذاری می‌کند.
++> این یک **مثبت کاذب** شناخته‌شده برای برنامه‌های Go/Wails است — و ویروس *نیست*. پسوند `!ml` یعنی هشدار از یک مدل یادگیری ماشین می‌آید که فایل‌های اجرایی *کم‌رواج* (و تا نسخه‌ی 0.4.0، امضانشده) را علامت‌گذاری می‌کند.
+ > بخوانید [چرا این اتفاق می‌افتد و چگونه فایل دانلودشده را بررسی کنید](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
+ 
+ ### 🔎 بررسی صحت هر فایل دانلودشده
+@@ -50,7 +50,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **امضای کد:** فایل‌های اجرایی Windows **هنوز با Authenticode امضا نشده‌اند** و همین موضوع باعث هشدارهای SmartScreen / `!ml` بالا می‌شود. درخواست ما برای یک گواهی رایگان متن‌باز از [SignPath Foundation](https://signpath.org) بی‌پاسخ ماند؛ امضا از طریق Azure Artifact Signing در حال راه‌اندازی است و هدف آن نسخه‌ی **0.4.1** است. تا آن زمان، منشأ فایل‌ها از طریق گواهی منشأ ساخت و چک‌سام‌های بالا اثبات می‌شود.
++> 🔏 **امضای کد:** از نسخه‌ی 0.4.1، `NimbusBackup.exe`، سرویس آن و `NimbusBackup.msi` **با Authenticode توسط RDEM SYSTEMS امضا شده‌اند** (Azure Artifact Signing)؛ بخش *Properties ← Digital Signatures* ناشر را نشان می‌دهد. SmartScreen ممکن است تا زمانی که اعتبار یک نسخه‌ی جدید تثبیت نشده، همچنان هشدار دهد: بررسی کنید که ناشر RDEM SYSTEMS باشد، سپس *More info ← Run anyway* را بزنید. ابزارهای خط فرمان هنوز امضا نشده‌اند؛ گواهی منشأ ساخت و چک‌سام‌های بالا همه‌ی فایل‌ها را پوشش می‌دهند.
+ 
+ ### 🐧 روی Linux؟ از کلاینت رسمی استفاده کنید
+ 
+@@ -80,11 +80,12 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ ### رابط گرافیکی (پیشنهادی)
+ - **🌍 چندزبانه** — رابط کاربری به زبان‌های انگلیسی، فرانسوی، ایتالیایی، آلمانی و لهستانی
+ - پیکربندی کاربرپسند همراه با آزمایش اتصال (توکن API یا نام کاربری/گذرواژه)
+-- نمایش لحظه‌ای پیشرفت پشتیبان‌گیری با سرعت و زمان باقی‌مانده، با امکان لغو در هر لحظه
+-- پشتیبانی از VSS (Volume Shadow Copy) برای پشتیبان‌های سازگار
++- نمایش لحظه‌ای پیشرفت پشتیبان‌گیری با سرعت و زمان باقی‌مانده، با امکان لغو در هر لحظه، و یک زبانه‌ی کارهای در حال اجرا
++- VSS (Volume Shadow Copy) برای پشتیبان‌های سازگار: یک اسنپ‌شات برای کل یک پشتیبان چندپوشه‌ای، یک shadow copy برای هر volume
+ - پشتیبان‌گیری از چند پوشه، حالت‌های فایل و دیسک (کل ماشین)؛ پوشه‌ها می‌توانند به‌صورت موازی پردازش شوند (پیشنهاد: تعداد CPUها / 4)
+-- مرور اسنپ‌شات‌ها، جستجوی فایل (با کاراکترهای عام) و بازیابی
+-- پشتیبانی از چند سرور PBS، پین کردن اثر انگشت گواهی (TOFU)
++- پشتیبان‌های دیسک در Proxmox VE به‌صورت یک VM منطبق با ماشین بازیابی می‌شوند (CPUها، RAM، firmware، کارت‌های شبکه با آدرس‌های MAC خودشان، شناسه‌ی VM اختصاصی)
++- مرور اسنپ‌شات‌ها، جستجوی فایل (با کاراکترهای عام) و بازیابی، به‌همراه ACLهای NTFS
++- پشتیبانی از چند سرور PBS با یک سرور PBS برای هر کار، پین کردن اثر انگشت گواهی (TOFU)
+ - **🔒 رمزنگاری سمت کلاینت** (AES-256-GCM)، با فایل‌های کلید سازگار با `proxmox-backup-client` و Proxmox VE
+ - حالت سرویس Windows + پشتیبان‌گیری زمان‌بندی‌شده، تاریخچه‌ی پشتیبان‌گیری با اجرای مجدد با یک کلیک
+ - لاگ‌های اشکال‌زدایی (debug) برای عیب‌یابی
+@@ -119,7 +120,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ - اعتبارسنجی ورودی‌ها و پاک‌سازی اطلاعات احراز هویت (حذف اسرار از لاگ‌ها)
+ - جلوگیری از پیمایش مسیر (path traversal)
+ - منطق تلاش مجدد با عقب‌نشینی نمایی (exponential backoff)
+-- دروازه‌های CI در هر build: تست‌ها، `golangci-lint`، `gosec`، `go mod tidy`
++- دروازه‌های CI در هر build: تست‌ها، `golangci-lint`، `gosec`، `go mod tidy` و یک مجموعه‌ی تست end-to-end روی یک PBS واقعی (بازیابی با `proxmox-backup-client` رسمی، PBS verify)
+ 
+ ### 🔒 رمزنگاری سمت کلاینت
+ پشتیبان‌ها را می‌توان **روی کلاینت** و پیش از خروج از ماشین رمزنگاری کرد، با
+@@ -227,11 +228,12 @@ wails build      # or: wails dev  (hot reload)
+ 
+ ## 🔗 رابطه با پروژه اصلی (upstream)
+ 
+-Nimbus Backup به‌عنوان یک fork از [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (کلاینت Proxmox Backup به زبان Go، نوشته‌ی Tiziano Bacocco، با مجوز GPLv3) آغاز شد و ما رابط گرافیکی Windows، سرویس، زمان‌بندی، پشتیبانی از چند سرور PBS و بازیابی را به آن افزودیم. در سپتامبر 2026، پروژه‌ی اصلی آن رابط گرافیکی را ادغام کرد و آن را از نظر برند خنثی کرد ("Proxmox Backup Client GUI"). از نسخه‌ی 0.4.0، Nimbus Backup از همان کد پایه ساخته می‌شود: **اکنون دو پروژه از نظر عملکرد تقریباً یکسان هستند.**
++Nimbus Backup به‌عنوان یک fork از [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (کلاینت Proxmox Backup به زبان Go، نوشته‌ی Tiziano Bacocco، با مجوز GPLv3) آغاز شد و ما رابط گرافیکی Windows، سرویس، زمان‌بندی، پشتیبانی از چند سرور PBS و بازیابی را به آن افزودیم. در سپتامبر 2026، پروژه‌ی اصلی آن رابط گرافیکی را ادغام کرد و آن را از نظر برند خنثی کرد ("Proxmox Backup Client GUI"). در اکتبر 2026 (0.4.1)، Nimbus Backup بر پایه‌ی کد فعلی پروژه‌ی اصلی بازسازی شد و رمزنگاری سمت کلاینت پروژه‌ی اصلی را به کار گرفت: **دو پروژه کد پایه‌ی یکسانی دارند.**
+ 
+-آنچه این مخزن به پروژه‌ی اصلی اضافه می‌کند، مجموعه‌ای کوچک و مستند از وصله‌هاست ([`patches/`](patches/README.md)):
++آنچه این مخزن به پروژه‌ی اصلی اضافه می‌کند، مجموعه‌ای مستند از وصله‌هاست ([`patches/`](patches/README.md)) که بیشترشان به پروژه‌ی اصلی پیشنهاد شده‌اند:
+ 
+-- **اصلاحاتی که هنوز در پروژه‌ی اصلی ادغام نشده‌اند** (ساخت سرویس، بازیابی با سرورهای دارای نام کاربری/گذرواژه، کدهای خروج، حذف اطلاعات حساس از لاگ‌ها، قابلیت اطمینان پشتیبان‌گیری از ماشین…) — که به‌تدریج با ادغامشان به پروژه‌ی اصلی ارسال می‌شوند.
++- **قابلیت‌ها**: کلید کاغذی (paper key) و وارد کردن کلید (کد QR)، پشتیبان‌گیری موازی از پوشه‌ها، یک اسنپ‌شات VSS برای هر پشتیبان چندپوشه‌ای، استثناها در CLI، پیکربندی VM برای Proxmox VE که از ماشین واقعی تولید می‌شود.
++- **اصلاحاتی که هنوز در پروژه‌ی اصلی ادغام نشده‌اند** (بازیابی پشتیبان‌های فشرده و رمزنگاری‌شده‌ی `proxmox-backup-client`، سرور PBS انتخاب‌شده برای پشتیبان‌گیری سرویس، دلایل رد شدن از سوی PBS، بازیابی با سرورهای دارای نام کاربری/گذرواژه، بزرگ‌نمایی پنجره…) — که به‌تدریج با ادغامشان به پروژه‌ی اصلی ارسال می‌شوند.
+ - **هویت Nimbus Backup** — `NimbusBackup.exe`/`.msi`، سرویس `NimbusBackup` و کد ارتقای MSI نصب‌های موجود، تا همچنان درجا ارتقا یابند.
+ - **مسیر ارتقا** از Nimbus Backup ≤ 0.3.0 (مهاجرت پوشه‌ی داده، فراداده‌ی اسنپ‌شات‌های قدیمی).
+ - **خط انتشار نسخه‌ها** — گواهی منشأ ساخت، چک‌سام‌ها، گزارش‌های VirusTotal.
+diff --git a/README.it.md b/README.it.md
+index cb577f0..5114ab0 100644
+--- a/README.it.md
++++ b/README.it.md
+@@ -27,7 +27,7 @@ Ogni release include:
+ - `SHA256SUMS.txt` — checksum
+ 
+ > ⚠️ **Windows segnala "virus rilevato" (ad es. `Trojan:Win32/Sabsik.FL.A!ml`) o mostra un avviso SmartScreen?**
+-> Si tratta di un **falso positivo** noto per le applicazioni Go/Wails — *non* è un virus. Il suffisso `!ml` indica che proviene da un modello di machine learning che segnala gli eseguibili *non firmati e poco diffusi*.
++> Si tratta di un **falso positivo** noto per le applicazioni Go/Wails — *non* è un virus. Il suffisso `!ml` indica che proviene da un modello di machine learning che segnala gli eseguibili *poco diffusi* (e, fino alla 0.4.0, quelli non firmati).
+ > Leggete [perché succede e come verificare il download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
+ 
+ ### 🔎 Verificare un download
+@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **Firma del codice:** i binari Windows **non sono ancora firmati Authenticode**, ed è questo che provoca gli avvisi SmartScreen / `!ml` descritti sopra. La nostra richiesta di un certificato OSS gratuito alla [SignPath Foundation](https://signpath.org) non ha ricevuto risposta; la firma tramite Azure Artifact Signing è in fase di configurazione ed è prevista per la **0.4.1**. Fino ad allora, la provenienza è garantita dall'attestazione di provenienza della build e dai checksum indicati sopra.
++> 🔏 **Firma del codice:** dalla 0.4.1, `NimbusBackup.exe`, il relativo servizio e `NimbusBackup.msi` sono **firmati Authenticode da RDEM SYSTEMS** (Azure Artifact Signing); *Proprietà → Firme digitali* mostra l'editore. SmartScreen può ancora mostrare un avviso su una nuova release finché la sua reputazione non è consolidata: verificate che l'editore sia RDEM SYSTEMS, poi *Ulteriori informazioni → Esegui comunque*. Gli strumenti da riga di comando non sono ancora firmati; l'attestazione di provenienza della build e i checksum indicati sopra coprono tutti i file.
+ 
+ ### 🐧 Su Linux? Usate il client ufficiale
+ 
+@@ -74,11 +74,12 @@ Non volete ospitare voi stessi un Proxmox Backup Server? Usate i nostri datastor
+ ### GUI (consigliata)
+ - **🌍 Multilingue** — interfaccia in inglese, francese, italiano, tedesco e polacco
+ - Configurazione semplice con test della connessione (token API o nome utente/password)
+-- Avanzamento del backup in tempo reale con velocità e tempo stimato, annullabile in qualsiasi momento
+-- Supporto VSS (Volume Shadow Copy) per backup coerenti
++- Avanzamento del backup in tempo reale con velocità e tempo stimato, annullabile in qualsiasi momento, una scheda Job in esecuzione
++- VSS (Volume Shadow Copy) per backup coerenti: un solo snapshot per un intero backup di più cartelle, una shadow copy per volume
+ - Backup di più cartelle, modalità file e disco (macchina intera); le cartelle possono essere elaborate in parallelo (consigliato: CPU / 4)
+-- Navigazione degli snapshot, ricerca di file (caratteri jolly) e ripristino
+-- Supporto di più server PBS, pinning dell'impronta del certificato (TOFU)
++- I backup del disco si ripristinano in Proxmox VE come una VM conforme alla macchina (CPU, RAM, firmware, schede di rete con i loro MAC, VM ID dedicato)
++- Navigazione degli snapshot, ricerca di file (caratteri jolly) e ripristino, ACL NTFS incluse
++- Supporto di più server PBS con un server PBS per job, pinning dell'impronta del certificato (TOFU)
+ - **🔒 Cifratura lato client** (AES-256-GCM), file di chiave compatibili con `proxmox-backup-client` e Proxmox VE
+ - Modalità servizio Windows + backup pianificati, cronologia dei backup con riesecuzione in un clic
+ - Log di debug per la risoluzione dei problemi
+@@ -113,7 +114,7 @@ Quando si esegue il backup di un'intera unità (ad es. `D:\`), Nimbus Backup esc
+ - Validazione degli input e sanificazione delle credenziali (segreti oscurati nei log)
+ - Prevenzione del path traversal
+ - Logica di retry con backoff esponenziale
+-- Controlli CI a ogni build: test, `golangci-lint`, `gosec`, `go mod tidy`
++- Controlli CI a ogni build: test, `golangci-lint`, `gosec`, `go mod tidy`, e una suite end-to-end su un vero PBS (ripristini con il `proxmox-backup-client` ufficiale, verify di PBS)
+ 
+ ### 🔒 Cifratura lato client
+ I backup possono essere cifrati **sul client** prima di lasciare la macchina, con
+@@ -216,11 +217,12 @@ Il marchio viene scelto in base al nome dell'eseguibile: `NimbusBackup.exe` si a
+ 
+ ## 🔗 Rapporto con il progetto upstream
+ 
+-Nimbus Backup è nato come fork di [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, di Tiziano Bacocco, GPLv3), a cui abbiamo aggiunto la GUI Windows, il servizio, la pianificazione, il multi-PBS e il ripristino. Nel settembre 2026, il progetto upstream ha integrato quella GUI rendendola neutra rispetto al marchio ("Proxmox Backup Client GUI"). Dalla 0.4.0, Nimbus Backup è compilato a partire dalla stessa base di codice: **i due progetti sono ora quasi identici dal punto di vista funzionale.**
++Nimbus Backup è nato come fork di [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, di Tiziano Bacocco, GPLv3), a cui abbiamo aggiunto la GUI Windows, il servizio, la pianificazione, il multi-PBS e il ripristino. Nel settembre 2026, il progetto upstream ha integrato quella GUI rendendola neutra rispetto al marchio ("Proxmox Backup Client GUI"). Nell'ottobre 2026 (0.4.1), Nimbus Backup è stato ricostruito sul codice attuale dell'upstream, adottando la cifratura lato client dell'upstream: **i due progetti condividono la stessa base di codice.**
+ 
+-Ciò che questo repository aggiunge rispetto all'upstream è una piccola serie di patch documentata ([`patches/`](patches/README.md)):
++Ciò che questo repository aggiunge rispetto all'upstream è una serie di patch documentata ([`patches/`](patches/README.md)), in gran parte proposta upstream:
+ 
+-- **Correzioni non ancora integrate upstream** (build del servizio, ripristino con server a nome utente/password, codici di uscita, oscuramento dei log, affidabilità del backup della macchina…) — inviate upstream man mano che vengono integrate.
++- **Funzionalità**: chiave cartacea e importazione della chiave (codice QR), backup di cartelle in parallelo, un solo snapshot VSS per backup di più cartelle, esclusioni da riga di comando, una configurazione di VM Proxmox VE generata dalla macchina reale.
++- **Correzioni non ancora integrate upstream** (ripristino dei backup cifrati e compressi di `proxmox-backup-client`, il server PBS scelto per un backup del servizio, motivi di rifiuto di PBS, ripristino con server a nome utente/password, massimizzazione della finestra…) — inviate upstream man mano che vengono integrate.
+ - **L'identità Nimbus Backup** — `NimbusBackup.exe`/`.msi`, il servizio `NimbusBackup` e l'upgrade code MSI delle installazioni esistenti, affinché continuino ad aggiornarsi sul posto.
+ - **Percorso di aggiornamento** da Nimbus Backup ≤ 0.3.0 (migrazione della cartella dei dati, metadati degli snapshot legacy).
+ - **Pipeline di release** — attestazione di provenienza della build, checksum, report VirusTotal.
+diff --git a/README.ja.md b/README.ja.md
+index 87a9688..2104927 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -27,7 +27,7 @@ Nimbus Backup は [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxba
+ - `SHA256SUMS.txt` — チェックサム
+ 
+ > ⚠️ **Windows が「ウイルスが検出されました」（例：`Trojan:Win32/Sabsik.FL.A!ml`）と表示したり、SmartScreen の警告が出たりしますか？**
+-> これは Go/Wails アプリケーションで既知の**誤検知**であり、ウイルスでは*ありません*。`!ml` という接尾辞は、*署名がなく普及度の低い*実行ファイルを検出する機械学習モデルによる判定であることを意味します。
++> これは Go/Wails アプリケーションで既知の**誤検知**であり、ウイルスでは*ありません*。`!ml` という接尾辞は、*普及度の低い*実行ファイル（0.4.0 までは署名のないものも）を検出する機械学習モデルによる判定であることを意味します。
+ > [この現象が起こる理由とダウンロードの検証方法](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github)をお読みください。
+ 
+ ### 🔎 ダウンロードの検証
+@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **コード署名：** Windows バイナリは**まだ Authenticode 署名されていません**。これが上記の SmartScreen / `!ml` 警告の原因です。[SignPath Foundation](https://signpath.org) への無償 OSS 証明書の申請には返答がありませんでした。Azure Artifact Signing による署名を準備中で、**0.4.1** での対応を目標としています。それまでは、上記のビルド来歴証明とチェックサムによって出所を確認できます。
++> 🔏 **コード署名：** 0.4.1 以降、`NimbusBackup.exe`、そのサービス、`NimbusBackup.msi` は **RDEM SYSTEMS により Authenticode 署名されています**（Azure Artifact Signing）。*プロパティ → デジタル署名* で発行元を確認できます。新しいリリースでは、評価が確立されるまで SmartScreen が警告を表示することがあります。発行元が RDEM SYSTEMS であることを確認してから、*詳細情報 → 実行* を選択してください。コマンドラインツールはまだ署名されていません。上記のビルド来歴証明とチェックサムはすべてのファイルを対象としています。
+ 
+ ### 🐧 Linux をお使いですか？ 公式クライアントをご利用ください
+ 
+@@ -74,11 +74,12 @@ Proxmox Backup Server を自前でホストしたくないですか？ 私たち
+ ### GUI（推奨）
+ - **🌍 多言語対応** — 英語、フランス語、イタリア語、ドイツ語、ポーランド語のインターフェース
+ - 接続テスト付きのわかりやすい設定（API トークンまたはユーザー名/パスワード）
+-- 速度と残り時間を含むリアルタイムのバックアップ進捗表示、いつでもキャンセル可能
+-- 整合性のあるバックアップのための VSS（ボリュームシャドウコピー）対応
++- 速度と残り時間を含むリアルタイムのバックアップ進捗表示、いつでもキャンセル可能、「実行中のジョブ」タブ
++- 整合性のあるバックアップのための VSS（ボリュームシャドウコピー）：複数フォルダーのバックアップ全体で 1 つのスナップショット、ボリュームごとに 1 つのシャドウコピー
+ - 複数フォルダーのバックアップ、ファイルモードとディスク（マシン全体）モード。フォルダーは並列実行可能（推奨：CPU 数 / 4）
+-- スナップショットの閲覧、ファイル検索（ワイルドカード対応）、リストア
+-- 複数 PBS サーバー対応、証明書フィンガープリントのピン留め（TOFU）
++- ディスクバックアップは Proxmox VE 上で元のマシンに合わせた VM としてリストア可能（CPU、RAM、ファームウェア、MAC アドレスを引き継いだ NIC、専用の VM ID）
++- スナップショットの閲覧、ファイル検索（ワイルドカード対応）、リストア（NTFS ACL を含む）
++- 複数 PBS サーバー対応（ジョブごとに PBS サーバーを指定可能）、証明書フィンガープリントのピン留め（TOFU）
+ - **🔒 クライアント側暗号化**（AES-256-GCM）、鍵ファイルは `proxmox-backup-client` および Proxmox VE と互換
+ - Windows サービスモード + スケジュールバックアップ、ワンクリックで再実行できるバックアップ履歴
+ - トラブルシューティング用のデバッグログ
+@@ -113,7 +114,7 @@ Proxmox Backup Server を自前でホストしたくないですか？ 私たち
+ - 入力の検証と認証情報のサニタイズ（シークレットはログ上で伏せ字化）
+ - パストラバーサルの防止
+ - 指数バックオフによるリトライ処理
+-- すべてのビルドで CI チェック：テスト、`golangci-lint`、`gosec`、`go mod tidy`
++- すべてのビルドで CI チェック：テスト、`golangci-lint`、`gosec`、`go mod tidy`、および実際の PBS に対するエンドツーエンドテストスイート（公式 `proxmox-backup-client` によるリストア、PBS の verify）
+ 
+ ### 🔒 クライアント側暗号化
+ バックアップはマシンから送出される前に**クライアント上で**暗号化できます。
+@@ -216,11 +217,12 @@ wails build      # or: wails dev  (hot reload)
+ 
+ ## 🔗 アップストリームとの関係
+ 
+-Nimbus Backup は [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（Tiziano Bacocco による Go 製の Proxmox Backup Client、GPLv3）のフォークとして始まり、私たちはそこに Windows GUI、サービス、スケジューリング、複数 PBS 対応、リストア機能を追加しました。2026 年 9 月、アップストリームはこの GUI を取り込み、ブランド中立化しました（「Proxmox Backup Client GUI」）。0.4.0 以降、Nimbus Backup は同じコードベースからビルドされています：**現在、両プロジェクトは機能的にほぼ同一です。**
++Nimbus Backup は [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（Tiziano Bacocco による Go 製の Proxmox Backup Client、GPLv3）のフォークとして始まり、私たちはそこに Windows GUI、サービス、スケジューリング、複数 PBS 対応、リストア機能を追加しました。2026 年 9 月、アップストリームはこの GUI を取り込み、ブランド中立化しました（「Proxmox Backup Client GUI」）。2026 年 10 月（0.4.1）、Nimbus Backup はアップストリームの最新コードをもとに再構築され、アップストリームのクライアント側暗号化を採用しました：**両プロジェクトは同じコードベースを共有しています。**
+ 
+-このリポジトリがアップストリームに加えているのは、小規模で文書化されたパッチシリーズ（[`patches/`](patches/README.md)）です：
++このリポジトリがアップストリームに加えているのは、文書化されたパッチシリーズ（[`patches/`](patches/README.md)）で、その大部分はアップストリームに提案済みです：
+ 
+-- **アップストリームにまだマージされていない修正**（サービスのビルド、ユーザー名/パスワード認証のサーバーからのリストア、終了コード、ログの伏せ字化、マシンバックアップの信頼性など） — 順次アップストリームに送り、マージを待っています。
++- **機能**：ペーパーキーとキーのインポート（QR コード）、フォルダーの並列バックアップ、複数フォルダーのバックアップごとに 1 つの VSS スナップショット、コマンドラインでの除外指定、実マシンから生成される Proxmox VE の VM 構成。
++- **アップストリームにまだマージされていない修正**（`proxmox-backup-client` の圧縮・暗号化されたバックアップのリストア、サービスによるバックアップで選択される PBS サーバー、PBS の拒否理由、ユーザー名/パスワード認証のサーバーからのリストア、ウィンドウの最大化など） — 順次アップストリームに送り、マージを待っています。
+ - **Nimbus Backup としての識別情報** — `NimbusBackup.exe`/`.msi`、`NimbusBackup` サービス、既存インストールの MSI アップグレードコード。これにより既存環境は引き続きその場でアップグレードされます。
+ - **アップグレードパス** — Nimbus Backup 0.3.0 以前からの移行（データフォルダーの移行、旧形式のスナップショットメタデータ）。
+ - **リリースパイプライン** — ビルド来歴証明、チェックサム、VirusTotal レポート。
+diff --git a/README.ro.md b/README.ro.md
+index 38622e0..30186ed 100644
+--- a/README.ro.md
++++ b/README.ro.md
+@@ -27,7 +27,7 @@ Fiecare versiune include:
+ - `SHA256SUMS.txt` — sume de control
+ 
+ > ⚠️ **Windows raportează „virus detectat” (de ex. `Trojan:Win32/Sabsik.FL.A!ml`) sau afișează un avertisment SmartScreen?**
+-> Este un **fals pozitiv** cunoscut pentru aplicațiile Go/Wails — *nu* este un virus. Sufixul `!ml` înseamnă că provine de la un model de învățare automată care semnalează executabilele *nesemnate și puțin răspândite*.
++> Este un **fals pozitiv** cunoscut pentru aplicațiile Go/Wails — *nu* este un virus. Sufixul `!ml` înseamnă că provine de la un model de învățare automată care semnalează executabilele *puțin răspândite* (și, până la 0.4.0, pe cele nesemnate).
+ > Citiți [de ce se întâmplă acest lucru și cum să verificați descărcarea](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
+ 
+ ### 🔎 Verificarea oricărei descărcări
+@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **Semnarea codului:** binarele Windows **nu sunt încă semnate Authenticode**, ceea ce declanșează avertismentele SmartScreen / `!ml` de mai sus. Cererea noastră pentru un certificat OSS gratuit de la [SignPath Foundation](https://signpath.org) nu a primit răspuns; semnarea prin Azure Artifact Signing este în curs de configurare și este vizată pentru **0.4.1**. Până atunci, proveniența este stabilită prin atestarea de proveniență a build-ului și sumele de control de mai sus.
++> 🔏 **Semnarea codului:** începând cu 0.4.1, `NimbusBackup.exe`, serviciul său și `NimbusBackup.msi` sunt **semnate Authenticode de RDEM SYSTEMS** (Azure Artifact Signing); *Proprietăți → Semnături digitale* afișează editorul. SmartScreen poate încă afișa avertismente pentru o versiune nouă până când reputația acesteia este stabilită: verificați că editorul este RDEM SYSTEMS, apoi *Mai multe informații → Executați oricum*. Instrumentele în linie de comandă nu sunt încă semnate; atestarea de proveniență a build-ului și sumele de control de mai sus acoperă toate fișierele.
+ 
+ ### 🐧 Pe Linux? Folosiți clientul oficial
+ 
+@@ -74,11 +74,12 @@ Nu doriți să găzduiți singuri Proxmox Backup Server? Folosiți datastore-uri
+ ### GUI (recomandat)
+ - **🌍 Multilingv** — interfață în engleză, franceză, italiană, germană și poloneză
+ - Configurare ușoară, cu testarea conexiunii (token API sau nume de utilizator/parolă)
+-- Progresul backup-ului în timp real, cu viteză și timp estimat, anulare oricând
+-- Suport VSS (Volume Shadow Copy) pentru backup-uri consistente
++- Progresul backup-ului în timp real, cu viteză și timp estimat, anulare oricând, o filă cu joburile în desfășurare
++- VSS (Volume Shadow Copy) pentru backup-uri consistente: un singur snapshot pentru un întreg backup cu mai multe directoare, o copie shadow per volum
+ - Backup pentru mai multe directoare, moduri fișier și disc (mașină completă); directoarele pot rula în paralel (recomandat: CPU-uri / 4)
+-- Navigare în snapshot-uri, căutare de fișiere (wildcard-uri) și restaurare
+-- Suport pentru mai multe servere PBS, fixarea amprentei certificatului (TOFU)
++- Backup-urile de disc se restaurează în Proxmox VE ca VM care corespunde mașinii (CPU-uri, RAM, firmware, plăci de rețea cu adresele lor MAC, ID de VM dedicat)
++- Navigare în snapshot-uri, căutare de fișiere (wildcard-uri) și restaurare, inclusiv ACL-urile NTFS
++- Suport pentru mai multe servere PBS, cu un server PBS per job, fixarea amprentei certificatului (TOFU)
+ - **🔒 Criptare pe partea clientului** (AES-256-GCM), fișiere cheie compatibile cu `proxmox-backup-client` și Proxmox VE
+ - Mod serviciu Windows + backup-uri programate, istoric al backup-urilor cu reluare dintr-un clic
+ - Jurnalizare de depanare pentru diagnosticarea problemelor
+@@ -113,7 +114,7 @@ La backup-ul unei unități întregi (de ex. `D:\`), Nimbus Backup exclude autom
+ - Validarea datelor de intrare și igienizarea credențialelor (secretele sunt mascate în jurnale)
+ - Prevenirea path traversal
+ - Logică de reîncercare cu backoff exponențial
+-- Verificări CI la fiecare build: teste, `golangci-lint`, `gosec`, `go mod tidy`
++- Verificări CI la fiecare build: teste, `golangci-lint`, `gosec`, `go mod tidy` și o suită end-to-end pe un PBS real (restaurări cu `proxmox-backup-client` oficial, PBS verify)
+ 
+ ### 🔒 Criptare pe partea clientului
+ Backup-urile pot fi criptate **pe client** înainte de a părăsi mașina, cu
+@@ -216,11 +217,12 @@ Brandul este ales după numele executabilului: `NimbusBackup.exe` rulează ca Ni
+ 
+ ## 🔗 Relația cu upstream
+ 
+-Nimbus Backup a pornit ca fork al [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client în Go, de Tiziano Bacocco, GPLv3), la care am adăugat GUI-ul Windows, serviciul, programarea, suportul multi-PBS și restaurarea. În septembrie 2026, upstream a integrat acest GUI și l-a făcut neutru din punct de vedere al brandului („Proxmox Backup Client GUI”). Începând cu 0.4.0, Nimbus Backup este construit din aceeași bază de cod: **cele două proiecte sunt acum aproape identice din punct de vedere funcțional.**
++Nimbus Backup a pornit ca fork al [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client în Go, de Tiziano Bacocco, GPLv3), la care am adăugat GUI-ul Windows, serviciul, programarea, suportul multi-PBS și restaurarea. În septembrie 2026, upstream a integrat acest GUI și l-a făcut neutru din punct de vedere al brandului („Proxmox Backup Client GUI”). În octombrie 2026 (0.4.1), Nimbus Backup a fost reconstruit pe codul actual din upstream, adoptând criptarea pe partea clientului din upstream: **cele două proiecte au aceeași bază de cod.**
+ 
+-Ceea ce adaugă acest depozit peste upstream este o serie mică și documentată de patch-uri ([`patches/`](patches/README.md)):
++Ceea ce adaugă acest depozit peste upstream este o serie documentată de patch-uri ([`patches/`](patches/README.md)), în mare parte propuse upstream:
+ 
+-- **Corecturi încă neintegrate în upstream** (build-ul serviciului, restaurare cu servere cu nume de utilizator/parolă, coduri de ieșire, mascarea datelor în jurnale, fiabilitatea backup-ului de mașină…) — trimise upstream pe măsură ce sunt integrate.
++- **Funcționalități**: paper key și importul cheii (cod QR), backup-uri de directoare în paralel, un singur snapshot VSS per backup cu mai multe directoare, excluderi în CLI, o configurație de VM Proxmox VE generată din mașina reală.
++- **Corecturi încă neintegrate în upstream** (restaurarea backup-urilor criptate și comprimate ale `proxmox-backup-client`, serverul PBS ales pentru un backup al serviciului, motivele de refuz ale PBS, restaurare cu servere cu nume de utilizator/parolă, maximizarea ferestrei…) — trimise upstream pe măsură ce sunt integrate.
+ - **Identitatea Nimbus Backup** — `NimbusBackup.exe`/`.msi`, serviciul `NimbusBackup` și codul de actualizare MSI al instalărilor existente, astfel încât acestea să se actualizeze în continuare pe loc.
+ - **Calea de actualizare** de la Nimbus Backup ≤ 0.3.0 (migrarea directorului de date, metadate vechi ale snapshot-urilor).
+ - **Pipeline-ul de lansare** — atestare de proveniență a build-ului, sume de control, rapoarte VirusTotal.
+diff --git a/README.ru.md b/README.ru.md
+index 9590096..f7c5d67 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -27,7 +27,7 @@ Nimbus Backup — это сборка RDEM Systems проекта [Proxmox Backu
+ - `SHA256SUMS.txt` — контрольные суммы
+ 
+ > ⚠️ **Windows сообщает «обнаружен вирус» (например, `Trojan:Win32/Sabsik.FL.A!ml`) или показывает предупреждение SmartScreen?**
+-> Это известное **ложное срабатывание** для приложений на Go/Wails — это *не* вирус. Суффикс `!ml` означает, что срабатывание исходит от модели машинного обучения, которая помечает *неподписанные, малораспространённые* исполняемые файлы.
++> Это известное **ложное срабатывание** для приложений на Go/Wails — это *не* вирус. Суффикс `!ml` означает, что срабатывание исходит от модели машинного обучения, которая помечает *малораспространённые* исполняемые файлы (а до версии 0.4.0 — и неподписанные).
+ > Прочитайте, [почему это происходит и как проверить загруженный файл](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
+ 
+ ### 🔎 Проверка любой загрузки
+@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **Подпись кода:** бинарные файлы для Windows **пока не подписаны Authenticode** — именно это вызывает предупреждения SmartScreen / `!ml`, описанные выше. Наш запрос на бесплатный сертификат для OSS в [SignPath Foundation](https://signpath.org) остался без ответа; подпись через Azure Artifact Signing сейчас настраивается и запланирована на **0.4.1**. До тех пор происхождение подтверждается приведёнными выше аттестацией происхождения сборки и контрольными суммами.
++> 🔏 **Подпись кода:** начиная с 0.4.1, `NimbusBackup.exe`, его служба и `NimbusBackup.msi` **подписаны Authenticode компанией RDEM SYSTEMS** (Azure Artifact Signing); издатель отображается в *Свойства → Цифровые подписи*. SmartScreen может по-прежнему предупреждать о новом релизе, пока его репутация не сложится: убедитесь, что издатель — RDEM SYSTEMS, затем нажмите *Подробнее → Выполнить в любом случае*. Инструменты командной строки пока не подписаны; приведённые выше аттестация происхождения сборки и контрольные суммы охватывают каждый файл.
+ 
+ ### 🐧 Используете Linux? Берите официальный клиент
+ 
+@@ -74,11 +74,12 @@ GUI Nimbus Backup работает только в Windows (инструмент
+ ### GUI (рекомендуется)
+ - **🌍 Многоязычность** — интерфейс на английском, французском, итальянском, немецком и польском языках
+ - Удобная настройка с проверкой подключения (токен API или имя пользователя/пароль)
+-- Ход резервного копирования в реальном времени со скоростью и оставшимся временем, отмена в любой момент
+-- Поддержка VSS (Volume Shadow Copy) для согласованных резервных копий
++- Ход резервного копирования в реальном времени со скоростью и оставшимся временем, отмена в любой момент, вкладка выполняющихся заданий
++- VSS (Volume Shadow Copy) для согласованных резервных копий: один снимок на всё резервное копирование нескольких папок, одна теневая копия на том
+ - Резервное копирование нескольких папок, файловый и дисковый (вся машина) режимы; папки могут обрабатываться параллельно (рекомендуется: число CPU / 4)
+-- Просмотр снимков, поиск файлов (с подстановочными знаками) и восстановление
+-- Поддержка нескольких серверов PBS, закрепление отпечатка сертификата (TOFU)
++- Дисковые резервные копии восстанавливаются в Proxmox VE как ВМ, соответствующая машине (CPU, ОЗУ, прошивка, сетевые адаптеры с их MAC-адресами, выделенный VM ID)
++- Просмотр снимков, поиск файлов (с подстановочными знаками) и восстановление, включая списки ACL NTFS
++- Поддержка нескольких серверов PBS со своим сервером PBS для каждого задания, закрепление отпечатка сертификата (TOFU)
+ - **🔒 Шифрование на стороне клиента** (AES-256-GCM), файлы ключей совместимы с `proxmox-backup-client` и Proxmox VE
+ - Режим службы Windows + резервное копирование по расписанию, история резервных копий с повторным запуском в один клик
+ - Отладочное журналирование для диагностики
+@@ -113,7 +114,7 @@ GUI Nimbus Backup работает только в Windows (инструмент
+ - Проверка входных данных и очистка учётных данных (секреты скрываются в журналах)
+ - Защита от обхода путей (path traversal)
+ - Логика повторных попыток с экспоненциальной задержкой
+-- Проверки CI при каждой сборке: тесты, `golangci-lint`, `gosec`, `go mod tidy`
++- Проверки CI при каждой сборке: тесты, `golangci-lint`, `gosec`, `go mod tidy`, а также сквозной (end-to-end) набор тестов на реальном PBS (восстановление официальным `proxmox-backup-client`, проверка PBS verify)
+ 
+ ### 🔒 Шифрование на стороне клиента
+ Резервные копии могут шифроваться **на клиенте** ещё до того, как покинут машину,
+@@ -216,11 +217,12 @@ wails build      # or: wails dev  (hot reload)
+ 
+ ## 🔗 Связь с upstream
+ 
+-Nimbus Backup начинался как форк [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client на Go, автор Tiziano Bacocco, GPLv3), к которому мы добавили GUI для Windows, службу, планирование, поддержку нескольких PBS и восстановление. В сентябре 2026 года upstream принял этот GUI обратно и сделал его брендонейтральным («Proxmox Backup Client GUI»). Начиная с 0.4.0, Nimbus Backup собирается из той же кодовой базы: **функционально оба проекта теперь практически идентичны.**
++Nimbus Backup начинался как форк [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client на Go, автор Tiziano Bacocco, GPLv3), к которому мы добавили GUI для Windows, службу, планирование, поддержку нескольких PBS и восстановление. В сентябре 2026 года upstream принял этот GUI обратно и сделал его брендонейтральным («Proxmox Backup Client GUI»). В октябре 2026 года (0.4.1) Nimbus Backup был пересобран на текущем коде upstream с переходом на клиентское шифрование upstream: **оба проекта используют одну и ту же кодовую базу.**
+ 
+-Поверх upstream этот репозиторий добавляет небольшую документированную серию патчей ([`patches/`](patches/README.md)):
++Поверх upstream этот репозиторий добавляет документированную серию патчей ([`patches/`](patches/README.md)), бо́льшая часть которой предложена в upstream:
+ 
+-- **Исправления, ещё не принятые в upstream** (сборка службы, восстановление с серверов с именем пользователя/паролем, коды возврата, скрытие данных в журналах, надёжность резервного копирования машин…) — отправляются в upstream и принимаются там постепенно.
++- **Функции**: бумажный ключ и импорт ключа (QR-код), параллельное резервное копирование папок, один снимок VSS на резервное копирование нескольких папок, исключения в командной строке, конфигурация ВМ Proxmox VE, сформированная по реальной машине.
++- **Исправления, ещё не принятые в upstream** (восстановление сжатых зашифрованных резервных копий `proxmox-backup-client`, сервер PBS, выбранный для резервного копирования службой, причины отказа PBS, восстановление с серверов с именем пользователя/паролем, разворачивание окна…) — отправляются в upstream и принимаются там постепенно.
+ - **Идентичность Nimbus Backup** — `NimbusBackup.exe`/`.msi`, служба `NimbusBackup` и код обновления (upgrade code) MSI существующих установок, чтобы они продолжали обновляться на месте.
+ - **Путь обновления** с Nimbus Backup ≤ 0.3.0 (перенос папки данных, устаревшие метаданные снимков).
+ - **Конвейер выпуска релизов** — аттестация происхождения сборки, контрольные суммы, отчёты VirusTotal.
+diff --git a/README.sv.md b/README.sv.md
+index ed9f02f..e7c671c 100644
+--- a/README.sv.md
++++ b/README.sv.md
+@@ -27,7 +27,7 @@ Varje version innehåller:
+ - `SHA256SUMS.txt` — kontrollsummor
+ 
+ > ⚠️ **Säger Windows ”virus hittat” (t.ex. `Trojan:Win32/Sabsik.FL.A!ml`) eller visar en SmartScreen-varning?**
+-> Detta är ett känt **falskt positivt** resultat för Go/Wails-program — det är *inte* ett virus. Suffixet `!ml` betyder att det kommer från en maskininlärningsmodell som flaggar *osignerade, sällsynta* körbara filer.
++> Detta är ett känt **falskt positivt** resultat för Go/Wails-program — det är *inte* ett virus. Suffixet `!ml` betyder att det kommer från en maskininlärningsmodell som flaggar *sällsynta* körbara filer (och, till och med 0.4.0, osignerade).
+ > Läs [varför detta händer och hur du verifierar nedladdningen](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
+ 
+ ### 🔎 Verifiera en nedladdning
+@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **Kodsignering:** Windows-binärerna är **ännu inte Authenticode-signerade**, vilket är det som utlöser SmartScreen- / `!ml`-varningarna ovan. Vår ansökan om ett kostnadsfritt OSS-certifikat från [SignPath Foundation](https://signpath.org) fick inget svar; signering via Azure Artifact Signing håller på att sättas upp och är planerad till **0.4.1**. Fram till dess fastställs ursprunget via build-provenance-intyget och kontrollsummorna ovan.
++> 🔏 **Kodsignering:** sedan 0.4.1 är `NimbusBackup.exe`, dess tjänst och `NimbusBackup.msi` **Authenticode-signerade av RDEM SYSTEMS** (Azure Artifact Signing); *Egenskaper → Digitala signaturer* visar utgivaren. SmartScreen kan fortfarande varna för en ny version tills dess rykte har etablerats: kontrollera att utgivaren är RDEM SYSTEMS och välj sedan *Mer information → Kör ändå*. Kommandoradsverktygen är ännu inte signerade; build-provenance-intyget och kontrollsummorna ovan täcker alla filer.
+ 
+ ### 🐧 Kör du Linux? Använd den officiella klienten
+ 
+@@ -74,11 +74,12 @@ Vill du inte drifta Proxmox Backup Server själv? Använd våra helt hanterade,
+ ### GUI (rekommenderas)
+ - **🌍 Flerspråkigt** — gränssnitt på engelska, franska, italienska, tyska och polska
+ - Användarvänlig konfiguration med anslutningstest (API-token eller användarnamn/lösenord)
+-- Förlopp för säkerhetskopieringen i realtid med hastighet och beräknad tid kvar, kan avbrytas när som helst
+-- VSS-stöd (Volume Shadow Copy) för konsekventa säkerhetskopior
++- Förlopp för säkerhetskopieringen i realtid med hastighet och beräknad tid kvar, kan avbrytas när som helst, en flik för pågående jobb
++- VSS (Volume Shadow Copy) för konsekventa säkerhetskopior: en ögonblicksbild för en hel säkerhetskopia av flera mappar, en skuggkopia per volym
+ - Säkerhetskopiering av flera mappar, fil- och diskläge (hela maskinen); mappar kan köras parallellt (rekommenderat: CPU:er / 4)
+-- Bläddring i ögonblicksbilder, filsökning (jokertecken) och återställning
+-- Stöd för flera PBS-servrar, fastlåsning av certifikatets fingeravtryck (TOFU)
++- Disksäkerhetskopior återställs i Proxmox VE som en VM som motsvarar maskinen (CPU:er, RAM, firmware, nätverkskort med sina MAC-adresser, dedikerat VM-ID)
++- Bläddring i ögonblicksbilder, filsökning (jokertecken) och återställning, inklusive NTFS-ACL:er
++- Stöd för flera PBS-servrar med en PBS-server per jobb, fastlåsning av certifikatets fingeravtryck (TOFU)
+ - **🔒 Kryptering på klientsidan** (AES-256-GCM), nyckelfiler kompatibla med `proxmox-backup-client` och Proxmox VE
+ - Windows-tjänstläge + schemalagda säkerhetskopior, historik över säkerhetskopior med omkörning med ett klick
+ - Felsökningsloggning
+@@ -113,7 +114,7 @@ Vid säkerhetskopiering av en hel enhet (t.ex. `D:\`) undantar Nimbus Backup aut
+ - Validering av indata och sanering av inloggningsuppgifter (hemligheter maskeras i loggar)
+ - Skydd mot path traversal
+ - Logik för nya försök med exponentiell backoff
+-- CI-kontroller vid varje bygge: tester, `golangci-lint`, `gosec`, `go mod tidy`
++- CI-kontroller vid varje bygge: tester, `golangci-lint`, `gosec`, `go mod tidy` och en end-to-end-svit mot en riktig PBS (återställningar med den officiella `proxmox-backup-client`, PBS verify)
+ 
+ ### 🔒 Kryptering på klientsidan
+ Säkerhetskopior kan krypteras **på klienten** innan de lämnar maskinen, med
+@@ -216,11 +217,12 @@ Varumärket väljs utifrån den körbara filens namn: `NimbusBackup.exe` körs s
+ 
+ ## 🔗 Förhållande till upstream
+ 
+-Nimbus Backup började som en fork av [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client i Go, av Tiziano Bacocco, GPLv3), till vilken vi lade till Windows-GUI:t, tjänsten, schemaläggningen, stöd för flera PBS och återställning. I september 2026 slog upstream ihop det GUI:t och gjorde det varumärkesneutralt (”Proxmox Backup Client GUI”). Sedan 0.4.0 byggs Nimbus Backup från samma kodbas: **de två projekten är nu funktionellt nästan identiska.**
++Nimbus Backup började som en fork av [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client i Go, av Tiziano Bacocco, GPLv3), till vilken vi lade till Windows-GUI:t, tjänsten, schemaläggningen, stöd för flera PBS och återställning. I september 2026 slog upstream ihop det GUI:t och gjorde det varumärkesneutralt (”Proxmox Backup Client GUI”). I oktober 2026 (0.4.1) byggdes Nimbus Backup om på upstreams aktuella kod och tog över upstreams kryptering på klientsidan: **de två projekten delar samma kodbas.**
+ 
+-Det detta repo lägger till ovanpå upstream är en liten, dokumenterad patchserie ([`patches/`](patches/README.md)):
++Det detta repo lägger till ovanpå upstream är en dokumenterad patchserie ([`patches/`](patches/README.md)), varav det mesta har erbjudits upstream:
+ 
+-- **Rättningar som ännu inte slagits ihop med upstream** (bygge av tjänsten, återställning med servrar som använder användarnamn/lösenord, slutkoder, maskering i loggar, tillförlitlighet för maskinsäkerhetskopior…) — skickas upstream allteftersom de slås ihop.
++- **Funktioner**: paper key och nyckelimport (QR-kod), parallella säkerhetskopior av mappar, en VSS-ögonblicksbild per säkerhetskopia av flera mappar, undantag i CLI, en VM-konfiguration för Proxmox VE genererad från den verkliga maskinen.
++- **Rättningar som ännu inte slagits ihop med upstream** (återställning av `proxmox-backup-client`:s komprimerade krypterade säkerhetskopior, den PBS-server som väljs för en säkerhetskopia via tjänsten, PBS:s orsaker till avvisning, återställning med servrar som använder användarnamn/lösenord, maximering av fönstret…) — skickas upstream allteftersom de slås ihop.
+ - **Nimbus Backup-identiteten** — `NimbusBackup.exe`/`.msi`, tjänsten `NimbusBackup` och MSI-uppgraderingskoden för befintliga installationer, så att de fortsätter att uppgraderas på plats.
+ - **Uppgraderingsväg** från Nimbus Backup ≤ 0.3.0 (migrering av datamappen, äldre metadata för ögonblicksbilder).
+ - **Releasepipeline** — build-provenance-intyg, kontrollsummor, VirusTotal-rapporter.
+diff --git a/README.zh.md b/README.zh.md
+index e7ba749..33b005a 100644
+--- a/README.zh.md
++++ b/README.zh.md
+@@ -27,7 +27,7 @@ Nimbus Backup 是 RDEM Systems 对 [Proxmox Backup Client GO](https://github.com
+ - `SHA256SUMS.txt` — 校验和
+ 
+ > ⚠️ **Windows 提示“检测到病毒”（例如 `Trojan:Win32/Sabsik.FL.A!ml`）或显示 SmartScreen 警告？**
+-> 这是 Go/Wails 应用程序已知的**误报**——它*不是*病毒。`!ml` 后缀表示该告警来自一个机器学习模型，该模型会标记*未签名、普及度低*的可执行文件。
++> 这是 Go/Wails 应用程序已知的**误报**——它*不是*病毒。`!ml` 后缀表示该告警来自一个机器学习模型，该模型会标记*普及度低*的可执行文件（在 0.4.0 及之前，还包括未签名的文件）。
+ > 阅读[为什么会出现这种情况以及如何验证下载文件](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github)。
+ 
+ ### 🔎 验证任何下载文件
+@@ -44,7 +44,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
+ [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
+ [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
+ 
+-> ℹ️ **代码签名：** Windows 二进制文件**尚未进行 Authenticode 签名**，这正是触发上述 SmartScreen / `!ml` 警告的原因。我们向 [SignPath Foundation](https://signpath.org) 申请免费开源证书未获回复；通过 Azure Artifact Signing 进行签名的工作正在配置中，目标版本为 **0.4.1**。在此之前，来源可通过上述构建来源证明和校验和来确认。
++> 🔏 **代码签名：** 自 0.4.1 起，`NimbusBackup.exe`、其服务以及 `NimbusBackup.msi` 均**由 RDEM SYSTEMS 进行 Authenticode 签名**（Azure Artifact Signing）；*属性 → 数字签名* 中会显示发布者。在新版本的信誉建立之前，SmartScreen 仍可能发出警告：请确认发布者为 RDEM SYSTEMS，然后点击 *更多信息 → 仍要运行*。命令行工具尚未签名；上述构建来源证明和校验和覆盖所有文件。
+ 
+ ### 🐧 使用 Linux？请使用官方客户端
+ 
+@@ -74,11 +74,12 @@ Nimbus Backup GUI 仅支持 Windows（CLI 工具也可为 Linux 和 macOS 构建
+ ### GUI（推荐）
+ - **🌍 多语言** — 英语、法语、意大利语、德语和波兰语界面
+ - 友好的配置界面，支持连接测试（API 令牌或用户名/密码）
+-- 实时显示备份进度、速度和预计剩余时间，可随时取消
+-- 支持 VSS（卷影复制）以实现一致性备份
++- 实时显示备份进度、速度和预计剩余时间，可随时取消，提供“运行中的作业”标签页
++- VSS（卷影复制）实现一致性备份：整个多文件夹备份只用一个快照，每个卷一个卷影副本
+ - 多文件夹备份，文件模式和磁盘（整机）模式；文件夹可并行备份（推荐：CPU 数 / 4）
+-- 快照浏览、文件搜索（支持通配符）和恢复
+-- 支持多台 PBS 服务器，证书指纹固定（TOFU）
++- 磁盘备份可在 Proxmox VE 中恢复为与原机器一致的虚拟机（CPU、内存、固件、带原 MAC 地址的网卡、专用 VM ID）
++- 快照浏览、文件搜索（支持通配符）和恢复，包括 NTFS ACL
++- 支持多台 PBS 服务器，每个作业可使用各自的 PBS 服务器，证书指纹固定（TOFU）
+ - **🔒 客户端加密**（AES-256-GCM），密钥文件与 `proxmox-backup-client` 及 Proxmox VE 兼容
+ - Windows 服务模式 + 计划备份，备份历史记录支持一键重新运行
+ - 用于故障排查的调试日志
+@@ -113,7 +114,7 @@ Nimbus Backup GUI 仅支持 Windows（CLI 工具也可为 Linux 和 macOS 构建
+ - 输入验证和凭据清理（日志中的机密信息会被脱敏）
+ - 防止路径遍历
+ - 带指数退避的重试逻辑
+-- 每次构建都执行 CI 检查：测试、`golangci-lint`、`gosec`、`go mod tidy`
++- 每次构建都执行 CI 检查：测试、`golangci-lint`、`gosec`、`go mod tidy`，以及针对真实 PBS 的端到端测试套件（使用官方 `proxmox-backup-client` 恢复、PBS 校验）
+ 
+ ### 🔒 客户端加密
+ 备份可以在离开机器之前**在客户端**进行加密，
+@@ -216,11 +217,12 @@ wails build      # or: wails dev  (hot reload)
+ 
+ ## 🔗 与上游项目的关系
+ 
+-Nimbus Backup 最初是 [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（用 Go 编写的 Proxmox Backup Client，作者 Tiziano Bacocco，GPLv3）的一个分支，我们在其基础上添加了 Windows GUI、服务、计划任务、多 PBS 和恢复功能。2026 年 9 月，上游合并了该 GUI 并使其品牌中立（“Proxmox Backup Client GUI”）。自 0.4.0 起，Nimbus Backup 基于同一代码库构建：**两个项目现在在功能上几乎完全相同。**
++Nimbus Backup 最初是 [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（用 Go 编写的 Proxmox Backup Client，作者 Tiziano Bacocco，GPLv3）的一个分支，我们在其基础上添加了 Windows GUI、服务、计划任务、多 PBS 和恢复功能。2026 年 9 月，上游合并了该 GUI 并使其品牌中立（“Proxmox Backup Client GUI”）。2026 年 10 月（0.4.1），Nimbus Backup 基于上游的当前代码重新构建，并采用了上游的客户端加密：**两个项目共享同一代码库。**
+ 
+-本仓库在上游基础上增加的是一个小型、有文档说明的补丁系列（[`patches/`](patches/README.md)）：
++本仓库在上游基础上增加的是一个有文档说明的补丁系列（[`patches/`](patches/README.md)），其中大部分已提交给上游：
+ 
+-- **尚未合并到上游的修复**（服务构建、使用用户名/密码的服务器的恢复、退出码、日志脱敏、整机备份可靠性……）——已陆续提交给上游，等待其合并。
++- **功能**：纸质密钥和密钥导入（二维码）、文件夹并行备份、多文件夹备份只用一个 VSS 快照、命令行排除项、根据真实机器生成的 Proxmox VE 虚拟机配置。
++- **尚未合并到上游的修复**（恢复 `proxmox-backup-client` 的压缩加密备份、服务备份所选用的 PBS 服务器、PBS 拒绝原因、使用用户名/密码的服务器的恢复、窗口最大化……）——已陆续提交给上游，等待其合并。
+ - **Nimbus Backup 标识** — `NimbusBackup.exe`/`.msi`、`NimbusBackup` 服务，以及现有安装的 MSI 升级代码，以便它们继续原地升级。
+ - **升级路径** — 从 Nimbus Backup ≤ 0.3.0 升级（数据文件夹迁移、旧版快照元数据）。
+ - **发布流水线** — 构建来源证明、校验和、VirusTotal 报告。
+-- 
+2.47.3
+

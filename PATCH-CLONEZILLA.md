@@ -98,7 +98,45 @@ is tried with `--dry-run` against the extracted rootfs and the ISO tree; the
 target path in the diff header decides where it belongs. A patch that does not
 apply cleanly aborts the run.
 
+A patch whose change has since been adopted by Clonezilla itself can opt in to
+being skipped instead. It declares, in its header (text before the first `---`
+line, which `patch` ignores), the file it touches and one or more fixed strings
+that only the fixed code contains:
+
+```
+# present-in: usr/share/drbl/sbin/ocs-functions
+# present-marker: partprobe /dev/$dev_
+# present-marker: udevadm settle --timeout=5
+```
+
+If that file exists in the rootfs or ISO tree and contains every marker, the
+patch is reported as already present and skipped. The markers should be code,
+not comments, so a maintainer rewording a comment cannot defeat the check. A
+patch with no markers is always applied, so the menu patches still abort the
+run if their target files change.
+
 Prerequisite for patching: the `patch` utility.
+
+## Encrypted backups
+
+Backups made with `-keyfile` (client-side AES-256-GCM, same key file format
+as `proxmox-backup-client key create`) can only be attached with that key.
+Both helpers ask for it after the datastore: **no key**, **a key file on a
+USB stick / other disk** (the partition is mounted read-only, the `*.json`
+files on it are listed, the chosen one is copied to
+`/tmp/pbs-encryption-key.json` with mode 600 and the stick is unmounted
+again), or **a typed path** (for example a key placed on the boot medium). A
+key file that is passphrase protected (`kdf` set) makes the helper ask for the
+passphrase in a hidden box. The key is handed to `pbsnbd` as
+`-keyfile` / `-keyfile-passphrase`. `pbsnbd` reads the first chunk of the
+image before it touches the NBD device, so a missing or wrong key fails
+immediately with a clear message instead of leaving a dead `/dev/nbdN`. A
+mistyped passphrase is asked for again, three attempts in total, before the
+helper stops. The key is never written to the ISO.
+
+Key files protected with a passphrase by the official client use a tagged
+`kdf` object (`{"Scrypt": {...}}` or `{"PBKDF2": {...}}`) and the scrypt
+parameters stored in the file; `pbscommon` reads both.
 
 ## Included menu option: attach a PBS backup via NBD
 
@@ -130,6 +168,9 @@ When the user picks it, the helper:
      first `/` is passed to `pbsnbd -namespace`** (`ns1/ns2`).
    The last used server/username/password/datastore are kept in
    `/tmp/pbsnbd-credentials` (mode 600) and pre-fill the boxes on the next run.
+   After the datastore, a menu asks whether the backups were made with an
+   **encryption key** (see "Encrypted backups" above): none, a key file on a
+   USB stick or other disk, or a typed path.
 5. Runs `/usr/local/sbin/pbsnbd -list`, which prints the available backups as
    `type/id/time/file.fidx[#comment]` lines sorted by date, **newest first**
    (the trailing `#comment`, if the snapshot has one, is included) and presents
@@ -143,6 +184,100 @@ When the user picks it, the helper:
    **forks it in the background**, so the Clonezilla main menu / shell stays
    usable while `/dev/nbd0` attaches. Rerunning the flow warns and stops the
    previous background instance first.
+
+## Included boot entry: fully automated PBS Bare Metal Restore
+
+Where `ocs-pbs-nbd` above hands off to Clonezilla's own generic device-image/
+device-device wizard once the snapshot is attached, this is a separate,
+first-position, default-on-timeout **boot menu entry** — not a Clonezilla
+main-menu option — that skips Clonezilla's language/keyboard prompts and its
+own wizard entirely, walking straight from PBS credentials to a completed,
+auto-rebooted restore.
+
+- Helper `/usr/local/sbin/ocs-pbs-bare-metal-restore`
+  (`clonezilla-patch/ocs-pbs-bare-metal-restore`) is injected into the live
+  rootfs, deliberately **not** sharing code with `ocs-pbs-nbd` (some
+  duplication of the network/credentials/snapshot-picker/NBD-attach steps) —
+  each script can then be modified without risking the other's already-proven
+  behaviour.
+- Patches `0003-first-boot-bare-metal-restore-menu-grub.patch`,
+  `0004-first-boot-bare-metal-restore-menu-syslinux.patch` and
+  `0005-first-boot-bare-metal-restore-menu-isolinux.patch` add a new
+  **"Proxmox Backup Client Go - PBS Bare Metal Restore"** entry as the first,
+  default-on-timeout item in `boot/grub/grub.cfg` (UEFI),
+  `syslinux/syslinux.cfg` (USB stick / PXE) and `syslinux/isolinux.cfg`
+  (BIOS boot from the ISO as a CD/DVD, which reads `isolinux.cfg`, not
+  `syslinux.cfg`), booted via
+  `locales=en_US.UTF-8 keyboard-layouts=gb
+  ocs_live_run="/usr/local/sbin/ocs-pbs-bare-metal-restore"` — those boot
+  parameters are what actually skip Clonezilla's language/keyboard prompts
+  and its own `ocs-live-general` main-menu launcher.
+- Patch `0002-ocs-functions-partition-detect-race.patch` fixes a real,
+  100%-reproducible bug found while testing this flow: a source disk
+  attached moments earlier in the same live session (here, the NBD device)
+  could make Clonezilla's own `is_disk_without_part_and_fs()` report zero
+  partitions on the first restore pass — `lsblk` reads udev's device
+  database, not just the kernel's raw partition table, so a just-created
+  source can transiently look empty even though its on-disk table is
+  already correct. A rerun always then passed, the classic signature of
+  this exact race. The fix retries once (`partprobe` + `udevadm settle` +
+  recount) the moment this check first sees zero partitions.
+  The same fix was merged into Clonezilla as stevenshiau/clonezilla#192, so this
+  patch declares `present-in` / `present-marker` lines and is skipped
+  automatically when the base ISO already includes it.
+
+When the automated flow runs:
+
+1. Attempts DHCP on every detected NIC first (`dhcpcd -t 15`), silently —
+   Clonezilla's own interactive `ocs-live-netcfg` wizard (DHCP-or-static
+   choice, plus its own internal time-sync prompt) only ever runs as a
+   fallback if no IP came up on its own. Time syncs automatically via
+   `ocs-live-time-sync -b -i`, no prompt either way.
+2. Asks for the PBS server URL, username (with realm), password and
+   datastore (optionally `datastore/namespace`) — the same shape of prompts
+   as `ocs-pbs-nbd`, with basic validation and a retry loop, but as four
+   separate screens (a combined single-form attempt was tried and reverted;
+   see the fork's own history if picking that back up).
+   After the datastore, the same encryption-key menu as `ocs-pbs-nbd` is shown
+   (see "Encrypted backups" above).
+3. Lists and lets the user pick a snapshot via the same three-level
+   kind/date/file menu `ocs-pbs-nbd` uses, then attaches it via `pbsnbd`
+   in the **foreground** this time (the automated flow needs the device up
+   before continuing, unlike `ocs-pbs-nbd`'s fork-and-return-to-menu
+   design).
+4. Auto-detects the restore target: the one local block device that is not
+   `nbd*`/`loop*`/`sr*`/`ram*` and not marked removable. Zero or more than
+   one candidate means asking, never guessing, on what is an irreversible
+   whole-disk overwrite.
+5. Shows one confirmation (source/target/sizes, from `parted ... unit GB`)
+   before the write — deliberately just the one dialog, since
+   `ocs-onthefly` itself still asks its own two separate confirmations
+   before actually wiping the destination.
+6. Runs `ocs-onthefly -icds -k0 -sfsck -j2 -f <nbd-device> -d <target>` directly
+   (`-j2` restores the data between the MBR and the first partition, where GRUB
+   keeps its core image on a BIOS/MBR disk), with no `-p` postaction — success
+   shows a plain-language completion
+   message and reboots on its own; failure shows the exit code and where to
+   find the logs, no reboot.
+
+**English/UK-only, by design, for now:** `locales=en_US.UTF-8 keyboard-layouts=gb` is hardcoded
+in both menu patches, so this entry skips Clonezilla's language/keyboard prompt entirely rather
+than defaulting to English within it — the whole point of this entry is skipping every avoidable
+prompt during a bare-metal recovery, and that one is no exception. Clonezilla's own native
+prompts (the `$msg_*` strings this script already calls) would very likely localize correctly if
+`locales=` pointed elsewhere, since Clonezilla ships real translations — but nearly everything
+this script actually shows (every PBS prompt, every dialog title, the completion message) is our
+own hardcoded English text with no translation table behind it yet, so changing just `locales=`
+would produce a broken-looking mix rather than a real translation. Offering a language choice
+here properly would mean building that string table and accepting one more prompt back into a
+flow designed to have as few as possible — a real but separate piece of work, not a quick fix.
+
+**Tested repeatedly on isolated VMs** (Windows and Linux Mint sources,
+32-40 GiB disks), consistently 8-11 minutes from power-on to a working
+login prompt — **not yet tested on physical hardware.** A pre-built ISO
+(includes both this entry and `ocs-pbs-nbd`) is available from
+[this fork's releases](https://github.com/mjb-is/proxmoxbackupclient_go/releases)
+if you'd rather try it before building your own.
 
 ## Generated ISO build (for reference)
 

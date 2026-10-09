@@ -35,10 +35,10 @@ const (
 // descendants. Paths use forward slashes (archive style); backslashes are
 // accepted and normalized.
 //
-	// RestoreACLs / RestoreADS / RestoreTimestamps are reserved for the upcoming
-	// NTFS sidecar work — accepted today so the API surface is stable, but only
-	// RestoreTimestamps has any effect (always-on: mtime is restored). The other
-	// two are no-ops until the per-file .proxmox_meta sidecar lands.
+// RestoreACLs / RestoreADS / RestoreTimestamps are reserved for the upcoming
+// NTFS sidecar work — accepted today so the API surface is stable, but only
+// RestoreTimestamps has any effect (always-on: mtime is restored). The other
+// two are no-ops until the per-file .proxmox_meta sidecar lands.
 type RestoreOptions struct {
 	BaseURL         string
 	AuthID          string
@@ -48,10 +48,15 @@ type RestoreOptions struct {
 	Datastore       string
 	Namespace       string
 	CertFingerprint string
-	EncryptionKey   json.RawMessage // server's client-side encryption key, if any
 	BackupID        string
 	SnapshotTime    time.Time
 	DestPath        string
+
+	// Crypt unlocks an encrypted snapshot. Nil means a plain snapshot. Every
+	// chunk fetch goes through pbscommon.PBSClient.GetChunkData, which needs
+	// it to decrypt and to recompute the index's sha256(plaintext || id_key)
+	// digests for verification.
+	Crypt *pbscommon.CryptConfig
 
 	// Mode selects the destination policy. Empty defaults to alternate_abs
 	// (legacy behaviour: dest + full archive path).
@@ -151,8 +156,7 @@ func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progres
 	if archiveName == "" {
 		archiveName = "backup.pxar.didx"
 	}
-	hasCreds := (opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "" // API token or u/p ticket
-	if opts.BaseURL == "" || !hasCreds {
+	if opts.BaseURL == "" || ((opts.AuthID == "" || opts.Secret == "") && opts.Ticket == "") {
 		return fmt.Errorf("PBS connection parameters required")
 	}
 	if opts.BackupID == "" {
@@ -173,22 +177,14 @@ func withSnapshotReader(opts RestoreOptions, archiveName, logTag string, progres
 		Namespace:        opts.Namespace,
 		Insecure:         opts.CertFingerprint != "",
 		CompressionLevel: pbscommon.CompressionFastest,
+		Crypt:            opts.Crypt,
 		Manifest: pbscommon.BackupManifest{
 			BackupID:   opts.BackupID,
 			BackupTime: opts.SnapshotTime.Unix(),
 		},
 	}
-	if err := applyEncryptionKey(client, opts.EncryptionKey); err != nil {
-		return err
-	}
 	client.Connect(true, "host")
 	defer client.Close()
-	// Clear "key required" / "wrong key" error up front for encrypted
-	// snapshots, instead of a decryption failure on the first chunk.
-	if err := client.VerifySnapshotKey(); err != nil {
-		writeBackupLog(fmt.Sprintf("Snapshot key check failed (%s): %v", logTag, err))
-		return err
-	}
 
 	ra, size, err := client.NewDIDXReaderAt(archiveName, 64, func(fetched, total int) {
 		if fetched == total || fetched%32 == 0 {
@@ -231,14 +227,11 @@ func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []
 		Namespace:        opts.Namespace,
 		Insecure:         opts.CertFingerprint != "",
 		CompressionLevel: pbscommon.CompressionFastest,
+		Crypt:            opts.Crypt,
 		Manifest: pbscommon.BackupManifest{
 			BackupID:   opts.BackupID,
 			BackupTime: opts.SnapshotTime.Unix(),
 		},
-	}
-	if err := applyEncryptionKey(client, opts.EncryptionKey); err != nil {
-		writeBackupLog(fmt.Sprintf("Catalog listing skipped: %v", err))
-		return nil, nil, false // the data-archive walk reports the error
 	}
 	client.Connect(true, "host")
 	defer client.Close()
@@ -651,8 +644,7 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		}
 	}
 
-	hasCreds := (opts.AuthID != "" && opts.Secret != "") || opts.Ticket != "" // API token or u/p ticket
-	if opts.BaseURL == "" || !hasCreds {
+	if opts.BaseURL == "" || ((opts.AuthID == "" || opts.Secret == "") && opts.Ticket == "") {
 		return fmt.Errorf("PBS connection parameters required")
 	}
 	if opts.BackupID == "" {
@@ -697,10 +689,33 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		return err
 	}
 
+	// NTFS ACLs/DOS attributes on Windows, POSIX ACLs/xattrs on Linux — a
+	// no-op elsewhere; opt-in via opts.RestoreACLs, previously always false
+	// ("reserved, requires NTFS sidecar"). Captured during backup into a blob
+	// alongside the archive (see gui/backup_meta_windows.go /
+	// backup_meta_linux.go). Best-effort: nil on any failure (missing blob on
+	// a legacy snapshot, network error) just means files restore without
+	// their ACLs/attributes re-applied, never fails the restore.
+	var aclMeta *BackupFileMeta
+	if opts.RestoreACLs {
+		aclClient := &pbscommon.PBSClient{
+			BaseURL: opts.BaseURL, CertFingerPrint: opts.CertFingerprint,
+			AuthID: opts.AuthID, Secret: opts.Secret, Ticket: opts.Ticket, CSRFToken: opts.CSRFToken,
+			Datastore: opts.Datastore, Namespace: opts.Namespace, Insecure: opts.CertFingerprint != "",
+			Manifest: pbscommon.BackupManifest{BackupID: opts.BackupID, BackupTime: opts.SnapshotTime.Unix()},
+		}
+		aclClient.Connect(true, "host")
+		if m, aerr := downloadBackupFileMeta(aclClient); aerr == nil {
+			aclMeta = m
+		}
+		aclClient.Close()
+	}
+
 	progress(0.20, "Downloading backup archive...")
-	// AssembleDIDXToFile downloads the .didx index and reassembles the actual
-	// PXAR stream chunk-by-chunk into a temp file (bounded memory), then we walk
-	// it from disk and stream each file payload to its destination.
+	// The .didx index is parsed lazily and its chunks are fetched on demand by
+	// pbscommon.NewDIDXReaderAt, so we walk the PXAR stream straight off the
+	// network reader and stream each file payload to its destination. Nothing is
+	// materialised on disk first.
 	var extracted []pbscommon.PXARExtractedFile
 	err = withSnapshotReader(opts, "backup.pxar.didx", "Restore", func(done, total int) {
 		// Map chunk progress to the 0.20–0.80 portion of the overall bar.
@@ -747,10 +762,36 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		successCount, dirCount, skipCount, errorSkipCount))
 	progress(0.95, fmt.Sprintf("Extracted %d files", successCount))
 
-	if opts.RestoreACLs || opts.RestoreADS {
-		// Reserved options — sidecar metadata isn't written by the backup yet.
-		// Log the request so it shows up in support transcripts.
-		writeBackupLog("NOTE: ACL/ADS restore requested but not yet implemented (NTFS sidecar pending)")
+	// Re-apply captured ACLs/attributes now that the files are actually on
+	// disk. Best-effort per file: an apply failure is logged, never fails
+	// the restore — the file's content is already safely on disk regardless.
+	if aclMeta != nil {
+		entryIdx := buildFileMetaIndex(aclMeta)
+		applied, failed := 0, 0
+		for _, f := range extracted {
+			if f.Skipped || f.ArchivePath == "" {
+				continue
+			}
+			entry, ok := entryIdx[f.ArchivePath]
+			if !ok {
+				continue
+			}
+			if aerr := applyNTFSMetadata(f.Path, entry, aclMeta.SDDLs); aerr != nil {
+				failed++
+				writeBackupLog(fmt.Sprintf("NTFS metadata apply failed for %s: %v", f.Path, aerr))
+			} else {
+				applied++
+			}
+		}
+		if applied > 0 || failed > 0 {
+			writeBackupLog(fmt.Sprintf("NTFS ACLs/attributes: applied %d, failed %d", applied, failed))
+		}
+	}
+
+	if opts.RestoreADS {
+		// Reserved option — no ADS sidecar exists. Log the request so it
+		// shows up in support transcripts.
+		writeBackupLog("NOTE: ADS restore requested but not yet implemented (no ADS sidecar exists)")
 	}
 
 	progress(1.0, "Restore completed")

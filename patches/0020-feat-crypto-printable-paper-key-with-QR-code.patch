@@ -1,0 +1,705 @@
+From f6a8186b6ed820f4cd86e3616e5398549f02de86 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 09:50:36 +0200
+Subject: [PATCH 20/58] feat(crypto): printable paper key with QR code
+
+pbscommon: NewPaperKey renders a key file like `proxmox-backup-client key
+paperkey`: the key file pretty-printed as serde_json does ("kdf": null
+included) between the BEGIN/END markers, a QR code of it (EC level M,
+via rsc.io/qr) and a standalone printable HTML page with escaped caller
+text. ProtectKeyConfig wraps a key in a passphrase-protected key file
+(scrypt, as `key create` does) for a copy that is useless without the
+passphrase. ParseKeyConfig, and so LoadKeyConfig, also accept the text
+copied off a paper key; the markers count only on a line of their own.
+---
+ clientcommon/go.mod        |   1 +
+ clientcommon/go.sum        |   2 +
+ directorybackup/go.mod     |   1 +
+ directorybackup/go.sum     |   2 +
+ gui/go.mod                 |   1 +
+ gui/go.sum                 |   2 +
+ machinebackup/go.mod       |   1 +
+ machinebackup/go.sum       |   2 +
+ nbd/go.mod                 |   1 +
+ nbd/go.sum                 |   2 +
+ pbscommon/crypt.go         |  17 ++-
+ pbscommon/go.mod           |   1 +
+ pbscommon/go.sum           |   2 +
+ pbscommon/paperkey.go      | 218 +++++++++++++++++++++++++++++
+ pbscommon/paperkey_test.go | 276 +++++++++++++++++++++++++++++++++++++
+ 15 files changed, 526 insertions(+), 3 deletions(-)
+ create mode 100644 pbscommon/paperkey.go
+ create mode 100644 pbscommon/paperkey_test.go
+
+diff --git a/clientcommon/go.mod b/clientcommon/go.mod
+index e7816dc..c3beb9e 100644
+--- a/clientcommon/go.mod
++++ b/clientcommon/go.mod
+@@ -18,6 +18,7 @@ require (
+ 	golang.org/x/net v0.54.0 // indirect
+ 	golang.org/x/sys v0.44.0 // indirect
+ 	golang.org/x/text v0.37.0 // indirect
++	rsc.io/qr v0.2.0 // indirect
+ )
+ 
+ replace pbscommon => ../pbscommon
+diff --git a/clientcommon/go.sum b/clientcommon/go.sum
+index 2426920..cef2c65 100644
+--- a/clientcommon/go.sum
++++ b/clientcommon/go.sum
+@@ -12,3 +12,5 @@ golang.org/x/net v0.54.0 h1:2zJIZAxAHV/OHCDTCOHAYehQzLfSXuf/5SoL/Dv6w/w=
+ golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
+ golang.org/x/term v0.43.0 h1:S4RLU2sB31O/NCl+zFN9Aru9A/Cq2aqKpTZJ6B+DwT4=
+ golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
++rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
++rsc.io/qr v0.2.0/go.mod h1:IF+uZjkb9fqyeF/4tlBoynqmQxUoPfWEKh921coOuXs=
+diff --git a/directorybackup/go.mod b/directorybackup/go.mod
+index 9940bde..4fab7af 100644
+--- a/directorybackup/go.mod
++++ b/directorybackup/go.mod
+@@ -20,6 +20,7 @@ require (
+ 	golang.org/x/net v0.54.0 // indirect
+ 	golang.org/x/term v0.43.0 // indirect
+ 	golang.org/x/text v0.37.0 // indirect
++	rsc.io/qr v0.2.0 // indirect
+ )
+ 
+ require (
+diff --git a/directorybackup/go.sum b/directorybackup/go.sum
+index ea16bf8..813d045 100644
+--- a/directorybackup/go.sum
++++ b/directorybackup/go.sum
+@@ -35,3 +35,5 @@ golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
+ golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=
+ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+ gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
++rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
++rsc.io/qr v0.2.0/go.mod h1:IF+uZjkb9fqyeF/4tlBoynqmQxUoPfWEKh921coOuXs=
+diff --git a/gui/go.mod b/gui/go.mod
+index 34e15f5..8113f42 100644
+--- a/gui/go.mod
++++ b/gui/go.mod
+@@ -58,6 +58,7 @@ require (
+ 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+ 	golang.org/x/net v0.54.0 // indirect
+ 	golang.org/x/text v0.37.0 // indirect
++	rsc.io/qr v0.2.0 // indirect
+ )
+ 
+ // Local package replacements to use sibling directories
+diff --git a/gui/go.sum b/gui/go.sum
+index d6f32ab..ab752c9 100644
+--- a/gui/go.sum
++++ b/gui/go.sum
+@@ -123,3 +123,5 @@ golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGm
+ gopkg.in/Knetic/govaluate.v3 v3.0.0/go.mod h1:csKLBORsPbafmSCGTEh3U7Ozmsuq8ZSIlKk1bcqph0E=
+ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+ gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
++rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
++rsc.io/qr v0.2.0/go.mod h1:IF+uZjkb9fqyeF/4tlBoynqmQxUoPfWEKh921coOuXs=
+diff --git a/machinebackup/go.mod b/machinebackup/go.mod
+index aa758cb..afca0aa 100644
+--- a/machinebackup/go.mod
++++ b/machinebackup/go.mod
+@@ -24,6 +24,7 @@ require (
+ 	golang.org/x/term v0.43.0 // indirect
+ 	golang.org/x/text v0.37.0 // indirect
+ 	pbscommon v0.0.0 // indirect
++	rsc.io/qr v0.2.0 // indirect
+ 	snapshot v0.0.0 // indirect
+ )
+ 
+diff --git a/machinebackup/go.sum b/machinebackup/go.sum
+index e6d4371..dc6fdce 100644
+--- a/machinebackup/go.sum
++++ b/machinebackup/go.sum
+@@ -37,3 +37,5 @@ golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
+ golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=
+ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+ gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
++rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
++rsc.io/qr v0.2.0/go.mod h1:IF+uZjkb9fqyeF/4tlBoynqmQxUoPfWEKh921coOuXs=
+diff --git a/nbd/go.mod b/nbd/go.mod
+index 8e1cbfb..9545a76 100644
+--- a/nbd/go.mod
++++ b/nbd/go.mod
+@@ -24,6 +24,7 @@ require (
+ 	golang.org/x/net v0.54.0 // indirect
+ 	golang.org/x/sys v0.44.0 // indirect
+ 	golang.org/x/text v0.37.0 // indirect
++	rsc.io/qr v0.2.0 // indirect
+ )
+ 
+ // Local package replacements
+diff --git a/nbd/go.sum b/nbd/go.sum
+index 2de5edf..cf7968a 100644
+--- a/nbd/go.sum
++++ b/nbd/go.sum
+@@ -94,3 +94,5 @@ golang.org/x/tools v0.6.0/go.mod h1:Xwgl3UAJ/d3gWutnCtw505GrjyAbvKui8lOU390QaIU=
+ golang.org/x/tools v0.13.0/go.mod h1:HvlwmtVNQAhOuCjW7xxvovg8wbNq7LwfXh/k7wXUl58=
+ golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d/go.mod h1:aiJjzUbINMkxbQROHiO6hDPo2LHcIPhhQsa9DLh0yGk=
+ golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
++rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
++rsc.io/qr v0.2.0/go.mod h1:IF+uZjkb9fqyeF/4tlBoynqmQxUoPfWEKh921coOuXs=
+diff --git a/pbscommon/crypt.go b/pbscommon/crypt.go
+index 68ec8b6..5f5c370 100644
+--- a/pbscommon/crypt.go
++++ b/pbscommon/crypt.go
+@@ -449,12 +449,23 @@ func LoadKeyConfig(path string) (*KeyConfig, error) {
+ 	if err != nil {
+ 		return nil, fmt.Errorf("unable to read key file %s: %w", path, err)
+ 	}
++	cfg, err := ParseKeyConfig(raw)
++	if err != nil {
++		return nil, fmt.Errorf("key file %s: %w", path, err)
++	}
++	return cfg, nil
++}
++
++// ParseKeyConfig parses a key file's content. It also accepts the text copied
++// off a paper key (between its BEGIN/END marker lines, see paperkey.go), so a
++// key typed or scanned back from paper imports as is.
++func ParseKeyConfig(raw []byte) (*KeyConfig, error) {
+ 	cfg := &KeyConfig{}
+-	if err := json.Unmarshal(raw, cfg); err != nil {
+-		return nil, fmt.Errorf("unable to parse key file %s: %w", path, err)
++	if err := json.Unmarshal(stripPaperKeyMarkers(raw), cfg); err != nil {
++		return nil, fmt.Errorf("unable to parse key file: %w", err)
+ 	}
+ 	if cfg.Data == "" {
+-		return nil, fmt.Errorf("key file %s contains no key data", path)
++		return nil, errors.New("key file contains no key data")
+ 	}
+ 	return cfg, nil
+ }
+diff --git a/pbscommon/go.mod b/pbscommon/go.mod
+index 1486f54..3a62495 100644
+--- a/pbscommon/go.mod
++++ b/pbscommon/go.mod
+@@ -7,6 +7,7 @@ require (
+ 	github.com/klauspost/compress v1.17.9
+ 	golang.org/x/crypto v0.51.0
+ 	golang.org/x/net v0.54.0
++	rsc.io/qr v0.2.0
+ )
+ 
+ require golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+diff --git a/pbscommon/go.sum b/pbscommon/go.sum
+index bb7ef76..1420ee1 100644
+--- a/pbscommon/go.sum
++++ b/pbscommon/go.sum
+@@ -8,3 +8,5 @@ golang.org/x/crypto v0.51.0 h1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f h1:W3F4c+6OLc6H2lb//N1q4WpJkhzJCK5J6kUi1NTVXfM=
+ golang.org/x/net v0.54.0 h1:2zJIZAxAHV/OHCDTCOHAYehQzLfSXuf/5SoL/Dv6w/w=
+ golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
++rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
++rsc.io/qr v0.2.0/go.mod h1:IF+uZjkb9fqyeF/4tlBoynqmQxUoPfWEKh921coOuXs=
+diff --git a/pbscommon/paperkey.go b/pbscommon/paperkey.go
+new file mode 100644
+index 0000000..361c820
+--- /dev/null
++++ b/pbscommon/paperkey.go
+@@ -0,0 +1,218 @@
++package pbscommon
++
++import (
++	"bytes"
++	"crypto/rand"
++	"encoding/base64"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"html"
++	"strings"
++	"time"
++
++	"golang.org/x/crypto/scrypt"
++	"rsc.io/qr"
++)
++
++// Paper key: a printable copy of a key file with a QR code, like
++// `proxmox-backup-client key paperkey` (proxmox-backup:
++// pbs-datastore/src/paperkey.rs). The QR code holds the key file exactly as
++// PBS pretty-prints it (EC level M, like its `qrencode -lm`), so scanning it
++// gives a key file that this client and proxmox-backup-client both import.
++
++const (
++	paperKeyBegin = "-----BEGIN PROXMOX BACKUP KEY-----"
++	paperKeyEnd   = "-----END PROXMOX BACKUP KEY-----"
++)
++
++// PaperKey is the printable form of a key file.
++type PaperKey struct {
++	JSON  string // key file as serde_json::to_string_pretty writes it; the QR payload
++	Text  string // JSON between the BEGIN/END markers, as PBS prints it
++	QRSVG string // QR code of JSON, as a standalone SVG document
++}
++
++// NewPaperKey renders kc as a paper key. Protect kc with a passphrase first
++// (ProtectKeyConfig) if the paper may be seen by others: the paper key holds
++// exactly what the key file holds.
++func NewPaperKey(kc *KeyConfig) (*PaperKey, error) {
++	data, err := kc.prettyJSON()
++	if err != nil {
++		return nil, err
++	}
++	code, err := qr.Encode(data, qr.M)
++	if err != nil {
++		return nil, fmt.Errorf("paper key QR code: %w", err)
++	}
++	return &PaperKey{
++		JSON:  data,
++		Text:  paperKeyBegin + "\n" + data + "\n" + paperKeyEnd + "\n",
++		QRSVG: qrSVG(code, 4),
++	}, nil
++}
++
++// pbsKeyConfig is KeyConfig laid out as proxmox-backup serializes it (field
++// order of pbs-key-config, "kdf": null when the key is not protected).
++type pbsKeyConfig struct {
++	KDF         *KeyDerivationConfig `json:"kdf"`
++	Created     string               `json:"created"`
++	Modified    string               `json:"modified"`
++	Data        string               `json:"data"`
++	Fingerprint string               `json:"fingerprint,omitempty"`
++	Hint        string               `json:"hint,omitempty"`
++}
++
++// prettyJSON matches serde_json::to_string_pretty of the PBS KeyConfig:
++// two-space indent, no trailing newline, and no HTML escaping of <, > and &.
++func (c *KeyConfig) prettyJSON() (string, error) {
++	var buf bytes.Buffer
++	enc := json.NewEncoder(&buf)
++	enc.SetEscapeHTML(false)
++	enc.SetIndent("", "  ")
++	if err := enc.Encode(pbsKeyConfig(*c)); err != nil {
++		return "", err
++	}
++	return strings.TrimSuffix(buf.String(), "\n"), nil
++}
++
++// ProtectKeyConfig wraps the key of crypt in a passphrase-protected key file,
++// as `proxmox-backup-client key create` writes it (scrypt n=65536 r=8 p=1,
++// data = IV || TAG || AES-256-GCM(derived key, raw key)). Use it to print or
++// export a copy that is useless without the passphrase.
++func ProtectKeyConfig(crypt *CryptConfig, passphrase []byte, hint string) (*KeyConfig, error) {
++	if len(passphrase) < 5 {
++		return nil, errors.New("the passphrase must be at least 5 characters long")
++	}
++	salt := make([]byte, 32)
++	if _, err := rand.Read(salt); err != nil {
++		return nil, err
++	}
++	kdf := &KeyDerivationConfig{KDF: "scrypt", N: 65536, R: 8, P: 1, Salt: base64.StdEncoding.EncodeToString(salt)}
++	derived, err := scrypt.Key(passphrase, salt, int(kdf.N), int(kdf.R), int(kdf.P), BlobEncryptionKeySize)
++	if err != nil {
++		return nil, err
++	}
++	wrap, err := NewCryptConfig(derived)
++	if err != nil {
++		return nil, err
++	}
++	iv, ct, tag, err := wrap.Seal(crypt.encKey)
++	if err != nil {
++		return nil, err
++	}
++	data := make([]byte, 0, len(iv)+len(tag)+len(ct))
++	data = append(append(append(data, iv...), tag...), ct...)
++	now := time.Now().UTC().Format(time.RFC3339)
++	return &KeyConfig{
++		KDF:         kdf,
++		Created:     now,
++		Modified:    now,
++		Data:        base64.StdEncoding.EncodeToString(data),
++		Fingerprint: crypt.Fingerprint(),
++		Hint:        hint,
++	}, nil
++}
++
++// qrSVG draws code with a quiet zone of margin modules (PBS uses none; the QR
++// spec asks for 4, which scanners read more reliably). Each horizontal run of
++// dark modules is one rectangle of the path.
++func qrSVG(code *qr.Code, margin int) string {
++	n := code.Size + 2*margin
++	var b strings.Builder
++	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" shape-rendering="crispEdges">`, n, n)
++	fmt.Fprintf(&b, `<rect width="%d" height="%d" fill="#fff"/><path fill="#000" d="`, n, n)
++	for y := 0; y < code.Size; y++ {
++		for x := 0; x < code.Size; {
++			if !code.Black(x, y) {
++				x++
++				continue
++			}
++			start := x
++			for x < code.Size && code.Black(x, y) {
++				x++
++			}
++			fmt.Fprintf(&b, "M%d %dh%dv1h-%dz", start+margin, y+margin, x-start, x-start)
++		}
++	}
++	b.WriteString(`"/></svg>`)
++	return b.String()
++}
++
++// PaperKeyPage holds the caller-supplied (localized) text of a paper key page.
++type PaperKeyPage struct {
++	Lang    string   // HTML lang attribute; "" = "en"
++	Title   string   // page title and heading; "" = "Proxmox Backup Paperkey"
++	Subject string   // printed under the title as is (PBS prints "Subject: ..."); "" = none
++	Notes   []string // paragraphs printed under the QR code (e.g. restore steps)
++}
++
++// HTML returns a standalone printable page: the key text and its QR code on
++// one sheet, the layout of `proxmox-backup-client key paperkey --output-format
++// html`. All caller text is escaped.
++func (p *PaperKey) HTML(page PaperKeyPage) []byte {
++	lang := page.Lang
++	if lang == "" {
++		lang = "en"
++	}
++	title := page.Title
++	if title == "" {
++		title = "Proxmox Backup Paperkey"
++	}
++	esc := html.EscapeString
++
++	var b strings.Builder
++	b.WriteString("<!DOCTYPE html>\n")
++	fmt.Fprintf(&b, "<html lang=\"%s\">\n<head>\n<meta charset=\"utf-8\">\n", esc(lang))
++	b.WriteString("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
++	fmt.Fprintf(&b, "<title>%s</title>\n", esc(title))
++	b.WriteString(`<style>
++  body { font-family: sans-serif; margin: 1.5cm; color: #000; background: #fff; }
++  h1 { font-size: 16pt; margin: 0 0 0.5em; }
++  p.key { font-size: 11pt; font-family: monospace; white-space: pre-wrap; line-break: anywhere; }
++  .sheet { page-break-inside: avoid; break-inside: avoid; }
++  .qr { text-align: center; margin: 1em 0; }
++  .qr svg { width: 11cm; height: 11cm; }
++  p.note { font-size: 10pt; }
++</style>
++</head>
++<body>
++<div class="sheet">
++`)
++	fmt.Fprintf(&b, "<h1>%s</h1>\n", esc(title))
++	if page.Subject != "" {
++		fmt.Fprintf(&b, "<p>%s</p>\n", esc(page.Subject))
++	}
++	fmt.Fprintf(&b, "<p class=\"key\">%s</p>\n", esc(strings.TrimSuffix(p.Text, "\n")))
++	fmt.Fprintf(&b, "<div class=\"qr\">%s</div>\n", p.QRSVG)
++	for _, note := range page.Notes {
++		fmt.Fprintf(&b, "<p class=\"note\">%s</p>\n", esc(note))
++	}
++	b.WriteString("</div>\n</body>\n</html>\n")
++	return []byte(b.String())
++}
++
++// stripPaperKeyMarkers extracts the key file from text copied off a paper key
++// (anything around the BEGIN/END marker lines, such as PBS's "Subject:" line,
++// is dropped). Markers count only on a line of their own, so a hint quoting
++// them stays intact. Plain JSON is returned unchanged.
++func stripPaperKeyMarkers(data []byte) []byte {
++	if strings.HasPrefix(strings.TrimSpace(string(data)), "{") {
++		return data
++	}
++	lines := strings.Split(string(data), "\n")
++	for i, line := range lines {
++		if strings.TrimSpace(line) != paperKeyBegin {
++			continue
++		}
++		body := lines[i+1:]
++		for j, l := range body {
++			if strings.TrimSpace(l) == paperKeyEnd {
++				body = body[:j]
++				break
++			}
++		}
++		return []byte(strings.Join(body, "\n"))
++	}
++	return data
++}
+diff --git a/pbscommon/paperkey_test.go b/pbscommon/paperkey_test.go
+new file mode 100644
+index 0000000..b0d31e5
+--- /dev/null
++++ b/pbscommon/paperkey_test.go
+@@ -0,0 +1,276 @@
++package pbscommon
++
++import (
++	"encoding/base64"
++	"fmt"
++	"strings"
++	"testing"
++
++	"rsc.io/qr"
++)
++
++// Golden key files generated by OpenSSL's libcrypto (the library
++// proxmox-backup-client uses), protecting key 00 01 .. 1f with passphrase
++// pkVecPassphrase. The fingerprint matches proxmox-backup's own tests.
++const (
++	pkVecPassphrase  = "correct horse battery"
++	pkVecFingerprint = "0e:ab:d4:46:0b:6e:b9:ca:34:50:23:de:e2:b7:78:c7:90:e5:4a:16:83:b9:65:9c:0a:57:ae:19:90:90:15:9b"
++	vecKeyfileScrypt = `{"kdf": {"Scrypt": {"n": 65536, "r": 8, "p": 1, "salt": "yMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5uc="}}, "created": "2026-09-30T12:00:00+02:00", "modified": "2026-09-30T12:00:00+02:00", "data": "MjM0NTY3ODk6Ozw9Pj9AQS9y+1ZDO3RKqC2a/i42IUQHHuvDc5i/5/oKFXwec3pch1cc2ZSAFjm2ruQbH6ZdWg==", "fingerprint": "0e:ab:d4:46:0b:6e:b9:ca:34:50:23:de:e2:b7:78:c7:90:e5:4a:16:83:b9:65:9c:0a:57:ae:19:90:90:15:9b", "hint": "test"}`
++)
++
++// testKeyConfig returns an unprotected key file for key {b, 0, 0, ...}.
++func testKeyConfig(t *testing.T, b byte, hint string) *KeyConfig {
++	t.Helper()
++	key := make([]byte, BlobEncryptionKeySize)
++	key[0] = b
++	crypt, err := NewCryptConfig(key)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return &KeyConfig{
++		Created:     "2026-10-09T12:00:00Z",
++		Modified:    "2026-10-09T12:00:00Z",
++		Data:        base64.StdEncoding.EncodeToString(key),
++		Fingerprint: crypt.Fingerprint(),
++		Hint:        hint,
++	}
++}
++
++// vecKeyfileScryptPretty is vecKeyfileScrypt as serde_json::to_string_pretty
++// lays it out (generated with Python json.dumps(indent=2), same layout), i.e.
++// what `proxmox-backup-client key paperkey` prints and puts in the QR code.
++const vecKeyfileScryptPretty = `{
++  "kdf": {
++    "Scrypt": {
++      "n": 65536,
++      "r": 8,
++      "p": 1,
++      "salt": "yMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5uc="
++    }
++  },
++  "created": "2026-09-30T12:00:00+02:00",
++  "modified": "2026-09-30T12:00:00+02:00",
++  "data": "MjM0NTY3ODk6Ozw9Pj9AQS9y+1ZDO3RKqC2a/i42IUQHHuvDc5i/5/oKFXwec3pch1cc2ZSAFjm2ruQbH6ZdWg==",
++  "fingerprint": "0e:ab:d4:46:0b:6e:b9:ca:34:50:23:de:e2:b7:78:c7:90:e5:4a:16:83:b9:65:9c:0a:57:ae:19:90:90:15:9b",
++  "hint": "test"
++}`
++
++func TestPaperKeyMatchesPBSLayout(t *testing.T) {
++	kc, err := ParseKeyConfig([]byte(vecKeyfileScrypt))
++	if err != nil {
++		t.Fatal(err)
++	}
++	pk, err := NewPaperKey(kc)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if pk.JSON != vecKeyfileScryptPretty {
++		t.Errorf("paper key JSON =\n%s\nwant\n%s", pk.JSON, vecKeyfileScryptPretty)
++	}
++	wantText := paperKeyBegin + "\n" + vecKeyfileScryptPretty + "\n" + paperKeyEnd + "\n"
++	if pk.Text != wantText {
++		t.Errorf("paper key text =\n%s\nwant\n%s", pk.Text, wantText)
++	}
++}
++
++func TestPaperKeyMarkerInHint(t *testing.T) {
++	kc := testKeyConfig(t, 7, "x\n"+paperKeyEnd+"\n"+paperKeyBegin)
++	pk, err := NewPaperKey(kc)
++	if err != nil {
++		t.Fatal(err)
++	}
++	got, err := ParseKeyConfig([]byte("Subject: s\n" + pk.Text))
++	if err != nil {
++		t.Fatal(err)
++	}
++	if got.Hint != kc.Hint {
++		t.Errorf("hint = %q, want %q", got.Hint, kc.Hint)
++	}
++}
++
++func TestPaperKeyNoHTMLEscaping(t *testing.T) {
++	kc := testKeyConfig(t, 1, "<a&b>")
++	pk, err := NewPaperKey(kc)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !strings.Contains(pk.JSON, `"hint": "<a&b>"`) {
++		t.Errorf("hint escaped, serde_json would not:\n%s", pk.JSON)
++	}
++}
++
++// The text of a paper key, with or without what surrounds the markers, and
++// the QR payload must all import back to the same key.
++func TestPaperKeyImportsBack(t *testing.T) {
++	kc, err := ParseKeyConfig([]byte(vecKeyfileScrypt))
++	if err != nil {
++		t.Fatal(err)
++	}
++	want, err := kc.CryptConfig([]byte(pkVecPassphrase))
++	if err != nil {
++		t.Fatal(err)
++	}
++	pk, err := NewPaperKey(kc)
++	if err != nil {
++		t.Fatal(err)
++	}
++	for name, in := range map[string]string{
++		"qr payload": pk.JSON,
++		"text":       pk.Text,
++		"pbs text":   "Subject: my key\n\n" + pk.Text + "\n█▀▀▀▀▀█ qr art\n",
++		"indented":   "  " + strings.ReplaceAll(pk.Text, "\n", "\r\n  "),
++		"no end":     paperKeyBegin + "\n" + pk.JSON,
++		"original":   vecKeyfileScrypt,
++	} {
++		got, err := ParseKeyConfig([]byte(in))
++		if err != nil {
++			t.Errorf("%s: %v", name, err)
++			continue
++		}
++		crypt, err := got.CryptConfig([]byte(pkVecPassphrase))
++		if err != nil {
++			t.Errorf("%s: %v", name, err)
++			continue
++		}
++		if crypt.Fingerprint() != want.Fingerprint() || want.Fingerprint() != pkVecFingerprint {
++			t.Errorf("%s: key mismatch", name)
++		}
++	}
++}
++
++// parseQRSVG rasterizes the "M x yhWv1h-Wz" runs qrSVG writes.
++func parseQRSVG(t *testing.T, svg string, size, margin int) [][]bool {
++	t.Helper()
++	i := strings.Index(svg, ` d="`)
++	j := strings.LastIndex(svg, `"/>`)
++	if i < 0 || j < i {
++		t.Fatalf("no path in SVG: %s", svg)
++	}
++	grid := make([][]bool, size)
++	for y := range grid {
++		grid[y] = make([]bool, size)
++	}
++	for _, run := range strings.Split(strings.TrimSuffix(svg[i+4:j], "z"), "z") {
++		var x, y, w, w2 int
++		if _, err := fmt.Sscanf(run, "M%d %dh%dv1h-%d", &x, &y, &w, &w2); err != nil || w != w2 {
++			t.Fatalf("bad run %q: %v", run, err)
++		}
++		for k := 0; k < w; k++ {
++			grid[y-margin][x-margin+k] = true
++		}
++	}
++	return grid
++}
++
++func TestQRSVGMatchesCode(t *testing.T) {
++	kc, err := ParseKeyConfig([]byte(vecKeyfileScrypt))
++	if err != nil {
++		t.Fatal(err)
++	}
++	pk, err := NewPaperKey(kc)
++	if err != nil {
++		t.Fatal(err)
++	}
++	code, err := qr.Encode(pk.JSON, qr.M)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if (code.Size-17)%4 != 0 || code.Size < 21 {
++		t.Fatalf("odd QR size %d", code.Size)
++	}
++	n := code.Size + 8
++	if !strings.Contains(pk.QRSVG, fmt.Sprintf(`viewBox="0 0 %d %d"`, n, n)) {
++		t.Errorf("viewBox does not include the 4-module quiet zone: %s", pk.QRSVG[:120])
++	}
++	grid := parseQRSVG(t, pk.QRSVG, code.Size, 4)
++	for y := 0; y < code.Size; y++ {
++		for x := 0; x < code.Size; x++ {
++			if grid[y][x] != code.Black(x, y) {
++				t.Fatalf("module (%d,%d) = %v, want %v", x, y, grid[y][x], code.Black(x, y))
++			}
++		}
++	}
++	// Top-left finder pattern: dark 7x7 ring, light ring, dark 3x3 core.
++	for k := 0; k < 7; k++ {
++		if !grid[0][k] || !grid[6][k] || !grid[k][0] || !grid[k][6] {
++			t.Fatalf("finder pattern ring broken at %d", k)
++		}
++	}
++	if grid[1][1] || !grid[3][3] {
++		t.Fatal("finder pattern core broken")
++	}
++}
++
++func TestPaperKeyHTMLEscapes(t *testing.T) {
++	kc := testKeyConfig(t, 9, "</p><script>")
++	pk, err := NewPaperKey(kc)
++	if err != nil {
++		t.Fatal(err)
++	}
++	page := string(pk.HTML(PaperKeyPage{
++		Lang:    "fr",
++		Title:   "Clé <b>",
++		Subject: "Serveur & co",
++		Notes:   []string{"<img src=x>"},
++	}))
++	for _, bad := range []string{"<script>", "<b>", "<img src=x>", "Serveur & co"} {
++		if strings.Contains(page, bad) {
++			t.Errorf("unescaped %q in page", bad)
++		}
++	}
++	for _, good := range []string{`<html lang="fr">`, "Serveur &amp; co", paperKeyBegin, "<svg ", "&lt;script&gt;"} {
++		if !strings.Contains(page, good) {
++			t.Errorf("page lacks %q", good)
++		}
++	}
++}
++
++// An unprotected key prints "kdf": null first, as PBS serializes it.
++func TestPaperKeyUnprotectedKDFIsNull(t *testing.T) {
++	pk, err := NewPaperKey(testKeyConfig(t, 3, ""))
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !strings.HasPrefix(pk.JSON, "{\n  \"kdf\": null,\n  \"created\": ") {
++		t.Errorf("unexpected layout:\n%s", pk.JSON)
++	}
++}
++
++func TestProtectKeyConfig(t *testing.T) {
++	plain, err := testKeyConfig(t, 5, "").CryptConfig(nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err := ProtectKeyConfig(plain, []byte("abc"), ""); err == nil {
++		t.Error("short passphrase accepted")
++	}
++	kc, err := ProtectKeyConfig(plain, []byte("s3cret pass"), "the usual")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if kc.KDF == nil || kc.KDF.KDF != "scrypt" || kc.KDF.N != 65536 || kc.KDF.R != 8 || kc.KDF.P != 1 {
++		t.Fatalf("kdf = %+v", kc.KDF)
++	}
++	if _, err := kc.CryptConfig([]byte("wrong pass")); err == nil || !strings.Contains(err.Error(), "the usual") {
++		t.Errorf("wrong passphrase: err = %v", err)
++	}
++	// Through the paper key text, as it would be typed back.
++	pk, err := NewPaperKey(kc)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !strings.Contains(pk.JSON, `"Scrypt": {`) {
++		t.Errorf("protected paper key lacks the scrypt KDF:\n%s", pk.JSON)
++	}
++	back, err := ParseKeyConfig([]byte(pk.Text))
++	if err != nil {
++		t.Fatal(err)
++	}
++	got, err := back.CryptConfig([]byte("s3cret pass"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	if got.Fingerprint() != plain.Fingerprint() {
++		t.Errorf("fingerprint %s, want %s", got.Fingerprint(), plain.Fingerprint())
++	}
++}
+-- 
+2.47.3
+

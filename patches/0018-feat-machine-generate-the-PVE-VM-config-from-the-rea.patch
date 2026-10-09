@@ -1,0 +1,1210 @@
+From 791ba28f51f0035331326af61c9c42c1f0fb448d Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 30 Sep 2026 16:07:05 +0200
+Subject: [PATCH 18/58] feat(machine): generate the PVE VM config from the real
+ machine
+
+"vm" disk snapshots carried a fixed qemu-server.conf template (4 cores,
+2 GB, win11, BIOS, no NIC, random SMBIOS UUID, boot on sata0, rendered
+with html/template), so a Proxmox VE restore produced a VM that often
+did not boot (UEFI installs) or lost its identity.
+
+CollectMachineInfo now probes the source machine (best-effort):
+- Windows: RtlGetVersion + ProductName (Windows 11 fix-up) for the OS,
+  GlobalMemoryStatusEx, GetFirmwareType, Secure Boot state (registry),
+  TPM presence (Tbsi_GetDeviceInfo), SMBIOS type 1 via
+  GetSystemFirmwareTable('RSMB'), system-drive disk via the volume
+  extents already used for VSS.
+- Linux: /etc/os-release, /proc/meminfo, /sys/firmware/efi + SecureBoot
+  efivar, /sys/class/tpm, /sys/class/dmi/id, root filesystem disk via
+  /sys/dev/block (following dm/LVM/md slaves).
+- All: logical CPUs, physical NICs (virtual adapters filtered by name,
+  locally administered MACs sorted last).
+
+BuildQemuConfig renders cores, memory, bios: ovmf for UEFI, ostype from
+the Windows version/edition (win11/win10/win8/win7/...) or l26, one
+netN per adapter keeping its MAC (e1000e on Windows, virtio on Linux),
+smbios1 with the real UUID and base64 strings, boot order on the system
+disk, and description notes listing what to add before first boot (EFI
+disk with pre-enrolled keys when Secure Boot was on, TPM state, Unique
+MACs). efidisk0/tpmstate0 are not declared since the backup has no such
+volume. Every machine backup also uploads machine-info.json.blob.
+
+CI runs the new pure-Go tests through the machinebackup module.
+
+Port onto upstream: keeps upstream's findings in the generated config,
+a "#qmdump#map" line per disk (without it PVE restores no data),
+cache=writeback, and bios: ovmf for a GPT boot disk even when firmware
+detection fails. Replaces upstream's fixed template (renderQemuConfig).
+---
+ machinebackuplib/machinebackup.go       |  99 +-----
+ machinebackuplib/machineinfo.go         | 450 ++++++++++++++++++++++++
+ machinebackuplib/machineinfo_linux.go   | 134 +++++++
+ machinebackuplib/machineinfo_other.go   |   7 +
+ machinebackuplib/machineinfo_test.go    | 160 +++++++++
+ machinebackuplib/machineinfo_windows.go | 152 ++++++++
+ machinebackuplib/qemu_config_test.go    |  43 +--
+ 7 files changed, 938 insertions(+), 107 deletions(-)
+ create mode 100644 machinebackuplib/machineinfo.go
+ create mode 100644 machinebackuplib/machineinfo_linux.go
+ create mode 100644 machinebackuplib/machineinfo_other.go
+ create mode 100644 machinebackuplib/machineinfo_test.go
+ create mode 100644 machinebackuplib/machineinfo_windows.go
+
+diff --git a/machinebackuplib/machinebackup.go b/machinebackuplib/machinebackup.go
+index 94b5d34..27ccaba 100644
+--- a/machinebackuplib/machinebackup.go
++++ b/machinebackuplib/machinebackup.go
+@@ -1,17 +1,15 @@
+ package machinebackuplib
+ 
+ import (
+-	"bytes"
+ 	"crypto/sha256"
+ 	"encoding/hex"
++	"encoding/json"
+ 	"errors"
+ 	"fmt"
+-	"html/template"
+ 	"io"
+ 	"math"
+ 	"os"
+ 	"regexp"
+-	"runtime"
+ 	"slices"
+ 	"strconv"
+ 	"strings"
+@@ -21,7 +19,6 @@ import (
+ 	"pbscommon"
+ 
+ 	"github.com/alphadose/haxmap"
+-	"github.com/google/uuid"
+ )
+ 
+ // ProgressCallback function type for reporting progress.
+@@ -476,60 +473,7 @@ func bootDiskIsGPT(disks []BackupDisk) bool {
+ // BackupResult represents the result of a backup operation
+ type BackupResult struct {
+ 	Disks []BackupDisk
+-}
+-
+-// qemuConfigData is the input to qemuConfigTemplate.
+-type qemuConfigData struct {
+-	VMGenId string
+-	VMID    int64
+-	VMName  string
+-	Disks   []BackupDisk
+-	OS      string
+-	SMBIOS  string
+-	UEFI    bool
+-}
+-
+-// VMID is not a field of BackupDisk, so inside the {{range .Disks}} block it
+-// has to be reached through $ (the root data) rather than through dot.
+-//
+-// The "#qmdump#map:<drive>:<devname>:<storage>:<format>:" line per disk is what
+-// makes Proxmox VE restore the disk image at all: PVE's restore only allocates
+-// and fills drives declared by these lines (found 2026-10-02: without them a
+-// restore ends "TASK OK" in a second, copies the config verbatim and writes no
+-// data). Storage is left empty so the storage chosen in the restore dialog
+-// applies; PVE falls back to "local" (no images) if none is chosen. The sata
+-// line is rewritten by PVE with the newly allocated volume.
+-//
+-// UEFI adds "bios: ovmf" for GPT boot disks (verified 2026-10-03: a Windows
+-// GPT disk gives "no bootable device" under the default SeaBIOS and boots
+-// under OVMF). No efidisk0 is written: PVE's restore only fills drives that
+-// have an image in the archive, and without one PVE starts OVMF with a
+-// temporary efivars disk, which is enough for Windows to boot.
+-var qemuConfigTemplate = template.Must(template.New("qemuconfig").Parse(`{{if .UEFI}}bios: ovmf
+-{{end}}boot: order=sata0
+-cores: 4
+-machine: q35
+-memory: 2048
+-name: {{.VMName}}
+-numa: 0
+-onboot: 0
+-ostype: {{.OS}}
+-scsihw: virtio-scsi-single
+-smbios1: uuid={{.SMBIOS}}
+-sockets: 1
+-{{range .Disks}}
+-sata{{.Index}}: local:{{$.VMID}}/vm-{{$.VMID}}-disk-{{.Index}}.raw,cache=writeback,discard=on,size={{.Size}}
+-#qmdump#map:sata{{.Index}}:drive-sata{{.Index}}::raw:
+-{{end}}
+-vmgenid: {{.VMGenId}}
+-`))
+-
+-func renderQemuConfig(data qemuConfigData) ([]byte, error) {
+-	var wr bytes.Buffer
+-	if err := qemuConfigTemplate.Execute(&wr, data); err != nil {
+-		return nil, fmt.Errorf("execute VM config template: %v", err)
+-	}
+-	return wr.Bytes(), nil
++	Info  *MachineInfo
+ }
+ 
+ // Backup performs a machine backup using the provided configuration
+@@ -672,33 +616,27 @@ func Backup(cfg *Config, progressCallback ProgressCallback) (*BackupResult, erro
+ 		}
+ 	}
+ 
++	// Machine facts (CPU, RAM, firmware, NICs, SMBIOS, boot disk): uploaded as
++	// a side-car for every machine backup, and used to generate the VM config
++	// Proxmox VE restores for "vm" snapshots.
++	info := CollectMachineInfo(cfg.BackupDevices, disks)
++	if progressCallback != nil {
++		progressCallback(1, fmt.Sprintf("Machine: %s, %d CPUs, %d MiB RAM, firmware %s, %d NIC(s)",
++			info.OSName, info.CPUs, info.MemoryMiB, info.Firmware, len(info.NICs)))
++	}
++	if infoJSON, err := json.MarshalIndent(info, "", "  "); err == nil {
++		if err := client.UploadBlob("machine-info.json.blob", infoJSON); err != nil {
++			return nil, fmt.Errorf("upload machine info blob: %v", err)
++		}
++	}
++
+ 	if cfg.BackupType == "vm" {
+ 		vmid, err := strconv.ParseInt(cfg.BackupID, 10, 32)
+ 		if err != nil {
+ 			return nil, fmt.Errorf("parse VM ID %v", err)
+ 		}
+-		hostname, err := os.Hostname()
+-		if err != nil {
+-			return nil, fmt.Errorf("get hostname: %v", err)
+-		}
+-		cfgt := qemuConfigData{
+-			VMGenId: uuid.New().String(),
+-			VMID:    vmid,
+-			Disks:   disks,
+-			VMName:  hostname,
+-			SMBIOS:  uuid.New().String(), //TODO extract from real machine
+-			UEFI:    bootDiskIsGPT(disks),
+-		}
+-		if runtime.GOOS == "windows" { // TODO Improve
+-			cfgt.OS = "win11"
+-		} else {
+-			cfgt.OS = "l26"
+-		}
+-		wr, err := renderQemuConfig(cfgt)
+-		if err != nil {
+-			return nil, err
+-		}
+-		if err := client.UploadBlob("qemu-server.conf.blob", wr); err != nil {
++		conf := BuildQemuConfig(info, vmid, disks)
++		if err := client.UploadBlob("qemu-server.conf.blob", []byte(conf)); err != nil {
+ 			return nil, fmt.Errorf("upload VM config blob: %v", err)
+ 		}
+ 	}
+@@ -712,6 +650,7 @@ func Backup(cfg *Config, progressCallback ProgressCallback) (*BackupResult, erro
+ 
+ 	return &BackupResult{
+ 		Disks: disks,
++		Info:  info,
+ 	}, nil
+ }
+ 
+diff --git a/machinebackuplib/machineinfo.go b/machinebackuplib/machineinfo.go
+new file mode 100644
+index 0000000..1b4e8a0
+--- /dev/null
++++ b/machinebackuplib/machineinfo.go
+@@ -0,0 +1,450 @@
++package machinebackuplib
++
++import (
++	"encoding/base64"
++	"encoding/binary"
++	"fmt"
++	"net"
++	"os"
++	"runtime"
++	"sort"
++	"strings"
++	"time"
++
++	"github.com/google/uuid"
++)
++
++// MachineInfo describes the backed-up machine so a "vm" snapshot restores in
++// Proxmox VE as a VM that matches it: CPU count, RAM, firmware (BIOS/UEFI),
++// NICs, SMBIOS identity and guest OS type. It drives the generated
++// qemu-server.conf and is also uploaded as machine-info.json.blob (PVE
++// ignores that file; it keeps the full facts for later P2V tooling).
++type MachineInfo struct {
++	Hostname   string     `json:"hostname"`
++	OS         string     `json:"os"`                // runtime.GOOS
++	OSName     string     `json:"os_name,omitempty"` // e.g. "Windows Server 2022 Standard (build 20348)"
++	OSMajor    uint32     `json:"os_major,omitempty"`
++	OSMinor    uint32     `json:"os_minor,omitempty"`
++	OSBuild    uint32     `json:"os_build,omitempty"`
++	IsServer   bool       `json:"is_server,omitempty"`
++	PVEOSType  string     `json:"pve_ostype"`
++	CPUs       int        `json:"cpus"` // logical processors
++	MemoryMiB  uint64     `json:"memory_mib"`
++	Firmware   string     `json:"firmware"` // "uefi", "bios" or "" (unknown)
++	SecureBoot bool       `json:"secure_boot,omitempty"`
++	TPM        bool       `json:"tpm,omitempty"`
++	SMBIOS     SMBIOSInfo `json:"smbios"`
++	NICs       []NICInfo  `json:"nics"`
++	// BootDisk is the BackupDisk.Index (sataN) of the disk holding the OS,
++	// -1 when it could not be determined (the first disk is then used).
++	BootDisk    int      `json:"boot_disk"`
++	CollectedAt string   `json:"collected_at"`
++	Warnings    []string `json:"warnings,omitempty"`
++}
++
++// SMBIOSInfo is the SMBIOS "System Information" (type 1) of the machine.
++type SMBIOSInfo struct {
++	UUID         string `json:"uuid,omitempty"`
++	Manufacturer string `json:"manufacturer,omitempty"`
++	Product      string `json:"product,omitempty"`
++	Version      string `json:"version,omitempty"`
++	Serial       string `json:"serial,omitempty"`
++	SKU          string `json:"sku,omitempty"`
++	Family       string `json:"family,omitempty"`
++}
++
++// NICInfo is one physical network adapter.
++type NICInfo struct {
++	Name string `json:"name"`
++	MAC  string `json:"mac"`
++	Up   bool   `json:"up"`
++	// LocallyAdministered MACs are set by software (virtual adapters, but
++	// also overridden or randomized MACs on real ones).
++	LocallyAdministered bool `json:"locally_administered,omitempty"`
++}
++
++// CollectMachineInfo gathers the machine facts for the backed-up disks.
++// devices are cfg.BackupDevices (used to locate the boot disk on Linux).
++// Every probe is best-effort: a failed one leaves its field empty and the
++// generated VM config falls back to safe defaults.
++func CollectMachineInfo(devices []string, disks []BackupDisk) *MachineInfo {
++	mi := &MachineInfo{
++		OS:          runtime.GOOS,
++		CPUs:        runtime.NumCPU(),
++		BootDisk:    -1,
++		CollectedAt: time.Now().Format(time.RFC3339),
++	}
++	mi.Hostname, _ = os.Hostname()
++	collectPlatformInfo(mi)
++	mi.NICs = collectNICs()
++	mi.PVEOSType = pveOSType(mi)
++	if idx := systemDiskIndex(devices, disks); idx >= 0 {
++		mi.BootDisk = idx
++	} else if len(disks) > 0 {
++		mi.Warnings = append(mi.Warnings, "could not determine the system disk; boot order set to the first disk")
++	}
++	for _, d := range disks {
++		if d.Index > 5 {
++			mi.Warnings = append(mi.Warnings, fmt.Sprintf("disk sata%d: Proxmox VE only supports sata0-sata5, move it to another bus after restore", d.Index))
++		}
++	}
++	return mi
++}
++
++// pveOSType maps the guest OS to the Proxmox VE "ostype" value.
++func pveOSType(mi *MachineInfo) string {
++	switch mi.OS {
++	case "linux":
++		return "l26"
++	case "windows":
++	default:
++		return "other"
++	}
++	switch {
++	case mi.OSMajor >= 10:
++		// Windows 11 / Server 2022 / Server 2025 → win11;
++		// Windows 10 / Server 2016 / Server 2019 → win10.
++		if (!mi.IsServer && mi.OSBuild >= 22000) || (mi.IsServer && mi.OSBuild >= 20348) {
++			return "win11"
++		}
++		return "win10"
++	case mi.OSMajor == 6 && mi.OSMinor >= 2: // 8, 8.1, 2012, 2012 R2
++		return "win8"
++	case mi.OSMajor == 6 && mi.OSMinor == 1: // 7, 2008 R2
++		return "win7"
++	case mi.OSMajor == 6: // Vista, 2008
++		return "w2k8"
++	case mi.OSMajor == 5 && mi.OSMinor >= 2: // 2003
++		return "w2k3"
++	case mi.OSMajor == 5:
++		return "wxp"
++	default:
++		return "win10" // unknown Windows: the most compatible modern choice
++	}
++}
++
++// virtualNICMarkers identifies virtual/tunnel adapters that must not become
++// VM NICs (matched case-insensitively against the interface name).
++var virtualNICMarkers = []string{
++	"loopback", "vethernet", "hyper-v", "virtualbox", "vmware", "vmnet", "tap", "tun",
++	"wireguard", "wg", "tailscale", "zerotier", "openvpn", "bluetooth", "docker",
++	"veth", "virbr", "vmbr", "br-", "wsl", "npcap", "isatap", "teredo", "6to4",
++}
++
++// collectNICs lists physical adapters: a 6-byte MAC and no virtual-adapter
++// name. Locally administered MACs are kept (real adapters can have one) but
++// sorted after factory MACs, so the 4-NIC cap drops them first.
++func collectNICs() []NICInfo {
++	ifaces, err := net.Interfaces()
++	if err != nil {
++		return nil
++	}
++	nics := make([]NICInfo, 0)
++	for _, ifc := range ifaces {
++		if ifc.Flags&net.FlagLoopback != 0 || len(ifc.HardwareAddr) != 6 {
++			continue
++		}
++		lname := strings.ToLower(ifc.Name)
++		virtual := false
++		for _, m := range virtualNICMarkers {
++			if strings.Contains(lname, m) {
++				virtual = true
++				break
++			}
++		}
++		if virtual {
++			continue
++		}
++		nics = append(nics, NICInfo{
++			Name:                ifc.Name,
++			MAC:                 strings.ToUpper(ifc.HardwareAddr.String()),
++			Up:                  ifc.Flags&net.FlagUp != 0,
++			LocallyAdministered: ifc.HardwareAddr[0]&0x02 != 0,
++		})
++	}
++	// Factory MACs first, then connected adapters, then by name, for a
++	// stable net0..netN order.
++	sort.SliceStable(nics, func(i, j int) bool {
++		if nics[i].LocallyAdministered != nics[j].LocallyAdministered {
++			return !nics[i].LocallyAdministered
++		}
++		if nics[i].Up != nics[j].Up {
++			return nics[i].Up
++		}
++		return nics[i].Name < nics[j].Name
++	})
++	return nics
++}
++
++// parseSMBIOSSystemInfo extracts the type 1 (System Information) structure
++// from a raw SMBIOS structure table. major/minor is the SMBIOS version: from
++// 2.6 on, the first three UUID fields are little endian.
++func parseSMBIOSSystemInfo(table []byte, major, minor byte) SMBIOSInfo {
++	var info SMBIOSInfo
++	pos := 0
++	for pos+4 <= len(table) {
++		typ := table[pos]
++		length := int(table[pos+1])
++		if length < 4 || pos+length > len(table) {
++			break
++		}
++		formatted := table[pos : pos+length]
++		// Unformatted string-set: NUL-terminated strings, ended by an extra NUL.
++		strs := []string{}
++		end := pos + length
++		for end < len(table) {
++			start := end
++			for end < len(table) && table[end] != 0 {
++				end++
++			}
++			if end == start { // empty string: end of the string-set
++				end++
++				break
++			}
++			strs = append(strs, string(table[start:end]))
++			end++
++		}
++		if len(strs) == 0 && end < len(table) && table[end] == 0 {
++			end++ // no strings: the set is two NULs
++		}
++		str := func(off int) string {
++			if off >= len(formatted) {
++				return ""
++			}
++			n := int(formatted[off])
++			if n == 0 || n > len(strs) {
++				return ""
++			}
++			return cleanSMBIOSString(strs[n-1])
++		}
++		if typ == 1 {
++			info.Manufacturer = str(0x04)
++			info.Product = str(0x05)
++			info.Version = str(0x06)
++			info.Serial = str(0x07)
++			if len(formatted) >= 0x19 {
++				info.UUID = formatSMBIOSUUID(formatted[0x08:0x18], major > 2 || (major == 2 && minor >= 6))
++			}
++			info.SKU = str(0x19)
++			info.Family = str(0x1A)
++			return info
++		}
++		if typ == 127 { // end-of-table
++			break
++		}
++		pos = end
++	}
++	return info
++}
++
++// formatSMBIOSUUID renders a 16-byte SMBIOS UUID, or "" when the firmware
++// left it unset (all 0x00 or all 0xFF).
++func formatSMBIOSUUID(b []byte, littleEndian bool) string {
++	if len(b) != 16 {
++		return ""
++	}
++	allZero, allFF := true, true
++	for _, v := range b {
++		allZero = allZero && v == 0
++		allFF = allFF && v == 0xFF
++	}
++	if allZero || allFF {
++		return ""
++	}
++	var u [16]byte
++	copy(u[:], b)
++	if littleEndian {
++		binary.BigEndian.PutUint32(u[0:4], binary.LittleEndian.Uint32(b[0:4]))
++		binary.BigEndian.PutUint16(u[4:6], binary.LittleEndian.Uint16(b[4:6]))
++		binary.BigEndian.PutUint16(u[6:8], binary.LittleEndian.Uint16(b[6:8]))
++	}
++	return strings.ToUpper(fmt.Sprintf("%x-%x-%x-%x-%x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16]))
++}
++
++// smbiosPlaceholders are values firmware vendors leave in unset SMBIOS fields.
++var smbiosPlaceholders = []string{
++	"to be filled by o.e.m.", "default string", "not specified", "not applicable",
++	"system product name", "system manufacturer", "system version", "system serial number",
++	"none", "n/a", "0", "0123456789",
++}
++
++// cleanSMBIOSString trims a SMBIOS string and drops vendor placeholders.
++func cleanSMBIOSString(s string) string {
++	s = strings.TrimSpace(strings.Trim(s, "\x00"))
++	for _, p := range smbiosPlaceholders {
++		if strings.EqualFold(s, p) {
++			return ""
++		}
++	}
++	return s
++}
++
++// normalizeUUID upper-cases a textual UUID and drops unset ones (all 0 / all F).
++func normalizeUUID(s string) string {
++	s = strings.ToUpper(strings.TrimSpace(s))
++	hexOnly := strings.ReplaceAll(s, "-", "")
++	if len(hexOnly) != 32 || strings.Trim(hexOnly, "0") == "" || strings.Trim(hexOnly, "F") == "" {
++		return ""
++	}
++	return s
++}
++
++// sanitizeVMName makes a Proxmox VE VM name (a DNS name: letters, digits,
++// '-' and '.', not starting or ending with '-' or '.').
++func sanitizeVMName(name string) string {
++	var b strings.Builder
++	for _, r := range name {
++		switch {
++		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '.':
++			b.WriteRune(r)
++		default:
++			b.WriteRune('-')
++		}
++	}
++	s := strings.Trim(b.String(), "-.")
++	if len(s) > 63 {
++		s = strings.Trim(s[:63], "-.")
++	}
++	if s == "" {
++		s = "restored-machine"
++	}
++	return s
++}
++
++// BuildQemuConfig renders the qemu-server.conf stored in a "vm" snapshot, so
++// PVE restores a VM sized and identified like the source machine. Devices
++// that need a storage volume PVE cannot take from the backup (EFI vars disk,
++// TPM state) are not declared: the notes at the top of the config (shown as
++// the VM description in PVE) say what to add before the first boot.
++func BuildQemuConfig(mi *MachineInfo, vmid int64, disks []BackupDisk) string {
++	var notes []string
++	notes = append(notes, fmt.Sprintf("Created by Nimbus Backup from machine %s", mi.Hostname))
++	if mi.OSName != "" {
++		notes = append(notes, "Source OS: "+mi.OSName)
++	}
++	if mi.SMBIOS.Manufacturer != "" || mi.SMBIOS.Product != "" {
++		notes = append(notes, strings.TrimSpace("Source hardware: "+mi.SMBIOS.Manufacturer+" "+mi.SMBIOS.Product))
++	}
++	notes = append(notes, fmt.Sprintf("Backed up on %s with %d CPUs and %d MiB RAM: adjust to the target host if needed.", mi.CollectedAt, mi.CPUs, mi.MemoryMiB))
++	if mi.Firmware == "uefi" {
++		keys := ""
++		if mi.SecureBoot {
++			keys = " with pre-enrolled keys (Secure Boot was on)"
++		}
++		notes = append(notes, "UEFI boot: add an EFI Disk"+keys+" before the first start (Hardware > Add > EFI Disk). Without it PVE boots with temporary EFI variables.")
++	}
++	if mi.TPM {
++		notes = append(notes, "The source had a TPM: add a TPM State v2.0 (Hardware > Add > TPM State). BitLocker volumes may ask for their recovery key on first boot.")
++	}
++	if len(mi.NICs) > 0 {
++		notes = append(notes, "Network cards keep the source MAC addresses: tick Unique when restoring if the source machine is still online.")
++	}
++	for _, w := range mi.Warnings {
++		notes = append(notes, "Warning: "+w)
++	}
++
++	var b strings.Builder
++	for _, n := range notes {
++		// One line per note (a CR/LF from SMBIOS or a hostname would otherwise
++		// start an uncommented config line); PVE URI-decodes description
++		// lines, so keep '%' out of them.
++		n = strings.NewReplacer("\r", " ", "\n", " ", "%", " percent").Replace(n)
++		b.WriteString("#" + n + "\n")
++	}
++
++	boot := -1
++	if mi.BootDisk >= 0 {
++		for _, d := range disks {
++			if d.Index == mi.BootDisk {
++				boot = d.Index
++			}
++		}
++	}
++	if boot < 0 && len(disks) > 0 {
++		boot = disks[0].Index
++	}
++
++	// A GPT boot disk only boots under OVMF ("no bootable device" under the
++	// default SeaBIOS), even when firmware detection came back empty.
++	if mi.Firmware == "uefi" || bootDiskIsGPT(disks) {
++		b.WriteString("bios: ovmf\n")
++	}
++	if boot >= 0 {
++		fmt.Fprintf(&b, "boot: order=sata%d\n", boot)
++	}
++	cpus := mi.CPUs
++	if cpus < 1 {
++		cpus = 2
++	}
++	fmt.Fprintf(&b, "cores: %d\n", cpus)
++	b.WriteString("machine: q35\n")
++	mem := mi.MemoryMiB
++	if mem < 512 {
++		mem = 2048
++	}
++	fmt.Fprintf(&b, "memory: %d\n", mem)
++	fmt.Fprintf(&b, "name: %s\n", sanitizeVMName(mi.Hostname))
++
++	// Windows ships an e1000e driver in-box (virtio needs extra drivers);
++	// older Windows only has e1000. Linux has virtio in-kernel.
++	model := "virtio"
++	if mi.OS == "windows" {
++		model = "e1000e"
++		if mi.PVEOSType == "win7" || mi.PVEOSType == "w2k8" || mi.PVEOSType == "w2k3" || mi.PVEOSType == "wxp" {
++			model = "e1000"
++		}
++	}
++	nics := mi.NICs
++	if len(nics) > 4 {
++		nics = nics[:4]
++	}
++	if len(nics) == 0 {
++		fmt.Fprintf(&b, "net0: %s,bridge=vmbr0\n", model) // PVE picks a MAC
++	}
++	for i, n := range nics {
++		fmt.Fprintf(&b, "net%d: %s=%s,bridge=vmbr0\n", i, model, n.MAC)
++	}
++	b.WriteString("numa: 0\n")
++	b.WriteString("onboot: 0\n")
++	fmt.Fprintf(&b, "ostype: %s\n", mi.PVEOSType)
++	// The "#qmdump#map:<drive>:<devname>:<storage>:<format>:" line per disk is
++	// what makes Proxmox VE restore the disk image at all: PVE's restore only
++	// allocates and fills drives declared by these lines (without them a
++	// restore ends "TASK OK" in a second and writes no data). Storage is left
++	// empty so the storage chosen in the restore dialog applies.
++	for _, d := range disks {
++		fmt.Fprintf(&b, "sata%d: local:%d/vm-%d-disk-%d.raw,cache=writeback,discard=on,size=%d\n", d.Index, vmid, vmid, d.Index, d.Size)
++		fmt.Fprintf(&b, "#qmdump#map:sata%d:drive-sata%d::raw:\n", d.Index, d.Index)
++	}
++	b.WriteString("scsihw: virtio-scsi-single\n")
++	b.WriteString("smbios1: " + smbios1Value(mi.SMBIOS) + "\n")
++	b.WriteString("sockets: 1\n")
++	fmt.Fprintf(&b, "vmgenid: %s\n", uuid.New().String())
++	return b.String()
++}
++
++// smbios1Value builds the PVE smbios1 option: the source UUID (a fresh one
++// if unknown) and, base64-encoded as PVE requires for free text, the
++// manufacturer/product/serial/... strings.
++func smbios1Value(s SMBIOSInfo) string {
++	id := s.UUID
++	if id == "" {
++		id = uuid.New().String()
++	}
++	parts := []string{"uuid=" + strings.ToLower(id)}
++	enc := func(k, v string) {
++		if v != "" {
++			parts = append(parts, k+"="+base64.StdEncoding.EncodeToString([]byte(v)))
++		}
++	}
++	enc("manufacturer", s.Manufacturer)
++	enc("product", s.Product)
++	enc("version", s.Version)
++	enc("serial", s.Serial)
++	enc("sku", s.SKU)
++	enc("family", s.Family)
++	if len(parts) > 1 {
++		parts = append(parts, "base64=1")
++	}
++	return strings.Join(parts, ",")
++}
+diff --git a/machinebackuplib/machineinfo_linux.go b/machinebackuplib/machineinfo_linux.go
+new file mode 100644
+index 0000000..8589dac
+--- /dev/null
++++ b/machinebackuplib/machineinfo_linux.go
+@@ -0,0 +1,134 @@
++//go:build linux
++
++package machinebackuplib
++
++import (
++	"bufio"
++	"fmt"
++	"os"
++	"path/filepath"
++	"strconv"
++	"strings"
++
++	"golang.org/x/sys/unix"
++)
++
++func collectPlatformInfo(mi *MachineInfo) {
++	mi.OSName = linuxOSName()
++	mi.MemoryMiB = linuxMemTotalMiB()
++	if _, err := os.Stat("/sys/firmware/efi"); err == nil {
++		mi.Firmware = "uefi"
++		// efivarfs: 4 attribute bytes, then the value (1 = Secure Boot on).
++		if b, err := os.ReadFile("/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"); err == nil && len(b) >= 5 && b[4] == 1 {
++			mi.SecureBoot = true
++		}
++	} else {
++		mi.Firmware = "bios"
++	}
++	if _, err := os.Stat("/sys/class/tpm/tpm0"); err == nil {
++		mi.TPM = true
++	}
++	read := func(name string) string {
++		b, err := os.ReadFile("/sys/class/dmi/id/" + name)
++		if err != nil {
++			return ""
++		}
++		return cleanSMBIOSString(string(b))
++	}
++	mi.SMBIOS = SMBIOSInfo{
++		UUID:         normalizeUUID(read("product_uuid")), // root only
++		Manufacturer: read("sys_vendor"),
++		Product:      read("product_name"),
++		Version:      read("product_version"),
++		Serial:       read("product_serial"),
++		SKU:          read("product_sku"),
++		Family:       read("product_family"),
++	}
++}
++
++func linuxOSName() string {
++	f, err := os.Open("/etc/os-release")
++	if err != nil {
++		return "Linux"
++	}
++	defer f.Close()
++	sc := bufio.NewScanner(f)
++	for sc.Scan() {
++		if v, ok := strings.CutPrefix(sc.Text(), "PRETTY_NAME="); ok {
++			return strings.Trim(v, `"'`)
++		}
++	}
++	return "Linux"
++}
++
++func linuxMemTotalMiB() uint64 {
++	f, err := os.Open("/proc/meminfo")
++	if err != nil {
++		return 0
++	}
++	defer f.Close()
++	sc := bufio.NewScanner(f)
++	for sc.Scan() {
++		fields := strings.Fields(sc.Text())
++		if len(fields) >= 2 && fields[0] == "MemTotal:" {
++			kb, err := strconv.ParseUint(fields[1], 10, 64)
++			if err == nil {
++				return kb / 1024
++			}
++		}
++	}
++	return 0
++}
++
++// systemDiskIndex returns the index (in devices) of the backed-up disk that
++// holds the root filesystem, or -1.
++func systemDiskIndex(devices []string, disks []BackupDisk) int {
++	var st unix.Stat_t
++	if err := unix.Stat("/", &st); err != nil {
++		return -1
++	}
++	disk := blockDiskForDev(unix.Major(uint64(st.Dev)), unix.Minor(uint64(st.Dev)))
++	if disk == "" {
++		return -1
++	}
++	for i, dev := range devices {
++		p, err := filepath.EvalSymlinks(dev)
++		if err != nil {
++			p = dev
++		}
++		if filepath.Base(p) != disk {
++			continue
++		}
++		for _, d := range disks {
++			if d.Index == i {
++				return i
++			}
++		}
++	}
++	return -1
++}
++
++// blockDiskForDev resolves a block device number to its whole-disk kernel
++// name (sda, nvme0n1), following device-mapper / LVM / md to their first
++// underlying device. "" when it cannot (e.g. btrfs anonymous devices).
++func blockDiskForDev(maj, min uint32) string {
++	sys, err := filepath.EvalSymlinks(fmt.Sprintf("/sys/dev/block/%d:%d", maj, min))
++	if err != nil {
++		return ""
++	}
++	for depth := 0; depth < 8; depth++ {
++		if slaves, _ := filepath.Glob(filepath.Join(sys, "slaves", "*")); len(slaves) > 0 {
++			next, err := filepath.EvalSymlinks(slaves[0])
++			if err != nil {
++				return ""
++			}
++			sys = next
++			continue
++		}
++		if _, err := os.Stat(filepath.Join(sys, "partition")); err == nil {
++			return filepath.Base(filepath.Dir(sys))
++		}
++		return filepath.Base(sys)
++	}
++	return ""
++}
+diff --git a/machinebackuplib/machineinfo_other.go b/machinebackuplib/machineinfo_other.go
+new file mode 100644
+index 0000000..7aa4da8
+--- /dev/null
++++ b/machinebackuplib/machineinfo_other.go
+@@ -0,0 +1,7 @@
++//go:build !windows && !linux
++
++package machinebackuplib
++
++func collectPlatformInfo(mi *MachineInfo) {}
++
++func systemDiskIndex(devices []string, disks []BackupDisk) int { return -1 }
+diff --git a/machinebackuplib/machineinfo_test.go b/machinebackuplib/machineinfo_test.go
+new file mode 100644
+index 0000000..3ae280c
+--- /dev/null
++++ b/machinebackuplib/machineinfo_test.go
+@@ -0,0 +1,160 @@
++package machinebackuplib
++
++import (
++	"encoding/base64"
++	"strings"
++	"testing"
++)
++
++// smbiosType1 builds a type 1 structure (SMBIOS 2.8 layout, 0x1B bytes)
++// followed by its string-set.
++func smbiosType1(uuid [16]byte, strs ...string) []byte {
++	f := make([]byte, 0x1B)
++	f[0], f[1] = 1, 0x1B
++	f[4], f[5], f[6], f[7] = 1, 2, 3, 4 // manufacturer, product, version, serial
++	copy(f[0x08:0x18], uuid[:])
++	f[0x19], f[0x1A] = 5, 6 // SKU, family
++	for _, s := range strs {
++		f = append(append(f, s...), 0)
++	}
++	return append(f, 0)
++}
++
++func TestParseSMBIOSSystemInfo(t *testing.T) {
++	// Type 0 (BIOS) with no strings first: two NULs end its string-set.
++	table := append([]byte{0, 4, 0, 0, 0, 0}, smbiosType1(
++		[16]byte{0x44, 0x45, 0x4c, 0x4c, 0x35, 0x00, 0x10, 0x4e, 0x80, 0x33, 0xb4, 0xc0, 0x4f, 0x4d, 0x32, 0x33},
++		"Dell Inc.", "PowerEdge R640", "To Be Filled By O.E.M.", "ABC1234", "SKU=0716", "PowerEdge")...)
++	table = append(table, 127, 4, 0, 0, 0, 0)
++
++	info := parseSMBIOSSystemInfo(table, 2, 8)
++	want := SMBIOSInfo{
++		UUID:         "4C4C4544-0035-4E10-8033-B4C04F4D3233", // Dell-style, first fields little endian
++		Manufacturer: "Dell Inc.",
++		Product:      "PowerEdge R640",
++		Version:      "", // placeholder dropped
++		Serial:       "ABC1234",
++		SKU:          "SKU=0716",
++		Family:       "PowerEdge",
++	}
++	if info != want {
++		t.Fatalf("got %+v\nwant %+v", info, want)
++	}
++
++	// Pre-2.6 tables store the UUID big endian.
++	old := parseSMBIOSSystemInfo(smbiosType1([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}), 2, 4)
++	if old.UUID != "01020304-0506-0708-090A-0B0C0D0E0F10" {
++		t.Errorf("SMBIOS 2.4 UUID = %s", old.UUID)
++	}
++	var ff [16]byte
++	for i := range ff {
++		ff[i] = 0xFF
++	}
++	if u := parseSMBIOSSystemInfo(smbiosType1(ff), 3, 0).UUID; u != "" {
++		t.Errorf("unset UUID = %q, want empty", u)
++	}
++	if got := parseSMBIOSSystemInfo([]byte{1, 0x1B, 0}, 3, 0); got != (SMBIOSInfo{}) {
++		t.Errorf("truncated table: %+v", got)
++	}
++}
++
++func TestPVEOSType(t *testing.T) {
++	for _, tc := range []struct {
++		os                  string
++		major, minor, build uint32
++		server              bool
++		want                string
++	}{
++		{"windows", 10, 0, 22631, false, "win11"},
++		{"windows", 10, 0, 19045, false, "win10"},
++		{"windows", 10, 0, 26100, true, "win11"}, // Server 2025
++		{"windows", 10, 0, 20348, true, "win11"}, // Server 2022
++		{"windows", 10, 0, 17763, true, "win10"}, // Server 2019
++		{"windows", 6, 3, 9600, true, "win8"},    // 2012 R2
++		{"windows", 6, 1, 7601, false, "win7"},
++		{"linux", 0, 0, 0, false, "l26"},
++		{"darwin", 0, 0, 0, false, "other"},
++	} {
++		mi := &MachineInfo{OS: tc.os, OSMajor: tc.major, OSMinor: tc.minor, OSBuild: tc.build, IsServer: tc.server}
++		if got := pveOSType(mi); got != tc.want {
++			t.Errorf("%s %d.%d.%d server=%v: %s, want %s", tc.os, tc.major, tc.minor, tc.build, tc.server, got, tc.want)
++		}
++	}
++}
++
++func TestBuildQemuConfig(t *testing.T) {
++	mi := &MachineInfo{
++		Hostname: "SRV_FILES 01", OS: "windows", OSName: "Windows Server 2022 Standard (build 20348)",
++		PVEOSType: "win11", CPUs: 8, MemoryMiB: 32768, Firmware: "uefi", SecureBoot: true, TPM: true,
++		SMBIOS:   SMBIOSInfo{UUID: "4C4C4544-0035-4E10-8033-B4C04F4D3233", Manufacturer: "Dell Inc.", Serial: "ABC1234"},
++		NICs:     []NICInfo{{Name: "Ethernet", MAC: "B4:96:91:00:11:22", Up: true}, {Name: "Ethernet 2", MAC: "B4:96:91:00:11:23"}},
++		BootDisk: 1, CollectedAt: "2026-09-30T12:00:00+02:00",
++	}
++	conf := BuildQemuConfig(mi, 105, []BackupDisk{{Index: 0, Size: 1 << 40}, {Index: 1, Size: 256 << 30}})
++	for _, want := range []string{
++		"bios: ovmf\n",
++		"boot: order=sata1\n",
++		"cores: 8\n",
++		"memory: 32768\n",
++		"name: SRV-FILES-01\n",
++		"net0: e1000e=B4:96:91:00:11:22,bridge=vmbr0\n",
++		"net1: e1000e=B4:96:91:00:11:23,bridge=vmbr0\n",
++		"ostype: win11\n",
++		"sata0: local:105/vm-105-disk-0.raw,cache=writeback,discard=on,size=1099511627776\n",
++		"#qmdump#map:sata0:drive-sata0::raw:\n",
++		"sata1: local:105/vm-105-disk-1.raw,cache=writeback,discard=on,size=274877906944\n",
++		"#qmdump#map:sata1:drive-sata1::raw:\n",
++		"smbios1: uuid=4c4c4544-0035-4e10-8033-b4c04f4d3233,manufacturer=" + base64.StdEncoding.EncodeToString([]byte("Dell Inc.")) +
++			",serial=" + base64.StdEncoding.EncodeToString([]byte("ABC1234")) + ",base64=1\n",
++		"EFI Disk with pre-enrolled keys",
++		"TPM State v2.0",
++	} {
++		if !strings.Contains(conf, want) {
++			t.Errorf("config lacks %q:\n%s", want, conf)
++		}
++	}
++	for _, line := range strings.Split(strings.TrimSpace(conf), "\n") {
++		if strings.HasPrefix(line, "#") {
++			if strings.Contains(line, "%") {
++				t.Errorf("description line contains %%: %q", line)
++			}
++			continue
++		}
++		if !strings.Contains(line, ": ") {
++			t.Errorf("malformed config line %q", line)
++		}
++	}
++	injected := BuildQemuConfig(&MachineInfo{Hostname: "h", OS: "linux", PVEOSType: "l26", BootDisk: -1,
++		SMBIOS: SMBIOSInfo{Manufacturer: "Evil\nbios: seabios"}}, 100, nil)
++	if strings.Contains(injected, "\nbios: seabios") {
++		t.Errorf("newline in SMBIOS data escaped the description:\n%s", injected)
++	}
++	if strings.Contains(conf, "efidisk0") || strings.Contains(conf, "tpmstate0") {
++		t.Error("config references volumes absent from the backup")
++	}
++
++	// Unknown hardware: safe defaults, generated SMBIOS UUID, PVE-picked MAC.
++	bare := BuildQemuConfig(&MachineInfo{Hostname: "", OS: "linux", PVEOSType: "l26", BootDisk: -1}, 100, []BackupDisk{{Index: 0, Size: 1 << 30}})
++	for _, want := range []string{"boot: order=sata0\n", "cores: 2\n", "memory: 2048\n", "name: restored-machine\n", "net0: virtio,bridge=vmbr0\n", "smbios1: uuid="} {
++		if !strings.Contains(bare, want) {
++			t.Errorf("bare config lacks %q:\n%s", want, bare)
++		}
++	}
++	if strings.Contains(bare, "bios: ovmf") || strings.Contains(bare, "base64=1") {
++		t.Errorf("bare config:\n%s", bare)
++	}
++}
++
++func TestSanitizeVMNameAndUUID(t *testing.T) {
++	for in, want := range map[string]string{"WIN-DC01": "WIN-DC01", "srv_files": "srv-files", "-é-": "restored-machine", strings.Repeat("a", 70): strings.Repeat("a", 63)} {
++		if got := sanitizeVMName(in); got != want {
++			t.Errorf("sanitizeVMName(%q) = %q, want %q", in, got, want)
++		}
++	}
++	if normalizeUUID("00000000-0000-0000-0000-000000000000") != "" || normalizeUUID("ffffffff-ffff-ffff-ffff-ffffffffffff") != "" {
++		t.Error("unset UUID not dropped")
++	}
++	if got := normalizeUUID("4c4c4544-0035-4e10-8033-b4c04f4d3233"); got != "4C4C4544-0035-4E10-8033-B4C04F4D3233" {
++		t.Errorf("normalizeUUID = %s", got)
++	}
++}
+diff --git a/machinebackuplib/machineinfo_windows.go b/machinebackuplib/machineinfo_windows.go
+new file mode 100644
+index 0000000..abfe705
+--- /dev/null
++++ b/machinebackuplib/machineinfo_windows.go
+@@ -0,0 +1,152 @@
++//go:build windows
++
++package machinebackuplib
++
++import (
++	"encoding/binary"
++	"fmt"
++	"os"
++	"strings"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++	"golang.org/x/sys/windows/registry"
++)
++
++var (
++	procGlobalMemoryStatusEx   = modkernel32.NewProc("GlobalMemoryStatusEx")
++	procGetFirmwareType        = modkernel32.NewProc("GetFirmwareType")
++	procGetSystemFirmwareTable = modkernel32.NewProc("GetSystemFirmwareTable")
++	modtbs                     = windows.NewLazySystemDLL("tbs.dll")
++	procTbsiGetDeviceInfo      = modtbs.NewProc("Tbsi_GetDeviceInfo")
++)
++
++// MEMORYSTATUSEX
++type memoryStatusEx struct {
++	Length               uint32
++	MemoryLoad           uint32
++	TotalPhys            uint64
++	AvailPhys            uint64
++	TotalPageFile        uint64
++	AvailPageFile        uint64
++	TotalVirtual         uint64
++	AvailVirtual         uint64
++	AvailExtendedVirtual uint64
++}
++
++// TPM_DEVICE_INFO
++type tpmDeviceInfo struct {
++	StructVersion    uint32
++	TPMVersion       uint32
++	TPMInterfaceType uint32
++	TPMImpRevision   uint32
++}
++
++func collectPlatformInfo(mi *MachineInfo) {
++	// RtlGetVersion is not subject to the manifest-based version lie of GetVersionEx.
++	v := windows.RtlGetVersion()
++	mi.OSMajor, mi.OSMinor, mi.OSBuild = v.MajorVersion, v.MinorVersion, v.BuildNumber
++	mi.IsServer = v.ProductType != 1 // VER_NT_WORKSTATION
++	mi.OSName = windowsProductName(mi)
++
++	var ms memoryStatusEx
++	ms.Length = uint32(unsafe.Sizeof(ms))
++	if r, _, _ := procGlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&ms))); r != 0 {
++		mi.MemoryMiB = ms.TotalPhys / (1024 * 1024)
++	}
++
++	// GetFirmwareType (Windows 8+): FirmwareTypeBios = 1, FirmwareTypeUefi = 2.
++	if procGetFirmwareType.Find() == nil {
++		var ft uint32
++		if r, _, _ := procGetFirmwareType.Call(uintptr(unsafe.Pointer(&ft))); r != 0 {
++			switch ft {
++			case 1:
++				mi.Firmware = "bios"
++			case 2:
++				mi.Firmware = "uefi"
++			}
++		}
++	}
++	if mi.Firmware == "uefi" {
++		if k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\SecureBoot\State`, registry.QUERY_VALUE); err == nil {
++			if val, _, err := k.GetIntegerValue("UEFISecureBootEnabled"); err == nil && val == 1 {
++				mi.SecureBoot = true
++			}
++			_ = k.Close()
++		}
++	}
++
++	// Tbsi_GetDeviceInfo returns TBS_SUCCESS (0) only when a TPM is present.
++	if procTbsiGetDeviceInfo.Find() == nil {
++		var info tpmDeviceInfo
++		if r, _, _ := procTbsiGetDeviceInfo.Call(uintptr(unsafe.Sizeof(info)), uintptr(unsafe.Pointer(&info))); r == 0 {
++			mi.TPM = true
++		}
++	}
++
++	mi.SMBIOS = windowsSMBIOS()
++}
++
++// windowsProductName is e.g. "Windows Server 2022 Standard (build 20348)".
++// Windows 11 still reports "Windows 10" in ProductName: fix it from the build.
++func windowsProductName(mi *MachineInfo) string {
++	name := "Windows"
++	if k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows NT\CurrentVersion`, registry.QUERY_VALUE); err == nil {
++		if s, _, err := k.GetStringValue("ProductName"); err == nil && s != "" {
++			name = s
++		}
++		_ = k.Close()
++	}
++	if !mi.IsServer && mi.OSBuild >= 22000 {
++		name = strings.Replace(name, "Windows 10", "Windows 11", 1)
++	}
++	return fmt.Sprintf("%s (build %d)", name, mi.OSBuild)
++}
++
++// windowsSMBIOS reads the raw SMBIOS table (GetSystemFirmwareTable 'RSMB').
++func windowsSMBIOS() SMBIOSInfo {
++	const rsmb = 0x52534D42 // 'RSMB'
++	size, _, _ := procGetSystemFirmwareTable.Call(rsmb, 0, 0, 0)
++	if size < 8 || size > 1<<20 {
++		return SMBIOSInfo{}
++	}
++	buf := make([]byte, size)
++	n, _, _ := procGetSystemFirmwareTable.Call(rsmb, 0, uintptr(unsafe.Pointer(&buf[0])), size)
++	if n < 8 || n > size {
++		return SMBIOSInfo{}
++	}
++	buf = buf[:n]
++	// RawSMBIOSData: Used20CallingMethod, SMBIOSMajorVersion, SMBIOSMinorVersion,
++	// DmiRevision (1 byte each), Length (DWORD), then the structure table.
++	table := buf[8:]
++	if tlen := binary.LittleEndian.Uint32(buf[4:8]); int(tlen) < len(table) {
++		table = table[:tlen]
++	}
++	return parseSMBIOSSystemInfo(table, buf[1], buf[2])
++}
++
++// systemDiskIndex returns the backed-up disk (PhysicalDriveN index) holding
++// the Windows system drive, or -1.
++func systemDiskIndex(devices []string, disks []BackupDisk) int {
++	sysDrive := strings.ToUpper(os.Getenv("SystemDrive"))
++	if sysDrive == "" {
++		sysDrive = "C:"
++	}
++	vols, err := enumVolumeDiskOffset()
++	if err != nil {
++		return -1
++	}
++	for _, v := range vols {
++		for _, l := range v.Letters {
++			if !strings.EqualFold(strings.TrimRight(l, `\`), sysDrive) {
++				continue
++			}
++			for _, d := range disks {
++				if d.Index == int(v.DiskNumber) {
++					return d.Index
++				}
++			}
++		}
++	}
++	return -1
++}
+diff --git a/machinebackuplib/qemu_config_test.go b/machinebackuplib/qemu_config_test.go
+index df619ab..4947a8e 100644
+--- a/machinebackuplib/qemu_config_test.go
++++ b/machinebackuplib/qemu_config_test.go
+@@ -5,26 +5,16 @@ import (
+ 	"testing"
+ )
+ 
+-func TestRenderQemuConfigUsesVMIDForEveryDisk(t *testing.T) {
+-	out, err := renderQemuConfig(qemuConfigData{
+-		VMGenId: "11111111-1111-1111-1111-111111111111",
+-		VMID:    107,
+-		VMName:  "testhost",
+-		OS:      "l26",
+-		SMBIOS:  "22222222-2222-2222-2222-222222222222",
+-		Disks:   []BackupDisk{{Index: 0, Size: 1 << 30}, {Index: 1, Size: 2 << 30}},
+-	})
+-	if err != nil {
+-		t.Fatalf("renderQemuConfig: %v", err)
+-	}
+-	cfg := string(out)
++func TestBuildQemuConfigUsesVMIDForEveryDisk(t *testing.T) {
++	mi := &MachineInfo{Hostname: "testhost", OS: "linux", PVEOSType: "l26", BootDisk: -1}
++	cfg := BuildQemuConfig(mi, 107, []BackupDisk{{Index: 0, Size: 1 << 30}, {Index: 1, Size: 2 << 30}})
+ 	for _, want := range []string{
+ 		"name: testhost",
+ 		"sata0: local:107/vm-107-disk-0.raw,cache=writeback,discard=on,size=1073741824",
+ 		"sata1: local:107/vm-107-disk-1.raw,cache=writeback,discard=on,size=2147483648",
+ 		"#qmdump#map:sata0:drive-sata0::raw:",
+ 		"#qmdump#map:sata1:drive-sata1::raw:",
+-		"vmgenid: 11111111-1111-1111-1111-111111111111",
++		"vmgenid: ",
+ 	} {
+ 		if !strings.Contains(cfg, want) {
+ 			t.Errorf("config missing %q\n%s", want, cfg)
+@@ -32,22 +22,21 @@ func TestRenderQemuConfigUsesVMIDForEveryDisk(t *testing.T) {
+ 	}
+ }
+ 
+-func TestRenderQemuConfigUEFI(t *testing.T) {
+-	base := qemuConfigData{VMGenId: "g", VMID: 107, VMName: "h", OS: "win11", SMBIOS: "s", Disks: []BackupDisk{{Index: 0, Size: 1 << 30}}}
+-	out, err := renderQemuConfig(base)
+-	if err != nil {
+-		t.Fatal(err)
+-	}
+-	if strings.Contains(string(out), "bios:") {
++func TestBuildQemuConfigUEFI(t *testing.T) {
++	mi := &MachineInfo{Hostname: "h", OS: "windows", PVEOSType: "win11", BootDisk: -1}
++	disks := []BackupDisk{{Index: 0, Size: 1 << 30}}
++	if out := BuildQemuConfig(mi, 107, disks); strings.Contains(out, "bios:") {
+ 		t.Errorf("BIOS disk must not get a bios line\n%s", out)
+ 	}
+-	base.UEFI = true
+-	out, err = renderQemuConfig(base)
+-	if err != nil {
+-		t.Fatal(err)
++	// Firmware detection failed but the boot disk is GPT: still OVMF.
++	disks[0].GPT = true
++	if out := BuildQemuConfig(mi, 107, disks); !strings.Contains(out, "\nbios: ovmf\n") || strings.Contains(out, "efidisk") {
++		t.Errorf("GPT boot disk should get bios: ovmf and no efidisk\n%s", out)
+ 	}
+-	if !strings.HasPrefix(string(out), "bios: ovmf\n") || strings.Contains(string(out), "efidisk") {
+-		t.Errorf("UEFI config should start with bios: ovmf and have no efidisk\n%s", out)
++	disks[0].GPT = false
++	mi.Firmware = "uefi"
++	if out := BuildQemuConfig(mi, 107, disks); !strings.Contains(out, "\nbios: ovmf\n") {
++		t.Errorf("UEFI firmware should get bios: ovmf\n%s", out)
+ 	}
+ }
+ 
+-- 
+2.47.3
+

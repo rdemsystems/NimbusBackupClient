@@ -1,0 +1,29 @@
+From 972c0fff26c531817d6407ec66e3f5252bcb6266 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 14:01:15 +0200
+Subject: [PATCH 32/58] ci: run Build GUI in the 'signing' environment for a
+ single Azure federated credential
+
+---
+ .github/workflows/build-and-release.yml | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index d60f0ac..09f943d 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -260,6 +260,11 @@ jobs:
+     name: Build GUI
+     needs: [security, test, test-modules]
+     runs-on: windows-latest
++    # The environment pins the OIDC subject to
++    # repo:rdemsystems/NimbusBackupClient:environment:signing, so one Azure
++    # federated credential covers every branch and tag (a ref-based subject
++    # cannot wildcard v* tags).
++    environment: signing
+     # id-token: OIDC login to Azure for code signing (no stored secret).
+     permissions:
+       contents: read
+-- 
+2.47.3
+

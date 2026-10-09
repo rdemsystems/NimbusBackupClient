@@ -1,0 +1,264 @@
+From 7a22640b62bb6de568aa60dbc66d41ebd03a50ad Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 14:52:43 +0200
+Subject: [PATCH 42/58] feat(cli): -parallel N backs up several directories at
+ once (issue #6)
+
+backup_parallel runs up to N directories of a multi-directory run at the same
+time, each in its own backup group and PBS session. With VSS, one snapshot
+set covering every directory is taken first: concurrent snapshot creations
+collide, and the VSS-busy recovery deletes every shadow copy. No upper limit;
+the help shows the recommended value (CPUs / 4). "parallel" in the JSON
+config. e2e test 10: two directories in parallel with -exclude and
+-exclude-from, restored with the official client.
+---
+ directorybackup/config.go | 15 ++++++
+ directorybackup/main.go   | 98 +++++++++++++++++++++++++++++++++++++--
+ testing/e2e/run.sh        | 36 ++++++++++++++
+ 3 files changed, 146 insertions(+), 3 deletions(-)
+
+diff --git a/directorybackup/config.go b/directorybackup/config.go
+index a3102dd..5680ae1 100644
+--- a/directorybackup/config.go
++++ b/directorybackup/config.go
+@@ -5,6 +5,7 @@ import (
+ 	"flag"
+ 	"fmt"
+ 	"os"
++	"runtime"
+ 	"strings"
+ )
+ 
+@@ -65,6 +66,16 @@ type Config struct {
+ 	// ExcludeFrom is a file with one pattern per line (blank lines and lines
+ 	// starting with # are ignored), added to Exclude.
+ 	ExcludeFrom string `json:"exclude-from"`
++
++	// Parallel is how many directories of a multi-directory run are backed up
++	// at the same time (default 1, one after the other). No upper limit; the
++	// recommended value is the number of CPUs / 4 (RecommendedParallel).
++	Parallel int `json:"parallel"`
++}
++
++// RecommendedParallel is the suggested -parallel value: CPUs / 4, at least 1.
++func RecommendedParallel() int {
++	return max(runtime.NumCPU()/4, 1)
+ }
+ 
+ // ExcludePatterns returns the patterns of Exclude and of the ExcludeFrom file.
+@@ -147,6 +158,7 @@ func loadConfig() *Config {
+ 	var excludeFlags dirListFlag
+ 	flag.Var(&excludeFlags, "exclude", "Exclusion pattern, repeatable: a name anywhere in the tree (\"*.tmp\", \"node_modules\") or a path anchored to the backup root (\"logs/*.log\")")
+ 	excludeFromFlag := flag.String("exclude-from", "", "File with one exclusion pattern per line (# starts a comment)")
++	parallelFlag := flag.Int("parallel", 0, fmt.Sprintf("Number of directories backed up at the same time when several -backupdir are given (default 1; recommended: CPUs / 4 = %d on this machine)", RecommendedParallel()))
+ 	backupStreamNameFlag := flag.String("backupstream", "", "Filename for stream backup")
+ 	pxarOutFlag := flag.String("pxarout", "", "Output PXAR archive for debug purposes (optional)")
+ 	noVSSFlag := flag.Bool("novss", false, "Disable VSS ( For filesystems that don't support it, for example veracrypt )")
+@@ -222,6 +234,9 @@ func loadConfig() *Config {
+ 	if *excludeFromFlag != "" {
+ 		config.ExcludeFrom = *excludeFromFlag
+ 	}
++	if *parallelFlag != 0 {
++		config.Parallel = *parallelFlag
++	}
+ 
+ 	if *backupStreamNameFlag != "" {
+ 		config.BackupStreamName = *backupStreamNameFlag
+diff --git a/directorybackup/main.go b/directorybackup/main.go
+index 18745bc..a54322b 100644
+--- a/directorybackup/main.go
++++ b/directorybackup/main.go
+@@ -11,10 +11,12 @@ import (
+ 	"hash"
+ 	"io"
+ 	"os"
++	"path/filepath"
+ 	"pbscommon"
+ 	"runtime"
+ 	"snapshot"
+ 	"strings"
++	"sync"
+ 	"sync/atomic"
+ 	"time"
+ 
+@@ -275,7 +277,7 @@ func main() {
+ 		if baseID == "" {
+ 			baseID = hostname
+ 		}
+-		readErrors, err = backup_many(newClient, newchunk, reusechunk, cfg.PxarOut, dirs, baseID, cfg.UseVSS, excludes)
++		readErrors, err = backup_many(newClient, newchunk, reusechunk, cfg.PxarOut, dirs, baseID, cfg.UseVSS, excludes, cfg.Parallel)
+ 	} else if cfg.BackupStreamName != "" {
+ 		sn := cfg.BackupStreamName
+ 		if !strings.HasSuffix(sn, ".didx") {
+@@ -368,8 +370,9 @@ func main() {
+ // backup group with the id <base>_<path> (the same ids the GUI uses), so PBS
+ // retention and restore treat every directory as an independent series. A
+ // directory that fails does not stop the others; the failures are joined into
+-// the returned error.
+-func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool, excludes []string) ([]string, error) {
++// the returned error. With parallel > 1, up to that many directories are backed
++// up at the same time (see backup_parallel).
++func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool, excludes []string, parallel int) ([]string, error) {
+ 	if pxarOut != "" {
+ 		return nil, fmt.Errorf("-pxarout writes a single archive and cannot be combined with several -backupdir")
+ 	}
+@@ -383,6 +386,10 @@ func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error),
+ 		ids[id] = dir
+ 	}
+ 
++	if parallel > 1 {
++		return backup_parallel(newClient, newchunk, reusechunk, dirs, baseID, usevss, excludes, parallel)
++	}
++
+ 	var readErrors []string
+ 	var failures []error
+ 	for _, dir := range dirs {
+@@ -406,6 +413,91 @@ func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error),
+ 	return readErrors, errors.Join(failures...)
+ }
+ 
++// backup_parallel backs up dirs with up to parallel directories at a time, each
++// in its own backup group and PBS session. With VSS, ONE snapshot set covering
++// every directory is taken before any upload starts: concurrent snapshot
++// creations collide ("VSS busy"), and the busy-recovery path deletes every
++// shadow copy, which would pull the snapshot from under the other directories.
++func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dirs []string, baseID string, usevss bool, excludes []string, parallel int) ([]string, error) {
++	fmt.Printf("Backing up %d directories, %d at a time\n", len(dirs), parallel)
++
++	run := func(readDirOf func(dir string) string) ([]string, error) {
++		readErrs := make([][]string, len(dirs))
++		failures := make([]error, len(dirs))
++		sem := make(chan struct{}, parallel)
++		var wg sync.WaitGroup
++		for i, dir := range dirs {
++			wg.Add(1)
++			sem <- struct{}{}
++			go func() {
++				defer wg.Done()
++				defer func() { <-sem }()
++				readErrs[i], failures[i] = backup_one(newClient, newchunk, reusechunk, dir, readDirOf(dir), baseID, excludes)
++			}()
++		}
++		wg.Wait()
++		var readErrors []string
++		for _, e := range readErrs {
++			readErrors = append(readErrors, e...)
++		}
++		return readErrors, errors.Join(failures...)
++	}
++
++	if !usevss {
++		return run(func(dir string) string { return dir })
++	}
++	var readErrors []string
++	var runErr error
++	err := snapshot.CreateVSSSnapshot(dirs, true, func(snaps map[string]snapshot.SnapShot) error {
++		readErrors, runErr = run(func(dir string) string {
++			if s, ok := snaps[dir]; ok {
++				return s.FullPath
++			}
++			if abs, err := filepath.Abs(dir); err == nil {
++				if s, ok := snaps[abs]; ok {
++					return s.FullPath
++				}
++			}
++			return ""
++		})
++		return nil
++	})
++	return readErrors, errors.Join(err, runErr)
++}
++
++// backup_one backs up one directory of a parallel run as backup group
++// <base>_<dir>, reading readDir (its snapshot path under VSS) and committing the
++// snapshot even on read errors, like backup().
++func backup_one(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dir, readDir, baseID string, excludes []string) ([]string, error) {
++	if readDir == "" {
++		return nil, fmt.Errorf("%s: no snapshot was taken for this directory", dir)
++	}
++	id := clientcommon.GenerateBackupID(baseID, dir)
++	fmt.Printf("Backing up %s as backup group %s\n", dir, id)
++	client, err := newClient(id)
++	if err != nil {
++		return nil, fmt.Errorf("%s: ticket login failed: %w", dir, err)
++	}
++	// Release the session even after a failure, otherwise PBS keeps the group
++	// locked until the connection times out.
++	defer client.Close()
++
++	readErrors, err := backup_real(client, newchunk, reusechunk, "", readDir, dir, excludes)
++	if readDir != dir {
++		err = unmapSnapshotPath(err, readDir, dir)
++		for i := range readErrors {
++			readErrors[i] = unmapSnapshotPathString(readErrors[i], readDir, dir)
++		}
++	}
++	if err == nil {
++		err = client.Finish()
++	}
++	if err != nil {
++		return readErrors, fmt.Errorf("%s: %w", dir, err)
++	}
++	return readErrors, nil
++}
++
+ func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, filename string, stream io.Reader) error {
+ 	knownChunks := haxmap.New[string, bool]()
+ 	client.Connect(false, "host")
+diff --git a/testing/e2e/run.sh b/testing/e2e/run.sh
+index 3615a45..4aa1271 100755
+--- a/testing/e2e/run.sh
++++ b/testing/e2e/run.sh
+@@ -354,6 +354,41 @@ test_dedup_reuse() {
+ 	ok "second identical block backup completed (fixed index is content-addressed)"
+ }
+ 
++# ===========================================================================
++# Test 10: two directories backed up in parallel, with exclusions
++# ===========================================================================
++# Each directory is its own backup group <base>_<path> (clientcommon
++# GenerateBackupID); both must restore to the source tree, the excluded
++# files (-exclude and -exclude-from) left out.
++e2e_backup_id() {
++	printf '%s_%s' "$1" "$(printf '%s' "$2" | tr '/' '_' | tr ' ' '-' | tr -cd 'A-Za-z0-9_.-' | sed 's/^_*//; s/_*$//')"
++}
++
++test_parallel_with_exclusions() {
++	local a="$WORK/par-a" b="$WORK/par-b"
++	rm -rf "$a" "$b"
++	cp -a "$WORK/src" "$a"
++	cp -a "$WORK/src" "$b"
++	printf 'excluded by -exclude\n' >"$a/skip.tmp"
++	mkdir -p "$b/subdir/cache"
++	printf 'excluded by -exclude-from\n' >"$b/subdir/cache/blob.bin"
++	printf '# e2e exclusions\ncache\n' >"$WORK/exclude.txt"
++
++	our_directory_backup "$a" -backupdir "$b" -backup-id e2e-par -parallel 2 \
++		-exclude '*.tmp' -exclude-from "$WORK/exclude.txt" >"$WORK/log-par.txt" 2>&1 \
++		|| { cat "$WORK/log-par.txt"; return 1; }
++	grep -q '2 at a time' "$WORK/log-par.txt" \
++		|| { cat "$WORK/log-par.txt"; die "the run did not back up the directories in parallel"; }
++
++	local d id
++	for d in a b; do
++		id="$(e2e_backup_id e2e-par "$WORK/par-$d")"
++		pbc_restore "host/$id" backup.pxar.didx "restore-par-$d"
++		assert_tree_identical "$WORK/src" "$WORK/restore-par-$d" "parallel backup of par-$d"
++	done
++	ok "both directories restored without their excluded files"
++}
++
+ # ---------------------------------------------------------------------------
+ # Main
+ # ---------------------------------------------------------------------------
+@@ -402,6 +437,7 @@ main() {
+ 	run_test "7. chunk dedup on a second identical backup"         test_dedup_reuse
+ 	run_test "8. namespace round-trip (-namespace / --ns)"         test_namespace_roundtrip
+ 	run_test "9. official encrypted block backup -> our read back" test_official_encrypted_block_readback
++	run_test "10. parallel directories + exclusions -> official"   test_parallel_with_exclusions
+ 
+ 	section "Summary"
+ 	log "passed: ${#PASSED[@]}"
+-- 
+2.47.3
+

@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package main
@@ -7,26 +8,46 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime/debug"
 	"time"
+
+	"pbscommon"
+	"snapshot"
 
 	"github.com/kardianos/service"
 	"github.com/tizbac/proxmoxbackupclient_go/gui/api"
-	"pbscommon"
-	"snapshot"
 )
 
 // BackupService wraps the application for Windows Service execution
 type BackupService struct {
-	app       *App
-	apiServer *api.Server
-	stopChan  chan struct{}
+	app          *App
+	apiServer    *api.Server
+	tokenRotator *api.TokenRotator
+	stopChan     chan struct{}
 }
 
 // Start is called when the service starts
 func (s *BackupService) Start(svc service.Service) error {
 	writeDebugLog("Proxmox Backup Client service starting...")
 	s.stopChan = make(chan struct{})
-	go s.run()
+	go func() {
+		// A panic in the run loop kills the process and the SCM reports the
+		// service as "terminated unexpectedly" (error 1053/1067) with nothing
+		// in the log to explain it. Recover, dump the stack to the service
+		// log, and keep the process alive so the failure is diagnosable.
+		defer func() {
+			if r := recover(); r != nil {
+				writeDebugLog(fmt.Sprintf("CRITICAL: service run panic: %v\n%s", r, debug.Stack()))
+				// Exit so the SCM reports a real failure (instead of a
+				// "running" service that does nothing); the stack above is
+				// already flushed to service-service.log.
+				os.Exit(1)
+			}
+		}()
+		s.run()
+	}()
 	return nil
 }
 
@@ -34,17 +55,14 @@ func (s *BackupService) Start(svc service.Service) error {
 func (s *BackupService) run() {
 	writeDebugLog("Proxmox Backup Client service running")
 
+	// The service owns the privileged state directory on Windows too.
+	// Pin config dir before any config/scheduler operations.
+	SetConfigDir(serviceStateDir())
+
 	// Initialize app with background context (service has no Wails runtime)
 	// IMPORTANT: Service App must be in Standalone mode to execute backups directly
-	s.app = &App{
-		ctx:              context.Background(),
-		config:           LoadConfig(),
-		stopScheduler:    make(chan struct{}),
-		apiClient:        api.NewClient(getAPITokenPath()),
-		mode:             api.ModeStandalone, // Service executes directly, doesn't use API
-		callbacksMap:     make(map[string]*progressCallbacks),
-		isServiceProcess: true, // Prevent mode re-detection (would cause infinite loop)
-	}
+
+	s.app = NewAppForService(context.Background())
 
 	// Load configuration (service will read config from file when needed)
 	configMap := s.app.GetConfigWithHostname()
@@ -83,8 +101,21 @@ func (s *BackupService) run() {
 	if tokErr != nil {
 		writeDebugLog(fmt.Sprintf("API token init failed (API will reject all requests): %v", tokErr))
 	}
+
+	// Harden file ACLs: token readable by SYSTEM + Administrators; config files
+	// SYSTEM-only. Best-effort — never fail service startup if icacls is missing.
+	go hardenWindowsACLs(serviceStateDir())
+
 	s.apiServer = api.NewServer("127.0.0.1:18765", s.app, apiToken, appVersion)
 	writeDebugLog("Starting HTTP API server on 127.0.0.1:18765")
+
+	// Periodic token regeneration (default 24h, PBSGO_TOKEN_ROTATION/GRACE to
+	// tune, rotation=0 to disable): the replaced token keeps authenticating
+	// for the grace window, and a GUI that outlives it gets a 401 and repeats
+	// the elevated (UAC) fetch instead of failing forever.
+	interval, grace := api.TokenRotationFromEnv()
+	s.tokenRotator = api.NewTokenRotator(s.apiServer, getAPITokenPath(), interval, grace)
+	s.tokenRotator.Start()
 
 	go func() {
 		if err := s.apiServer.Start(); err != nil {
@@ -117,6 +148,11 @@ func (s *BackupService) Stop(svc service.Service) error {
 		s.app.StopScheduler()
 	}
 
+	// Stop rotating the API token
+	if s.tokenRotator != nil {
+		s.tokenRotator.Stop()
+	}
+
 	// Give it a moment to finish current operations
 	time.Sleep(2 * time.Second)
 
@@ -129,8 +165,8 @@ func RunAsService() {
 	writeDebugLog("Attempting to run as Windows Service")
 
 	svcConfig := &service.Config{
-		Name:        serviceNameFromExecutable(),
-		DisplayName: "Proxmox Backup Client Service",
+		Name:        windowsServiceName(),
+		DisplayName: windowsServiceDisplayName(),
 		Description: "Executes scheduled backups to Proxmox Backup Server with VSS support",
 	}
 
@@ -159,4 +195,43 @@ func IsServiceMode() bool {
 		}
 	}
 	return false
+}
+
+// hardenWindowsACLs applies restrictive ACLs to the service state directory:
+// - api-token: readable by SYSTEM and BUILTIN\Administrators (for elevated GUI fetch)
+// - config.json, scheduled_jobs.json, job_history.json: SYSTEM-only
+// Best-effort: if icacls.exe is missing or fails, we log and continue.
+func hardenWindowsACLs(stateDir string) {
+	icacls, err := exec.LookPath("icacls.exe")
+	if err != nil {
+		writeDebugLog("icacls.exe not found, skipping ACL hardening")
+		return
+	}
+
+	tokenPath := filepath.Join(stateDir, "api-token")
+	configFiles := []string{
+		filepath.Join(stateDir, "config.json"),
+		filepath.Join(stateDir, "scheduled_jobs.json"),
+		filepath.Join(stateDir, "job_history.json"),
+	}
+
+	// api-token: SYSTEM:(OI)(CI)F + BUILTIN\Administrators:(OI)(CI)R
+	// (OI)(CI) = Object Inherit + Container Inherit (for future files)
+	if _, err := exec.Command(icacls, tokenPath,
+		"/inheritance:r", // remove inherited ACEs
+		"/grant:r", "SYSTEM:(OI)(CI)F",
+		"/grant:r", "BUILTIN\\Administrators:(OI)(CI)R",
+	).CombinedOutput(); err != nil {
+		writeDebugLog(fmt.Sprintf("icacls on api-token failed (non-fatal): %v", err))
+	}
+
+	// Config files: SYSTEM-only (F = full control)
+	for _, f := range configFiles {
+		if _, err := exec.Command(icacls, f,
+			"/inheritance:r",
+			"/grant:r", "SYSTEM:(OI)(CI)F",
+		).CombinedOutput(); err != nil {
+			writeDebugLog(fmt.Sprintf("icacls on %s failed (non-fatal): %v", f, err))
+		}
+	}
 }

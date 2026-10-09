@@ -1,15 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Shared installer body. Included by a brand entry file (see Product.wxs /
-     NimbusBackup.wxs / AcmeBackup.wxs) that supplies the brand identity via
-     !define BEFORE the include. All identity is driven by these preprocessor variables:
-       ProductName, ExeName, ServiceExeName, VendorKey, Manufacturer,
-       UpgradeCode, ProductVersion, ArpUrlAbout, ArpHelpLink,
-       ArpUrlUpdateInfo, ArpContact.
-     The exe is installed under the SAME name as the installer (ExeName); the
-     GUI resolves its brand from the exe base name at runtime (gui/brand.go),
-     so the installed exe name == installer name == brand key. -->
-<!-- WiX 3 requires an included file to have an Include root element. -->
-<Include xmlns="http://schemas.microsoft.com/wix/2006/wi">
+<Include>
   <Product Id="*"
            Name="$(var.ProductName)"
            Language="1033"
@@ -66,8 +56,8 @@
         <!-- Service installation. The SCM name is the brand's ExeName (e.g.
              "NimbusBackup"), NOT the service exe name: it is the name every
              Nimbus MSI up to 0.3.0 registered (scripts/monitoring target it),
-             and gui/service_name.go derives the same name from the running
-             <ServiceExeName>.exe by stripping its "SVC" suffix. -->
+             and gui/service_identity.go derives the same name from the running
+             $(var.ServiceExeName).exe by stripping its "SVC" suffix. -->
         <ServiceInstall
           Id="BackupService"
           Type="ownProcess"

@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+// hexPairRe matches one colon-separated part of a certificate fingerprint.
+var hexPairRe = regexp.MustCompile(`^[0-9a-fA-F]{2}$`)
+
 // SanitizeForLog masks sensitive data for logging
 // Shows first 4 and last 4 chars, masks the middle
 func SanitizeForLog(s string) string {
@@ -77,7 +80,7 @@ func ValidateURL(rawURL string) error {
 	// "localhost.attacker.tld" or "127.0.0.1.evil.tld" pass the HTTP exemption and
 	// receive the PBS token in cleartext (audit v2-H-07). Match on the parsed
 	// hostname only.
-	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname())) {
+	if parsed.Scheme != "https" && (parsed.Scheme != "http" || !isLoopbackHost(parsed.Hostname())) {
 		return fmt.Errorf("only HTTPS URLs allowed (got %s)", parsed.Scheme)
 	}
 
@@ -168,6 +171,13 @@ func ValidateAuthID(authID string) error {
 	return nil
 }
 
+func ValidateUsername(username string) error {
+	if !strings.Contains(username, "@") {
+		return fmt.Errorf("username must be user@realm")
+	}
+	return nil
+}
+
 // SecureCompare performs constant-time string comparison
 // Use this for comparing secrets to prevent timing attacks
 func SecureCompare(a, b string) bool {
@@ -192,12 +202,7 @@ func ValidateFingerprint(fp string) error {
 			return fmt.Errorf("each fingerprint part must be 2 hex digits")
 		}
 
-		matched, err := regexp.MatchString(`^[0-9a-fA-F]{2}$`, part)
-		if err != nil {
-			return fmt.Errorf("regex error: %w", err)
-		}
-
-		if !matched {
+		if !hexPairRe.MatchString(part) {
 			return fmt.Errorf("fingerprint contains invalid hex: %s", part)
 		}
 	}

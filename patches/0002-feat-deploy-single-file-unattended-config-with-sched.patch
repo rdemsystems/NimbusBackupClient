@@ -1,0 +1,358 @@
+From 097aa797a28b806664ca2bd81d7396730752a5e8 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 09:41:22 +0200
+Subject: [PATCH 02/58] feat(deploy): single-file unattended config with
+ schedule provisioning
+
+Port of the fork's 0.3.0 feature: scheduled_jobs declared in config.json
+are upserted into the scheduler store at service start (Windows and
+systemd), idempotently and without touching GUI-created jobs. Provisioned
+jobs now go through the same validation as jobs saved from the GUI, and
+an invalid one is logged and skipped.
+---
+ gui/config.go                   |   9 +++
+ gui/frontend/src/App.jsx        |   2 +-
+ gui/scheduler.go                | 131 ++++++++++++++++++++++++++++++++
+ gui/scheduler_provision_test.go | 123 ++++++++++++++++++++++++++++++
+ gui/service.go                  |   4 +
+ gui/service_unix.go             |   4 +
+ 6 files changed, 272 insertions(+), 1 deletion(-)
+ create mode 100644 gui/scheduler_provision_test.go
+
+diff --git a/gui/config.go b/gui/config.go
+index 8eb610c..b7b9acb 100644
+--- a/gui/config.go
++++ b/gui/config.go
+@@ -151,6 +151,15 @@ type Config struct {
+ 	SMTPPassword string `json:"smtp_password,omitempty"`
+ 	EmailFrom    string `json:"email_from,omitempty"`
+ 	EmailTo      string `json:"email_to,omitempty"`
++
++	// ==================== PROVISIONED SCHEDULE (unattended deployment) ====================
++	// Optional list of scheduled backup jobs declared directly in config.json so a
++	// single file (dropped by Ansible/any config-management tool) can carry the PBS
++	// connection, the backup settings AND the schedule. At startup these are
++	// reconciled (upsert by ID, non-destructively) into scheduled_jobs.json — see
++	// App.ReconcileProvisionedJobs. Jobs created interactively in the GUI (whose IDs
++	// are not listed here) are left untouched.
++	ScheduledJobs []ScheduledJob `json:"scheduled_jobs,omitempty"`
+ }
+ 
+ // sanitized returns a copy of the config with all secrets stripped (legacy PBS
+diff --git a/gui/frontend/src/App.jsx b/gui/frontend/src/App.jsx
+index 3e98959..9a0c447 100644
+--- a/gui/frontend/src/App.jsx
++++ b/gui/frontend/src/App.jsx
+@@ -399,7 +399,7 @@ function App() {
+       const done = data.done || 0
+       const total = data.total || 0
+       const gb = ((data.bytes || 0) / (1024 * 1024 * 1024)).toFixed(1)
+-      showStatus(`📊 ${t('splitAnalyzing')} ${done}/${total} (${gb} GB)`, 'info')
++      showStatus(`📊 ${t('splitAnalyzing')} ${done}/${total} (${gb} GB)`, 'info', true)
+     })
+     return () => { if (unsub) unsub() }
+   }, [])
+diff --git a/gui/scheduler.go b/gui/scheduler.go
+index 9e2ac3f..f3286fa 100644
+--- a/gui/scheduler.go
++++ b/gui/scheduler.go
+@@ -402,6 +402,137 @@ func (j *ScheduledJob) validate() error {
+ 	return nil
+ }
+ 
++// validRFC3339 reports whether s is a parseable RFC3339 timestamp.
++func validRFC3339(s string) bool {
++	if s == "" {
++		return false
++	}
++	_, err := time.Parse(time.RFC3339, s)
++	return err == nil
++}
++
++// slugifyJobID derives a stable, filename-safe ID from a job name, used when a
++// provisioned job (from config.json) omits an explicit ID. Deterministic so
++// re-provisioning the same config upserts the same job instead of duplicating it.
++func slugifyJobID(name string) string {
++	var b strings.Builder
++	prevDash := false
++	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
++		switch {
++		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
++			b.WriteRune(r)
++			prevDash = false
++		default:
++			if !prevDash && b.Len() > 0 {
++				b.WriteByte('-')
++				prevDash = true
++			}
++		}
++	}
++	slug := strings.Trim(b.String(), "-")
++	if slug == "" {
++		return "job"
++	}
++	return "provisioned-" + slug
++}
++
++// mergeProvisionedJobs upserts the config-declared jobs into the existing
++// scheduler store, keyed by ID. Semantics (chosen for Ansible idempotency):
++//   - A provisioned job whose ID is not in the store is appended.
++//   - A provisioned job whose ID matches an existing one replaces it, but keeps
++//     the existing LastRun history and — when the schedule time is unchanged and
++//     the stored nextRun is still valid — keeps that nextRun, so re-pushing the
++//     same config does NOT reset the clock or trigger an extra run.
++//   - Jobs already in the store whose IDs are not provisioned are left untouched
++//     (a GUI-created job survives provisioning).
++//
++// It never mutates its inputs; the returned slice is safe to persist.
++func mergeProvisionedJobs(existing, provisioned []ScheduledJob) []ScheduledJob {
++	out := make([]ScheduledJob, len(existing))
++	copy(out, existing)
++
++	byID := make(map[string]int, len(out))
++	for i, j := range out {
++		byID[j.ID] = i
++	}
++
++	for _, pj := range provisioned {
++		if pj.ID == "" {
++			pj.ID = slugifyJobID(pj.Name)
++		}
++		if idx, ok := byID[pj.ID]; ok {
++			prev := out[idx]
++			pj.LastRun = prev.LastRun
++			// Preserve a still-valid nextRun when the schedule is unchanged so
++			// idempotent re-provisioning doesn't move or re-fire the job.
++			if pj.ScheduleTime == prev.ScheduleTime && validRFC3339(prev.NextRun) {
++				pj.NextRun = prev.NextRun
++			} else if pj.Enabled && pj.ScheduleTime != "" && !validRFC3339(pj.NextRun) {
++				pj.NextRun = calculateNextRun(pj.ScheduleTime)
++			}
++			out[idx] = pj
++		} else {
++			if pj.Enabled && pj.ScheduleTime != "" && !validRFC3339(pj.NextRun) {
++				pj.NextRun = calculateNextRun(pj.ScheduleTime)
++			}
++			byID[pj.ID] = len(out)
++			out = append(out, pj)
++		}
++	}
++	return out
++}
++
++// ReconcileProvisionedJobs applies any jobs declared in config.json's
++// "scheduled_jobs" into scheduled_jobs.json. This is what makes a single pushed
++// config file carry the whole deployment (connection + backup + schedule): drop
++// the file, (re)start the service, and the scheduler picks the jobs up. It is
++// idempotent and non-destructive (see mergeProvisionedJobs) and is a no-op when
++// no jobs are declared. Called at startup, before RecalculateNextRuns.
++func (a *App) ReconcileProvisionedJobs() {
++	cfg := LoadConfig()
++	if len(cfg.ScheduledJobs) == 0 {
++		return
++	}
++	writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: %d job(s) declared in config.json", len(cfg.ScheduledJobs)))
++
++	existing, err := a.GetScheduledJobs()
++	if err != nil {
++		// Never overwrite the jobs file from a failed read — that would wipe every
++		// existing job. Skip provisioning this cycle instead.
++		writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: skipping, could not read existing jobs: %v", err))
++		return
++	}
++
++	// Same checks as a job saved from the GUI: a job that could never run is
++	// reported and skipped instead of sitting silently in the store.
++	provisioned := make([]ScheduledJob, 0, len(cfg.ScheduledJobs))
++	for i := range cfg.ScheduledJobs {
++		if err := cfg.ScheduledJobs[i].validate(); err != nil {
++			writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: skipping job %q: %v", cfg.ScheduledJobs[i].Name, err))
++			continue
++		}
++		provisioned = append(provisioned, cfg.ScheduledJobs[i])
++	}
++
++	merged := mergeProvisionedJobs(existing, provisioned)
++
++	jobsPath, err := getScheduledJobsPath()
++	if err != nil {
++		writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: cannot resolve jobs path: %v", err))
++		return
++	}
++	data, err := json.MarshalIndent(merged, "", "  ")
++	if err != nil {
++		writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: marshal failed: %v", err))
++		return
++	}
++	if err := atomicWriteFile(jobsPath, data, 0600); err != nil {
++		writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: write failed: %v", err))
++		return
++	}
++	writeDebugLog(fmt.Sprintf("ReconcileProvisionedJobs: %d job(s) now in store", len(merged)))
++}
++
+ // RecalculateNextRuns repairs jobs whose nextRun is MISSING or unparseable by
+ // giving them a valid future run time. It deliberately leaves an overdue but
+ // valid nextRun in the past: the scheduler now catches missed runs up on its
+diff --git a/gui/scheduler_provision_test.go b/gui/scheduler_provision_test.go
+new file mode 100644
+index 0000000..623ff81
+--- /dev/null
++++ b/gui/scheduler_provision_test.go
+@@ -0,0 +1,123 @@
++package main
++
++import (
++	"testing"
++	"time"
++)
++
++func TestSlugifyJobID(t *testing.T) {
++	cases := []struct {
++		in   string
++		want string
++	}{
++		{"Nightly C:", "provisioned-nightly-c"},
++		{"  Backup  Users  ", "provisioned-backup-users"},
++		{"Sauvegarde éà#1", "provisioned-sauvegarde-1"},
++		{"", "job"},
++		{"!!!", "job"},
++		{"already-slug", "provisioned-already-slug"},
++	}
++	for _, c := range cases {
++		if got := slugifyJobID(c.in); got != c.want {
++			t.Errorf("slugifyJobID(%q) = %q, want %q", c.in, got, c.want)
++		}
++	}
++}
++
++func TestMergeProvisionedJobs_AppendsAndComputesNextRun(t *testing.T) {
++	prov := []ScheduledJob{
++		{Name: "Nightly", ScheduleTime: "02:30", Enabled: true, BackupDirs: []string{"C:"}},
++	}
++	got := mergeProvisionedJobs(nil, prov)
++	if len(got) != 1 {
++		t.Fatalf("want 1 job, got %d", len(got))
++	}
++	j := got[0]
++	if j.ID != "provisioned-nightly" {
++		t.Errorf("ID not derived from name: %q", j.ID)
++	}
++	if !validRFC3339(j.NextRun) {
++		t.Errorf("nextRun should be auto-computed for an enabled job, got %q", j.NextRun)
++	}
++}
++
++func TestMergeProvisionedJobs_DisabledOrNoTimeGetsNoNextRun(t *testing.T) {
++	prov := []ScheduledJob{
++		{ID: "a", Name: "disabled", ScheduleTime: "02:30", Enabled: false},
++		{ID: "b", Name: "no-time", Enabled: true},
++	}
++	got := mergeProvisionedJobs(nil, prov)
++	for _, j := range got {
++		if j.NextRun != "" {
++			t.Errorf("job %q should have empty nextRun, got %q", j.ID, j.NextRun)
++		}
++	}
++}
++
++func TestMergeProvisionedJobs_UpsertPreservesHistoryAndNextRun(t *testing.T) {
++	stored := time.Now().Add(6 * time.Hour).Format(time.RFC3339)
++	existing := []ScheduledJob{
++		{ID: "nightly", Name: "Nightly", ScheduleTime: "02:30", Enabled: true,
++			NextRun: stored, LastRun: "2026-07-01T02:30:00Z", BackupID: "old"},
++	}
++	// Same ID, same schedule, changed backup-id: should replace fields but keep
++	// LastRun and the still-valid NextRun (idempotent re-provisioning).
++	prov := []ScheduledJob{
++		{ID: "nightly", Name: "Nightly", ScheduleTime: "02:30", Enabled: true, BackupID: "new"},
++	}
++	got := mergeProvisionedJobs(existing, prov)
++	if len(got) != 1 {
++		t.Fatalf("upsert should not duplicate; got %d jobs", len(got))
++	}
++	if got[0].BackupID != "new" {
++		t.Errorf("provisioned fields not applied: BackupID=%q", got[0].BackupID)
++	}
++	if got[0].LastRun != "2026-07-01T02:30:00Z" {
++		t.Errorf("LastRun history not preserved: %q", got[0].LastRun)
++	}
++	if got[0].NextRun != stored {
++		t.Errorf("valid NextRun should be preserved on unchanged schedule: got %q want %q", got[0].NextRun, stored)
++	}
++}
++
++func TestMergeProvisionedJobs_ScheduleChangeRecomputesNextRun(t *testing.T) {
++	stored := time.Now().Add(6 * time.Hour).Format(time.RFC3339)
++	existing := []ScheduledJob{
++		{ID: "nightly", Name: "Nightly", ScheduleTime: "02:30", Enabled: true, NextRun: stored},
++	}
++	prov := []ScheduledJob{
++		{ID: "nightly", Name: "Nightly", ScheduleTime: "04:00", Enabled: true},
++	}
++	got := mergeProvisionedJobs(existing, prov)
++	if got[0].NextRun == stored {
++		t.Errorf("nextRun should be recomputed when schedule time changes")
++	}
++	if !validRFC3339(got[0].NextRun) {
++		t.Errorf("recomputed nextRun invalid: %q", got[0].NextRun)
++	}
++}
++
++func TestMergeProvisionedJobs_LeavesGUIJobsUntouched(t *testing.T) {
++	existing := []ScheduledJob{
++		{ID: "1720000000", Name: "GUI job", ScheduleTime: "12:00", Enabled: true},
++	}
++	prov := []ScheduledJob{
++		{ID: "provisioned-nightly", Name: "Nightly", ScheduleTime: "02:30", Enabled: true},
++	}
++	got := mergeProvisionedJobs(existing, prov)
++	if len(got) != 2 {
++		t.Fatalf("want both GUI and provisioned job, got %d", len(got))
++	}
++	if got[0].ID != "1720000000" {
++		t.Errorf("GUI job should be preserved in place, got first ID %q", got[0].ID)
++	}
++}
++
++func TestMergeProvisionedJobs_DoesNotMutateInputs(t *testing.T) {
++	existing := []ScheduledJob{{ID: "nightly", ScheduleTime: "02:30", Enabled: true, NextRun: ""}}
++	prov := []ScheduledJob{{ID: "nightly", ScheduleTime: "02:30", Enabled: true}}
++	_ = mergeProvisionedJobs(existing, prov)
++	if existing[0].NextRun != "" {
++		t.Errorf("mergeProvisionedJobs mutated its existing input: %q", existing[0].NextRun)
++	}
++}
+diff --git a/gui/service.go b/gui/service.go
+index 178cd71..cc795fd 100644
+--- a/gui/service.go
++++ b/gui/service.go
+@@ -84,6 +84,10 @@ func (s *BackupService) run() {
+ 		writeDebugLog(fmt.Sprintf("VSS cleanup at startup reported error: %v", err))
+ 	}
+ 
++	// Apply any schedule declared inline in config.json (single-file /
++	// unattended deployment) into the scheduler store before computing runs.
++	s.app.ReconcileProvisionedJobs()
++
+ 	// Recalculate stale nextRun values (e.g. after service restart or missed window)
+ 	s.app.RecalculateNextRuns()
+ 
+diff --git a/gui/service_unix.go b/gui/service_unix.go
+index 1bca834..7659653 100644
+--- a/gui/service_unix.go
++++ b/gui/service_unix.go
+@@ -68,6 +68,10 @@ func (s *BackupService) run() {
+ 	// Clean up any abandoned jobs from previous crash
+ 	s.app.CleanupAbandonedJobs()
+ 
++	// Apply any schedule declared inline in config.json (single-file /
++	// unattended deployment) into the scheduler store before computing runs.
++	s.app.ReconcileProvisionedJobs()
++
+ 	// Recalculate stale nextRun values (e.g. after restart or missed window)
+ 	s.app.RecalculateNextRuns()
+ 
+-- 
+2.47.3
+

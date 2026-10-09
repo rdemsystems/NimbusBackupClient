@@ -1,0 +1,212 @@
+From 10c4f08820e999c31bbfd25b8a707d840d3e16f5 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 09:48:09 +0200
+Subject: [PATCH 19/58] fix(gui): dedicated Proxmox VM ID for "vm" machine
+ backups
+
+A "vm" machine backup is filed as vm/<ID> and needs a numeric Proxmox
+VM ID, but reused the Backup ID field, pre-filled with the hostname.
+In "vm" mode the form now shows its own VM ID field (digits only,
+remembered per machine, the Backup ID stays intact), validated as
+100..999999999 before a backup starts or a job is saved; the backend
+enforces the same range. Editing a scheduled machine job restores its
+VM ID and disks. Strings in fr/en/it/de/pl.
+---
+ gui/frontend/src/App.jsx              | 68 ++++++++++++++++++++++-----
+ gui/frontend/src/i18n/translations.js | 15 ++++++
+ machinebackuplib/machinebackup.go     |  6 ++-
+ 3 files changed, 74 insertions(+), 15 deletions(-)
+
+diff --git a/gui/frontend/src/App.jsx b/gui/frontend/src/App.jsx
+index ee1e53f..b1acab3 100644
+--- a/gui/frontend/src/App.jsx
++++ b/gui/frontend/src/App.jsx
+@@ -127,6 +127,16 @@ function App() {
+   const [progress, setProgress] = useState(0)
+   const [backupPBSID, setBackupPBSID] = useState('')
+   const [machineBackupKind, setMachineBackupKind] = useState('host')
++  // A "vm" machine backup is filed by PBS as "vm/<VMID>" so Proxmox VE can
++  // restore it: it needs a numeric VM ID, kept apart from the Backup ID (which
++  // defaults to the hostname) and remembered per machine.
++  const [machineVMID, setMachineVMIDState] = useState(() => {
++    try { return localStorage.getItem('machineVMID') || '' } catch { return '' }
++  })
++  const setMachineVMID = (v) => {
++    setMachineVMIDState(v)
++    try { localStorage.setItem('machineVMID', v) } catch { /* storage unavailable */ }
++  }
+   // Opt-in: split this backup into parts (for the first backup of a large volume).
+   // Off by default → no size analysis, the backup starts immediately.
+   const [splitFirstBackup, setSplitFirstBackup] = useState(false)
+@@ -1196,6 +1206,15 @@ function App() {
+       return
+     }
+ 
++    // PVE VM IDs are 100..999999999; anything else fails in the backend.
++    const usesVMID = backupType === 'machine' && machineBackupKind === 'vm'
++    const machineID = machineVMID.trim()
++    if (usesVMID && !(/^\d+$/.test(machineID) && Number(machineID) >= 100 && Number(machineID) <= 999999999)) {
++      showStatus(`❌ ${t('vmidInvalid')}`, 'error')
++      return
++    }
++    const effectiveBackupID = usesVMID ? machineID : config['backup-id']
++
+     // Splitting is now an explicit, opt-in choice (the "split this backup" toggle),
+     // intended for the first backup of a large volume. When it's off we never size
+     // the directories — the backup starts immediately, so a whole-drive root like
+@@ -1240,11 +1259,11 @@ function App() {
+       // We'll pass drive letters in a separate field or structure based on backup type
+       const jobData = {
+         id: editingJobId || Date.now().toString(),
+-        name: `Backup ${config['backup-id'] || hostname}`,
++        name: `Backup ${effectiveBackupID || hostname}`,
+         scheduleTime: scheduleTime,
+         runAtStartup: runAtStartup,
+         backupDirs: backupType === 'directory' ? dirList : [],
+-        backupId: config['backup-id'],
++        backupId: effectiveBackupID,
+         useVSS: config.usevss,
+         backupType: backupType,
+         excludeList: backupType === 'directory' ? excludeList.split('\n').filter(l => l.trim()) : [],
+@@ -1307,7 +1326,7 @@ function App() {
+         await StartMachineBackup(
+           backupType,
+           validDrives,
+-          config['backup-id'],
++          effectiveBackupID,
+           config.usevss,
+           '',
+           backupPBSID,
+@@ -2091,15 +2110,29 @@ function App() {
+                 </div>
+               )}
+ 
+-          <div className="form-group">
+-            <label>{t('backupID')}</label>
+-            <input
+-              type="text"
+-              value={config['backup-id']}
+-              onChange={(e) => setConfig({...config, 'backup-id': e.target.value})}
+-              placeholder={t('backupIDPlaceholder')}
+-            />
+-          </div>
++          {backupType === 'machine' && machineBackupKind === 'vm' ? (
++            <div className="form-group">
++              <label>{t('machineVMID')}</label>
++              <input
++                type="text"
++                inputMode="numeric"
++                value={machineVMID}
++                onChange={(e) => setMachineVMID(e.target.value.replace(/\D/g, ''))}
++                placeholder="9001"
++              />
++              <div className="info-box" style={{marginTop: '8px'}}>💡 {t('machineVMIDHint')}</div>
++            </div>
++          ) : (
++            <div className="form-group">
++              <label>{t('backupID')}</label>
++              <input
++                type="text"
++                value={config['backup-id']}
++                onChange={(e) => setConfig({...config, 'backup-id': e.target.value})}
++                placeholder={t('backupIDPlaceholder')}
++              />
++            </div>
++          )}
+ 
+           <div className="form-group">
+             <label>
+@@ -2273,7 +2306,16 @@ function App() {
+                           setScheduleTime(job.scheduleTime)
+                           setRunAtStartup(job.runAtStartup)
+                           setBackupDirs((job.backupDirs || []).join('\n'))
+-                          setConfig({...config, 'backup-id': job.backupId, usevss: job.useVSS})
++                          if (job.backupType === 'machine' && job.backup_kind === 'vm') {
++                            // The job's backup ID is the VM ID; keep the Backup ID intact.
++                            setMachineVMID(job.backupId || '')
++                            setConfig({...config, usevss: job.useVSS})
++                          } else {
++                            setConfig({...config, 'backup-id': job.backupId, usevss: job.useVSS})
++                          }
++                          if (job.backupType === 'machine') {
++                            setSelectedDrives(job.driveLetters || [])
++                          }
+                           setBackupType(job.backupType)
+                           setBackupPBSID(job.pbs_id || '')
+                           setMachineBackupKind(job.backup_kind || 'host')
+diff --git a/gui/frontend/src/i18n/translations.js b/gui/frontend/src/i18n/translations.js
+index 69497db..665499a 100644
+--- a/gui/frontend/src/i18n/translations.js
++++ b/gui/frontend/src/i18n/translations.js
+@@ -147,6 +147,9 @@ const translations = {
+       machineBackupKindVM: "VM (vm) — pour migration P2V vers Proxmox VE, backup ID numérique requis",
+       machineBackupKindInfoTitle: "Explication :",
+       machineBackupKindInfo: "« Hôte » crée une sauvegarde complète du système avec un ID libre (ex: 'monserveur'). « VM » crée un snapshot compatible Proxmox VE pour migration physique→virtuel (P2V) : le Backup ID doit être un ID VM numérique (ex: 100).",
++      machineVMID: "ID de VM Proxmox (numérique)",
++      machineVMIDHint: "En mode « VM », la sauvegarde est enregistrée comme une VM (vm/<ID>) pour pouvoir être restaurée dans Proxmox VE : choisissez un numéro libre entre 100 et 999999999 (ex. 9001), toujours le même pour cette machine afin de garder l'incrémental.",
++      vmidInvalid: "ID de VM invalide : saisissez un nombre entre 100 et 999999999 (ex. 9001).",
+       vssAdminRequired: "VSS nécessite des privilèges administrateur.",
+       vssAdminHint: "Redémarrez l'application en tant qu'administrateur (clic droit → Exécuter en tant qu'administrateur) pour utiliser VSS.",
+       vssServiceAvailable: "VSS disponible via le service.",
+@@ -520,6 +523,9 @@ const translations = {
+       machineBackupKindVM: "VM — for P2V migration to Proxmox VE, numeric backup ID required",
+       machineBackupKindInfoTitle: "Explanation:",
+       machineBackupKindInfo: "« Host » creates a full system backup with a free-form backup ID (e.g., 'myserver'). « VM » creates a Proxmox VE compatible snapshot for physical-to-virtual (P2V) migration: the Backup ID must be a numeric VM ID (e.g., 100).",
++      machineVMID: "Proxmox VM ID (numeric)",
++      machineVMIDHint: "In \"VM\" mode the backup is stored as a VM (vm/<ID>) so Proxmox VE can restore it: pick a free number between 100 and 999999999 (e.g. 9001), always the same for this machine to keep backups incremental.",
++      vmidInvalid: "Invalid VM ID: enter a number between 100 and 999999999 (e.g. 9001).",
+       vssAdminRequired: "VSS requires administrator privileges.",
+       vssAdminHint: "Restart the application as administrator (right-click → Run as administrator) to use VSS.",
+       vssServiceAvailable: "VSS available via service.",
+@@ -894,6 +900,9 @@ const translations = {
+       machineBackupKindVM: "VM — per migrazione P2V verso Proxmox VE, ID backup numerico richiesto",
+       machineBackupKindInfoTitle: "Spiegazione:",
+       machineBackupKindInfo: "« Host » crea un backup completo del sistema con ID backup libero (es. 'mioserver'). « VM » crea uno snapshot compatibile Proxmox VE per migrazione fisico→virtuale (P2V): l'ID Backup deve essere un ID VM numerico (es. 100).",
++      machineVMID: "ID VM Proxmox (numerico)",
++      machineVMIDHint: "In modalità « VM » il backup è salvato come VM (vm/<ID>) per poterlo ripristinare in Proxmox VE: scegli un numero libero tra 100 e 999999999 (es. 9001), sempre lo stesso per questo computer per mantenere l'incrementale.",
++      vmidInvalid: "ID VM non valido: inserisci un numero tra 100 e 999999999 (es. 9001).",
+       vssAdminRequired: "VSS richiede privilegi amministrativi.",
+       vssAdminHint: "Riavvia l'applicazione come amministratore (click destro → Esegui come amministratore) per utilizzare VSS.",
+       vssServiceAvailable: "VSS disponibile tramite servizio.",
+@@ -1268,6 +1277,9 @@ const translations = {
+       machineBackupKindVM: "VM — für P2V-Migration nach Proxmox VE, numerische Backup-ID erforderlich",
+       machineBackupKindInfoTitle: "Erklärung:",
+       machineBackupKindInfo: "« Host » erstellt eine vollständige Systemsicherung mit freier Backup-ID (z. B. 'meinserver'). « VM » erstellt einen Proxmox VE kompatiblen Snapshot für physische-zu-virtuelle (P2V) Migration: Die Backup-ID muss eine numerische VM-ID sein (z. B. 100).",
++      machineVMID: "Proxmox-VM-ID (numerisch)",
++      machineVMIDHint: "Im Modus „VM“ wird die Sicherung als VM (vm/<ID>) gespeichert, damit Proxmox VE sie wiederherstellen kann: Wählen Sie eine freie Nummer zwischen 100 und 999999999 (z. B. 9001), für diesen Rechner immer dieselbe, damit die Sicherungen inkrementell bleiben.",
++      vmidInvalid: "Ungültige VM-ID: Geben Sie eine Zahl zwischen 100 und 999999999 ein (z. B. 9001).",
+       vssAdminRequired: "VSS erfordert Administratorrechte.",
+       vssAdminHint: "Starten Sie die Anwendung als Administrator (Rechtsklick → Als Administrator ausführen) um VSS zu verwenden.",
+       vssServiceAvailable: "VSS über Dienst verfügbar.",
+@@ -1642,6 +1654,9 @@ const translations = {
+       machineBackupKindVM: "VM — dla migracji P2V do Proxmox VE, wymagane numeryczne ID kopii",
+       machineBackupKindInfoTitle: "Wyjaśnienie:",
+       machineBackupKindInfo: "« Host » tworzy pełną kopię systemu z dowolnym ID kopii (np. 'moiserwer'). « VM » tworzy snapshot zgodny z Proxmox VE do migracji fizycznej na wirtualną (P2V): ID kopii musi być numerycznym ID VM (np. 100).",
++      machineVMID: "ID maszyny wirtualnej Proxmox (liczba)",
++      machineVMIDHint: "W trybie „VM” kopia jest zapisywana jako VM (vm/<ID>), aby Proxmox VE mógł ją przywrócić: wybierz wolny numer od 100 do 999999999 (np. 9001), zawsze ten sam dla tego komputera, aby kopie pozostały przyrostowe.",
++      vmidInvalid: "Nieprawidłowe ID VM: wpisz liczbę od 100 do 999999999 (np. 9001).",
+       vssAdminRequired: "VSS wymaga uprawnień administratora.",
+       vssAdminHint: "Uruchom ponownie aplikację jako administrator (kliknij prawym przyciskiem myszy → Uruchom jako administrator), aby użyć VSS.",
+       vssServiceAvailable: "VSS dostępne przez usługę.",
+diff --git a/machinebackuplib/machinebackup.go b/machinebackuplib/machinebackup.go
+index 27ccaba..141254f 100644
+--- a/machinebackuplib/machinebackup.go
++++ b/machinebackuplib/machinebackup.go
+@@ -484,10 +484,12 @@ func Backup(cfg *Config, progressCallback ProgressCallback) (*BackupResult, erro
+ 	}
+ 	// A "vm" backup needs a numeric VMID for the generated VM config; reject a
+ 	// bad ID now rather than after every disk has been transferred.
++	// Proxmox VE VM IDs are 100..999999999.
+ 	if cfg.BackupType == "vm" {
+-		if _, err := strconv.ParseInt(cfg.BackupID, 10, 32); err != nil {
+-			return nil, fmt.Errorf("backup type \"vm\" needs a numeric VM ID (e.g. 100) as the backup ID, got %q: use a numeric ID, or use backup type \"host\" if a VM-type snapshot is not required", cfg.BackupID)
++		if id, err := strconv.ParseInt(strings.TrimSpace(cfg.BackupID), 10, 32); err != nil || id < 100 || id > 999999999 {
++			return nil, fmt.Errorf("backup type \"vm\" needs a Proxmox VM ID (a number between 100 and 999999999, e.g. 9001) as the backup ID, got %q: use such an ID, or use backup type \"host\" if a VM-type snapshot is not required", cfg.BackupID)
+ 		}
++		cfg.BackupID = strings.TrimSpace(cfg.BackupID)
+ 	}
+ 
+ 	client := &pbscommon.PBSClient{
+-- 
+2.47.3
+

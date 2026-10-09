@@ -1,0 +1,193 @@
+From 7d1d6caf0b293e0db0e326555ed0b0781485f408 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 14:30:01 +0200
+Subject: [PATCH 36/58] pbscommon: check (discard) Close and Write errors
+ flagged by errcheck
+
+---
+ pbscommon/didx_fixtures_test.go |  6 +++---
+ pbscommon/pbsapi.go             | 30 +++++++++++++++---------------
+ pbscommon/pxar.go               |  2 +-
+ 3 files changed, 19 insertions(+), 19 deletions(-)
+
+diff --git a/pbscommon/didx_fixtures_test.go b/pbscommon/didx_fixtures_test.go
+index d12419e..0ca7815 100644
+--- a/pbscommon/didx_fixtures_test.go
++++ b/pbscommon/didx_fixtures_test.go
+@@ -108,10 +108,10 @@ func newFakePBSWithDIDX(t *testing.T, name string, a *didxArchive, crypt *CryptC
+ 				return
+ 			}
+ 			if f.overrideDidx != nil {
+-				w.Write(f.overrideDidx)
++				_, _ = w.Write(f.overrideDidx)
+ 				return
+ 			}
+-			w.Write(a.didx)
++			_, _ = w.Write(a.didx)
+ 		case "/chunk":
+ 			d := r.URL.Query().Get("digest")
+ 			f.mu.Lock()
+@@ -125,7 +125,7 @@ func newFakePBSWithDIDX(t *testing.T, name string, a *didxArchive, crypt *CryptC
+ 			if repl, ok := f.corrupt[d]; ok {
+ 				payload = repl
+ 			}
+-			w.Write(mustEncodeBlob(t, payload, crypt))
++			_, _ = w.Write(mustEncodeBlob(t, payload, crypt))
+ 		default:
+ 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+ 		}
+diff --git a/pbscommon/pbsapi.go b/pbscommon/pbsapi.go
+index ce5320e..6d80be1 100644
+--- a/pbscommon/pbsapi.go
++++ b/pbscommon/pbsapi.go
+@@ -366,7 +366,7 @@ func FetchServerFingerprint(baseURL string) (string, error) {
+ 	if err != nil {
+ 		return "", fmt.Errorf("failed to reach server: %w", err)
+ 	}
+-	defer conn.Close()
++	defer func() { _ = conn.Close() }()
+ 	certs := conn.ConnectionState().PeerCertificates
+ 	if len(certs) == 0 {
+ 		return "", fmt.Errorf("server presented no certificate")
+@@ -475,7 +475,7 @@ func (pbs *PBSClient) ObtainTicket() error {
+ 	if err != nil {
+ 		return fmt.Errorf("ticket request failed: %w", err)
+ 	}
+-	defer resp.Body.Close()
++	defer func() { _ = resp.Body.Close() }()
+ 	body, _ := io.ReadAll(resp.Body)
+ 	if resp.StatusCode != http.StatusOK {
+ 		return fmt.Errorf("ticket login failed: HTTP %d - %s", resp.StatusCode, strings.TrimSpace(string(body)))
+@@ -526,7 +526,7 @@ func (pbs *PBSClient) ListSnapshots() ([]BackupManifest, error) {
+ 	if err != nil {
+ 		return ret, err
+ 	}
+-	defer resp.Body.Close()
++	defer func() { _ = resp.Body.Close() }()
+ 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+ 		body, _ := io.ReadAll(resp.Body)
+ 		return ret, fmt.Errorf("HTTP error: %d - %s", resp.StatusCode, string(body))
+@@ -596,7 +596,7 @@ func (pbs *PBSClient) CreateFixedIndex(fic FixedIndexCreateReq) (uint64, error)
+ 		return 0, err
+ 	}
+ 	fmt.Println("Writer id: ", R.WriterID)
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 	f := File{
+ 		CryptMode: pbs.defaultCryptMode(),
+ 		Csum:      "",
+@@ -631,7 +631,7 @@ func (pbs *PBSClient) AssignFixedChunks(writerid uint64, digests []string, offse
+ 		fmt.Println("Error making request:", err)
+ 		return err
+ 	}
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 
+ 	if resp2.StatusCode != http.StatusOK {
+ 		bodyBytes, _ := io.ReadAll(resp2.Body)
+@@ -664,7 +664,7 @@ func (pbs *PBSClient) CloseFixedIndex(writerid uint64, checksum string, totalsiz
+ 		fmt.Println("Error making request:", err)
+ 		return err
+ 	}
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 
+ 	if resp2.StatusCode != http.StatusOK {
+ 		bodyBytes, _ := io.ReadAll(resp2.Body)
+@@ -732,7 +732,7 @@ func (pbs *PBSClient) CreateDynamicIndex(name string) (uint64, error) {
+ 		fmt.Printf("ERROR: Error type: %T\n", err)
+ 		return 0, fmt.Errorf("HTTP request failed: %w", err)
+ 	}
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 
+ 	fmt.Printf("Response status: %d %s\n", resp2.StatusCode, resp2.Status)
+ 	fmt.Printf("Response proto: %s\n", resp2.Proto)
+@@ -756,7 +756,7 @@ func (pbs *PBSClient) CreateDynamicIndex(name string) (uint64, error) {
+ 		return 0, err
+ 	}
+ 	fmt.Println("Writer id: ", R.WriterID)
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 	f := File{
+ 		CryptMode: pbs.defaultCryptMode(),
+ 		Csum:      "",
+@@ -925,7 +925,7 @@ func (pbs *PBSClient) AssignDynamicChunks(writerid uint64, digests []string, off
+ 		fmt.Println("Error making request:", err)
+ 		return err
+ 	}
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 
+ 	if resp2.StatusCode != http.StatusOK {
+ 		bodyBytes, _ := io.ReadAll(resp2.Body)
+@@ -958,7 +958,7 @@ func (pbs *PBSClient) CloseDynamicIndex(writerid uint64, checksum string, totals
+ 		fmt.Println("Error making request:", err)
+ 		return err
+ 	}
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 
+ 	if resp2.StatusCode != http.StatusOK {
+ 		bodyBytes, _ := io.ReadAll(resp2.Body)
+@@ -1134,7 +1134,7 @@ func (pbs *PBSClient) Finish() error {
+ 	if err != nil {
+ 		return fmt.Errorf("finish request failed: %w", err)
+ 	}
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 
+ 	// CRITICAL: Check HTTP status code
+ 	if resp2.StatusCode != http.StatusOK {
+@@ -1181,7 +1181,7 @@ func (pbs *PBSClient) TestConnection() error {
+ 	if err != nil {
+ 		return fmt.Errorf("connection failed: %w", err)
+ 	}
+-	defer resp.Body.Close()
++	defer func() { _ = resp.Body.Close() }()
+ 
+ 	// Check HTTP status
+ 	if resp.StatusCode == 401 {
+@@ -1425,7 +1425,7 @@ func (pbs *PBSClient) DownloadPreviousToBytes(archivename string) ([]byte, error
+ 		fmt.Println("Error making request:", err)
+ 		return nil, err
+ 	}
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 
+ 	ret, err := io.ReadAll(resp2.Body)
+ 
+@@ -1452,7 +1452,7 @@ func (pbs *PBSClient) DownloadToBytes(archivename string) ([]byte, error) { //In
+ 		fmt.Println("Error making request:", err)
+ 		return nil, err
+ 	}
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 
+ 	ret, err := io.ReadAll(resp2.Body)
+ 
+@@ -1509,7 +1509,7 @@ func (pbs *PBSClient) GetChunkData(digest string) ([]byte, error) {
+ 		fmt.Println("Error making request:", err)
+ 		return nil, err
+ 	}
+-	defer resp2.Body.Close()
++	defer func() { _ = resp2.Body.Close() }()
+ 
+ 	ret, err := io.ReadAll(resp2.Body)
+ 
+diff --git a/pbscommon/pxar.go b/pbscommon/pxar.go
+index f3c0160..afd4a09 100644
+--- a/pbscommon/pxar.go
++++ b/pbscommon/pxar.go
+@@ -738,7 +738,7 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
+ 		return CatalogFile{}, nil
+ 	}
+ 
+-	defer file.Close()
++	defer func() { _ = file.Close() }()
+ 
+ 	// Capture per-file metadata (NTFS ACLs on Windows). Best-effort.
+ 	if a.MetaCollector != nil {
+-- 
+2.47.3
+

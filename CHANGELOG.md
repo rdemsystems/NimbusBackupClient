@@ -5,58 +5,79 @@ All notable changes to Proxmox Backup Client (GUI) will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.1] - 2026-10-09
+
+Second **re-merge with upstream** (tizbac/proxmoxbackupclient_go, October
+2026): the fork is rebuilt on upstream's current code plus the fork patch
+series (see `patches/README.md`). Upstream's own client-side encryption
+replaces the fork's unreleased one.
+
+### Added (from upstream)
+- **Client-side encryption, compatible with `proxmox-backup-client`**: AES-256-GCM
+  chunks and blobs, keyed chunk digests. Compatibility is verified in CI on every
+  build against a real PBS: a folder encrypted by Nimbus Backup with a key created
+  by `proxmox-backup-client` is restored by the official client with the same
+  key (and refused without it), and an encrypted disk backup made by the official
+  client is read back by Nimbus Backup. The GUI points each PBS server at an
+  unprotected key file (create one or pick an existing one, fingerprint shown);
+  the CLIs also take passphrase-protected key files (`-keyfile` and
+  `-keyfile-passphrase`, or prompt). Restore, search, browse and the NBD server
+  decrypt; the patched Clonezilla ISO restores encrypted disk backups.
+- Linux packages (Debian, Fedora, Arch) with a systemd service, a Running jobs
+  tab (progress, ETA, cancel), a PBS server choice per job, disks pinned by
+  identity (drive letters shown), host/VM choice for machine backups, NTFS and
+  POSIX ACL restore, several directories per CLI run, launch-time elevation,
+  and a real-PBS end-to-end test suite in CI.
 
 ### Added
-- **Client-side encryption, compatible with `proxmox-backup-client`.** Chunks and
-  blobs are encrypted on the client with AES-256-GCM before upload; chunk digests
-  are keyed and the manifest is signed, exactly like the official client, so an
-  encrypted backup restores with `proxmox-backup-client` / Proxmox VE using the
-  same key file, and vice versa. The PBS server never sees the key.
-  - GUI: new **🔒 Encryption** tab per PBS server — generate or import a key
-    (passphrase-protected key files are unlocked on import), export it to a file
-    (optionally passphrase-protected) or show it for copying, remove it. Servers
-    with a key show a 🔒 badge. Key writes go through the service when it owns
-    `config.json`.
-  - Provisioning: `encryption_key` on a `pbs_servers` entry (the key file JSON,
-    without passphrase).
-  - CLI: `-keyfile` for `proxmoxbackup-directory` and `proxmoxbackup-machine`,
-    passphrase from `PBS_ENCRYPTION_PASSWORD`.
-  - Restore/search/browse decrypt transparently; a missing or wrong key is
-    reported up front from the snapshot manifest. Older unencrypted snapshots
-    keep restoring when a key is configured.
-  - A configured but unusable key fails the backup instead of silently backing
-    up unencrypted data.
+- **Several folders backed up in parallel** (issue #6): GUI setting "Folders backed up in parallel" (one-shot and scheduled backups) and `-parallel N` / `"parallel"` in `proxmoxbackup-directory`. No maximum; CPUs / 4 is recommended. Each folder stays its own backup group.
+- **One VSS snapshot for a whole multi-folder backup**, one after the other or in parallel: the snapshot is taken once for every folder before the first upload, with one shadow copy per volume, so all the folders of a volume are frozen at the same instant (each folder used to get its own snapshot at its own turn). Same on Linux, one snapshot per block device.
+- **Exclusions in `proxmoxbackup-directory`** (issue #4): `-exclude PATTERN` (repeatable), `-exclude-from FILE` (one pattern per line, `#` comments) and `"exclude"` / `"exclude-from"` in the JSON config, with the GUI's pattern syntax.
+- **Paper key**: print an encryption key as a page with its QR code, in the
+  format of `proxmox-backup-client key paperkey` (the QR code holds the key
+  file), optionally protected by a passphrase; the key and its QR code can also
+  be shown in the GUI. **Import a key from text or a QR code** rebuilds a key
+  file from a scanned QR code, a paper key or a pasted key file. **A protected
+  key is unlocked with its passphrase and saved without one** (the GUI only
+  uses unprotected key files): the import says so, keep that file as safe as
+  the key itself.
 - **Disk backups restore in Proxmox VE as a VM that matches the machine.** The
-  VM config stored with "vm" snapshots was a fixed template (4 cores, 2 GB,
-  `win11`, BIOS, no network, random SMBIOS UUID, boot always on `sata0`). It is
-  now generated from the real machine: logical CPU count, RAM, firmware (UEFI →
-  `bios: ovmf`), guest OS type (Windows version/edition → `win11`/`win10`/`win8`/
-  `win7`…, Linux → `l26`), one NIC per physical adapter keeping its MAC (`e1000e`
-  on Windows, `virtio` on Linux), the SMBIOS identity (UUID, manufacturer,
-  product, serial…) and the boot disk (the disk holding the system drive / root
-  filesystem). The VM description lists what to add before the first boot (EFI
-  disk, with pre-enrolled keys when Secure Boot was on; TPM state; "Unique" MACs
-  if the source is still online). Every machine backup also stores these facts
-  in `machine-info.json.blob`.
+  VM config stored with "vm" snapshots is generated from the real machine:
+  logical CPU count, RAM, firmware (UEFI or GPT boot disk → `bios: ovmf`), guest
+  OS type (Windows version/edition → `win11`/`win10`/`win8`/`win7`…, Linux →
+  `l26`), one NIC per physical adapter keeping its MAC (`e1000e` on Windows,
+  `virtio` on Linux), the SMBIOS identity (UUID, manufacturer, product,
+  serial…) and the boot disk. The VM description lists what to add before the
+  first boot (EFI disk, with pre-enrolled keys when Secure Boot was on; TPM
+  state; "Unique" MACs if the source is still online). Every machine backup
+  also stores these facts in `machine-info.json.blob`.
 
 ### Fixed
-- **GUI disk backups always failed with the default Backup ID** (regression in
-  0.4.0): disk mode now files snapshots as `vm/<ID>` for Proxmox VE restore,
-  which needs a numeric VM ID, but the field was pre-filled with the hostname
-  ("machine backup needs a numeric backup ID"). Disk mode now has its own
-  **Proxmox VM ID** field (100–999999999, remembered per machine, separate from
-  the folder Backup ID), validated before the backup or scheduled job starts;
-  editing a scheduled disk job restores its VM ID and disks.
-
-### Changed
-- Once PBS servers are configured, backups and restores always use the default
-  server entry. Configs migrated from the legacy single-server format kept their
-  top-level connection fields, which took precedence and ignored later edits of
-  the server entry (changed default server, rotated token, encryption key).
-  If you maintain the top-level connection fields of `config.json` by hand, edit
-  the `pbs_servers` entry instead.
-- `SaveConfig` no longer drops the PBS server list when the payload omits it.
+- **A busy VSS no longer wipes every shadow copy on the host.** When VSS reported that another shadow copy was being created, the client ran `vssadmin delete shadows /all` and restarted the VSS service, destroying restore points and other tools' snapshots. It now waits and retries (30 s, 60 s, 120 s), then fails with an explicit message. And the startup cleanup no longer deletes a shadow copy another Nimbus process is still reading (e.g. a CLI backup running while the GUI starts): each run holds an in-use marker for its shadows.
+- **Disk backups never reached PBS, and scheduled ones could still show "Backup terminé"** (issue #9). Every machine backup failed at its last step (`execute VM config template: ... can't evaluate field VMID`), so no snapshot was committed; the VM config is now generated by upstream's code, covered by tests. And in 0.4.0 a GUI started before the service ran its own scheduler, which recorded a scheduled job as successful as soon as the service had accepted it, without waiting for the result. Only the service runs scheduled jobs now, and it records the real outcome (a failure shows as failed).
+- **A backup run by the service stayed on "Starting backup..." in the GUI** (issue #2): the service now reports its progress and completion to the GUI (upstream's progress dispatch), and the status bar no longer hides itself mid-run.
+- **The service ignored the PBS server selected for a directory backup**: the `/backup` route swapped it with the compression level, and the service always used the default PBS. Split backups now pass the selected server too.
+- **Maximising the window filled the screen only up to 1680×1008** (issue #1): the window maximum size is gone, so "maximise" fills the screen; on small screens the startup window is shrunk to fit instead.
+- **Encrypted backups made by `proxmox-backup-client` now restore.** The official
+  client compresses then encrypts chunks by default (`ENCR_COMPR` blobs), which
+  could not be decoded. Our encrypted chunks and blobs are now compressed the
+  same way when it helps, instead of being uploaded uncompressed (less storage
+  and bandwidth for encrypted backups).
+- Error messages now show the reason returned by PBS instead of "authentication
+  failed" for every refusal, e.g. `PBS refused the backup (HTTP 400): backup
+  owner check failed (…)`. 401 and 403 keep their own wording, and the raw
+  response headers no longer appear in the message.
+- **"VM" machine backups need a numeric VM ID**, but reused the Backup ID field,
+  pre-filled with the hostname. In "VM" mode the form now has its own **Proxmox
+  VM ID** field (100–999999999, remembered per machine, the Backup ID stays
+  intact), validated before the backup or scheduled job starts; editing a
+  scheduled machine job restores its VM ID and disks.
+- A machine backup with several disks is no longer split into one snapshot per
+  disk.
+- Standalone GUI upgraded from Nimbus Backup <= 0.3.0: its settings are now
+  also picked up from the legacy `ProgramData\NimbusBackup` folder.
+- Scheduled jobs declared in `config.json` (unattended deployment) are
+  validated like jobs saved from the GUI; an invalid one is logged and skipped.
 
 ## [0.4.0] - 2026-09-24
 

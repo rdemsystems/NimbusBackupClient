@@ -37,20 +37,20 @@ type BackupOptions struct {
 	Datastore       string
 	Namespace       string
 	CertFingerprint string
-	// EncryptionKey is the PBS server's client-side encryption key (key file
-	// JSON), empty for unencrypted backups. An unusable key fails the backup.
-	EncryptionKey json.RawMessage
-	BackupObjects      []string // Multiple directories or drives to backup
+	BackupObjects   []string // Multiple directories or drives to backup
 	BackupID        string
-	BackupType      string // "host" for directory, "vm" for machine
+	BackupType      string // "host" for GUI backups; "vm" additionally uploads a VM config and needs a numeric BackupID
 	Kind            string // "disk", "directory", or "machine"
 	UseVSS          bool
 	Compression     string   // Compression level: "fastest", "default", "better", "best"
 	ExcludeList     []string // User-configured exclusion patterns applied by the PXAR writer (H-04)
 	DisableSplit    bool     // When true, never auto-split regardless of size
 	SplitSizeBytes  uint64   // Auto-split threshold and per-bin target; 0 = default (SplitThreshold)
-	OnProgress      func(percent float64, message string)
-	OnComplete      func(success bool, message string)
+	// Crypt encrypts every chunk and signs the manifest. Nil means a plain
+	// snapshot. Populated from Config.Crypt (Config.EncryptionKeyFile).
+	Crypt      *pbscommon.CryptConfig
+	OnProgress func(percent float64, message string)
+	OnComplete func(success bool, message string)
 	// OnResult delivers the full structured result (Group 0 contract). It is
 	// additive: OnComplete keeps firing with the success bool for existing
 	// consumers. OnResult is the source the sidecar (Group 1) and rich history read.
@@ -58,6 +58,23 @@ type BackupOptions struct {
 	// OnStats delivers structured live progress so the GUI can show real
 	// statistics instead of parsing them out of the progress message string.
 	OnStats func(*BackupProgressStats)
+	// Parallel is how many folders of a multi-folder backup run at the same
+	// time (0 or 1: one after the other). No upper limit; the GUI recommends
+	// CPUs / 4 (RecommendedParallel).
+	Parallel int
+
+	// Set by runFoldersParallel on each folder's options: the batch already
+	// holds the destination lock, and under VSS (batchVSS) the folder reads
+	// snapshotPath, taken once for the whole batch.
+	lockHeld     bool
+	batchVSS     bool
+	snapshotPath string
+}
+
+// RecommendedParallel is the suggested number of folders backed up at the same
+// time: CPUs / 4, at least 1.
+func RecommendedParallel() int {
+	return max(runtime.NumCPU()/4, 1)
 }
 
 // isFatalSessionError returns true for errors that make the current PBS session
@@ -89,19 +106,6 @@ var (
 	currentBackupCancelMutex sync.Mutex
 	currentBackupCancel      context.CancelFunc
 )
-
-// CancelBackup requests a graceful stop of the currently running backup.
-// It is exported to the GUI and returns false if no backup is running.
-func (a *App) CancelBackup() error {
-	currentBackupCancelMutex.Lock()
-	defer currentBackupCancelMutex.Unlock()
-	if currentBackupCancel != nil {
-		currentBackupCancel()
-		writeDebugLog("CancelBackup: cancellation requested for running backup")
-	}
-	writeDebugLog("CancelBackup: no backup running (or already cancelled)")
-	return nil
-}
 
 // newBackupContext returns a fresh cancellable context and registers its
 // cancel function as the current in-flight backup. Callers should not defer
@@ -206,25 +210,25 @@ func calculateDirSizeCtx(ctx context.Context, path string) (uint64, error) {
 
 type ChunkState struct {
 	assignments         []string
-	assignmentsOffset  []uint64
+	assignmentsOffset   []uint64
 	pos                 uint64
 	wrid                uint64
 	chunkcount          uint64
 	chunkdigests        hash.Hash
-	currentChunk       []byte
+	currentChunk        []byte
 	C                   pbscommon.Chunker
 	newchunk            *atomic.Uint64
 	reusechunk          *atomic.Uint64
-	failedchunk         *atomic.Uint64     // Track failed chunk uploads
+	failedchunk         *atomic.Uint64 // Track failed chunk uploads
 	knownChunks         *haxmap.Map[string, bool]
 	onProgress          func(float64, string)
 	onStats             func(*BackupProgressStats) // Structured live stats for the GUI (nil for the catalog stream)
 	currentDir          string                     // Directory currently being archived, for the stats payload
 	lastProgressReport  uint64
-	lastProgressPercent float64            // Track last reported percentage to prevent backwards progress
-	totalSize           *atomic.Uint64     // Total size, updated by background scan
-	uploadErrors        []string           // Collect upload errors to report at the end
-	errorsMutex         sync.Mutex         // Protect uploadErrors slice
+	lastProgressPercent float64        // Track last reported percentage to prevent backwards progress
+	totalSize           *atomic.Uint64 // Total size, updated by background scan
+	uploadErrors        []string       // Collect upload errors to report at the end
+	errorsMutex         sync.Mutex     // Protect uploadErrors slice
 }
 
 func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, failedchunk *atomic.Uint64, knownChunks *haxmap.Map[string, bool], onProgress func(float64, string), totalSize *atomic.Uint64, onStats func(*BackupProgressStats), currentDir string) {
@@ -261,9 +265,12 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 		for chunkpos > 0 {
 			c.currentChunk = append(c.currentChunk, b[:chunkpos]...)
 
-			// Keyed digest when the backup is encrypted (Crypt is nil-safe).
-			bindigest := client.Crypt.ChunkDigest(c.currentChunk)
-			shahash := hex.EncodeToString(bindigest[:])
+			h := sha256.New()
+			if _, err := h.Write(c.currentChunk); err != nil {
+				return fmt.Errorf("failed to hash chunk: %w", err)
+			}
+			bindigest := h.Sum(nil)
+			shahash := hex.EncodeToString(bindigest)
 
 			if _, known := c.knownChunks.Get(shahash); !known {
 				writeBackupLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.currentChunk)))
@@ -307,7 +314,7 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 			if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.currentChunk)))); err != nil {
 				return fmt.Errorf("failed to write chunk offset: %w", err)
 			}
-			if _, err := c.chunkdigests.Write(bindigest[:]); err != nil {
+			if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
 				return fmt.Errorf("failed to write chunk digest: %w", err)
 			}
 
@@ -390,12 +397,16 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 
 func (c *ChunkState) EOF(client *pbscommon.PBSClient) error {
 	if len(c.currentChunk) > 0 {
-		bindigest := client.Crypt.ChunkDigest(c.currentChunk)
-		shahash := hex.EncodeToString(bindigest[:])
+		h := sha256.New()
+		if _, err := h.Write(c.currentChunk); err != nil {
+			return fmt.Errorf("failed to hash final chunk: %w", err)
+		}
+
+		shahash := hex.EncodeToString(h.Sum(nil))
 		if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.currentChunk)))); err != nil {
 			return fmt.Errorf("failed to write final chunk offset: %w", err)
 		}
-		if _, err := c.chunkdigests.Write(bindigest[:]); err != nil {
+		if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
 			return fmt.Errorf("failed to write final chunk digest: %w", err)
 		}
 
@@ -606,43 +617,10 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 		baseID = hostname
 	}
 
-	for i, dir := range opts.BackupObjects {
-		if opts.Ctx != nil && opts.Ctx.Err() != nil {
-			// A cancelled run must never be reported as a success: the skipped
-			// folders were not backed up. Partial when some folders completed.
-			skipped := len(opts.BackupObjects) - i
-			errMsg := fmt.Sprintf("backup cancelled: %d/%d folder(s) not backed up", skipped, len(opts.BackupObjects))
-			writeBackupLog("Cancellation requested — skipping remaining folders (" + errMsg + ")")
-			perDirErrors = append(perDirErrors, errMsg)
-			if i == 0 {
-				agg.Outcome = OutcomeFailed
-			} else if outcomeRank(agg.Outcome) > outcomeRank(OutcomePartial) {
-				agg.Outcome = OutcomePartial
-			}
-			break
-		}
-		dirOpts := opts
-		dirOpts.BackupObjects = []string{dir}
-		dirOpts.BackupID = GenerateBackupID(baseID, dir)
-		dirOpts.OnComplete = nil // suppress per-folder terminal callback; aggregated below
-		var dirStatus *BackupStatus
-		dirOpts.OnResult = func(s *BackupStatus) { dirStatus = s }
-
-		writeBackupLog(fmt.Sprintf("[Grouping] Backing up %s as its own group %s", dir, dirOpts.BackupID))
-		derr := runBackupInlineInternal(dirOpts)
-
-		if dirStatus != nil {
-			agg.merge(dirStatus)
-		} else if derr != nil {
-			agg.Outcome = OutcomeFailed
-		}
-		if derr != nil {
-			errMsg := fmt.Sprintf("backup of %s failed: %v", dir, derr)
-			writeBackupLog(errMsg)
-			perDirErrors = append(perDirErrors, errMsg)
-			// Continue with the remaining folders — one bad folder must not skip the rest.
-		}
-	}
+	// One after the other unless Parallel says otherwise; either way from one
+	// VSS snapshot set taken for every folder (see runFoldersParallel).
+	parallel := max(min(opts.Parallel, len(opts.BackupObjects)), 1)
+	perDirErrors = runFoldersParallel(opts, baseID, parallel, agg)
 
 	agg.DurationSec = time.Since(aggStart).Seconds()
 	if len(perDirErrors) > 0 {
@@ -661,6 +639,203 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 		return fmt.Errorf("%s", agg.Message)
 	}
 	return nil
+}
+
+// errFoldersFailed tells runFoldersParallel's snapshot callback that some
+// folders failed (already reported per folder).
+var errFoldersFailed = errors.New("some folders failed")
+
+// runFoldersParallel backs up up to parallel folders at the same time (1: one
+// after the other), each as its own backup group and PBS session, merging
+// every result into agg. It returns the per-folder errors.
+//
+// The batch takes the destination lock once (folders skip it, or they would
+// run one by one). Under VSS, ONE snapshot set covering every folder is taken
+// before any upload, so the folders are frozen together (one shadow copy per
+// volume) rather than each at its own turn. It also keeps concurrent folders
+// safe: concurrent snapshot creations collide ("VSS busy"), and the
+// busy-recovery path deletes every shadow copy, pulling it from under the
+// folders already running. Progress is the average of the folders,
+// statistics their sum.
+func runFoldersParallel(opts BackupOptions, baseID string, parallel int, agg *BackupStatus) []string {
+	dirs := opts.BackupObjects
+	writeBackupLog(fmt.Sprintf("[Parallel] Backing up %d folders, %d at a time", len(dirs), parallel))
+
+	cancelledBeforeStart := func() []string {
+		if opts.Ctx == nil || opts.Ctx.Err() == nil {
+			return nil
+		}
+		agg.Outcome = OutcomeFailed
+		errMsg := fmt.Sprintf("backup cancelled: %d/%d folder(s) not backed up", len(dirs), len(dirs))
+		writeBackupLog("Cancellation requested — " + errMsg)
+		return []string{errMsg}
+	}
+	if errs := cancelledBeforeStart(); errs != nil {
+		return errs
+	}
+
+	backupLock := getBackupLock(opts.BaseURL, opts.Datastore)
+	if opts.OnProgress != nil {
+		opts.OnProgress(0, "Waiting for previous backup to complete...")
+	}
+	backupLock.Lock()
+	defer backupLock.Unlock()
+	if errs := cancelledBeforeStart(); errs != nil {
+		return errs
+	}
+
+	var mu sync.Mutex
+	var perDirErrors []string
+	fractions := make([]float64, len(dirs))
+	stats := make([]BackupProgressStats, len(dirs))
+	started := 0
+
+	reportProgress := func(i int, pct float64, msg string) {
+		mu.Lock()
+		fractions[i] = pct
+		sum := 0.0
+		for _, f := range fractions {
+			sum += f
+		}
+		mu.Unlock()
+		if opts.OnProgress != nil {
+			opts.OnProgress(sum/float64(len(dirs)), fmt.Sprintf("[%s] %s", filepath.Base(dirs[i]), msg))
+		}
+	}
+	reportStats := func(i int, s *BackupProgressStats) {
+		mu.Lock()
+		stats[i] = *s
+		total := BackupProgressStats{CurrentDir: s.CurrentDir, Message: s.Message}
+		for _, st := range stats {
+			total.BytesDone += st.BytesDone
+			total.BytesTotal += st.BytesTotal
+			total.NewChunks += st.NewChunks
+			total.ReusedChunks += st.ReusedChunks
+			total.FailedChunks += st.FailedChunks
+		}
+		sum := 0.0
+		for _, f := range fractions {
+			sum += f
+		}
+		total.Percent = sum / float64(len(dirs))
+		mu.Unlock()
+		opts.OnStats(&total)
+	}
+
+	runAll := func(snapshotPaths map[string]string, parallel int) {
+		sem := make(chan struct{}, parallel)
+		var wg sync.WaitGroup
+		for i, dir := range dirs {
+			sem <- struct{}{}
+			if opts.Ctx != nil && opts.Ctx.Err() != nil {
+				<-sem
+				// A cancelled run must never be reported as a success: the
+				// folders not started were not backed up.
+				errMsg := fmt.Sprintf("backup cancelled: %d/%d folder(s) not backed up", len(dirs)-i, len(dirs))
+				writeBackupLog("Cancellation requested — skipping remaining folders (" + errMsg + ")")
+				mu.Lock()
+				perDirErrors = append(perDirErrors, errMsg)
+				mu.Unlock()
+				break
+			}
+			mu.Lock()
+			started++
+			mu.Unlock()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				dirOpts := opts
+				dirOpts.BackupObjects = []string{dir}
+				dirOpts.BackupID = GenerateBackupID(baseID, dir)
+				dirOpts.OnComplete = nil // aggregated by the caller
+				var dirStatus *BackupStatus
+				dirOpts.OnResult = func(s *BackupStatus) { dirStatus = s }
+				dirOpts.OnProgress = func(pct float64, msg string) { reportProgress(i, pct, msg) }
+				if opts.OnStats != nil {
+					dirOpts.OnStats = func(s *BackupProgressStats) { reportStats(i, s) }
+				}
+				dirOpts.lockHeld = true
+				if snapshotPaths != nil {
+					dirOpts.batchVSS = true
+					dirOpts.snapshotPath = snapshotPaths[dir]
+				}
+
+				writeBackupLog(fmt.Sprintf("[Parallel] Backing up %s as its own group %s", dir, dirOpts.BackupID))
+				derr := runBackupInlineInternal(dirOpts)
+
+				mu.Lock()
+				defer mu.Unlock()
+				if dirStatus != nil {
+					agg.merge(dirStatus)
+				} else if derr != nil {
+					agg.Outcome = OutcomeFailed
+				}
+				if derr != nil {
+					errMsg := fmt.Sprintf("backup of %s failed: %v", dir, derr)
+					writeBackupLog(errMsg)
+					perDirErrors = append(perDirErrors, errMsg)
+				}
+			}()
+		}
+		wg.Wait()
+	}
+
+	if opts.UseVSS {
+		called := false
+		err := snapshot.CreateVSSSnapshot(dirs, true, func(snaps map[string]snapshot.SnapShot) error {
+			called = true
+			paths := make(map[string]string, len(dirs))
+			for _, dir := range dirs {
+				if s, ok := snaps[dir]; ok {
+					paths[dir] = s.FullPath
+				} else if abs, aerr := filepath.Abs(dir); aerr == nil {
+					if s, ok := snaps[abs]; ok {
+						paths[dir] = s.FullPath
+					}
+				}
+			}
+			runAll(paths, parallel)
+			if len(perDirErrors) > 0 {
+				// Lets the snapshot code delete the shadow copies right away
+				// (Windows only does it on an error); already reported.
+				return errFoldersFailed
+			}
+			return nil
+		})
+		if err != nil && !called {
+			// The set could not be taken (e.g. one volume refuses VSS): fall
+			// back to one snapshot per folder, one folder at a time, so the
+			// folders on healthy volumes are still backed up. Never in
+			// parallel: concurrent snapshot creations collide.
+			writeBackupLog(fmt.Sprintf("[VSS] One snapshot for every folder failed (%v): falling back to one snapshot per folder, one folder at a time", err))
+			runAll(nil, 1)
+		} else if err != nil && !errors.Is(err, errFoldersFailed) {
+			// Releasing the snapshot failed: never a success, even when every
+			// folder uploaded.
+			errMsg := fmt.Sprintf("VSS snapshot of the folders failed: %v", err)
+			writeBackupLog(errMsg)
+			perDirErrors = append(perDirErrors, errMsg)
+			if started == 0 {
+				agg.Outcome = OutcomeFailed
+			} else if outcomeRank(agg.Outcome) > outcomeRank(OutcomePartial) {
+				agg.Outcome = OutcomePartial
+			}
+		}
+	} else {
+		runAll(nil, parallel)
+	}
+
+	// Cancelled or VSS-failed before every folder ran: never a success.
+	if len(perDirErrors) > 0 && started < len(dirs) {
+		if started == 0 {
+			agg.Outcome = OutcomeFailed
+		} else if outcomeRank(agg.Outcome) > outcomeRank(OutcomePartial) {
+			agg.Outcome = OutcomePartial
+		}
+	}
+	return perDirErrors
 }
 
 // runBackupInlineInternal is the actual backup implementation (called by RunBackupInline)
@@ -682,27 +857,30 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	if opts.Kind == "machine" {
 		return runMachineBackupInline(opts)
 	}
-	
+
 	// Default to directory backup for "disk" or "directory" kinds
 	// (existing logic handles these cases)
 
 	startTime := time.Now()
 
-	// Acquire backup lock for this destination to prevent concurrent backups
-	backupLock := getBackupLock(opts.BaseURL, opts.Datastore)
-	writeBackupLog(fmt.Sprintf("[Backup Lock] Waiting for lock on %s/%s (prevents concurrent backups)", opts.BaseURL, opts.Datastore))
+	// Acquire backup lock for this destination to prevent concurrent backups.
+	// A folder of a parallel batch runs under the batch's lock.
+	if !opts.lockHeld {
+		backupLock := getBackupLock(opts.BaseURL, opts.Datastore)
+		writeBackupLog(fmt.Sprintf("[Backup Lock] Waiting for lock on %s/%s (prevents concurrent backups)", opts.BaseURL, opts.Datastore))
 
-	// Notify that we're waiting if OnProgress is set
-	if opts.OnProgress != nil {
-		opts.OnProgress(0, "Waiting for previous backup to complete...")
+		// Notify that we're waiting if OnProgress is set
+		if opts.OnProgress != nil {
+			opts.OnProgress(0, "Waiting for previous backup to complete...")
+		}
+
+		backupLock.Lock()
+		writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock acquired for %s/%s - starting backup", opts.BaseURL, opts.Datastore))
+		defer func() {
+			backupLock.Unlock()
+			writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock released for %s/%s", opts.BaseURL, opts.Datastore))
+		}()
 	}
-
-	backupLock.Lock()
-	writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock acquired for %s/%s - starting backup", opts.BaseURL, opts.Datastore))
-	defer func() {
-		backupLock.Unlock()
-		writeBackupLog(fmt.Sprintf("[Backup Lock] ✓ Lock released for %s/%s", opts.BaseURL, opts.Datastore))
-	}()
 
 	// Generate backup ID from path if not specified
 	writeBackupLog("[DEBUG] Generating backup ID if needed")
@@ -786,30 +964,10 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		Namespace:        opts.Namespace,
 		Insecure:         opts.CertFingerprint != "",
 		CompressionLevel: compressionLevel,
+		Crypt:            opts.Crypt,
 		Manifest: pbscommon.BackupManifest{
 			BackupID: opts.BackupID,
 		},
-	}
-	// Client-side encryption: a configured but unusable key fails the backup
-	// rather than silently uploading unencrypted data.
-	if err := applyEncryptionKey(client, opts.EncryptionKey); err != nil {
-		errMsg := fmt.Sprintf("encryption key error: %v", err)
-		writeBackupLog("❌ " + errMsg)
-		if opts.OnComplete != nil {
-			opts.OnComplete(false, errMsg)
-		}
-		if opts.OnResult != nil {
-			opts.OnResult(&BackupStatus{
-				Outcome:     OutcomeFailed,
-				BackupID:    opts.BackupID,
-				DurationSec: time.Since(startTime).Seconds(),
-				Message:     errMsg,
-			})
-		}
-		return fmt.Errorf("%s", errMsg)
-	}
-	if client.Crypt != nil {
-		writeBackupLog(fmt.Sprintf("🔒 Client-side encryption enabled (key %s)", client.Crypt.ShortFingerprint()))
 	}
 
 	writeBackupLog("[DEBUG] PBS client created, starting directory backup loop")
@@ -842,7 +1000,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 			if opts.OnComplete != nil {
 				opts.OnComplete(false, "Backup annulé par l'utilisateur")
 			}
-			return fmt.Errorf("backup cancelled by user")
+			return machinebackuplib.ErrCancelled
 		}
 		writeBackupLog(fmt.Sprintf("Starting backup of directory %d/%d: %s", idx+1, len(opts.BackupObjects), dir))
 
@@ -852,7 +1010,15 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		var err error
 		var dirBytes uint64
 		for attempt := 1; attempt <= maxDirAttempts; attempt++ {
-			dirBytes, err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
+			switch {
+			case opts.batchVSS && opts.snapshotPath == "":
+				err = fmt.Errorf("no VSS snapshot was taken for %s", dir)
+			case opts.snapshotPath != "":
+				// Folder of a multi-folder batch: read the batch's snapshot.
+				dirBytes, err = backupReal(client, &newchunk, &reusechunk, &failedchunk, opts.snapshotPath, dir, true, progress, opts.OnStats, opts.ExcludeList)
+			default:
+				dirBytes, err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
+			}
 			if err == nil {
 				break
 			}
@@ -878,7 +1044,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 						if opts.OnComplete != nil {
 							opts.OnComplete(false, "Backup annulé par l'utilisateur")
 						}
-						return fmt.Errorf("backup cancelled by user")
+						return machinebackuplib.ErrCancelled
 					}
 					remaining := time.Until(waitUntil)
 					if remaining <= 0 {
@@ -1069,7 +1235,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 // runMachineBackupInline handles machine backup using machinebackuplib
 func runMachineBackupInline(opts BackupOptions) error {
 	startTime := time.Now()
-	
+
 	// Create machine backup config from opts
 	cfg := &machinebackuplib.Config{
 		BaseURL:         opts.BaseURL,
@@ -1083,25 +1249,9 @@ func runMachineBackupInline(opts BackupOptions) error {
 		BackupID:        opts.BackupID,
 		BackupType:      opts.BackupType,
 		BackupDevices:   opts.BackupObjects,
+		Crypt:           opts.Crypt,
+		UseSnapshot:     opts.UseVSS,
 	}
-	crypt, kerr := cryptFromStoredKey(opts.EncryptionKey)
-	if kerr != nil {
-		errMsg := fmt.Sprintf("encryption key error: %v", kerr)
-		writeBackupLog("❌ " + errMsg)
-		if opts.OnComplete != nil {
-			opts.OnComplete(false, errMsg)
-		}
-		if opts.OnResult != nil {
-			opts.OnResult(&BackupStatus{
-				Outcome:     OutcomeFailed,
-				BackupID:    opts.BackupID,
-				DurationSec: time.Since(startTime).Seconds(),
-				Message:     errMsg,
-			})
-		}
-		return fmt.Errorf("%s", errMsg)
-	}
-	cfg.Crypt = crypt
 
 	// Progress callback wrapper. Returning true (user pressed Stop, which
 	// cancels opts.Ctx) makes the backup abort without committing the index.
@@ -1112,14 +1262,21 @@ func runMachineBackupInline(opts BackupOptions) error {
 		}
 		return opts.Ctx != nil && opts.Ctx.Err() != nil
 	}
-	
+
 	// Perform machine backup
 	_, err := machinebackuplib.Backup(cfg, progress)
 	if err != nil {
-		// Handle error case
+		// A user Stop is not a failure: report it as a cancellation, and keep
+		// the sentinel intact so callers can match it with errors.Is instead
+		// of string-parsing the message.
+		cancelled := errors.Is(err, machinebackuplib.ErrCancelled) ||
+			(opts.Ctx != nil && opts.Ctx.Err() != nil)
 		errMsg := fmt.Sprintf("Machine backup failed: %v", err)
+		if cancelled {
+			errMsg = "Machine backup cancelled by user"
+		}
 		writeBackupLog(errMsg)
-		
+
 		if opts.OnComplete != nil {
 			opts.OnComplete(false, errMsg)
 		}
@@ -1131,13 +1288,16 @@ func runMachineBackupInline(opts BackupOptions) error {
 				Message:     errMsg,
 			})
 		}
-		return fmt.Errorf("%s", errMsg)
+		if cancelled {
+			return machinebackuplib.ErrCancelled
+		}
+		return errors.New(errMsg)
 	}
-	
+
 	// Success case
 	duration := time.Since(startTime)
 	completionMsg := fmt.Sprintf("Machine backup completed in %s", formatDuration(duration))
-	
+
 	if opts.OnComplete != nil {
 		opts.OnComplete(true, completionMsg)
 	}
@@ -1149,7 +1309,7 @@ func runMachineBackupInline(opts BackupOptions) error {
 			Message:     completionMsg,
 		})
 	}
-	
+
 	return nil
 }
 
@@ -1224,10 +1384,11 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 		}
 	}
 
-	// NTFS metadata collector: captures ACLs/owner/attrs for every entry during
-	// the walk. Implementation is Windows-only; no-op on other platforms.
-	// The collected data is serialized after the walk and uploaded as a blob
-	// in the same backup session (see below, after Eof).
+	// NTFS metadata collector: captures owner/ACLs/attrs on Windows, or every
+	// extended attribute (including POSIX ACLs, which the kernel itself
+	// stores as xattrs) on Linux, for every entry during the walk; no-op on
+	// other platforms. The collected data is serialized after the walk and
+	// uploaded as a blob in the same backup session (see below, after Eof).
 	ntfsCollector := NewNTFSMetaCollector(backupdir, hostname)
 	archive.MetaCollector = ntfsCollector
 
