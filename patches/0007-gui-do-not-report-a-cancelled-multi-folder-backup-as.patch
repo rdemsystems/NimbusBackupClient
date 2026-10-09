@@ -1,7 +1,7 @@
 From ac6852d4ea537261fde1090f2f9d5b3f591c5ce8 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:04:54 +0200
-Subject: [PATCH 07/28] gui: do not report a cancelled multi-folder backup as a
+Subject: [PATCH 07/33] gui: do not report a cancelled multi-folder backup as a
  success
 
 Cancelling between folders only broke out of the loop: with no earlier

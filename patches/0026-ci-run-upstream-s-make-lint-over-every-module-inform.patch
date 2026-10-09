@@ -1,7 +1,7 @@
 From 21016bd7e33a9731e9f588ea7306632391239f94 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 10:11:56 +0200
-Subject: [PATCH 26/28] ci: run upstream's make lint over every module
+Subject: [PATCH 26/33] ci: run upstream's make lint over every module
  (informational)
 
 ---

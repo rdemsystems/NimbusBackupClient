@@ -1,7 +1,7 @@
 From b58a293a99b85104a89cdf91db446e79830b046e Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 09:45:34 +0200
-Subject: [PATCH 17/28] fork: version 0.4.0 base and release notes
+Subject: [PATCH 17/33] fork: version 0.4.0 base and release notes
 
 ---
  RELEASE_NOTES.md | 6 ++++--

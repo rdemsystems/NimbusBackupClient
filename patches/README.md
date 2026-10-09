@@ -49,6 +49,11 @@ carry the Nimbus identity, docs and CI.
 | 0026 | ci: run upstream's make lint over every module (informational) | fork-only | |
 | 0027 | test: framing test uploads uncompressed; e2e test 9 path works with a local client | upstream candidate | |
 | 0028 | ci: sign the Windows GUI, service and MSI with Azure Artifact Signing | fork-only | Account `github-nimbus`; active once `AZURE_SIGNING_PROFILE` is set. |
+| 0029 | fix(ci): gofmt-align ScheduledJob, gosec G703 annotations, failures as annotations | fork-only (gofmt + G703: upstream candidate) | Upstream code failed gofmt and gosec; e2e failures surface as job annotations. |
+| 0030 | fix(ci): gosec G703 on upstream file operations; e2e log tail as sub-4KB annotations | fork-only (G703: upstream candidate) | |
+| 0031 | fix: real file owners in pxar on Unix; upstream lint findings | upstream candidate | pxar hardcoded uid/gid 1000: restoring as another user failed ("failed to set ownership"), restoring as root gave files to uid 1000. `serviceIdentity` unused outside the service build; ST1020 comment. |
+| 0032 | ci: run Build GUI in the 'signing' environment | fork-only | One Azure federated credential (`repo:rdemsystems/NimbusBackupClient:environment:signing`) for every branch and tag. |
+| 0033 | docs: PBS user, token and DatastoreBackup permissions | fork-only | |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

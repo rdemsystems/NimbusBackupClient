@@ -1,0 +1,162 @@
+From 5b7d0dce9ac6f06624a2ce869af19d808bc16a32 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 11:59:01 +0200
+Subject: [PATCH 31/33] fix: real file owners in pxar on Unix; upstream lint
+ findings
+
+- pxar entries recorded a fixed uid/gid 1000 (the project targeted
+  Windows). On Unix they now carry the file's real owner (virtual files:
+  the process owner), so a restore gives files back to their owner, and
+  an unprivileged restore by the backing-up user no longer fails with
+  "failed to set ownership: Operation not permitted" whenever that user
+  is not uid 1000 (the e2e suite on GitHub runners, uid 1001). Windows
+  keeps 1000.
+- gui/service_name_other.go: built with the service tag only, where
+  serviceIdentity is used (unused otherwise).
+- OpenDirectoryPicker: doc comment named a different function (ST1020).
+---
+ gui/main.go                     |  4 ++--
+ gui/service_name_other.go       |  4 ++--
+ pbscommon/pxar.go               | 17 +++++++++++------
+ pbscommon/pxar_owner_unix.go    | 25 +++++++++++++++++++++++++
+ pbscommon/pxar_owner_windows.go | 12 ++++++++++++
+ 5 files changed, 52 insertions(+), 10 deletions(-)
+ create mode 100644 pbscommon/pxar_owner_unix.go
+ create mode 100644 pbscommon/pxar_owner_windows.go
+
+diff --git a/gui/main.go b/gui/main.go
+index 921acf8..955f932 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -1985,8 +1985,8 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
+ 	return nil
+ }
+ 
+-// OpenRestoreDestDialog opens a native folder picker so the user can choose
+-// where to restore files. Returns "" if the dialog was cancelled.
++// OpenDirectoryPicker opens a native folder picker (e.g. to choose where to
++// restore files). Returns "" if the dialog was cancelled.
+ //
+ // Hardened against a reported crash on the client: the native Windows folder
+ // picker (IFileDialog) can fault when handed an empty/invalid initial folder,
+diff --git a/gui/service_name_other.go b/gui/service_name_other.go
+index 753f2e1..3e80536 100644
+--- a/gui/service_name_other.go
++++ b/gui/service_name_other.go
+@@ -1,5 +1,5 @@
+-//go:build !windows
+-// +build !windows
++//go:build !windows && service
++// +build !windows,service
+ 
+ package main
+ 
+diff --git a/pbscommon/pxar.go b/pbscommon/pxar.go
+index 098760e..f3c0160 100644
+--- a/pbscommon/pxar.go
++++ b/pbscommon/pxar.go
+@@ -479,13 +479,16 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
+ 
+ 	dir_start_pos := a.pos
+ 
++	// Permissions stay fixed (the project targets Windows, which has no
++	// Unix execute/traverse bits); the owner is the real one on Unix.
++	uid, gid := fileOwner(fileInfo)
+ 	entry := &PXARFileEntry{
+ 		hdr:   PXAR_ENTRY,
+ 		len:   56,
+ 		mode:  IFDIR | 0o777,
+ 		flags: 0,
+-		uid:   1000, //This is fixed because this project for now targeting windows , on which execute, traverse etc permissions don't exist
+-		gid:   1000,
++		uid:   uid,
++		gid:   gid,
+ 		mtime: MTime{
+ 			secs:    uint64(fileInfo.ModTime().Unix()),
+ 			nanos:   0,
+@@ -755,13 +758,14 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
+ 	a.buffer.WriteString(basename)
+ 	a.buffer.WriteByte(0x00)
+ 
++	uid, gid := fileOwner(fileInfo)
+ 	entry := &PXARFileEntry{
+ 		hdr:   PXAR_ENTRY,
+ 		len:   56,
+ 		mode:  IFREG | 0o777,
+ 		flags: 0,
+-		uid:   1000,
+-		gid:   1000,
++		uid:   uid,
++		gid:   gid,
+ 		mtime: MTime{
+ 			secs:    uint64(fileInfo.ModTime().Unix()),
+ 			nanos:   0,
+@@ -863,13 +867,14 @@ func (a *PXARArchive) WriteVirtualFile(filename string, data []byte, mtime uint6
+ 	a.buffer.WriteString(filename)
+ 	a.buffer.WriteByte(0x00)
+ 
++	uid, gid := processOwner()
+ 	entry := &PXARFileEntry{
+ 		hdr:   PXAR_ENTRY,
+ 		len:   56,
+ 		mode:  IFREG | 0o444,
+ 		flags: 0,
+-		uid:   1000,
+-		gid:   1000,
++		uid:   uid,
++		gid:   gid,
+ 		mtime: MTime{
+ 			secs:    mtime,
+ 			nanos:   0,
+diff --git a/pbscommon/pxar_owner_unix.go b/pbscommon/pxar_owner_unix.go
+new file mode 100644
+index 0000000..d069bd1
+--- /dev/null
++++ b/pbscommon/pxar_owner_unix.go
+@@ -0,0 +1,25 @@
++//go:build !windows
++
++package pbscommon
++
++import (
++	"os"
++	"syscall"
++)
++
++// fileOwner is the uid/gid a pxar entry records for fi. On Unix it is the real
++// owner, so a restore (as root, or as that same user) gives the files back
++// to whom they belonged; a restore by another unprivileged user could not
++// chown them anyway.
++func fileOwner(fi os.FileInfo) (uid, gid uint32) {
++	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
++		return st.Uid, st.Gid
++	}
++	return processOwner()
++}
++
++// processOwner is the uid/gid of this process, for entries with no file on
++// disk (virtual files).
++func processOwner() (uid, gid uint32) {
++	return uint32(os.Getuid()), uint32(os.Getgid()) // #nosec G115 -- uid/gid are non-negative on Unix
++}
+diff --git a/pbscommon/pxar_owner_windows.go b/pbscommon/pxar_owner_windows.go
+new file mode 100644
+index 0000000..1386863
+--- /dev/null
++++ b/pbscommon/pxar_owner_windows.go
+@@ -0,0 +1,12 @@
++//go:build windows
++
++package pbscommon
++
++import "os"
++
++// fileOwner is the uid/gid a pxar entry records for fi. Windows has no
++// Unix owner: a fixed 1000, as the archive always used.
++func fileOwner(os.FileInfo) (uid, gid uint32) { return 1000, 1000 }
++
++// processOwner is the uid/gid recorded for virtual files.
++func processOwner() (uid, gid uint32) { return 1000, 1000 }
+-- 
+2.47.3
+

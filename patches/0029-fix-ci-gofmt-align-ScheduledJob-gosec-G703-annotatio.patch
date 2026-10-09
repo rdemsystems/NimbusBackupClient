@@ -1,0 +1,143 @@
+From f21e00ca6c68c9f3e60ab5394feb109840307fb3 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 10:37:02 +0200
+Subject: [PATCH 29/33] fix(ci): gofmt-align ScheduledJob, gosec G703
+ annotations, failures as annotations
+
+- gui/scheduler.go: trailing comments of ScheduledJob aligned as gofmt
+  wants (upstream f1bf650 left them misaligned).
+- #nosec G703 on the new file operations (paths from the ProgramData env
+  var or a native save dialog), like legacy_datadir.go.
+- gosec findings and the tail of a failed e2e run are emitted as
+  annotations, readable without access to the job logs.
+---
+ .github/workflows/build-and-release.yml | 13 ++++++++++++-
+ .github/workflows/e2e.yml               | 13 ++++++++++++-
+ gui/config.go                           |  4 ++--
+ gui/paperkey_gui.go                     |  6 +++---
+ gui/scheduler.go                        |  8 ++++----
+ 5 files changed, 33 insertions(+), 11 deletions(-)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index 0fa3379..d60f0ac 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -66,9 +66,20 @@ jobs:
+       - name: Run gosec
+         env:
+           GOWORK: off
++        # Findings are also emitted as annotations (readable without access
++        # to the job logs).
+         run: |
+           go install github.com/securego/gosec/v2/cmd/gosec@latest
+-          cd gui && gosec -severity high -confidence high ./...
++          cd gui
++          rc=0
++          gosec -severity high -confidence high -fmt json -out "$RUNNER_TEMP/gosec.json" -stdout -verbose text ./... || rc=$?
++          python3 - "$RUNNER_TEMP/gosec.json" <<'PY' || true
++          import json, os, sys
++          for i in json.load(open(sys.argv[1])).get("Issues") or []:
++              f = os.path.relpath(i.get("file", ""), os.environ["GITHUB_WORKSPACE"])
++              print(f"::error file={f},line={i.get('line','1').split('-')[0]}::gosec {i.get('rule_id')}: {i.get('details')}")
++          PY
++          exit $rc
+ 
+       - name: Run golangci-lint
+         uses: golangci/golangci-lint-action@v7
+diff --git a/.github/workflows/e2e.yml b/.github/workflows/e2e.yml
+index 3f25c3e..4e1d76a 100644
+--- a/.github/workflows/e2e.yml
++++ b/.github/workflows/e2e.yml
+@@ -136,7 +136,18 @@ jobs:
+         id: run-e2e
+         env:
+           E2E_SKIP_OFFICIAL: ${{ inputs.skip_official_client && '1' || '0' }}
+-        run: make test-e2e
++        run: |
++          set -o pipefail
++          make test-e2e 2>&1 | tee "$RUNNER_TEMP/e2e.log"
++
++      # The tail of the run as an annotation, readable without access to the
++      # job logs.
++      - name: Failure summary
++        if: failure()
++        run: |
++          tail -n 80 "$RUNNER_TEMP/e2e.log" | sed -r 's/\x1b\[[0-9;]*m//g; s/%/%25/g; s/\r//g' \
++            | awk 'BEGIN{ORS="%0A"} {print}' > "$RUNNER_TEMP/e2e-tail.txt"
++          echo "::error title=End-to-end suite failed::$(cat "$RUNNER_TEMP/e2e-tail.txt")"
+ 
+       - name: PBS container logs
+         if: failure()
+diff --git a/gui/config.go b/gui/config.go
+index b2720bd..b92c0a8 100644
+--- a/gui/config.go
++++ b/gui/config.go
+@@ -79,7 +79,7 @@ func migrateStandaloneFromProgramData() {
+ 	legacy := filepath.Join(filepath.Dir(src), legacyDataDirName)
+ 	// Once copied into the service dir the legacy folder is retired (its
+ 	// marker file): never bring its data back from there.
+-	if _, err := os.Stat(filepath.Join(legacy, legacyCopiedMarker)); err != nil {
++	if _, err := os.Stat(filepath.Join(legacy, legacyCopiedMarker)); err != nil { // #nosec G703 -- path built from the trusted ProgramData env var + fixed names
+ 		sources = append(sources, legacy)
+ 	}
+ 	for _, name := range []string{"config.json", "scheduled_jobs.json", "job_history.json"} {
+@@ -88,7 +88,7 @@ func migrateStandaloneFromProgramData() {
+ 			continue // home copy already exists: never clobber it
+ 		}
+ 		for _, dir := range sources {
+-			data, err := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- fixed names under the trusted ProgramData folder
++			data, err := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 G703 -- fixed names under the trusted ProgramData folder
+ 			if err != nil {
+ 				continue // missing or not readable (e.g. SYSTEM-only ACL)
+ 			}
+diff --git a/gui/paperkey_gui.go b/gui/paperkey_gui.go
+index a7672fd..e469f36 100644
+--- a/gui/paperkey_gui.go
++++ b/gui/paperkey_gui.go
+@@ -103,7 +103,7 @@ func (a *App) ExportEncryptionPaperKey(path, passphrase string, labels PaperKeyL
+ 	if err != nil || out == "" {
+ 		return "", err
+ 	}
+-	if err := os.WriteFile(out, page, 0o600); err != nil {
++	if err := os.WriteFile(out, page, 0o600); err != nil { // #nosec G703 -- path chosen by the user in a native save dialog
+ 		return "", fmt.Errorf("ecriture de %s: %w", out, err)
+ 	}
+ 	return out, nil
+@@ -151,12 +151,12 @@ func (a *App) writeNewKeyFile(path string, crypt *pbscommon.CryptConfig) error {
+ 	if err := security.ValidatePath(path); err != nil {
+ 		return fmt.Errorf("chemin de cle invalide: %w", err)
+ 	}
+-	if _, err := os.Stat(path); err == nil {
++	if _, err := os.Stat(path); err == nil { // #nosec G703 -- path chosen by the user in a native save dialog, validated above
+ 		return fmt.Errorf("le fichier %s existe deja: il n'est jamais ecrase, choisissez un autre nom", path)
+ 	} else if !os.IsNotExist(err) {
+ 		return fmt.Errorf("verification de %s: %w", path, err)
+ 	}
+-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
++	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { // #nosec G703 -- see above
+ 		return fmt.Errorf("creation du dossier %s: %w", filepath.Dir(path), err)
+ 	}
+ 	if err := pbscommon.SaveKeyFile(path, crypt); err != nil {
+diff --git a/gui/scheduler.go b/gui/scheduler.go
+index d78fd19..d7650dc 100644
+--- a/gui/scheduler.go
++++ b/gui/scheduler.go
+@@ -26,11 +26,11 @@ type ScheduledJob struct {
+ 	UseVSS       bool     `json:"useVSS"`
+ 	BackupType   string   `json:"backupType"`
+ 	ExcludeList  []string `json:"excludeList"`
+-	Compression  string   `json:"compression"`       // "fastest", "default", "better", "best"
+-	PBSID        string   `json:"pbs_id,omitempty"`  // PBS server ID to use (empty = default)
++	Compression  string   `json:"compression"`           // "fastest", "default", "better", "best"
++	PBSID        string   `json:"pbs_id,omitempty"`      // PBS server ID to use (empty = default)
+ 	BackupKind   string   `json:"backup_kind,omitempty"` // "host" or "vm" for machine backups
+-	LastRun      string   `json:"lastRun,omitempty"` // ISO timestamp
+-	NextRun      string   `json:"nextRun,omitempty"` // ISO timestamp
++	LastRun      string   `json:"lastRun,omitempty"`     // ISO timestamp
++	NextRun      string   `json:"nextRun,omitempty"`     // ISO timestamp
+ 	Enabled      bool     `json:"enabled"`
+ }
+ 
+-- 
+2.47.3
+

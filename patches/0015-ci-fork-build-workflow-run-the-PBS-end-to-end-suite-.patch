@@ -1,7 +1,7 @@
 From 5654b9733f114fbda961d4172f31e6c070628861 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 09:44:57 +0200
-Subject: [PATCH 15/28] ci: fork build workflow; run the PBS end-to-end suite
+Subject: [PATCH 15/33] ci: fork build workflow; run the PBS end-to-end suite
  on fork branches
 
 Keep the fork's build-and-release.yml (Nimbus brand, master pushes,

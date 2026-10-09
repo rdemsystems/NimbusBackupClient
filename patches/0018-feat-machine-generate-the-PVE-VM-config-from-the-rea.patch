@@ -1,7 +1,7 @@
 From 791ba28f51f0035331326af61c9c42c1f0fb448d Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 30 Sep 2026 16:07:05 +0200
-Subject: [PATCH 18/28] feat(machine): generate the PVE VM config from the real
+Subject: [PATCH 18/33] feat(machine): generate the PVE VM config from the real
  machine
 
 "vm" disk snapshots carried a fixed qemu-server.conf template (4 cores,
