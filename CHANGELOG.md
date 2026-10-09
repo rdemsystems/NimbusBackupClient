@@ -44,6 +44,11 @@ replaces the fork's unreleased one.
   also stores these facts in `machine-info.json.blob`.
 
 ### Fixed
+- **Encrypted backups made by `proxmox-backup-client` now restore.** The official
+  client compresses then encrypts chunks by default (`ENCR_COMPR` blobs), which
+  could not be decoded. Our encrypted chunks and blobs are now compressed the
+  same way when it helps, instead of being uploaded uncompressed (less storage
+  and bandwidth for encrypted backups).
 - Error messages now show the reason returned by PBS instead of "authentication
   failed" for every refusal, e.g. `PBS refused the backup (HTTP 400): backup
   owner check failed (…)`. 401 and 403 keep their own wording, and the raw
