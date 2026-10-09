@@ -1,7 +1,7 @@
 From 7b5581b3ab146bce016fb760d8f748f84b3862b9 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 15:53:11 +0200
-Subject: [PATCH 48/51] docs: 0.4.1 is signed; issue #9 in full; README
+Subject: [PATCH 48/58] docs: 0.4.1 is signed; issue #9 in full; README
  features and upstream section
 
 - Release notes and READMEs: the GUI, its service and the MSI are

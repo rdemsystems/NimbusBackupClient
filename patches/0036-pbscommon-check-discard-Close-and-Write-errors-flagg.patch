@@ -1,7 +1,7 @@
 From 7d1d6caf0b293e0db0e326555ed0b0781485f408 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 14:30:01 +0200
-Subject: [PATCH 36/51] pbscommon: check (discard) Close and Write errors
+Subject: [PATCH 36/58] pbscommon: check (discard) Close and Write errors
  flagged by errcheck
 
 ---

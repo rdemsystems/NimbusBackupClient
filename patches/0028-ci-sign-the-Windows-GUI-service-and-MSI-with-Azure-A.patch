@@ -1,7 +1,7 @@
 From 654a1a133ab132d39dc5881981e6e566f58e246a Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 10:23:11 +0200
-Subject: [PATCH 28/51] ci: sign the Windows GUI, service and MSI with Azure
+Subject: [PATCH 28/58] ci: sign the Windows GUI, service and MSI with Azure
  Artifact Signing
 
 Account github-nimbus (Switzerland North, https://swn.codesigning.azure.net/).

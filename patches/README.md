@@ -72,6 +72,13 @@ carry the Nimbus identity, docs and CI.
 | 0049 | docs: carry the README update into the 11 AI translations | fork-only |  |
 | 0050 | ci: verify the Authenticode signatures of every shipped Windows file | fork-only | Valid + CN=RDEM SYSTEMS + timestamp on the exe, service, MSI and the exes the MSI installs; the build fails otherwise. |
 | 0051 | docs(fa): Windows menu names in Persian, English in parentheses | fork-only |  |
+| 0052 | ci: install the signed MSI on Windows, fresh and as an upgrade from 0.4.0 | fork-only | Release notes from the CHANGELOG section. |
+| 0053 | docs: state the upstream commit 0.4.1 is built on, in every README | fork-only |  |
+| 0054 | docs: the GUI path to the encryption key and the Running tab use the real labels | fork-only |  |
+| 0055 | fix(vss): a busy VSS is waited for, never wiped; cleanup spares shadows in use | upstream candidate | Inherited: `vssadmin delete shadows /all` + VSS restart on "busy"; startup cleanup deleting another live run's shadow. |
+| 0056 | fix(vss): take the in-use lease before the symlink; ci: bounded, diagnosable install test | upstream candidate (VSS part) |  |
+| 0057 | ci: quote msiexec arguments in the install test | fork-only |  |
+| 0058 | release: v0.4.1 | fork-only |  |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

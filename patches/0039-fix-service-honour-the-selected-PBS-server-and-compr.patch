@@ -1,7 +1,7 @@
 From a12adcc8836db4220fd86a1487431937edfeb09d Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 14:40:09 +0200
-Subject: [PATCH 39/51] fix(service): honour the selected PBS server and
+Subject: [PATCH 39/58] fix(service): honour the selected PBS server and
  compression (issue #2)
 
 The /backup route passed req.PBSID as the compression level and the level as

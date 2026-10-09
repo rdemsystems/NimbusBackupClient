@@ -1,7 +1,7 @@
 From 2a9ff82a9109bd5637174404b772c8935c7eb008 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 15:10:49 +0200
-Subject: [PATCH 44/51] feat(vss): one snapshot for a whole multi-folder
+Subject: [PATCH 44/58] feat(vss): one snapshot for a whole multi-folder
  backup, one shadow copy per volume
 
 Sequential multi-folder backups (GUI and CLI) now go through the batch path

@@ -1,7 +1,7 @@
 From 4a7aaedc3cabaa99a5becae31d00fa0c714a75bb Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 14:49:14 +0200
-Subject: [PATCH 41/51] fix: the 67 golangci-lint findings outside gui
+Subject: [PATCH 41/58] fix: the 67 golangci-lint findings outside gui
 
 errcheck: Close/Remove/Write results explicitly discarded where nothing can be
 done about them. govet lostcancel: the service's backup goroutines cancel their

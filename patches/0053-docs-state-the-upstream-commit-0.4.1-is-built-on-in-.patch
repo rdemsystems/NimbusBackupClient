@@ -1,0 +1,196 @@
+From b664ee7c69825c54439227a61f5e4aab9c562073 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 17:20:10 +0200
+Subject: [PATCH 53/58] docs: state the upstream commit 0.4.1 is built on, in
+ every README
+
+upstream master 3c1b989 (2026-10-09); no upstream release has this code yet
+(latest: v1.1.3, May 2026, before the GUI merge).
+---
+ README.ar.md | 2 ++
+ README.de.md | 2 ++
+ README.el.md | 2 ++
+ README.es.md | 2 ++
+ README.fa.md | 2 ++
+ README.fr.md | 2 ++
+ README.it.md | 2 ++
+ README.ja.md | 2 ++
+ README.md    | 2 ++
+ README.ro.md | 2 ++
+ README.ru.md | 2 ++
+ README.sv.md | 2 ++
+ README.zh.md | 2 ++
+ 13 files changed, 26 insertions(+)
+
+diff --git a/README.ar.md b/README.ar.md
+index 3b0ba36..7d2db27 100644
+--- a/README.ar.md
++++ b/README.ar.md
+@@ -230,6 +230,8 @@ wails build      # or: wails dev  (hot reload)
+ 
+ بدأ Nimbus Backup كتفرّع (fork) من [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (عميل Proxmox Backup بلغة Go، من تطوير Tiziano Bacocco، بترخيص GPLv3)، وأضفنا إليه الواجهة الرسومية لـ Windows، والخدمة، والجدولة، ودعم عدة خوادم PBS، والاستعادة. في سبتمبر 2026، دمج المشروع الأصلي تلك الواجهة الرسومية وجعلها محايدة من حيث العلامة التجارية ("Proxmox Backup Client GUI"). وفي أكتوبر 2026 (0.4.1)، أُعيد بناء Nimbus Backup على الشيفرة الحالية للمشروع الأصلي، مع اعتماد التشفير من جانب العميل الخاص بالمشروع الأصلي: **يتشارك المشروعان قاعدة الشيفرة نفسها.**
+ 
++يعتمد Nimbus Backup 0.4.1 على الفرع `master` للمشروع الأصلي، عند الإيداع `3c1b989` (9 أكتوبر 2026). لا يوجد بعد أي إصدار من المشروع الأصلي يحتوي على هذه الشيفرة: آخر إصداراته، v1.1.3 (مايو 2026)، سابق لدمج الواجهة الرسومية.
++
+ ما يضيفه هذا المستودع فوق المشروع الأصلي هو سلسلة موثّقة من التصحيحات ([`patches/`](patches/README.md))، عُرض معظمها على المشروع الأصلي:
+ 
+ - **الميزات**: المفتاح الورقي (paper key) واستيراد المفتاح (رمز QR)، والنسخ الاحتياطي المتوازي للمجلدات، ولقطة VSS واحدة لكل نسخة احتياطية متعددة المجلدات، والاستثناءات في سطر الأوامر، وإعداد آلة افتراضية لـ Proxmox VE مُولَّد من الجهاز الفعلي.
+diff --git a/README.de.md b/README.de.md
+index 23ca056..ba0a59d 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -219,6 +219,8 @@ Die Marke wird anhand des Namens der ausführbaren Datei gewählt: `NimbusBackup
+ 
+ Nimbus Backup begann als Fork von [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, von Tiziano Bacocco, GPLv3), dem wir die Windows-GUI, den Dienst, die Zeitplanung, Multi-PBS und die Wiederherstellung hinzugefügt haben. Im September 2026 hat das Upstream-Projekt diese GUI übernommen und markenneutral gestaltet („Proxmox Backup Client GUI“). Im Oktober 2026 (0.4.1) wurde Nimbus Backup auf dem aktuellen Code des Upstream-Projekts neu aufgebaut und hat dessen clientseitige Verschlüsselung übernommen: **Die beiden Projekte teilen dieselbe Codebasis.**
+ 
++Nimbus Backup 0.4.1 basiert auf dem `master`-Zweig des Upstream-Projekts, Commit `3c1b989` (9. Oktober 2026). Noch kein Upstream-Release enthält diesen Code: das neueste, v1.1.3 (Mai 2026), stammt aus der Zeit vor der Übernahme der GUI.
++
+ Was dieses Repository gegenüber dem Upstream-Projekt hinzufügt, ist eine dokumentierte Patch-Serie ([`patches/`](patches/README.md)), die größtenteils upstream angeboten wird:
+ 
+ - **Funktionen**: Papierschlüssel und Schlüsselimport (QR-Code), parallele Ordnersicherungen, ein VSS-Snapshot pro Sicherung mehrerer Ordner, Ausschlüsse in der Kommandozeile, eine aus der realen Maschine erzeugte Proxmox-VE-VM-Konfiguration.
+diff --git a/README.el.md b/README.el.md
+index 626f2b2..a86f630 100644
+--- a/README.el.md
++++ b/README.el.md
+@@ -219,6 +219,8 @@ wails build      # or: wails dev  (hot reload)
+ 
+ Το Nimbus Backup ξεκίνησε ως fork του [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client σε Go, από τον Tiziano Bacocco, GPLv3), στο οποίο προσθέσαμε το GUI για Windows, την υπηρεσία, τον προγραμματισμό, τα πολλαπλά PBS και την επαναφορά. Τον Σεπτέμβριο του 2026, το upstream ενσωμάτωσε αυτό το GUI και το έκανε ουδέτερο ως προς το brand («Proxmox Backup Client GUI»). Τον Οκτώβριο του 2026 (0.4.1), το Nimbus Backup ανακατασκευάστηκε πάνω στον τρέχοντα κώδικα του upstream, υιοθετώντας την κρυπτογράφηση στην πλευρά του client του upstream: **τα δύο έργα μοιράζονται την ίδια βάση κώδικα.**
+ 
++Το Nimbus Backup 0.4.1 βασίζεται στον κλάδο `master` του αρχικού έργου, στο commit `3c1b989` (9 Οκτωβρίου 2026). Καμία έκδοση του αρχικού έργου δεν περιέχει ακόμη αυτόν τον κώδικα: η τελευταία, η v1.1.3 (Μάιος 2026), προηγείται της ενσωμάτωσης του GUI.
++
+ Αυτό που προσθέτει αυτό το αποθετήριο πάνω από το upstream είναι μια τεκμηριωμένη σειρά patches ([`patches/`](patches/README.md)), το μεγαλύτερο μέρος της οποίας έχει προταθεί στο upstream:
+ 
+ - **Λειτουργίες**: paper key και εισαγωγή κλειδιού (κωδικός QR), παράλληλα αντίγραφα ασφαλείας φακέλων, ένα στιγμιότυπο VSS ανά αντίγραφο πολλαπλών φακέλων, εξαιρέσεις στο CLI, διαμόρφωση VM του Proxmox VE που παράγεται από το πραγματικό μηχάνημα.
+diff --git a/README.es.md b/README.es.md
+index 660ee1b..8ddc046 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -219,6 +219,8 @@ La marca se elige según el nombre del ejecutable: `NimbusBackup.exe` se ejecuta
+ 
+ Nimbus Backup nació como un fork de [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client en Go, de Tiziano Bacocco, GPLv3), al que añadimos la GUI de Windows, el servicio, la programación, el multi-PBS y la restauración. En septiembre de 2026, el proyecto upstream integró esa GUI y la hizo neutra en cuanto a marca ("Proxmox Backup Client GUI"). En octubre de 2026 (0.4.1), Nimbus Backup se reconstruyó sobre el código actual del proyecto upstream, adoptando su cifrado del lado del cliente: **los dos proyectos comparten la misma base de código.**
+ 
++Nimbus Backup 0.4.1 se basa en la rama `master` del proyecto original, en el commit `3c1b989` (9 de octubre de 2026). Ninguna release del proyecto original contiene aún este código: la última, v1.1.3 (mayo de 2026), es anterior a la integración de la GUI.
++
+ Lo que este repositorio añade sobre el proyecto upstream es una serie de parches documentada ([`patches/`](patches/README.md)), en su mayor parte propuesta upstream:
+ 
+ - **Funcionalidades**: clave en papel e importación de claves (código QR), copias de carpetas en paralelo, un solo snapshot VSS por copia de varias carpetas, exclusiones en línea de comandos, una configuración de VM de Proxmox VE generada a partir de la máquina real.
+diff --git a/README.fa.md b/README.fa.md
+index 49a8704..695c4b4 100644
+--- a/README.fa.md
++++ b/README.fa.md
+@@ -230,6 +230,8 @@ wails build      # or: wails dev  (hot reload)
+ 
+ Nimbus Backup به‌عنوان یک fork از [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (کلاینت Proxmox Backup به زبان Go، نوشته‌ی Tiziano Bacocco، با مجوز GPLv3) آغاز شد و ما رابط گرافیکی Windows، سرویس، زمان‌بندی، پشتیبانی از چند سرور PBS و بازیابی را به آن افزودیم. در سپتامبر 2026، پروژه‌ی اصلی آن رابط گرافیکی را ادغام کرد و آن را از نظر برند خنثی کرد ("Proxmox Backup Client GUI"). در اکتبر 2026 (0.4.1)، Nimbus Backup بر پایه‌ی کد فعلی پروژه‌ی اصلی بازسازی شد و رمزنگاری سمت کلاینت پروژه‌ی اصلی را به کار گرفت: **دو پروژه کد پایه‌ی یکسانی دارند.**
+ 
++Nimbus Backup 0.4.1 بر پایهٔ شاخهٔ `master` پروژهٔ اصلی، در کامیت `3c1b989` (۹ اکتبر ۲۰۲۶) ساخته شده است. هنوز هیچ نسخهٔ منتشرشده‌ای از پروژهٔ اصلی این کد را ندارد: آخرین نسخهٔ آن، v1.1.3 (مه ۲۰۲۶)، پیش از ادغام رابط گرافیکی است.
++
+ آنچه این مخزن به پروژه‌ی اصلی اضافه می‌کند، مجموعه‌ای مستند از وصله‌هاست ([`patches/`](patches/README.md)) که بیشترشان به پروژه‌ی اصلی پیشنهاد شده‌اند:
+ 
+ - **قابلیت‌ها**: کلید کاغذی (paper key) و وارد کردن کلید (کد QR)، پشتیبان‌گیری موازی از پوشه‌ها، یک اسنپ‌شات VSS برای هر پشتیبان چندپوشه‌ای، استثناها در CLI، پیکربندی VM برای Proxmox VE که از ماشین واقعی تولید می‌شود.
+diff --git a/README.fr.md b/README.fr.md
+index b7caa46..343872f 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -221,6 +221,8 @@ La marque est déterminée par le nom de l'exécutable : `NimbusBackup.exe` s'af
+ 
+ Nimbus Backup est né comme un fork de [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client en Go, par Tiziano Bacocco, GPLv3), auquel nous avons ajouté l'interface graphique Windows, le service, la planification, le multi-PBS et la restauration. En septembre 2026, le projet d'origine a intégré cette interface et l'a rendue neutre (« Proxmox Backup Client GUI »). En octobre 2026 (0.4.1), Nimbus Backup a été reconstruit sur le code actuel du projet d'origine, dont il reprend le chiffrement côté client : **les deux projets partagent le même code.**
+ 
++Nimbus Backup 0.4.1 est construit sur la branche `master` du projet d'origine, au commit `3c1b989` (9 octobre 2026). Aucune release du projet d'origine ne contient encore ce code : sa dernière release, la v1.1.3 (mai 2026), est antérieure à l'intégration de l'interface graphique.
++
+ Ce dépôt ajoute par-dessus une série de patchs documentée ([`patches/`](patches/README.md)), en grande partie proposée au projet d'origine :
+ 
+ - **Des fonctionnalités** : clé papier et import de clé (QR code), sauvegarde de dossiers en parallèle, un seul snapshot VSS par sauvegarde multi-dossiers, exclusions en ligne de commande, configuration de VM Proxmox VE générée à partir de la machine réelle.
+diff --git a/README.it.md b/README.it.md
+index 5114ab0..e3fd3a7 100644
+--- a/README.it.md
++++ b/README.it.md
+@@ -219,6 +219,8 @@ Il marchio viene scelto in base al nome dell'eseguibile: `NimbusBackup.exe` si a
+ 
+ Nimbus Backup è nato come fork di [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, di Tiziano Bacocco, GPLv3), a cui abbiamo aggiunto la GUI Windows, il servizio, la pianificazione, il multi-PBS e il ripristino. Nel settembre 2026, il progetto upstream ha integrato quella GUI rendendola neutra rispetto al marchio ("Proxmox Backup Client GUI"). Nell'ottobre 2026 (0.4.1), Nimbus Backup è stato ricostruito sul codice attuale dell'upstream, adottando la cifratura lato client dell'upstream: **i due progetti condividono la stessa base di codice.**
+ 
++Nimbus Backup 0.4.1 è costruito sul ramo `master` del progetto upstream, al commit `3c1b989` (9 ottobre 2026). Nessuna release upstream contiene ancora questo codice: l'ultima, la v1.1.3 (maggio 2026), è precedente all'integrazione della GUI.
++
+ Ciò che questo repository aggiunge rispetto all'upstream è una serie di patch documentata ([`patches/`](patches/README.md)), in gran parte proposta upstream:
+ 
+ - **Funzionalità**: chiave cartacea e importazione della chiave (codice QR), backup di cartelle in parallelo, un solo snapshot VSS per backup di più cartelle, esclusioni da riga di comando, una configurazione di VM Proxmox VE generata dalla macchina reale.
+diff --git a/README.ja.md b/README.ja.md
+index 2104927..e88a7bf 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -219,6 +219,8 @@ wails build      # or: wails dev  (hot reload)
+ 
+ Nimbus Backup は [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（Tiziano Bacocco による Go 製の Proxmox Backup Client、GPLv3）のフォークとして始まり、私たちはそこに Windows GUI、サービス、スケジューリング、複数 PBS 対応、リストア機能を追加しました。2026 年 9 月、アップストリームはこの GUI を取り込み、ブランド中立化しました（「Proxmox Backup Client GUI」）。2026 年 10 月（0.4.1）、Nimbus Backup はアップストリームの最新コードをもとに再構築され、アップストリームのクライアント側暗号化を採用しました：**両プロジェクトは同じコードベースを共有しています。**
+ 
++Nimbus Backup 0.4.1 は、アップストリームの `master` ブランチのコミット `3c1b989`（2026 年 10 月 9 日）をベースに構築されています。このコードを含むアップストリームのリリースはまだありません。最新のリリース v1.1.3（2026 年 5 月）は GUI の統合より前のものです。
++
+ このリポジトリがアップストリームに加えているのは、文書化されたパッチシリーズ（[`patches/`](patches/README.md)）で、その大部分はアップストリームに提案済みです：
+ 
+ - **機能**：ペーパーキーとキーのインポート（QR コード）、フォルダーの並列バックアップ、複数フォルダーのバックアップごとに 1 つの VSS スナップショット、コマンドラインでの除外指定、実マシンから生成される Proxmox VE の VM 構成。
+diff --git a/README.md b/README.md
+index 8f4f75e..a5fce09 100644
+--- a/README.md
++++ b/README.md
+@@ -216,6 +216,8 @@ The brand is picked from the executable name: `NimbusBackup.exe` runs as Nimbus
+ 
+ Nimbus Backup started as a fork of [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, by Tiziano Bacocco, GPLv3), to which we added the Windows GUI, the service, scheduling, multi-PBS and restore. In September 2026, upstream merged that GUI back and made it brand-neutral ("Proxmox Backup Client GUI"). In October 2026 (0.4.1), Nimbus Backup was rebuilt on upstream's current code, adopting upstream's client-side encryption: **the two projects share the same code base.**
+ 
++Nimbus Backup 0.4.1 is built on upstream's `master` at commit `3c1b989` (9 October 2026). No upstream release has this code yet: upstream's latest release, v1.1.3 (May 2026), predates the GUI merge.
++
+ What this repository adds on top of upstream is a documented patch series ([`patches/`](patches/README.md)), most of it offered upstream:
+ 
+ - **Features**: paper key and key import (QR code), parallel folder backups, one VSS snapshot per multi-folder backup, CLI exclusions, a Proxmox VE VM config generated from the real machine.
+diff --git a/README.ro.md b/README.ro.md
+index 30186ed..8d81da2 100644
+--- a/README.ro.md
++++ b/README.ro.md
+@@ -219,6 +219,8 @@ Brandul este ales după numele executabilului: `NimbusBackup.exe` rulează ca Ni
+ 
+ Nimbus Backup a pornit ca fork al [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client în Go, de Tiziano Bacocco, GPLv3), la care am adăugat GUI-ul Windows, serviciul, programarea, suportul multi-PBS și restaurarea. În septembrie 2026, upstream a integrat acest GUI și l-a făcut neutru din punct de vedere al brandului („Proxmox Backup Client GUI”). În octombrie 2026 (0.4.1), Nimbus Backup a fost reconstruit pe codul actual din upstream, adoptând criptarea pe partea clientului din upstream: **cele două proiecte au aceeași bază de cod.**
+ 
++Nimbus Backup 0.4.1 este construit pe ramura `master` a proiectului original, la commit-ul `3c1b989` (9 octombrie 2026). Nicio versiune a proiectului original nu conține încă acest cod: ultima, v1.1.3 (mai 2026), este anterioară integrării interfeței grafice.
++
+ Ceea ce adaugă acest depozit peste upstream este o serie documentată de patch-uri ([`patches/`](patches/README.md)), în mare parte propuse upstream:
+ 
+ - **Funcționalități**: paper key și importul cheii (cod QR), backup-uri de directoare în paralel, un singur snapshot VSS per backup cu mai multe directoare, excluderi în CLI, o configurație de VM Proxmox VE generată din mașina reală.
+diff --git a/README.ru.md b/README.ru.md
+index f7c5d67..c18fa77 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -219,6 +219,8 @@ wails build      # or: wails dev  (hot reload)
+ 
+ Nimbus Backup начинался как форк [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client на Go, автор Tiziano Bacocco, GPLv3), к которому мы добавили GUI для Windows, службу, планирование, поддержку нескольких PBS и восстановление. В сентябре 2026 года upstream принял этот GUI обратно и сделал его брендонейтральным («Proxmox Backup Client GUI»). В октябре 2026 года (0.4.1) Nimbus Backup был пересобран на текущем коде upstream с переходом на клиентское шифрование upstream: **оба проекта используют одну и ту же кодовую базу.**
+ 
++Nimbus Backup 0.4.1 собран на ветке `master` исходного проекта, коммит `3c1b989` (9 октября 2026 г.). Ни один релиз исходного проекта пока не содержит этот код: последний, v1.1.3 (май 2026 г.), вышел до включения графического интерфейса.
++
+ Поверх upstream этот репозиторий добавляет документированную серию патчей ([`patches/`](patches/README.md)), бо́льшая часть которой предложена в upstream:
+ 
+ - **Функции**: бумажный ключ и импорт ключа (QR-код), параллельное резервное копирование папок, один снимок VSS на резервное копирование нескольких папок, исключения в командной строке, конфигурация ВМ Proxmox VE, сформированная по реальной машине.
+diff --git a/README.sv.md b/README.sv.md
+index e7c671c..1d801e7 100644
+--- a/README.sv.md
++++ b/README.sv.md
+@@ -219,6 +219,8 @@ Varumärket väljs utifrån den körbara filens namn: `NimbusBackup.exe` körs s
+ 
+ Nimbus Backup började som en fork av [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client i Go, av Tiziano Bacocco, GPLv3), till vilken vi lade till Windows-GUI:t, tjänsten, schemaläggningen, stöd för flera PBS och återställning. I september 2026 slog upstream ihop det GUI:t och gjorde det varumärkesneutralt (”Proxmox Backup Client GUI”). I oktober 2026 (0.4.1) byggdes Nimbus Backup om på upstreams aktuella kod och tog över upstreams kryptering på klientsidan: **de två projekten delar samma kodbas.**
+ 
++Nimbus Backup 0.4.1 bygger på originalprojektets `master`-gren, commit `3c1b989` (9 oktober 2026). Ingen release från originalprojektet innehåller ännu den här koden: den senaste, v1.1.3 (maj 2026), är äldre än integreringen av det grafiska gränssnittet.
++
+ Det detta repo lägger till ovanpå upstream är en dokumenterad patchserie ([`patches/`](patches/README.md)), varav det mesta har erbjudits upstream:
+ 
+ - **Funktioner**: paper key och nyckelimport (QR-kod), parallella säkerhetskopior av mappar, en VSS-ögonblicksbild per säkerhetskopia av flera mappar, undantag i CLI, en VM-konfiguration för Proxmox VE genererad från den verkliga maskinen.
+diff --git a/README.zh.md b/README.zh.md
+index 33b005a..3392c34 100644
+--- a/README.zh.md
++++ b/README.zh.md
+@@ -219,6 +219,8 @@ wails build      # or: wails dev  (hot reload)
+ 
+ Nimbus Backup 最初是 [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（用 Go 编写的 Proxmox Backup Client，作者 Tiziano Bacocco，GPLv3）的一个分支，我们在其基础上添加了 Windows GUI、服务、计划任务、多 PBS 和恢复功能。2026 年 9 月，上游合并了该 GUI 并使其品牌中立（“Proxmox Backup Client GUI”）。2026 年 10 月（0.4.1），Nimbus Backup 基于上游的当前代码重新构建，并采用了上游的客户端加密：**两个项目共享同一代码库。**
+ 
++Nimbus Backup 0.4.1 基于上游项目 `master` 分支的提交 `3c1b989`（2026 年 10 月 9 日）构建。目前还没有包含这些代码的上游 release：上游最新的 release v1.1.3（2026 年 5 月）早于 GUI 合并。
++
+ 本仓库在上游基础上增加的是一个有文档说明的补丁系列（[`patches/`](patches/README.md)），其中大部分已提交给上游：
+ 
+ - **功能**：纸质密钥和密钥导入（二维码）、文件夹并行备份、多文件夹备份只用一个 VSS 快照、命令行排除项、根据真实机器生成的 Proxmox VE 虚拟机配置。
+-- 
+2.47.3
+

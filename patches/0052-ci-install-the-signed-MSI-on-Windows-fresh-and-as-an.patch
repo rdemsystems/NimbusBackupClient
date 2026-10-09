@@ -1,0 +1,116 @@
+From af33bcfc1908dade007d986d30bc18e918a9a40c Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 17:20:10 +0200
+Subject: [PATCH 52/58] ci: install the signed MSI on Windows, fresh and as an
+ upgrade from 0.4.0
+
+A fresh install of this build's MSI, then the published 0.4.0 MSI upgraded
+with it: one Nimbus Backup product at this version, the NimbusBackup service
+pointing at a Valid RDEM SYSTEMS-signed executable, then a clean uninstall.
+The release notes take this version's CHANGELOG section instead of the git log
+since the previous tag (the fork is rebuilt on upstream: v0.4.0 is not an
+ancestor and the log would list hundreds of upstream commits).
+---
+ .github/workflows/build-and-release.yml | 78 ++++++++++++++++++++++---
+ 1 file changed, 71 insertions(+), 7 deletions(-)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index 7af42ec..f58de36 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -570,6 +570,63 @@ jobs:
+           }
+           if ($bad -gt 0) { throw "$bad file(s) are not validly signed by RDEM SYSTEMS" }
+ 
++      # Install for real on this Windows runner, both ways users get it:
++      # 1. a fresh install of this build's MSI on a clean machine;
++      # 2. the published 0.4.0 MSI upgraded with this build's MSI.
++      # Each time: one product at this version, the NimbusBackup service
++      # pointing at a signed executable, then a clean uninstall.
++      - name: Install and upgrade test
++        shell: pwsh
++        run: |
++          function Invoke-Msi([string[]]$msiArgs, [string]$what) {
++            $p = Start-Process msiexec.exe -Wait -PassThru -NoNewWindow -ArgumentList $msiArgs
++            if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "$what failed: msiexec exit code $($p.ExitCode)" }
++          }
++          function Get-Nimbus {
++            Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
++              Where-Object { $_.DisplayName -eq 'Nimbus Backup' }
++          }
++          $expected = '${{ steps.version.outputs.VERSION_MSI }}'
++          function Test-Installed([string]$label) {
++            $products = @(Get-Nimbus)
++            if ($products.Count -ne 1) { throw "${label}: expected one Nimbus Backup product, found $($products.Count): $($products.DisplayVersion -join ', ')" }
++            if ($products[0].DisplayVersion -ne $expected) { throw "${label}: installed version $($products[0].DisplayVersion), expected $expected" }
++            $svc = Get-CimInstance Win32_Service -Filter "Name='NimbusBackup'"
++            if (-not $svc) { throw "${label}: the NimbusBackup service is not registered" }
++            $svcExe = $svc.PathName.Trim('"').Split('"')[0].Trim()
++            $bad = 0
++            foreach ($f in @($svcExe, (Join-Path (Split-Path $svcExe) 'NimbusBackup.exe'))) {
++              $s = Get-AuthenticodeSignature -FilePath $f
++              if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch '(^|, )CN=RDEM SYSTEMS(,|$)') { $bad++ }
++              Write-Output "::notice title=${label}: installed $(Split-Path $f -Leaf)::$($s.Status) - $($s.SignerCertificate.Subject)"
++            }
++            if ($bad -gt 0) { throw "${label}: $bad installed file(s) are not validly signed by RDEM SYSTEMS" }
++            Write-Output "::notice title=${label}::one product at $expected, service NimbusBackup -> $svcExe ($($svc.StartMode), $($svc.State))"
++          }
++          function Test-Uninstall([string]$label) {
++            Invoke-Msi @('/x', "$PWD\dist\NimbusBackup.msi", '/qn', '/norestart', '/l*v', "$logs\uninstall-$label.log") "${label}: uninstall"
++            if (Get-Service -Name NimbusBackup -ErrorAction SilentlyContinue) { throw "${label}: the NimbusBackup service is still registered after uninstall" }
++            if (@(Get-Nimbus).Count -ne 0) { throw "${label}: Nimbus Backup is still listed as installed after uninstall" }
++            Write-Output "::notice title=${label}: uninstall::service and product removed"
++          }
++          $logs = Join-Path $env:RUNNER_TEMP 'msi-logs'
++          New-Item -ItemType Directory -Force -Path $logs | Out-Null
++
++          if (@(Get-Nimbus).Count -ne 0) { throw 'the runner is not clean: Nimbus Backup is already installed' }
++          Invoke-Msi @('/i', "$PWD\dist\NimbusBackup.msi", '/qn', '/norestart', '/l*v', "$logs\install-fresh.log") 'Fresh install'
++          Test-Installed 'Fresh install'
++          Test-Uninstall 'Fresh install'
++
++          $old = Join-Path $env:RUNNER_TEMP 'NimbusBackup-0.4.0.msi'
++          Invoke-WebRequest -Uri 'https://github.com/rdemsystems/NimbusBackupClient/releases/download/v0.4.0/NimbusBackup.msi' -OutFile $old
++          Invoke-Msi @('/i', $old, '/qn', '/norestart', '/l*v', "$logs\install-0.4.0.log") 'Installing 0.4.0'
++          if (-not (Get-Service -Name NimbusBackup -ErrorAction SilentlyContinue)) { throw '0.4.0 did not register the NimbusBackup service' }
++          Write-Output "::notice title=Install 0.4.0::installed, service NimbusBackup registered"
++
++          Invoke-Msi @('/i', "$PWD\dist\NimbusBackup.msi", '/qn', '/norestart', '/l*v', "$logs\upgrade.log") 'Upgrading to this build'
++          Test-Installed "Upgrade 0.4.0 -> $expected"
++          Test-Uninstall 'Upgrade'
++
+       - name: Upload GUI artifacts
+         uses: actions/upload-artifact@v4
+         with:
+@@ -728,14 +785,21 @@ jobs:
+ 
+           EOFNOTES
+ 
+-          # Get commits since last tag
+-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+-          if [ -n "$PREV_TAG" ]; then
+-            echo "### Changes since ${PREV_TAG}" >> RELEASE_BODY.md
+-            echo "" >> RELEASE_BODY.md
+-            git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges >> RELEASE_BODY.md
+-            echo "" >> RELEASE_BODY.md
++          # This version's CHANGELOG section (## [x.y.z] up to the next ## [).
++          # Not "git log since the previous tag": the fork is rebuilt on
++          # upstream, so the previous Nimbus tag is not an ancestor and the
++          # log would list hundreds of upstream commits.
++          awk -v v="${VERSION#v}" '
++            index($0, "## [" v "]") == 1 { on = 1; next }
++            on && /^## \[/ { exit }
++            on { print }
++          ' CHANGELOG.md > changelog-section.md
++          if [ -s changelog-section.md ]; then
++            cat changelog-section.md >> RELEASE_BODY.md
++          else
++            echo "See [CHANGELOG.md](CHANGELOG.md)." >> RELEASE_BODY.md
+           fi
++          echo "" >> RELEASE_BODY.md
+ 
+           # Publish the SHA-256 checksums on the release page itself so users
+           # can verify integrity without downloading SHA256SUMS.txt first.
+-- 
+2.47.3
+

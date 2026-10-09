@@ -1,0 +1,80 @@
+From 3d88bea2bbbb06ca529dfff1bc987ae842b589d1 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 18:19:58 +0200
+Subject: [PATCH 58/58] =?UTF-8?q?release:=20v0.4.1=20=E2=80=94=20upstream?=
+ =?UTF-8?q?=20rebuild,=20client-side=20encryption,=20signed=20binaries?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- gui/wails.json: 0.4.1
+- CHANGELOG: 0.4.1 section (2026-10-09)
+- RELEASE_NOTES: signed since 0.4.1, five GUI languages, parallel folders,
+  one VSS snapshot per multi-folder backup, encryption (upstream) and paper key
+---
+ CHANGELOG.md     |  2 +-
+ RELEASE_NOTES.md | 10 ++++++----
+ gui/wails.json   |  2 +-
+ 3 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index c67c990..16b517a 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,7 +5,7 @@ All notable changes to Proxmox Backup Client (GUI) will be documented in this fi
+ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
+-## [Unreleased]
++## [0.4.1] - 2026-10-09
+ 
+ Second **re-merge with upstream** (tizbac/proxmoxbackupclient_go, October
+ 2026): the fork is rebuilt on upstream's current code plus the fork patch
+diff --git a/RELEASE_NOTES.md b/RELEASE_NOTES.md
+index 0c82c6e..5e42bb0 100644
+--- a/RELEASE_NOTES.md
++++ b/RELEASE_NOTES.md
+@@ -19,21 +19,23 @@
+ 
+ ### Backup & restore
+ - One-shot (immediate) and scheduled (configurable time) backups
+-- **Auto-split of large backups** (>100 GB) into balanced jobs (~100 GB) with per-job retry
+-- **VSS** (Volume Shadow Copy) for consistent backups
++- **Split a first backup** of a large volume into smaller, resumable backups (opt-in)
++- **VSS** (Volume Shadow Copy) for consistent backups: one snapshot for a whole multi-folder backup, one shadow copy per volume
++- **Several folders in parallel** (no maximum; recommended: CPUs / 4)
++- **Client-side encryption** compatible with `proxmox-backup-client` (developed upstream by Tiziano Bacocco), paper key with QR code
+ - File/folder exclusions + **automatic exclusion of Windows system folders** (System Volume Information, $RECYCLE.BIN, pagefile.sys…)
+ - Snapshot restore and browsing (**fast catalog reads**)
+ - Robust long-running backups (**30 s keep-alive**, validated on 11 h+ backups)
+ - **Multi-server PBS support**
+ 
+ ### Interface & configuration
+-- Wails GUI (Go + React), **in English and French**
++- Wails GUI (Go + React), **in English, French, Italian, German and Polish**
+ - Backup history and re-run of failed jobs
+ - Progress bar with statistics, minimize to tray
+ - PBS configuration with connection test, **certificate fingerprint pinning (TOFU)** and namespaces
+ 
+ ## 📌 Known issues
+-- ⚠️ **Unsigned binaries**: Windows may flag the download (false positive). Creating the Azure account for code signing (Azure Trusted Signing) is blocked on Azure's side; signed builds are targeted for **0.4.1** if Azure answers / the account is created.
++- ℹ️ **Signed since 0.4.1**: the GUI, its service and the MSI are signed by RDEM SYSTEMS; SmartScreen may still warn until the reputation of a new release is established. The command-line tools are not signed yet.
+ - ℹ️ **Upgrading from <= 0.3.0**: the configuration folder is merged from `ProgramData\NimbusBackup` into `ProgramData\ProxmoxBackupClient` on first start (copied once, nothing overwritten, old folder kept).
+ - ⚠️ The **standalone .exe** does not persist across reboots → use the **MSI** in production.
+ - ⚠️ The exclusion format is not validated on input.
+diff --git a/gui/wails.json b/gui/wails.json
+index bb61e82..aefbc10 100644
+--- a/gui/wails.json
++++ b/gui/wails.json
+@@ -14,7 +14,7 @@
+   "info": {
+     "companyName": "Proxmox Backup Client",
+     "productName": "Proxmox Backup Client",
+-    "productVersion": "0.4.0",
++    "productVersion": "0.4.1",
+     "copyright": "© 2024-2026 Proxmox Backup Client GO Contributors and RDEM Systems.",
+     "comments": "Backup client for Proxmox Backup Server"
+   },
+-- 
+2.47.3
+

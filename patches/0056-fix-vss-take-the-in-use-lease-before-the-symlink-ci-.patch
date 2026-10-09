@@ -1,0 +1,100 @@
+From ed9a96b9bc6dfc579e8d56c2f9bd213f666ccdb4 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 17:46:58 +0200
+Subject: [PATCH 56/58] fix(vss): take the in-use lease before the symlink; ci:
+ bounded, diagnosable install test
+
+- The lease now exists before the snapshot symlink, so another process's
+  VSSCleanup can never see a live symlink without a held lease; the shadow id
+  is recorded right after creation, so a failed symlink still deletes it.
+- Install test: wait for msiexec itself (Start-Process -Wait also waits for
+  every descendant), 10 minutes per operation, the end of the MSI log as an
+  annotation on a failure or timeout, and a 30-minute cap on the step (the
+  first run hung in this step).
+---
+ .github/workflows/build-and-release.yml | 19 +++++++++++++++--
+ snapshot/win_snapshot.go                | 28 ++++++++++++++++---------
+ 2 files changed, 35 insertions(+), 12 deletions(-)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index f58de36..39ce7ef 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -577,10 +577,25 @@ jobs:
+       # pointing at a signed executable, then a clean uninstall.
+       - name: Install and upgrade test
+         shell: pwsh
++        timeout-minutes: 30
+         run: |
++          # Waits for msiexec itself only (Start-Process -Wait also waits for
++          # every descendant), 10 minutes at most; on a timeout or a failure
++          # the end of the MSI log is published as an annotation.
+           function Invoke-Msi([string[]]$msiArgs, [string]$what) {
+-            $p = Start-Process msiexec.exe -Wait -PassThru -NoNewWindow -ArgumentList $msiArgs
+-            if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "$what failed: msiexec exit code $($p.ExitCode)" }
++            $log = $msiArgs[[array]::IndexOf($msiArgs, '/l*v') + 1]
++            Write-Output "$what ..."
++            $p = Start-Process msiexec.exe -PassThru -NoNewWindow -ArgumentList $msiArgs
++            $done = $p.WaitForExit(600000)
++            if (-not $done -or ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010)) {
++              $why = if ($done) { "msiexec exit code $($p.ExitCode)" } else { 'timed out after 10 minutes' }
++              if (-not $done) { $p.Kill() }
++              $tail = if (Test-Path $log) { (Get-Content $log -Tail 40 -Encoding Unicode) -join "`n" } else { 'no MSI log' }
++              if ($tail.Length -gt 3400) { $tail = $tail.Substring($tail.Length - 3400) }
++              $msg = ($tail -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A')
++              Write-Output "::error title=$what ($why)::$msg"
++              throw "${what}: $why"
++            }
+           }
+           function Get-Nimbus {
+             Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+diff --git a/snapshot/win_snapshot.go b/snapshot/win_snapshot.go
+index 900121a..d540577 100644
+--- a/snapshot/win_snapshot.go
++++ b/snapshot/win_snapshot.go
+@@ -203,24 +203,32 @@ func CreateVSSSnapshot(paths []string, needFiles bool, backup_callback func(sn m
+ 			fmt.Println("  Note: Snapshot created despite writer warnings - file-level backup will proceed")
+ 		}
+ 
+-		_, err = SymlinkSnapshot(filepath.Join(appDataFolder, "VSS"), snapshot.Id, snapshot.DeviceObjectPath)
++		// Ours from here on: deleted by the deferred cleanup if a later step fails.
++		createdIDs = append(createdIDs, snapshot.Id)
+ 
+-		if err != nil {
++		// Lease first, symlink second: VSSCleanup in another process of ours
++		// (a GUI started during a CLI backup) treats a live symlink without a
++		// held lease as an orphan, so the lease must exist before the symlink.
++		// It is held until this call returns.
++		vssDir := filepath.Join(appDataFolder, "VSS")
++		if err := os.MkdirAll(vssDir, 0o700); err != nil {
+ 			return err
+ 		}
+-
+-		snapshots[path] = SnapShot{FullPath: filepath.Join(appDataFolder, "VSS", snapshot.Id, subPath), Id: snapshot.Id, ObjectPath: snapshot.DeviceObjectPath, Valid: true}
+-		byVolume[strings.ToUpper(volName)] = snapshots[path]
+-		createdIDs = append(createdIDs, snapshot.Id)
+-		// Lease: held open until this call returns, so VSSCleanup in another
+-		// process of ours (a GUI started during a CLI backup) knows the shadow
+-		// is in use and leaves it alone.
+-		if lease, lerr := holdShadowLease(filepath.Join(appDataFolder, "VSS", snapshot.Id)); lerr == nil {
++		if lease, lerr := holdShadowLease(filepath.Join(vssDir, snapshot.Id)); lerr == nil {
+ 			leases = append(leases, lease)
+ 		} else {
+ 			fmt.Printf("⚠️  VSS: could not create the in-use marker for %s: %v\n", snapshot.Id, lerr)
+ 		}
+ 
++		_, err = SymlinkSnapshot(vssDir, snapshot.Id, snapshot.DeviceObjectPath)
++
++		if err != nil {
++			return err
++		}
++
++		snapshots[path] = SnapShot{FullPath: filepath.Join(vssDir, snapshot.Id, subPath), Id: snapshot.Id, ObjectPath: snapshot.DeviceObjectPath, Valid: true}
++		byVolume[strings.ToUpper(volName)] = snapshots[path]
++
+ 	}
+ 
+ 	return backup_callback(snapshots)
+-- 
+2.47.3
+

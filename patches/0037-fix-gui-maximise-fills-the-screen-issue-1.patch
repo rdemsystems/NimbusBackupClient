@@ -1,7 +1,7 @@
 From e84f8eac53c21ae88678b2f835dd3445a6d2ef4c Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 14:32:33 +0200
-Subject: [PATCH 37/51] fix(gui): maximise fills the screen (issue #1)
+Subject: [PATCH 37/58] fix(gui): maximise fills the screen (issue #1)
 
 The window had MaxWidth/MaxHeight 1680x1008, so Windows capped the maximised
 window at that size and only moved it to the top-left corner. Drop the cap and

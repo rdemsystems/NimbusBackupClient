@@ -1,7 +1,7 @@
 From f21e00ca6c68c9f3e60ab5394feb109840307fb3 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 10:37:02 +0200
-Subject: [PATCH 29/51] fix(ci): gofmt-align ScheduledJob, gosec G703
+Subject: [PATCH 29/58] fix(ci): gofmt-align ScheduledJob, gosec G703
  annotations, failures as annotations
 
 - gui/scheduler.go: trailing comments of ScheduledJob aligned as gofmt

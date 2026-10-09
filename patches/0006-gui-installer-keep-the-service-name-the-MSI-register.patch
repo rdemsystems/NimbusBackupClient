@@ -1,7 +1,7 @@
 From c160685a38ded0ba39b4d5e0a074f24546e5e74e Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:04:13 +0200
-Subject: [PATCH 06/51] gui, installer: keep the service name the MSI registers
+Subject: [PATCH 06/58] gui, installer: keep the service name the MSI registers
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
