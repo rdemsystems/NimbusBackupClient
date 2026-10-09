@@ -74,7 +74,7 @@ Sie möchten Proxmox Backup Server nicht selbst betreiben? Nutzen Sie unsere vol
 ### GUI (empfohlen)
 - **🌍 Mehrsprachig** — Oberfläche auf Englisch, Französisch, Italienisch, Deutsch und Polnisch
 - Benutzerfreundliche Konfiguration mit Verbindungstest (API-Token oder Benutzername/Passwort)
-- Sicherungsfortschritt in Echtzeit mit Geschwindigkeit und Restzeit, jederzeit abbrechbar, ein Reiter „Laufende Jobs“
+- Sicherungsfortschritt in Echtzeit mit Geschwindigkeit und Restzeit, jederzeit abbrechbar, ein Reiter „Laufend“
 - VSS (Volume Shadow Copy) für konsistente Sicherungen: ein Snapshot für eine ganze Sicherung mehrerer Ordner, eine Schattenkopie pro Volume
 - Sicherung mehrerer Ordner, Datei- und Datenträgermodus (ganze Maschine); Ordner können parallel gesichert werden (empfohlen: CPUs / 4)
 - Datenträgersicherungen lassen sich in Proxmox VE als VM wiederherstellen, die der Maschine entspricht (CPUs, RAM, Firmware, Netzwerkkarten mit ihren MACs, eigene VM-ID)
@@ -124,7 +124,7 @@ den Schlüssel nie zu sehen — nützlich auf einem gemeinsam genutzten oder ver
 
 Die Verschlüsselung wurde im Upstream-Projekt von Tiziano Bacocco entwickelt ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); der Papierschlüssel, der QR-Code-Export und der Schlüsselimport sind Ergänzungen von Nimbus Backup.
 
-- **GUI**: *Server → Bearbeiten → Verschlüsselungsschlüssel* — erstellen Sie eine Schlüsseldatei oder wählen Sie eine
+- **GUI**: *PBS-Konfiguration → Bearbeiten → Verschlüsselungsschlüssel-Datei* — erstellen Sie eine Schlüsseldatei oder wählen Sie eine
   vorhandene aus (aus `proxmox-backup-client key create --kdf none` oder einem PVE-
   Storage); ihr Fingerabdruck wird angezeigt. Bewahren Sie anschließend eine Kopie außerhalb der Maschine auf:
   **Drucken (Papierschlüssel)** speichert eine druckbare Seite mit dem Schlüssel und seinem QR-Code (das

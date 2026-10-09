@@ -130,7 +130,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 
 طوّر Tiziano Bacocco التشفير في المشروع الأصلي ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go))؛ أما المفتاح الورقي وتصدير رمز QR واستيراد المفتاح فهي إضافات من Nimbus Backup.
 
-- **الواجهة الرسومية**: *Servers → Edit → Encryption key* — أنشئ ملف مفتاح أو اختر
+- **الواجهة الرسومية**: *PBS Configuration → Edit → Encryption key file* — أنشئ ملف مفتاح أو اختر
   ملفًا موجودًا (من `proxmox-backup-client key create --kdf none` أو من تخزين
   PVE)؛ وتُعرض بصمته. ثم احتفظ بنسخة منه خارج الجهاز:
   يحفظ **Print (paper key)** صفحة قابلة للطباعة تحتوي على المفتاح ورمز QR الخاص به (بتنسيق

@@ -130,7 +130,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 
 رمزگذاری را Tiziano Bacocco در پروژهٔ اصلی توسعه داده است ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go))؛ کلید کاغذی، خروجی کد QR و وارد کردن کلید افزوده‌های Nimbus Backup هستند.
 
-- **رابط گرافیکی**: *Servers → Edit → Encryption key* — یک فایل کلید بسازید یا
+- **رابط گرافیکی**: *PBS Configuration → Edit → Encryption key file* — یک فایل کلید بسازید یا
   یک فایل موجود را انتخاب کنید (ساخته‌شده با `proxmox-backup-client key create --kdf none` یا از یک
   فضای ذخیره‌سازی PVE)؛ اثر انگشت آن نمایش داده می‌شود. سپس یک نسخه از آن را بیرون از ماشین نگه دارید:
   **Print (paper key)** یک صفحه‌ی قابل چاپ حاوی کلید و کد QR آن ذخیره می‌کند (با

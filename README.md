@@ -71,7 +71,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite 
 ### GUI (recommended)
 - **🌍 Multi-language** — English, French, Italian, German and Polish interface
 - User-friendly configuration with connection testing (API token or username/password)
-- Real-time backup progress with speed and ETA, cancel at any time, a Running jobs tab
+- Real-time backup progress with speed and ETA, cancel at any time, a Running tab
 - VSS (Volume Shadow Copy) for consistent backups: one snapshot for a whole multi-folder backup, one shadow copy per volume
 - Multi-folder backup, file and disk (full machine) modes; folders can run in parallel (recommended: CPUs / 4)
 - Disk backups restore in Proxmox VE as a VM matching the machine (CPUs, RAM, firmware, NICs with their MACs, dedicated VM ID)
@@ -121,7 +121,7 @@ the key — useful on a shared or managed PBS.
 
 The encryption was developed upstream by Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); the paper key, the QR code export and the key import are Nimbus Backup additions.
 
-- **GUI**: *Servers → Edit → Encryption key* — create a key file or pick an
+- **GUI**: *PBS Configuration → Edit → Encryption key file* — create a key file or pick an
   existing one (from `proxmox-backup-client key create --kdf none` or a PVE
   storage); its fingerprint is shown. Then keep a copy off the machine:
   **Print (paper key)** saves a printable page with the key and its QR code (the

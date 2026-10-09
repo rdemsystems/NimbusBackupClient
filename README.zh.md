@@ -74,7 +74,7 @@ Nimbus Backup GUI 仅支持 Windows（CLI 工具也可为 Linux 和 macOS 构建
 ### GUI（推荐）
 - **🌍 多语言** — 英语、法语、意大利语、德语和波兰语界面
 - 友好的配置界面，支持连接测试（API 令牌或用户名/密码）
-- 实时显示备份进度、速度和预计剩余时间，可随时取消，提供“运行中的作业”标签页
+- 实时显示备份进度、速度和预计剩余时间，可随时取消，提供“Running”标签页
 - VSS（卷影复制）实现一致性备份：整个多文件夹备份只用一个快照，每个卷一个卷影副本
 - 多文件夹备份，文件模式和磁盘（整机）模式；文件夹可并行备份（推荐：CPU 数 / 4）
 - 磁盘备份可在 Proxmox VE 中恢复为与原机器一致的虚拟机（CPU、内存、固件、带原 MAC 地址的网卡、专用 VM ID）
@@ -124,7 +124,7 @@ Nimbus Backup GUI 仅支持 Windows（CLI 工具也可为 Linux 和 macOS 构建
 
 加密功能由 Tiziano Bacocco 在上游项目中开发（[tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)）；纸质密钥、二维码导出和密钥导入是 Nimbus Backup 新增的功能。
 
-- **GUI**：*服务器 → 编辑 → 加密密钥* — 创建密钥文件或选择
+- **GUI**：*PBS Configuration → Edit → Encryption key file* — 创建密钥文件或选择
   已有的密钥文件（来自 `proxmox-backup-client key create --kdf none` 或 PVE
   存储）；界面会显示其指纹。然后请在机器之外保留一份副本：
   **打印（纸质密钥）**会保存一个可打印页面，包含密钥及其二维码（即

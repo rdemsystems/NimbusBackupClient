@@ -124,7 +124,7 @@ gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 
 Η κρυπτογράφηση αναπτύχθηκε στο αρχικό έργο από τον Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go))· το χάρτινο κλειδί, η εξαγωγή σε κωδικό QR και η εισαγωγή κλειδιού είναι προσθήκες του Nimbus Backup.
 
-- **GUI**: *Servers → Edit → Encryption key* — δημιουργήστε αρχείο κλειδιού ή επιλέξτε
+- **GUI**: *PBS Configuration → Edit → Encryption key file* — δημιουργήστε αρχείο κλειδιού ή επιλέξτε
   ένα υπάρχον (από `proxmox-backup-client key create --kdf none` ή από storage
   του PVE)· εμφανίζεται το αποτύπωμά του. Στη συνέχεια κρατήστε αντίγραφο εκτός του μηχανήματος:
   το **Print (paper key)** αποθηκεύει μια εκτυπώσιμη σελίδα με το κλειδί και τον κωδικό QR του (τη

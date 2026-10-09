@@ -124,7 +124,7 @@ nyckeln — användbart på en delad eller hanterad PBS.
 
 Krypteringen har utvecklats i originalprojektet av Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); papperskopian av nyckeln, QR-kodsexporten och nyckelimporten är tillägg i Nimbus Backup.
 
-- **GUI**: *Servers → Edit → Encryption key* — skapa en nyckelfil eller välj
+- **GUI**: *PBS Configuration → Edit → Encryption key file* — skapa en nyckelfil eller välj
   en befintlig (från `proxmox-backup-client key create --kdf none` eller en PVE-
   storage); dess fingeravtryck visas. Spara sedan en kopia utanför maskinen:
   **Print (paper key)** sparar en utskrivbar sida med nyckeln och dess QR-kod (i

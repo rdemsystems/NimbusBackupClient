@@ -74,7 +74,7 @@ Non volete ospitare voi stessi un Proxmox Backup Server? Usate i nostri datastor
 ### GUI (consigliata)
 - **🌍 Multilingue** — interfaccia in inglese, francese, italiano, tedesco e polacco
 - Configurazione semplice con test della connessione (token API o nome utente/password)
-- Avanzamento del backup in tempo reale con velocità e tempo stimato, annullabile in qualsiasi momento, una scheda Job in esecuzione
+- Avanzamento del backup in tempo reale con velocità e tempo stimato, annullabile in qualsiasi momento, una scheda «In corso»
 - VSS (Volume Shadow Copy) per backup coerenti: un solo snapshot per un intero backup di più cartelle, una shadow copy per volume
 - Backup di più cartelle, modalità file e disco (macchina intera); le cartelle possono essere elaborate in parallelo (consigliato: CPU / 4)
 - I backup del disco si ripristinano in Proxmox VE come una VM conforme alla macchina (CPU, RAM, firmware, schede di rete con i loro MAC, VM ID dedicato)
@@ -124,7 +124,7 @@ la chiave — utile su un PBS condiviso o gestito.
 
 La cifratura è stata sviluppata a monte da Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); la chiave cartacea, l'esportazione in codice QR e l'importazione della chiave sono aggiunte di Nimbus Backup.
 
-- **GUI**: *Server → Modifica → Chiave di cifratura* — create un file di chiave o selezionatene uno
+- **GUI**: *Configurazione PBS → Modifica → File chiave di cifratura* — create un file di chiave o selezionatene uno
   esistente (da `proxmox-backup-client key create --kdf none` o da uno storage
   PVE); ne viene mostrata l'impronta. Conservatene poi una copia fuori dalla macchina:
   **Stampa (chiave cartacea)** salva una pagina stampabile con la chiave e il relativo codice QR (il

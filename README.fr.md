@@ -71,7 +71,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
 ### Interface graphique (recommandée)
 - **🌍 Multilingue** — interface en français, anglais, italien, allemand et polonais
 - Configuration conviviale avec test de connexion (jeton API ou identifiant/mot de passe)
-- Progression de sauvegarde en temps réel avec débit et temps restant, annulation à tout moment, onglet « Tâches en cours »
+- Progression de sauvegarde en temps réel avec débit et temps restant, annulation à tout moment, onglet « En cours »
 - VSS (Volume Shadow Copy) pour des sauvegardes cohérentes : un seul snapshot pour toute une sauvegarde multi-dossiers, une copie par volume
 - Sauvegarde multi-dossiers, modes fichier et disque (machine complète) ; dossiers sauvegardables en parallèle (recommandé : nombre de CPU / 4)
 - Les sauvegardes de disque se restaurent dans Proxmox VE en VM fidèle à la machine (processeurs, RAM, firmware, cartes réseau avec leurs MAC, VM ID dédié)
@@ -121,7 +121,7 @@ données opaques et ne voit jamais la clé — idéal sur un PBS mutualisé ou i
 
 Le chiffrement a été développé en amont par Tiziano Bacocco ([tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)) ; la clé papier, l'export en QR code et l'import de clé sont des ajouts de Nimbus Backup.
 
-- **Interface** : *Serveurs → Modifier → Clé de chiffrement* — créez un fichier
+- **Interface** : *Configuration PBS → Modifier → Clé de chiffrement* — créez un fichier
   de clé ou choisissez-en un existant (créé par
   `proxmox-backup-client key create --kdf none` ou issu d'un stockage PVE) ; son
   empreinte s'affiche. Gardez-en ensuite une copie hors du poste :

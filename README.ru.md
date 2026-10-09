@@ -124,7 +124,7 @@ GUI Nimbus Backup работает только в Windows (инструмент
 
 Шифрование разработано в исходном проекте Тициано Бакокко (Tiziano Bacocco, [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)); бумажная копия ключа, экспорт в QR-код и импорт ключа — дополнения Nimbus Backup.
 
-- **GUI**: *Серверы → Изменить → Ключ шифрования* — создайте файл ключа или выберите
+- **GUI**: *PBS Configuration → Edit → Encryption key file* — создайте файл ключа или выберите
   существующий (созданный `proxmox-backup-client key create --kdf none` или из хранилища
   PVE); отображается его отпечаток. Затем сохраните копию вне машины:
   **Печать (бумажный ключ)** сохраняет страницу для печати с ключом и его QR-кодом (в
