@@ -7,6 +7,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Client-side encryption, compatible with `proxmox-backup-client`.** Chunks and
+  blobs are encrypted on the client with AES-256-GCM before upload; chunk digests
+  are keyed and the manifest is signed, exactly like the official client, so an
+  encrypted backup restores with `proxmox-backup-client` / Proxmox VE using the
+  same key file, and vice versa. The PBS server never sees the key.
+  - GUI: new **🔒 Encryption** tab per PBS server — generate or import a key
+    (passphrase-protected key files are unlocked on import), export it to a file
+    (optionally passphrase-protected) or show it for copying, remove it. Servers
+    with a key show a 🔒 badge. Key writes go through the service when it owns
+    `config.json`.
+  - Provisioning: `encryption_key` on a `pbs_servers` entry (the key file JSON,
+    without passphrase).
+  - CLI: `-keyfile` for `proxmoxbackup-directory` and `proxmoxbackup-machine`,
+    passphrase from `PBS_ENCRYPTION_PASSWORD`.
+  - Restore/search/browse decrypt transparently; a missing or wrong key is
+    reported up front from the snapshot manifest. Older unencrypted snapshots
+    keep restoring when a key is configured.
+  - A configured but unusable key fails the backup instead of silently backing
+    up unencrypted data.
+- **Disk backups restore in Proxmox VE as a VM that matches the machine.** The
+  VM config stored with "vm" snapshots was a fixed template (4 cores, 2 GB,
+  `win11`, BIOS, no network, random SMBIOS UUID, boot always on `sata0`). It is
+  now generated from the real machine: logical CPU count, RAM, firmware (UEFI →
+  `bios: ovmf`), guest OS type (Windows version/edition → `win11`/`win10`/`win8`/
+  `win7`…, Linux → `l26`), one NIC per physical adapter keeping its MAC (`e1000e`
+  on Windows, `virtio` on Linux), the SMBIOS identity (UUID, manufacturer,
+  product, serial…) and the boot disk (the disk holding the system drive / root
+  filesystem). The VM description lists what to add before the first boot (EFI
+  disk, with pre-enrolled keys when Secure Boot was on; TPM state; "Unique" MACs
+  if the source is still online). Every machine backup also stores these facts
+  in `machine-info.json.blob`.
+
+### Fixed
+- **GUI disk backups always failed with the default Backup ID** (regression in
+  0.4.0): disk mode now files snapshots as `vm/<ID>` for Proxmox VE restore,
+  which needs a numeric VM ID, but the field was pre-filled with the hostname
+  ("machine backup needs a numeric backup ID"). Disk mode now has its own
+  **Proxmox VM ID** field (100–999999999, remembered per machine, separate from
+  the folder Backup ID), validated before the backup or scheduled job starts;
+  editing a scheduled disk job restores its VM ID and disks.
+
+### Changed
+- Once PBS servers are configured, backups and restores always use the default
+  server entry. Configs migrated from the legacy single-server format kept their
+  top-level connection fields, which took precedence and ignored later edits of
+  the server entry (changed default server, rotated token, encryption key).
+  If you maintain the top-level connection fields of `config.json` by hand, edit
+  the `pbs_servers` entry instead.
+- `SaveConfig` no longer drops the PBS server list when the payload omits it.
+
+## [0.4.0] - 2026-09-24
+
+Minor-version milestone: **re-merge with upstream** (tizbac/proxmoxbackupclient_go).
+Upstream merged our GUI and made it brand-neutral ("Proxmox Backup Client");
+Nimbus Backup is now built from that shared code base plus a small fork patch
+series (see `patches/README.md`). Existing installs upgrade in place.
+
+### Changed
+- **Configuration folder merge (upgrade from <= 0.3.0).** The data directory
+  moves from `ProgramData\NimbusBackup` to the shared
+  `ProgramData\ProxmoxBackupClient`. On first start the GUI/service copies
+  `config.json`, `scheduled_jobs.json`, `job_history.json` and `api-token` from
+  the old folder — once, never overwriting a file that already exists in the new
+  folder, retried on the next start if interrupted. The old folder is kept (so a
+  downgrade still works) and marked with `COPIED-TO-ProxmoxBackupClient.txt`.
+  Logs and the restore cache are not copied. The MSI keeps the same UpgradeCode,
+  service name (`NimbusBackup`) and exe name, and "delete configuration" on
+  uninstall now removes the real data folder.
+- Snapshots taken by <= 0.3.0 (legacy `.nimbus_backup_meta.json` sidecar) can
+  still be restored to their original location.
+
+### Fixed
+- `-tags service` build and machine backups via the service (`/backup/machine`
+  was not routed; scheduled machine jobs treated `\\.\PhysicalDriveN` as a folder).
+- Username/password PBS servers could list snapshots but not browse/restore them.
+- `machinebackup` exited 0 on failure (audit V-1).
+- A cancelled multi-folder backup was reported as completed.
+- The CSRF token was logged in clear in request headers.
+- Raw file/device backups could hang after success; a reader error could commit
+  a partial index; multi-disk machine backups got non-numeric backup IDs.
+
+### Known issues
+- **Code signing still pending.** Binaries are still unsigned (expect the usual
+  Windows Defender/SmartScreen false positive). The Azure account needed for
+  signing (Azure Trusted Signing) could not be created yet — we are waiting on
+  Azure. Signed builds are targeted for **0.4.1**, if Azure answers / the account
+  gets created in time.
+
+## [0.3.0] - 2026-07-02
+
+Minor-version milestone: **unattended deployment**. Nimbus Backup can now be
+installed and fully configured from files, with no interactive setup — built for
+Ansible (or any config-management tool). This is the headline of the 0.2 → 0.3
+series; nothing in a normal interactive workflow changes.
+
+### Added
+- **Single-file, unattended configuration for the GUI/service.** `config.json`
+  can now carry the whole deployment — PBS connection, backup settings **and** the
+  schedule — via a new optional `scheduled_jobs` array. On (re)start the service
+  reconciles those jobs into its store (`ReconcileProvisionedJobs`): matching is
+  **by `id`**, so re-pushing the same config **upserts** rather than duplicating,
+  an unchanged schedule is **not** re-fired (a still-valid `nextRun` is kept), the
+  job's `LastRun` history is preserved, and jobs you created in the GUI are left
+  untouched. A missing `id` is derived deterministically from the job name.
+- **`nextRun` is optional in a provisioned/hand-authored schedule** — the service
+  computes it on startup, so an Ansible/Jinja2 template never has to compute
+  RFC3339 timestamps. (This already applied to standalone mode; it now also covers
+  the pushed-config path.)
+- **Automation examples and guide** — `examples/automation/`: ready-to-use
+  command-line and GUI/service config files, Ansible playbooks and Jinja2
+  templates for both paths, a field reference and the CLI exit-code table.
+
+### Notes
+- The command-line tool (`directorybackup.exe --config file.json`) already
+  supported single-file configuration and now-reliable exit codes (`0` success,
+  `1` fatal, `2` locked, `3` partial); it is the recommended path for pure
+  infrastructure-as-code, with scheduling delegated to the Windows Task Scheduler.
+- No database or schema change; existing `config.json` / `scheduled_jobs.json`
+  files keep working unchanged.
+
 ## [0.2.119] - 2026-06-12
 
 ### Internal

@@ -1,67 +1,89 @@
-# Proxmox Backup Client — Windows and Linux client for Proxmox Backup Server
+# Nimbus Backup — Windows client for Proxmox Backup Server
 
-[🇬🇧 English](README.md) · [🇫🇷 Français](README.fr.md) · [🇮🇹 Italiano](README.it.md) · [🇩🇪 Deutsch](README.de.md) · [🇪🇸 Español](README.es.md) · [🇷🇺 Русский](README.ru.md) · [🇨🇳 中文](README.zh.md) · [🇯🇵 日本語](README.ja.md) · [🇬🇷 Ελληνικά](README.el.md) · [🇷🇴 Română](README.ro.md) · [🇸🇪 Svenska](README.sv.md) · [🇸🇦 العربية](README.ar.md) · [🇮🇷 فارسی](README.fa.md)
+🇬🇧 English | [🇫🇷 Français](README.fr.md)
 
-[![Licence](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/tizbac/proxmoxbackupclient_go)](https://github.com/tizbac/proxmoxbackupclient_go/releases)
-[![Documentation](https://img.shields.io/badge/docs-github-orange)](https://github.com/tizbac/proxmoxbackupclient_go)
+[![License](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/rdemsystems/NimbusBackupClient)](https://github.com/rdemsystems/NimbusBackupClient/releases)
+[![Documentation](https://img.shields.io/badge/docs-nimbus.rdem--systems.com-orange)](https://nimbus.rdem-systems.com/en/?utm_source=github)
 
-**Proxmox Backup Client is an open-source (GPL-3.0) backup client for Proxmox Backup Server (PBS), working on Windows and Linux.**
+**Nimbus Backup is an open-source (GPL-3.0) Windows backup client for Proxmox Backup Server (PBS).**
+A modern GUI to back up Windows servers and workstations to PBS — VSS-consistent snapshots, scheduled jobs, file and disk modes, snapshot browsing and restore, multi-PBS support, and a Windows service — plus command-line tools for directory and full-machine backups. Looking for **offsite, immutable** PBS storage without self-hosting? See the [managed service](#️-managed-pbs-offsite--immutable) below.
 
-It is a **suite of tools** for backing up to PBS:
+Nimbus Backup is the RDEM Systems build of [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxbackupclient_go): the GUI we developed has been merged upstream, and both projects now share the same code base (see [Relationship with upstream](#-relationship-with-upstream)).
 
-- **Proxmox Backup Client GUI** (based on the Nimbus Backup GUI from RDEM Systems) — modern graphical interface for backing up Windows and Linux servers and workstations to PBS: consistent VSS snapshots, scheduled jobs, file and disk modes, snapshot browsing/restoration, multi-PBS support and a Windows service mode.
-- **`proxmoxbackup-directory`** — command-line tool for directory (PXAR) backups with deduplication.
-- **`proxmoxbackup-machine`** — command-line tool for full live machine backups (FIDX, VSS, incremental).
-- **Linux machine backup** (`machinebackup` binary): live-consistent whole-disk image of a running Linux host (bootable, raw, FIDX). Mounted partitions are snapshotted point-in-time with the elastio-snap/dattobd kernel module.
-- **`proxmoxbackup-nbd`** — NBD server for restoring disk backups (Linux).
-
-> Keywords: proxmox backup client windows · PBS client · Windows VSS backup · immutable offsite backups · Proxmox Backup Server interface.
-
-> ⚠️ **Disclaimer:** This project is **not affiliated in any way** with **Proxmox Server Solutions GmbH**. "Proxmox", the Proxmox logo and related names are the property of their respective owners; here they are used **only** to state compatibility. See [proxmox.com](https://www.proxmox.com/) for their products.
+📖 **Full documentation, installation guide and PBS hosting:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
 
 ## 📦 Download
 
-👉 **[Download the latest release](https://github.com/tizbac/proxmoxbackupclient_go/releases)**
+👉 **[Download the latest release](https://github.com/rdemsystems/NimbusBackupClient/releases)**
 
-> ⚠️ **Windows shows "virus detected" (e.g. `Trojan:Win32/Sabsik.FL.A!ml`) or a SmartScreen warning?**
-> This is a **known false positive** for Go/Wails applications — it is *not* a virus. The `!ml` suffix indicates a machine-learning model detection that flags *unsigned and uncommon* executables.
-> See [why this happens and how to verify the download](https://github.com/tizbac/proxmoxbackupclient_go).
+Each release ships:
+- `NimbusBackup.msi` — installer (GUI + Windows service), **recommended for production**
+- `NimbusBackup.exe` — standalone GUI
+- `nimbus-backup-cli-<version>-windows.zip` / `-linux.tar.gz` / `-macos.tar.gz` — command-line tools
+- `SHA256SUMS.txt` — checksums
 
-### 🔎 Verifying any download
+> ⚠️ **Windows says "virus detected" (e.g. `Trojan:Win32/Sabsik.FL.A!ml`) or shows a SmartScreen warning?**
+> This is a known **false positive** for Go/Wails applications — it is *not* a virus. The `!ml` suffix means it comes from a machine-learning model that flags *unsigned, low-prevalence* executables.
+> Read [why this happens and how to verify the download](https://nimbus.rdem-systems.com/en/antivirus-false-positive/?utm_source=github).
 
-Every release provides SHA-256 checksums and a **signed provenance attestation** (cryptographic proof that the binary was produced by this repository's CI, from a precise commit):
+### 🔎 Verify any download
+
+Every release ships SHA-256 checksums and a signed **build-provenance attestation** (cryptographic proof the binary was produced by this repo's CI, from a specific commit):
 
 ```powershell
-Get-FileHash .\ProxmoxBackupClient.exe -Algorithm SHA256   # compare with SHA256SUMS.txt
-gh attestation verify .\ProxmoxBackupClient.exe --repo tizbac/proxmoxbackupclient_go
+Get-FileHash .\NimbusBackup.msi -Algorithm SHA256   # compare against SHA256SUMS.txt
+gh attestation verify .\NimbusBackup.msi --repo rdemsystems/NimbusBackupClient
 ```
 
-**VirusTotal — 0 detections.** Independent multi-engine reports of recent MSI installers:
+**VirusTotal.** Each release's notes link the VirusTotal report of that build's installer (published only when the scan is clean). Earlier reports, 0 detections:
 [0.2.108](https://www.virustotal.com/gui/file/6e8fb7ce9af740d470e947addb8daba4331c0b88e8bfdec9e0697ea8f7f29e9e/detection) ·
 [0.2.107](https://www.virustotal.com/gui/file/6fd6c6fa77e0305c129ef882a3745100aa6033187a6d52a4af94149ab6b666d2/detection) ·
 [0.2.106](https://www.virustotal.com/gui/file/ad6e56700ed9df8e088906e38cee2e2882fc7045f4e39269de0e379a01784ad7/detection)
 
-> ℹ️ **Code signing:** Windows binaries are **not yet Authenticode-signed** (an OSS certificate via [SignPath Foundation](https://signpath.org) is pending). In the meantime, provenance is established through the attestation and checksums above.
+> ℹ️ **Code signing:** Windows binaries are **not yet Authenticode-signed**, which is what triggers the SmartScreen / `!ml` warnings above. Our request for a free OSS certificate from the [SignPath Foundation](https://signpath.org) got no reply; signing through Azure Artifact Signing is being set up and is targeted for **0.4.1**. Until then, provenance is established via the build-provenance attestation and checksums above.
+
+### 🐧 On Linux? Use the official client
+
+The Nimbus Backup GUI is Windows-only (the CLI tools also build for Linux and macOS). For file-level backups on Linux, use Proxmox's own `proxmox-backup-client` — we package it for the distributions Proxmox doesn't cover:
+
+👉 **[rdemsystems/unofficial-proxmox-backup-client](https://github.com/rdemsystems/unofficial-proxmox-backup-client)** — signed package repositories for Debian/Ubuntu, Fedora/RHEL/Rocky/AlmaLinux, Arch and Alpine (amd64 & arm64). Proxmox's official static binary, repackaged unchanged — not patched, not recompiled.
+
+## ☁️ Managed PBS (offsite & immutable)
+
+Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite immutable** PBS datastores:
+👉 **[Configure your backup & see pricing](https://nimbus.rdem-systems.com/en/choose-backup/?utm_source=github)**
+
+- ✅ From €12/TB/month
+- ✅ 1 TB free trial
+- ✅ A ready-made [offsite target for your PBS](https://nimbus.rdem-systems.com/en/offsite-proxmox-backup/?utm_source=github) — air-gapped, immutable datastores
+- ✅ [NimbusBackup — Managed PBS hosting in France](https://nimbus.rdem-systems.com/en/?utm_source=github)
+
+## 📚 Documentation
+
+- **Complete Proxmox Backup guide** — PBS deployment best practices ([🇬🇧 EN](https://nimbus.rdem-systems.com/en/blog/complete-proxmox-backup-guide/?utm_source=github))
+- **Back up Windows with Proxmox Backup Server** — Windows-specific deployment guide ([🇬🇧 EN](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github))
+- **PBS vs Veeam** — Proxmox Backup Server comparison ([🇬🇧 EN](https://nimbus.rdem-systems.com/en/blog/pbs-vs-veeam-proxmox-backup-comparison/?utm_source=github))
+- In this repo: [multi-PBS user guide](MULTI_PBS_USER_GUIDE.md) · [unattended deployment examples](examples/automation/) · [bare-metal restore with Clonezilla](PATCH-CLONEZILLA.md) · [changelog](CHANGELOG.md)
 
 ## ✨ Features
 
-### GUI — Proxmox Backup Client GUI (recommended)
-- **🌍 Multilingual** — French, English, Italian, German and Polish interfaces
-- User-friendly configuration with connection test
-- Real-time backup progress with throughput and time remaining
+### GUI (recommended)
+- **🌍 Multi-language** — English, French, Italian, German and Polish interface
+- User-friendly configuration with connection testing (API token or username/password)
+- Real-time backup progress with speed and ETA, cancel at any time
 - VSS (Volume Shadow Copy) support for consistent backups
-- Multi-folder backups, file and disk modes
-- Snapshot browsing, file search (wildcards) and restoration
-- Multi-PBS server support with certificate fingerprint pinning (TOFU)
-- Windows service mode + scheduled backups
-- Backup cancel, history (last 6) and rerun
-- Debug logging for diagnostics
+- Multi-folder backup, file and disk (full machine) modes
+- Snapshot browsing, file search (wildcards) and restore
+- Multi-PBS server support, certificate fingerprint pinning (TOFU)
+- **🔒 Client-side encryption** (AES-256-GCM), key files compatible with `proxmox-backup-client` and Proxmox VE
+- Windows service mode + scheduled backups, backup history with one-click rerun
+- Debug logging for troubleshooting
 
-### CLI tools
-- `proxmoxbackup-directory` — directory (PXAR) backups with deduplication
-- `proxmoxbackup-machine` — full live Windows machine backups (FIDX, VSS, incremental)
-- `proxmoxbackup-nbd` — NBD server for restoring disk backups (Linux)
+### Command-line tools
+- `proxmoxbackup-directory` — directory (PXAR) backups with deduplication, stream backups (`-backupstream`, e.g. a `mysqldump` pipe), e-mail notifications, JSON config file
+- `proxmoxbackup-machine` — full live machine backups as a bootable disk image (FIDX): VSS on Windows, incremental, parallel hashing
+- `proxmoxbackup-nbd` — NBD server to mount a disk backup on Linux (file-level restore, bare-metal restore from a [patched Clonezilla live ISO](PATCH-CLONEZILLA.md))
 
 ### 📸 Screenshots
 
@@ -69,346 +91,129 @@ gh attestation verify .\ProxmoxBackupClient.exe --repo tizbac/proxmoxbackupclien
 *Multi-PBS server management with status indicators*
 
 ![Add server form](docs/screenshots/nimbus-gui-add-server-form.png)
-*Simple server configuration with connection test*
+*Easy server configuration with connection testing*
 
 ![One-shot backup](docs/screenshots/nimbus-gui-one-shot-backup.png)
-*Real-time backup progress with ETA and throughput*
+*Real-time backup progress with ETA and speed*
 
 ### Smart system exclusions (file mode)
-When backing up an entire drive (e.g. `D:\`), the GUI automatically excludes:
+When backing up an entire drive (e.g. `D:\`), Nimbus Backup automatically excludes:
 
-**System folders:** `System Volume Information` (VSS storage, can reach 100+ GB), `$RECYCLE.BIN`, `Recovery`.
+**System folders:** `System Volume Information` (VSS storage, can be 100+ GB), `$RECYCLE.BIN`, `Recovery`.
 **System files:** `pagefile.sys`, `hiberfil.sys`, `swapfile.sys`.
 
-**Why this matters:** a drive may show 1.03 TB used while real files are ~141 GB. Without exclusions the backup would include VSS snapshots (wasted space and time); with them, the size matches the real data.
+**Why it matters:** a drive may report 1.03 TB used while the real files are ~141 GB. Without exclusions the backup would include VSS snapshots (wasted space and time); with them the backup size matches the real data.
 
-**Recommendation:** use **file mode** (default) with auto-exclusions for file-level backups; use **disk mode** in a separate job for bare-metal restoration (includes everything).
+**Recommendation:** use **file mode** (default) with auto-exclusions for file-level backups; use **disk mode** in a separate job for bare-metal restore (includes everything).
 
 ### Security & quality
-- Input validation and credential sanitization
-- Path traversal prevention
+- Input validation and credential sanitization (secrets redacted from logs)
+- Path-traversal prevention
 - Retry logic with exponential backoff
-- Comprehensive error handling and tests, 100% lint compliance
+- CI gates on every build: tests, `golangci-lint`, `gosec`, `go mod tidy`
 
-## 🚀 Quick start (GUI)
+### 🔒 Client-side encryption
+Backups can be encrypted **on the client** before they leave the machine, with
+the same scheme as the official `proxmox-backup-client` (AES-256-GCM, keyed chunk
+digests, signed manifest). The PBS server only stores opaque data and never sees
+the key — useful on a shared or managed PBS.
 
-1. Download `ProxmoxBackupClient.exe` (or the `.msi`) from the releases
-2. Launch it (no admin rights needed to start: it asks for elevation only when something actually requires it — the service token, or VSS machine backups)
+- **GUI**: *Servers → Edit → 🔒 Encryption* — generate a key or import an existing
+  key file (from `proxmox-backup-client key create` or a PVE storage), then
+  **export it** and keep a copy off the machine (optionally passphrase-protected).
+- **CLI**: `-keyfile path/to/key.json` (or `"keyfile"` in the JSON config); a
+  passphrase-protected key reads its passphrase from `PBS_ENCRYPTION_PASSWORD`.
+- **Interoperable**: an encrypted backup restores with `proxmox-backup-client`
+  or Proxmox VE using the same key file, and vice versa.
+
+> ⚠️ **Without the key, encrypted backups are unrecoverable.** The first
+> encrypted backup uploads everything again (no deduplication with unencrypted
+> backups). Backup IDs, archive names and sizes stay visible to the server; file
+> contents, file names and the catalog are encrypted.
+
+## 🤖 Unattended deployment (Ansible & IaC)
+
+Nimbus Backup installs and configures entirely from files — no interactive setup.
+Two paths, both covered by ready-to-use examples in
+[`examples/automation/`](examples/automation/):
+
+- **Command line** — one JSON file per host carries the whole backup
+  (`proxmoxbackup-directory.exe --config file.json`); schedule via the Windows
+  Task Scheduler. Reliable exit codes (`0` OK, `1` fatal, `2` locked, `3` partial)
+  so your orchestrator detects failures. Best for pure infrastructure-as-code.
+- **GUI/service (MSI)** — a **single `config.json`** carries the PBS connection,
+  backup settings **and** the schedule (`scheduled_jobs`). Push the file, restart
+  the `NimbusBackup` service: jobs are reconciled idempotently and `nextRun` is
+  computed for you. No timestamp math in your Jinja2 template.
+
+The service reads its configuration from `C:\ProgramData\ProxmoxBackupClient\`
+(since 0.4.0; see [Upgrading](#️-upgrading-from--030)).
+
+📖 Full walkthrough: [Automate Windows backup to PBS with Ansible](https://nimbus.rdem-systems.com/en/blog/unattended-windows-backup-ansible/?utm_source=github).
+
+## 🚀 Quick start
+
+1. Download `NimbusBackup.msi` (or the standalone `NimbusBackup.exe`) from the releases
+2. Install it / run it with administrator privileges (required for VSS)
 3. Configure your PBS connection and test it
-4. Select the folders to back up
-5. Start the backup
+4. Select directories to back up
+5. Start the backup — or schedule it
 
-## NEW! — Full machine live backup
+## ⬆️ Upgrading from ≤ 0.3.0
 
-New functionality has been added that now allows backing up a complete Windows 10/11 system, or Linux machine, and their respective server versions without any downtime.
+Installing 0.4.0 or later over an existing install upgrades it in place (same MSI identity, same `NimbusBackup` service). The data folder moves from `C:\ProgramData\NimbusBackup` to the shared `C:\ProgramData\ProxmoxBackupClient`: on first start, your configuration, scheduled jobs, history and API token are copied over once (existing files are never overwritten). The old folder is kept, marked with `COPIED-TO-ProxmoxBackupClient.txt`, so a downgrade still works. Snapshots taken by older versions can still be restored to their original location.
 
-The command syntax is mostly the same, except `-backupdir string`.
+## 📋 Requirements
 
-In the case of machine backup executable there's in place of backupdir, `-backupdev`.
-For example an invocation could be:
-
-`machinebackup.exe -authid yourapikey -backupdev \\.\PhysicalDrive0 -baseurl https://yourpbs:8007 -certfingerprint xx:xx:xx... -datastore zfs -secret L4m3r -backup-id testfull1`
-
-The above command will look at Disk 0, detect all mounted partitions, take a VSS snapshot of these, and then create a bootable backup image of the whole disk as FIDX.
-
-The next backup will be incremental, hashing has been parallelized so speeds of 1 GB/sec can be easily reached.
-
-### Linux machine backup prerequisites
-
-Windows machine backup uses VSS. Linux has no VSS, so a machine backup of a running Linux host needs the `elastio-snap` kernel module (a fork of `dattobd`) to take a point-in-time snapshot of the block device while it is being written to. `dattobd` itself also works if it is already loaded.
-
-The original `elastio/elastio-snap` repository is archived and no longer builds on current kernels (we hit this on Debian 13, kernel 6.12). Use the maintained fork, [`Axcient/elastio-snap`](https://github.com/Axcient/elastio-snap) (branch `develop`). Version 0.12.11 of that fork built and ran on Debian 13 with kernel 6.12.
-
-Two things are required, or a Linux machine backup refuses to run:
-
-1. **The kernel module must be installed and loaded.** Building from source:
-   ```bash
-   sudo apt-get install linux-headers-$(uname -r) build-essential   # Debian/Ubuntu
-   git clone --depth 1 https://github.com/Axcient/elastio-snap.git
-   cd elastio-snap
-   sudo make
-   sudo make install
-   sudo depmod -a      # `make install` does not run depmod, and modprobe fails without it
-   sudo modprobe elastio-snap
-   lsmod | grep elastio_snap
-   ```
-   This loads it for the current boot only. Add an entry in `/etc/modules-load.d/` to load it on every boot. Its own [INSTALL.md](https://github.com/Axcient/elastio-snap/blob/develop/INSTALL.md) covers the packaged installs.
-
-2. **The backup must run as root.** The module's control interface is root only, and `machinebackup` refuses to take a snapshot as a normal user. A plain file or directory backup does not need root.
-
-
-### File restore — NEW!
-
-File restore is possible by using the nbd tool.
-
-In order to use nbd please first do `modprobe nbd max_part=0`.
-
-For unknown reasons, using `max_part != 0` causes an infinite partition probe loop.
-
-The NBD tool will connect any fixed disk backup, regardless of it being a VM or host backup (that being said, it also works for PVE backups).
-
-To use it use a command line similar to this:
-`./pbsnbd -authid 'apikey' -baseurl https://yourpbs:8007 -secret 'yoursecret' -certfingerprint 'aa:...:xx' -datastore test -namespace test1 -path "vm/107/2025-08-02T23:13:01Z/drive-virtio0.img.fidx"`
-
-If you omit `-path`, a terminal UI will show up allowing you to select the fidx file.
-
-> Beware to not use this on a machine running important stuff (a corrupt filesystem can crash the OS potentially, that's why Proxmox VE uses a QEMU instance for this).
-
-Also be very sure to have unmounted anything on the nbd disk before stopping pbsnbd, if not you will likely end up with a busy unmountable partition. If someone has an indication of how to recover from that, please tell me.
-
-If you get a `Device or resource busy` error, you have to force disconnect by running `nbd-client -d /dev/nbd0` or simply reboot.
-
-### Restore to physical machine
-
-A live CD / PXE boot system will be released that will allow logging in to a PBS server, selecting the backup, and launching clonezilla. For now the best way is spinning up a clonezilla live and copying to it the nbd server executable; before proceeding with clonezilla, on another tty, you launch `pbsnbd`.
-
-I suggest also copying over command line parameters such as authid, baseurl, fingerprint etc, they are a pain in the... to hand type!
-
-Once pbsnbd is up and running, you can use the clonezilla disk-to-local-disk option.
-
-## Usage — Directory Backup
-
-A typical command would look like:
-
-```shell
-proxmoxbackupgo.exe -baseurl "https://yourpbshost:8007" -certfingerprint pbsfingerprint -authid "user@realm!apiid" -secret "apisecret" -backupdir "C:\path\to\backup" -datastore "datastorename"
-```
-
-```
-proxmoxbackupgo.exe
-  -authid string
-        Authentication ID (PBS Api token)
-  -secret string
-        Secret for authentication
-  -backupdir string
-        Backup source directory, must not be symlink. Repeat the flag to back up
-        several directories in one run (see "Several directories" below)
-  -baseurl string
-        Base URL for the proxmox backup server, example: https://192.168.1.10:8007
-  -certfingerprint string
-        Certificate fingerprint for SSL connection, example: ea:7d:06:f9...
-  -datastore string
-        Datastore name
-  -namespace string
-        Namespace (optional)
-  -backup-id string
-        Backup ID (optional - if not specified, the hostname is used as the default for host-type backups)
-  -pxarout string
-        Output PXAR archive for debug purposes (optional)
-  -backupstream string  ***NEW***
-        Filename for stream backup
-  -mail-host string
-        mail notification system: mail server host(optional)
-  -mail-port string
-        mail notification system: mail server port(optional)
-  -mail-username string
-        mail notification system: mail server username(optional)
-  -mail-password string
-        mail notification system: mail server password(optional)
-  -mail-insecure bool
-        mail notification system: allow insecure communications(optional)
-  -mail-from string
-        mail notification system: sender mail(optional)
-  -mail-to string
-        mail notification system: receiver mail(optional)
-
-  -mail-subject-template string
-        mail notification system: mail subject template(optional)
-  -mail-body-template string
-        mail notification system: mail body template(optional)
-
-  -config string
-        Path to JSON config file. If this flag is provided all the others will override the loaded config file
-```
-
-For JSON configuration a JSON example is provided, fill in only the needed fields.
-
-### Several directories in one run
-
-Repeat `-backupdir` to back up more than one directory with a single command:
-
-```shell
-proxmoxbackupgo.exe -baseurl "https://yourpbshost:8007" -certfingerprint pbsfingerprint -authid "user@realm!apiid" -secret "apisecret" -datastore "datastorename" -backupdir "C:\Data" -backupdir "D:\Photos"
-```
-
-Each directory is backed up as its own backup group, with the backup id `<backup-id>_<path>` (the same ids the GUI uses; `-backup-id` defaults to the hostname). Retention, pruning and restore therefore treat every directory as an independent series. A directory that fails does not stop the others, and the exit code is 1 if any of them failed. `-pxarout` cannot be combined with several directories, and two directories that would end up with the same backup id are rejected before anything is uploaded.
-
-In a JSON config file use `"backupdirs": ["C:\\Data", "D:\\Photos"]`. The single `"backupdir"` field keeps working and can be combined with `"backupdirs"`.
-
-Encryption works the same way as for a single directory: `-keyfile` (and `-keyfile-passphrase`, or the interactive prompt) is read once, and every directory's backup group is encrypted with that key.
-
-Note on mail templating:
-[Go's templating engine](https://pkg.go.dev/text/template) is used for mail subjects and bodies, please refer to the documentation for the syntax.
-The following variables are available for templating:
-
-- `.NewChunks`: number of new chunks created
-- `.ReusedChunks`: number of chunks reused
-- `.Datastore`: datastore name
-- `.Error`: error message if any
-- `.Hostname`: hostname of the machine
-- `.StartTime`: time the backup started
-- `.EndTime`: time the backup ended
-- `.Duration`: duration of the backup
-- `.FromattedDuration`: formatted duration of the backup
-- `.Success`: a boolean telling whether the backup was successful
-- `.Status`: string representation of the backup status [SUCCESS, FAILURE]
-
-## Stream Backup
-
-This allows backing up a stream instead of a PXAR, allowing endless possibilities. For example you can invoke:
-
-```
-mysqldump yourdatabase | ./proxmoxbackupgo -backupstream yourdatabase.sql [other options]
-```
-
-This allows leveraging buzhash for dedup even when using tar for example, or the sql dump itself. And if someone wants to attempt it, it should be possible with some hack to pipe the DISM command to generate a WIM image to this and have a full host backup.
-
-## Known Issues
-
-Windows Defender antimalware being active will slow the backup down up to 25% of attainable speed.
-
-~~There's as of now no mechanism to prevent two instances being launched at the same time which will screw up VSS and backup~~
-If you use the Windows planning utility it should theoretically prevent two instances starting at the same time when originating from the same job.
-
-## 📋 Prerequisites
-
-- Windows 10/11 (64-bit)
+- Windows 10/11 or Windows Server (64-bit)
 - Administrator rights (for VSS snapshots)
 - Network access to a Proxmox Backup Server
-- Linux works too, especially for development
 
 ## 🔨 Building from source
 
 ### Prerequisites
-- Go 1.22 or later
+- Go 1.25 or later
 - Node.js 20 or later
-- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0` (the version CI uses)
 
-### GUI
+### Build
 ```bash
 cd gui
 npm install --prefix frontend
 wails build      # or: wails dev  (hot reload)
 ```
 
-### Full project (Makefile)
-```bash
-make install-deps   # install Wails CLI + frontend dependencies
-make                # build everything (CLI + GUI + Service)
-```
+Or build everything (CLI + GUI + service) with the Makefile: `make install-deps && make` (see `make help`). Windows toolchain and Docker cross-build: [BUILD.md](BUILD.md).
 
-Artifacts are placed in the `dist/` directory. See `make help` for all targets (`cli`, `gui`, `service`, `test`, `lint`, `security-check`, `release`...).
+The brand is picked from the executable name: `NimbusBackup.exe` runs as Nimbus Backup, any other name as the neutral "Proxmox Backup Client" ([`gui/brand.go`](gui/brand.go)).
 
-## 🔧 Advanced use & guides
+## 🔗 Relationship with upstream
 
-### Multi-PBS (multiple PBS servers)
+Nimbus Backup started as a fork of [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, by Tiziano Bacocco, GPLv3), to which we added the Windows GUI, the service, scheduling, multi-PBS and restore. In September 2026, upstream merged that GUI back and made it brand-neutral ("Proxmox Backup Client GUI"). Since 0.4.0, Nimbus Backup is built from the same code base: **the two projects are now functionally almost identical.**
 
-Configure several PBS servers and pick the target per backup (e.g. `C:\Users` → fast SSD PBS daily, `C:\` → big-data PBS weekly, plus a DR server).
+What this repository adds on top of upstream is a small, documented patch series ([`patches/`](patches/README.md)):
 
-- **[User guide](MULTI_PBS_USER_GUIDE.md)** — adding/testing servers, default server, FAQ and troubleshooting.
-- **[Implementation guide](MULTI_PBS_GUIDE.md)** — data model, automatic migration from single-PBS config, backend API methods.
+- **Fixes not yet merged upstream** (service build, restore with username/password servers, exit codes, log redaction, machine backup reliability…) — sent upstream as they are merged.
+- **The Nimbus Backup identity** — `NimbusBackup.exe`/`.msi`, the `NimbusBackup` service, and the MSI upgrade code of existing installs, so they keep upgrading in place.
+- **Upgrade path** from Nimbus Backup ≤ 0.3.0 (data-folder migration, legacy snapshot metadata).
+- **Release pipeline** — build-provenance attestation, checksums, VirusTotal reports.
 
-Legacy single-PBS configuration is automatically migrated to a `default` server on first load.
+We re-merge upstream regularly; upstream's own releases are published at [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go/releases).
 
-### Clonezilla live ISO (bare-metal restore)
+## ⚠️ Disclaimer
 
-The rescue workflow is built by patching a stock Clonezilla Live ISO with the `pbsnbd` / `machinebackup` binaries plus a **pbs-nbd** entry in the Clonezilla main menu (boots from CD, USB via `dd`, and UEFI):
+This software is provided as-is. While we strive for reliability, we take no responsibility for any data loss or damage. Always test your backups and verify restoration before relying on them in production.
 
-```bash
-./patch-clonezilla.sh \
-  -o clonezilla-live-patched.iso \
-  clonezilla-live-3.3.3-15-amd64.iso \
-  ./build/pbsnbd ./build/machinebackup \
-  ./clonezilla-patch/ocs-pbs-nbd
-```
-
-Full details (why a full ISO rebuild instead of an in-place swap, prerequisites, menu flow, verification) in **[PATCH-CLONEZILLA.md](PATCH-CLONEZILLA.md)**.
-
-### Building the Windows GUI
-
-**Docker (recommended, especially when building on Linux).** The one-command script builds a `ProxmoxBackupClientGO.exe` with proper WebView2 support, using a disposable `golang` container (installs mingw + Wails, builds the frontend, runs `wails build`):
-
-```bash
-./build_gui_windows_docker.sh
-```
-
-**Native Windows (Chocolatey).** See **[BUILD.md](BUILD.md)** for the complete Windows toolchain setup:
-
-```powershell
-choco install go
-choco install mingw
-# then, in a non-elevated shell:
-build.bat          # GUI
-build_cli.bat      # CLI
-```
-
-### Feature status, changelog & internal docs
-
-- **[FEATURES_STATUS.md](FEATURES_STATUS.md)** — per-feature status matrix (implemented / tested / roadmap).
-- **[CHANGELOG.md](CHANGELOG.md)** — per-version change history.
-- **[TODO.md](TODO.md)** — open roadmap and ideas.
-- **[RELEASE_NOTES.md](RELEASE_NOTES.md)** — stable product state and available builds.
-- **[MSI_UNINSTALL_TEST.md](MSI_UNINSTALL_TEST.md)** — MSI uninstall dialog (keep/delete configuration) and its test plan.
-- **[FIXES_SUMMARY.md](FIXES_SUMMARY.md)** — GUI fix notes (directory vs machine-backup mode switching).
-
-## 🌐 Tech Support in Italy
-
-Being said that the project and **ALL** its contributions will remain forever public and licensed under GPLv3 license, main sponsor of this project and also of the latest machine backup features, E.T.I. Srl ( https://etitech.net ) can provide, to who needs it, support for Proxmox deployments in general and specifically Windows backup tools.
-
-There will never be a "community" & "enterprise" different edition, solely tech support will be an independent service.
-Any customization that you are going to ask, even if development may be paid, will be released as GPLv3 like the whole project is.
-
-## 🖥️ GUI attribution
-
-The **Proxmox Backup Client GUI** is based on the **[Nimbus Backup GUI](https://nimbus.rdem-systems.com)**, developed and maintained by **[RDEM Systems](https://www.rdem-systems.com/)**.
-
-The GUI (originally a fork of this project) has been merged back into this repository: the entire codebase, including the GUI and all its features, remains open-source under the GPLv3 license. RDEM Systems sponsors the GUI development and provides commercial support for it.
-
-## ⚠️ Warning
-
-This software is provided "as is". Although we aim for reliability, we decline any responsibility for loss of or damage to data. Always test your backups and verify restoration before relying on them in production.
-
-The software is still alpha quality and we take no responsibility for any kind of damage or data loss, even of source files.
+This project is **not affiliated** with **Proxmox Server Solutions GmbH**. "Proxmox" and related names are the property of their respective owners and are used here only to state compatibility.
 
 ## 📄 License
 
 GPLv3 — see the [LICENSE](LICENSE) file.
 
-## 🏷️ Branding
+## About RDEM Systems
 
-Every contributor who has contributed **at least 5 commits** that add functionality or fixes, has the right to have their branding data added for commercial use.
-
-The only conditions are that the company that the branding points to is **not** running any of the following:
-
-- Malware campaigns
-- Businesses promoting war (this applies to any country, including western ones)
-- Scams
-- Data theft
-- Child trafficking
-- Violence
-- Discrimination
-- Drugs
-- Any activity generally recognized as illegal
-
-If any complaint shows up at any of the contributors, we will try to get in touch; if no valid explanation is given, we will **immediately terminate** that benefit.
-
-The **GPLv3 license remains active**, and you will still be free to fork the project and build your own executables.
-
-## 🤝 Contribute
-
-The GUI is now fully implemented, but contributions are still welcome, especially:
-
-1. Encryption support (still missing)
-2. Physical-to-virtual (P2V) migration, restoring a bare-metal backup into a virtual machine (still incomplete)
-3. Async upload / multicore upload of chunks (multicore compression is already implemented for machine backup)
-4. Proxmox side patch to add another kind of entry to pxar format with Windows security descriptors in it
-5. Support for Windows symlinks
-6. Anything interesting you can come up with :)
-
-## About Proxmox Backup Client GO contributors
-
-Proxmox Backup Client GO contributors develop and maintain this project. The software relies on the NTP/NTS infrastructure and the [11 public NTS servers](https://github.com/jauderho/nts-servers) listed in the community reference.
+NimbusBackupClient is developed and maintained by [RDEM Systems](https://www.rdem-systems.com/en/?utm_source=github), a French infrastructure provider specialized in Proxmox VE/PBS managed services and NTP/NTS infrastructure. We operate [16 public NTS servers](https://ntp.rdem-systems.com/en/nts.php?utm_source=github) ([live status](https://ntp.rdem-systems.com/en/status.php?utm_source=github); 11 of them are listed in the [community reference](https://github.com/jauderho/nts-servers)), and provide [fully managed PBS hosting](https://nimbus.rdem-systems.com/en/?utm_source=github) for users who don't want to self-host. We also maintain [unofficial-proxmox-backup-client](https://github.com/rdemsystems/unofficial-proxmox-backup-client), signed `proxmox-backup-client` packages for Linux distributions Proxmox doesn't officially support.
 
 ---
 
-**© 2024-2026 Proxmox Backup Client GO Contributors and RDEM Systems.**
+**© 2024-2026 RDEM Systems and Proxmox Backup Client GO contributors.**
