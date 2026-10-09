@@ -581,11 +581,13 @@ jobs:
         run: |
           # Waits for msiexec itself only (Start-Process -Wait also waits for
           # every descendant), 10 minutes at most; on a timeout or a failure
-          # the end of the MSI log is published as an annotation.
-          function Invoke-Msi([string[]]$msiArgs, [string]$what) {
-            $log = $msiArgs[[array]::IndexOf($msiArgs, '/l*v') + 1]
+          # the end of the MSI log is published as an annotation. Start-Process
+          # does not quote arguments: paths are quoted here, otherwise a space
+          # breaks the command line and msiexec waits on its usage dialog.
+          function Invoke-Msi([string]$action, [string]$msi, [string]$log, [string]$what) {
             Write-Output "$what ..."
-            $p = Start-Process msiexec.exe -PassThru -NoNewWindow -ArgumentList $msiArgs
+            $p = Start-Process msiexec.exe -PassThru -NoNewWindow -ArgumentList "$action `"$msi`" /qn /norestart /l*v `"$log`""
+            $null = $p.Handle  # keeps the handle, otherwise ExitCode can read as null
             $done = $p.WaitForExit(600000)
             if (-not $done -or ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010)) {
               $why = if ($done) { "msiexec exit code $($p.ExitCode)" } else { 'timed out after 10 minutes' }
@@ -619,7 +621,8 @@ jobs:
             Write-Output "::notice title=${label}::one product at $expected, service NimbusBackup -> $svcExe ($($svc.StartMode), $($svc.State))"
           }
           function Test-Uninstall([string]$label) {
-            Invoke-Msi @('/x', "$PWD\dist\NimbusBackup.msi", '/qn', '/norestart', '/l*v', "$logs\uninstall-$label.log") "${label}: uninstall"
+            $logName = ($label -replace '[^A-Za-z0-9.]+', '-')
+            Invoke-Msi '/x' "$PWD\dist\NimbusBackup.msi" "$logs\uninstall-$logName.log" "${label}: uninstall"
             if (Get-Service -Name NimbusBackup -ErrorAction SilentlyContinue) { throw "${label}: the NimbusBackup service is still registered after uninstall" }
             if (@(Get-Nimbus).Count -ne 0) { throw "${label}: Nimbus Backup is still listed as installed after uninstall" }
             Write-Output "::notice title=${label}: uninstall::service and product removed"
@@ -628,17 +631,17 @@ jobs:
           New-Item -ItemType Directory -Force -Path $logs | Out-Null
 
           if (@(Get-Nimbus).Count -ne 0) { throw 'the runner is not clean: Nimbus Backup is already installed' }
-          Invoke-Msi @('/i', "$PWD\dist\NimbusBackup.msi", '/qn', '/norestart', '/l*v', "$logs\install-fresh.log") 'Fresh install'
+          Invoke-Msi '/i' "$PWD\dist\NimbusBackup.msi" "$logs\install-fresh.log" 'Fresh install'
           Test-Installed 'Fresh install'
           Test-Uninstall 'Fresh install'
 
           $old = Join-Path $env:RUNNER_TEMP 'NimbusBackup-0.4.0.msi'
           Invoke-WebRequest -Uri 'https://github.com/rdemsystems/NimbusBackupClient/releases/download/v0.4.0/NimbusBackup.msi' -OutFile $old
-          Invoke-Msi @('/i', $old, '/qn', '/norestart', '/l*v', "$logs\install-0.4.0.log") 'Installing 0.4.0'
+          Invoke-Msi '/i' $old "$logs\install-0.4.0.log" 'Installing 0.4.0'
           if (-not (Get-Service -Name NimbusBackup -ErrorAction SilentlyContinue)) { throw '0.4.0 did not register the NimbusBackup service' }
           Write-Output "::notice title=Install 0.4.0::installed, service NimbusBackup registered"
 
-          Invoke-Msi @('/i', "$PWD\dist\NimbusBackup.msi", '/qn', '/norestart', '/l*v', "$logs\upgrade.log") 'Upgrading to this build'
+          Invoke-Msi '/i' "$PWD\dist\NimbusBackup.msi" "$logs\upgrade.log" 'Upgrading to this build'
           Test-Installed "Upgrade 0.4.0 -> $expected"
           Test-Uninstall 'Upgrade'
 
