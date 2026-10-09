@@ -8,7 +8,9 @@ name: End-to-end tests
 
 on:
   push:
-    branches: [main, develop]
+    # Fork: run the real-PBS interop suite on the published branch and on
+    # upstream re-merge branches too.
+    branches: [main, develop, master, github-release, 'merge-upstream-*']
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
