@@ -129,13 +129,18 @@ jobs:
             case " $sa " in *" $m "*) gowork=off ;; esac
             echo "==> $m"
             ( cd "$m" && GOWORK=$gowork "$lint_bin" run --max-issues-per-linter=0 --max-same-issues=0 ./... ) > "$RUNNER_TEMP/lint-one.txt" 2>&1 || rc=1
-            cat "$RUNNER_TEMP/lint-one.txt"
-            grep -E '^[^ ]+\.go:[0-9]+(:[0-9]+)?: ' "$RUNNER_TEMP/lint-one.txt" | sed "s|^|$m/|" >> "$RUNNER_TEMP/lint.txt" || true
+            # Strip colours and the workspace prefix; echo the raw output
+            # behind "| " so setup-go's Go problem matcher does not turn it
+            # into its own (capped) annotations.
+            sed -r 's/\x1b\[[0-9;]*m//g; s/\r//g' "$RUNNER_TEMP/lint-one.txt" | sed "s|$GITHUB_WORKSPACE/$m/||; s|$GITHUB_WORKSPACE/||" > "$RUNNER_TEMP/lint-clean.txt"
+            sed 's/^/| /' "$RUNNER_TEMP/lint-clean.txt"
+            grep -E '^[^ ]+\.go:[0-9]+(:[0-9]+)?: ' "$RUNNER_TEMP/lint-clean.txt" | sed "s|^|$m/|" >> "$RUNNER_TEMP/lint.txt" || true
           done
           python3 - "$RUNNER_TEMP/lint.txt" <<'PY'
           import collections, re, sys
           lines = [l.rstrip("\n") for l in open(sys.argv[1], encoding="utf-8", errors="replace") if l.strip()]
           if not lines:
+              print("::error title=Lint::no finding parsed from the linter output (see the log)")
               sys.exit(0)
           per = collections.Counter(m.group(1) if (m := re.search(r"\((\w+)\)$", l)) else "?" for l in lines)
           head = f"{len(lines)} findings: " + ", ".join(f"{k} {v}" for k, v in per.most_common())
