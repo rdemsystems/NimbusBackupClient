@@ -152,15 +152,16 @@ func main() {
 		app.hydrateFromService()
 	}
 
-	// Create application options
+	// Create application options. No MaxWidth/MaxHeight: Windows caps a
+	// maximised window at the max size, so "maximise" only moved the window
+	// to the top-left corner (issue #1). Small screens are handled by
+	// fitWindowToScreen instead.
 	appOptions := &options.App{
 		Title:     fmt.Sprintf("%s v%s", BrandFromExecutable().Title, appVersion),
 		Width:     1200,
 		Height:    840,
-		MaxWidth:  1680, // Prevent window from being too large
-		MaxHeight: 1008, // Prevent title bar from going off-screen
-		MinWidth:  480,  // Allow very small windows for low-res screens
-		MinHeight: 360,  // Allow very small windows for low-res screens
+		MinWidth:  480, // Allow very small windows for low-res screens
+		MinHeight: 360, // Allow very small windows for low-res screens
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
@@ -348,6 +349,46 @@ func (a *App) startup(ctx context.Context) {
 // domReady is called after front-end resources have been loaded
 func (a *App) domReady(ctx context.Context) {
 	writeDebugLog("App.domReady() called - UI loaded successfully")
+	fitWindowToScreen(ctx)
+}
+
+// fitWindowToScreen shrinks the startup window to fit a small screen, so the
+// title bar never starts off-screen. It replaces the old MaxWidth/MaxHeight,
+// which also capped the maximised window.
+func fitWindowToScreen(ctx context.Context) {
+	screens, err := runtime.ScreenGetAll(ctx)
+	if err != nil || len(screens) == 0 {
+		return
+	}
+	screen := screens[0]
+	for _, s := range screens {
+		if s.IsCurrent {
+			screen = s
+			break
+		}
+	}
+	w, h := runtime.WindowGetSize(ctx)
+	if fw, fh, changed := fitWindowSize(w, h, screen.Size.Width, screen.Size.Height); changed {
+		writeDebugLog(fmt.Sprintf("Window %dx%d does not fit the %dx%d screen: resized to %dx%d", w, h, screen.Size.Width, screen.Size.Height, fw, fh))
+		runtime.WindowSetSize(ctx, fw, fh)
+		runtime.WindowCenter(ctx)
+	}
+}
+
+// fitWindowSize returns the window size capped at 90% of the screen (room for
+// the taskbar and the window frame), never below the window's minimum size.
+func fitWindowSize(w, h, screenW, screenH int) (int, int, bool) {
+	if screenW <= 0 || screenH <= 0 {
+		return w, h, false
+	}
+	fw, fh := w, h
+	if limit := screenW * 9 / 10; fw > limit {
+		fw = max(limit, 480)
+	}
+	if limit := screenH * 9 / 10; fh > limit {
+		fh = max(limit, 360)
+	}
+	return fw, fh, fw != w || fh != h
 }
 
 // beforeClose is called when the application is about to quit.

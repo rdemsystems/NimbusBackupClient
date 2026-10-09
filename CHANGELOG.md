@@ -44,6 +44,7 @@ replaces the fork's unreleased one.
   also stores these facts in `machine-info.json.blob`.
 
 ### Fixed
+- **Maximising the window filled the screen only up to 1680×1008** (issue #1): the window maximum size is gone, so "maximise" fills the screen; on small screens the startup window is shrunk to fit instead.
 - **Encrypted backups made by `proxmox-backup-client` now restore.** The official
   client compresses then encrypts chunks by default (`ENCR_COMPR` blobs), which
   could not be decoded. Our encrypted chunks and blobs are now compressed the
