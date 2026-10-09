@@ -127,6 +127,16 @@ function App() {
   const [progress, setProgress] = useState(0)
   const [backupPBSID, setBackupPBSID] = useState('')
   const [machineBackupKind, setMachineBackupKind] = useState('host')
+  // A "vm" machine backup is filed by PBS as "vm/<VMID>" so Proxmox VE can
+  // restore it: it needs a numeric VM ID, kept apart from the Backup ID (which
+  // defaults to the hostname) and remembered per machine.
+  const [machineVMID, setMachineVMIDState] = useState(() => {
+    try { return localStorage.getItem('machineVMID') || '' } catch { return '' }
+  })
+  const setMachineVMID = (v) => {
+    setMachineVMIDState(v)
+    try { localStorage.setItem('machineVMID', v) } catch { /* storage unavailable */ }
+  }
   // Opt-in: split this backup into parts (for the first backup of a large volume).
   // Off by default → no size analysis, the backup starts immediately.
   const [splitFirstBackup, setSplitFirstBackup] = useState(false)
@@ -1196,6 +1206,15 @@ function App() {
       return
     }
 
+    // PVE VM IDs are 100..999999999; anything else fails in the backend.
+    const usesVMID = backupType === 'machine' && machineBackupKind === 'vm'
+    const machineID = machineVMID.trim()
+    if (usesVMID && !(/^\d+$/.test(machineID) && Number(machineID) >= 100 && Number(machineID) <= 999999999)) {
+      showStatus(`❌ ${t('vmidInvalid')}`, 'error')
+      return
+    }
+    const effectiveBackupID = usesVMID ? machineID : config['backup-id']
+
     // Splitting is now an explicit, opt-in choice (the "split this backup" toggle),
     // intended for the first backup of a large volume. When it's off we never size
     // the directories — the backup starts immediately, so a whole-drive root like
@@ -1240,11 +1259,11 @@ function App() {
       // We'll pass drive letters in a separate field or structure based on backup type
       const jobData = {
         id: editingJobId || Date.now().toString(),
-        name: `Backup ${config['backup-id'] || hostname}`,
+        name: `Backup ${effectiveBackupID || hostname}`,
         scheduleTime: scheduleTime,
         runAtStartup: runAtStartup,
         backupDirs: backupType === 'directory' ? dirList : [],
-        backupId: config['backup-id'],
+        backupId: effectiveBackupID,
         useVSS: config.usevss,
         backupType: backupType,
         excludeList: backupType === 'directory' ? excludeList.split('\n').filter(l => l.trim()) : [],
@@ -1307,7 +1326,7 @@ function App() {
         await StartMachineBackup(
           backupType,
           validDrives,
-          config['backup-id'],
+          effectiveBackupID,
           config.usevss,
           '',
           backupPBSID,
@@ -2091,15 +2110,29 @@ function App() {
                 </div>
               )}
 
-          <div className="form-group">
-            <label>{t('backupID')}</label>
-            <input
-              type="text"
-              value={config['backup-id']}
-              onChange={(e) => setConfig({...config, 'backup-id': e.target.value})}
-              placeholder={t('backupIDPlaceholder')}
-            />
-          </div>
+          {backupType === 'machine' && machineBackupKind === 'vm' ? (
+            <div className="form-group">
+              <label>{t('machineVMID')}</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={machineVMID}
+                onChange={(e) => setMachineVMID(e.target.value.replace(/\D/g, ''))}
+                placeholder="9001"
+              />
+              <div className="info-box" style={{marginTop: '8px'}}>💡 {t('machineVMIDHint')}</div>
+            </div>
+          ) : (
+            <div className="form-group">
+              <label>{t('backupID')}</label>
+              <input
+                type="text"
+                value={config['backup-id']}
+                onChange={(e) => setConfig({...config, 'backup-id': e.target.value})}
+                placeholder={t('backupIDPlaceholder')}
+              />
+            </div>
+          )}
 
           <div className="form-group">
             <label>
@@ -2273,7 +2306,16 @@ function App() {
                           setScheduleTime(job.scheduleTime)
                           setRunAtStartup(job.runAtStartup)
                           setBackupDirs((job.backupDirs || []).join('\n'))
-                          setConfig({...config, 'backup-id': job.backupId, usevss: job.useVSS})
+                          if (job.backupType === 'machine' && job.backup_kind === 'vm') {
+                            // The job's backup ID is the VM ID; keep the Backup ID intact.
+                            setMachineVMID(job.backupId || '')
+                            setConfig({...config, usevss: job.useVSS})
+                          } else {
+                            setConfig({...config, 'backup-id': job.backupId, usevss: job.useVSS})
+                          }
+                          if (job.backupType === 'machine') {
+                            setSelectedDrives(job.driveLetters || [])
+                          }
                           setBackupType(job.backupType)
                           setBackupPBSID(job.pbs_id || '')
                           setMachineBackupKind(job.backup_kind || 'host')

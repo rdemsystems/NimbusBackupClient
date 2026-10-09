@@ -484,10 +484,12 @@ func Backup(cfg *Config, progressCallback ProgressCallback) (*BackupResult, erro
 	}
 	// A "vm" backup needs a numeric VMID for the generated VM config; reject a
 	// bad ID now rather than after every disk has been transferred.
+	// Proxmox VE VM IDs are 100..999999999.
 	if cfg.BackupType == "vm" {
-		if _, err := strconv.ParseInt(cfg.BackupID, 10, 32); err != nil {
-			return nil, fmt.Errorf("backup type \"vm\" needs a numeric VM ID (e.g. 100) as the backup ID, got %q: use a numeric ID, or use backup type \"host\" if a VM-type snapshot is not required", cfg.BackupID)
+		if id, err := strconv.ParseInt(strings.TrimSpace(cfg.BackupID), 10, 32); err != nil || id < 100 || id > 999999999 {
+			return nil, fmt.Errorf("backup type \"vm\" needs a Proxmox VM ID (a number between 100 and 999999999, e.g. 9001) as the backup ID, got %q: use such an ID, or use backup type \"host\" if a VM-type snapshot is not required", cfg.BackupID)
 		}
+		cfg.BackupID = strings.TrimSpace(cfg.BackupID)
 	}
 
 	client := &pbscommon.PBSClient{
