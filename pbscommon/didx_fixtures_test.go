@@ -108,10 +108,10 @@ func newFakePBSWithDIDX(t *testing.T, name string, a *didxArchive, crypt *CryptC
 				return
 			}
 			if f.overrideDidx != nil {
-				w.Write(f.overrideDidx)
+				_, _ = w.Write(f.overrideDidx)
 				return
 			}
-			w.Write(a.didx)
+			_, _ = w.Write(a.didx)
 		case "/chunk":
 			d := r.URL.Query().Get("digest")
 			f.mu.Lock()
@@ -125,7 +125,7 @@ func newFakePBSWithDIDX(t *testing.T, name string, a *didxArchive, crypt *CryptC
 			if repl, ok := f.corrupt[d]; ok {
 				payload = repl
 			}
-			w.Write(mustEncodeBlob(t, payload, crypt))
+			_, _ = w.Write(mustEncodeBlob(t, payload, crypt))
 		default:
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 		}

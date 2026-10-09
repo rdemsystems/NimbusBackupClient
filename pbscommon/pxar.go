@@ -738,7 +738,7 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
 		return CatalogFile{}, nil
 	}
 
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Capture per-file metadata (NTFS ACLs on Windows). Best-effort.
 	if a.MetaCollector != nil {

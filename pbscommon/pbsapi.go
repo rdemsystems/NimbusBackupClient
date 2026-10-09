@@ -366,7 +366,7 @@ func FetchServerFingerprint(baseURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to reach server: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) == 0 {
 		return "", fmt.Errorf("server presented no certificate")
@@ -475,7 +475,7 @@ func (pbs *PBSClient) ObtainTicket() error {
 	if err != nil {
 		return fmt.Errorf("ticket request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("ticket login failed: HTTP %d - %s", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -526,7 +526,7 @@ func (pbs *PBSClient) ListSnapshots() ([]BackupManifest, error) {
 	if err != nil {
 		return ret, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return ret, fmt.Errorf("HTTP error: %d - %s", resp.StatusCode, string(body))
@@ -596,7 +596,7 @@ func (pbs *PBSClient) CreateFixedIndex(fic FixedIndexCreateReq) (uint64, error) 
 		return 0, err
 	}
 	fmt.Println("Writer id: ", R.WriterID)
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	f := File{
 		CryptMode: pbs.defaultCryptMode(),
 		Csum:      "",
@@ -631,7 +631,7 @@ func (pbs *PBSClient) AssignFixedChunks(writerid uint64, digests []string, offse
 		fmt.Println("Error making request:", err)
 		return err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	if resp2.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp2.Body)
@@ -664,7 +664,7 @@ func (pbs *PBSClient) CloseFixedIndex(writerid uint64, checksum string, totalsiz
 		fmt.Println("Error making request:", err)
 		return err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	if resp2.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp2.Body)
@@ -732,7 +732,7 @@ func (pbs *PBSClient) CreateDynamicIndex(name string) (uint64, error) {
 		fmt.Printf("ERROR: Error type: %T\n", err)
 		return 0, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	fmt.Printf("Response status: %d %s\n", resp2.StatusCode, resp2.Status)
 	fmt.Printf("Response proto: %s\n", resp2.Proto)
@@ -756,7 +756,7 @@ func (pbs *PBSClient) CreateDynamicIndex(name string) (uint64, error) {
 		return 0, err
 	}
 	fmt.Println("Writer id: ", R.WriterID)
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	f := File{
 		CryptMode: pbs.defaultCryptMode(),
 		Csum:      "",
@@ -925,7 +925,7 @@ func (pbs *PBSClient) AssignDynamicChunks(writerid uint64, digests []string, off
 		fmt.Println("Error making request:", err)
 		return err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	if resp2.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp2.Body)
@@ -958,7 +958,7 @@ func (pbs *PBSClient) CloseDynamicIndex(writerid uint64, checksum string, totals
 		fmt.Println("Error making request:", err)
 		return err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	if resp2.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp2.Body)
@@ -1134,7 +1134,7 @@ func (pbs *PBSClient) Finish() error {
 	if err != nil {
 		return fmt.Errorf("finish request failed: %w", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	// CRITICAL: Check HTTP status code
 	if resp2.StatusCode != http.StatusOK {
@@ -1181,7 +1181,7 @@ func (pbs *PBSClient) TestConnection() error {
 	if err != nil {
 		return fmt.Errorf("connection failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Check HTTP status
 	if resp.StatusCode == 401 {
@@ -1425,7 +1425,7 @@ func (pbs *PBSClient) DownloadPreviousToBytes(archivename string) ([]byte, error
 		fmt.Println("Error making request:", err)
 		return nil, err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	ret, err := io.ReadAll(resp2.Body)
 
@@ -1452,7 +1452,7 @@ func (pbs *PBSClient) DownloadToBytes(archivename string) ([]byte, error) { //In
 		fmt.Println("Error making request:", err)
 		return nil, err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	ret, err := io.ReadAll(resp2.Body)
 
@@ -1509,7 +1509,7 @@ func (pbs *PBSClient) GetChunkData(digest string) ([]byte, error) {
 		fmt.Println("Error making request:", err)
 		return nil, err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	ret, err := io.ReadAll(resp2.Body)
 
