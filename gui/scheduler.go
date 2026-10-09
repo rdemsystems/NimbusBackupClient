@@ -26,11 +26,11 @@ type ScheduledJob struct {
 	UseVSS       bool     `json:"useVSS"`
 	BackupType   string   `json:"backupType"`
 	ExcludeList  []string `json:"excludeList"`
-	Compression  string   `json:"compression"`       // "fastest", "default", "better", "best"
-	PBSID        string   `json:"pbs_id,omitempty"`  // PBS server ID to use (empty = default)
+	Compression  string   `json:"compression"`           // "fastest", "default", "better", "best"
+	PBSID        string   `json:"pbs_id,omitempty"`      // PBS server ID to use (empty = default)
 	BackupKind   string   `json:"backup_kind,omitempty"` // "host" or "vm" for machine backups
-	LastRun      string   `json:"lastRun,omitempty"` // ISO timestamp
-	NextRun      string   `json:"nextRun,omitempty"` // ISO timestamp
+	LastRun      string   `json:"lastRun,omitempty"`     // ISO timestamp
+	NextRun      string   `json:"nextRun,omitempty"`     // ISO timestamp
 	Enabled      bool     `json:"enabled"`
 }
 

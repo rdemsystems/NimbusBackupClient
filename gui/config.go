@@ -79,7 +79,7 @@ func migrateStandaloneFromProgramData() {
 	legacy := filepath.Join(filepath.Dir(src), legacyDataDirName)
 	// Once copied into the service dir the legacy folder is retired (its
 	// marker file): never bring its data back from there.
-	if _, err := os.Stat(filepath.Join(legacy, legacyCopiedMarker)); err != nil {
+	if _, err := os.Stat(filepath.Join(legacy, legacyCopiedMarker)); err != nil { // #nosec G703 -- path built from the trusted ProgramData env var + fixed names
 		sources = append(sources, legacy)
 	}
 	for _, name := range []string{"config.json", "scheduled_jobs.json", "job_history.json"} {
@@ -88,7 +88,7 @@ func migrateStandaloneFromProgramData() {
 			continue // home copy already exists: never clobber it
 		}
 		for _, dir := range sources {
-			data, err := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- fixed names under the trusted ProgramData folder
+			data, err := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 G703 -- fixed names under the trusted ProgramData folder
 			if err != nil {
 				continue // missing or not readable (e.g. SYSTEM-only ACL)
 			}

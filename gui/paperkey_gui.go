@@ -103,7 +103,7 @@ func (a *App) ExportEncryptionPaperKey(path, passphrase string, labels PaperKeyL
 	if err != nil || out == "" {
 		return "", err
 	}
-	if err := os.WriteFile(out, page, 0o600); err != nil {
+	if err := os.WriteFile(out, page, 0o600); err != nil { // #nosec G703 -- path chosen by the user in a native save dialog
 		return "", fmt.Errorf("ecriture de %s: %w", out, err)
 	}
 	return out, nil
@@ -151,12 +151,12 @@ func (a *App) writeNewKeyFile(path string, crypt *pbscommon.CryptConfig) error {
 	if err := security.ValidatePath(path); err != nil {
 		return fmt.Errorf("chemin de cle invalide: %w", err)
 	}
-	if _, err := os.Stat(path); err == nil {
+	if _, err := os.Stat(path); err == nil { // #nosec G703 -- path chosen by the user in a native save dialog, validated above
 		return fmt.Errorf("le fichier %s existe deja: il n'est jamais ecrase, choisissez un autre nom", path)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("verification de %s: %w", path, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { // #nosec G703 -- see above
 		return fmt.Errorf("creation du dossier %s: %w", filepath.Dir(path), err)
 	}
 	if err := pbscommon.SaveKeyFile(path, crypt); err != nil {

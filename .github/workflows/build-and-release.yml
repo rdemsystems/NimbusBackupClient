@@ -66,9 +66,20 @@ jobs:
       - name: Run gosec
         env:
           GOWORK: off
+        # Findings are also emitted as annotations (readable without access
+        # to the job logs).
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
-          cd gui && gosec -severity high -confidence high ./...
+          cd gui
+          rc=0
+          gosec -severity high -confidence high -fmt json -out "$RUNNER_TEMP/gosec.json" -stdout -verbose text ./... || rc=$?
+          python3 - "$RUNNER_TEMP/gosec.json" <<'PY' || true
+          import json, os, sys
+          for i in json.load(open(sys.argv[1])).get("Issues") or []:
+              f = os.path.relpath(i.get("file", ""), os.environ["GITHUB_WORKSPACE"])
+              print(f"::error file={f},line={i.get('line','1').split('-')[0]}::gosec {i.get('rule_id')}: {i.get('details')}")
+          PY
+          exit $rc
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
