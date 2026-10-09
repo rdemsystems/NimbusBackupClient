@@ -230,6 +230,37 @@ test_block_backup_encrypted() {
 }
 
 # ===========================================================================
+# Test 9: encrypted block backup by the OFFICIAL client -> read back by ours
+# ===========================================================================
+# The reverse direction: proxmox-backup-client compresses then encrypts its
+# chunks (ENCR_COMPR blobs) by default, and our readers (restore, NBD) must
+# decode them. The fixture mixes random and compressible regions, so both the
+# compressed and the plain encrypted forms are exercised.
+test_official_encrypted_block_readback() {
+	if ! pbc_available; then
+		warn "official client skipped -- nothing to read back"
+		return 0
+	fi
+	pbc backup disk.img:/e2e/disk.img --backup-id e2e-pbc-block-enc \
+		--keyfile key.pem >"$WORK/log-pbc-block-enc.txt" 2>&1 \
+		|| { cat "$WORK/log-pbc-block-enc.txt"; return 1; }
+
+	rm -f "$WORK/readback-block-enc.img"
+	"$REPO_ROOT/dist/e2e-readback" \
+		-baseurl "$PBS_BASEURL" \
+		-certfingerprint "$PBS_FINGERPRINT" \
+		-authid "$PBS_AUTHID" \
+		-secret "$PBS_TOKEN_SECRET" \
+		-datastore "$PBS_DATASTORE" \
+		-keyfile "$KEYFILE" \
+		-id e2e-pbc-block-enc \
+		-archive disk.img.fidx \
+		-out "$WORK/readback-block-enc.img" >"$WORK/log-readback.txt" 2>&1 \
+		|| { cat "$WORK/log-readback.txt"; return 1; }
+	assert_bytes_identical "$WORK/disk.img" "$WORK/readback-block-enc.img" "official encrypted block backup read back"
+}
+
+# ===========================================================================
 # Test 5: the official client can read our manifest and enumerate our snapshots
 # ===========================================================================
 test_manifest_interop() {
@@ -346,9 +377,12 @@ main() {
 	if [ "$E2E_SKIP_BUILD" != "1" ]; then
 		section "Building our CLIs"
 		make -C "$REPO_ROOT" cli || die "make cli failed"
+		( cd "$REPO_ROOT/machinebackup" && go build -o "$REPO_ROOT/dist/e2e-readback" ./readback ) \
+			|| die "building the readback helper failed"
 	fi
 	assert_file_exists "$REPO_ROOT/dist/proxmoxbackup-directory"
 	assert_file_exists "$REPO_ROOT/dist/proxmoxbackup-machine"
+	assert_file_exists "$REPO_ROOT/dist/e2e-readback"
 
 	section "Preparing fixtures"
 	make_directory_fixture
@@ -367,6 +401,7 @@ main() {
 	run_test "6. PBS server-side verify"                           test_server_side_verify
 	run_test "7. chunk dedup on a second identical backup"         test_dedup_reuse
 	run_test "8. namespace round-trip (-namespace / --ns)"         test_namespace_roundtrip
+	run_test "9. official encrypted block backup -> our read back" test_official_encrypted_block_readback
 
 	section "Summary"
 	log "passed: ${#PASSED[@]}"

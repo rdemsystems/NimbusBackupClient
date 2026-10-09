@@ -7,22 +7,20 @@ name: End-to-end tests
 # the wrong place, a chunk digest computed over the wrong bytes.
 
 on:
-  push:
-    # Fork: run the real-PBS interop suite on the published branch and on
-    # upstream re-merge branches too.
-    branches: [main, develop, master, github-release, 'merge-upstream-*']
-  pull_request:
-    branches: [main, develop]
+  # Fork: called by build-and-release.yml on every build, where it gates the
+  # release; can also be run by hand.
+  workflow_call:
+    inputs:
+      skip_official_client:
+        description: 'Skip the official-client interop assertions'
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       skip_official_client:
         description: 'Skip the official-client interop assertions'
         type: boolean
         default: false
-
-concurrency:
-  group: e2e-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   GO_VERSION: '1.25'
@@ -85,6 +83,17 @@ jobs:
             gui/config.go
             gui/pbs_server.go
             gui/main.go
+            pbscommon/paperkey.go
+            pbscommon/paperkey_test.go
+            pbscommon/crypt_compress_test.go
+            pbscommon/upgrade_error_test.go
+            pbscommon/pbsapi_crypt_test.go
+            gui/paperkey_gui.go
+            gui/scheduler.go
+            gui/service_identity.go
+            machinebackup/readback/main.go
+            machinebackuplib/machineinfo.go
+            machinebackuplib/qemu_config_test.go
           )
           out="$(gofmt -l "${files[@]}")"
           if [ -n "$out" ]; then

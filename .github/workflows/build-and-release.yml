@@ -184,6 +184,14 @@ jobs:
           ( cd snapshot && go mod tidy && go test ./... )
           echo "::endgroup::"
 
+  # Upstream's end-to-end suite against a real PBS in Docker (testing/e2e):
+  # our backups restored by the official proxmox-backup-client, encrypted ones
+  # included, and official encrypted backups read back by our code. Gates the
+  # release.
+  e2e:
+    name: End-to-end (real PBS)
+    uses: ./.github/workflows/e2e.yml
+
   # Build CLI for all platforms
   build-cli:
     name: Build CLI
@@ -378,7 +386,7 @@ jobs:
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-cli, build-gui]
+    needs: [build-cli, build-gui, e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: write
