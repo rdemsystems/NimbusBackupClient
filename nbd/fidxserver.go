@@ -171,7 +171,7 @@ func (f *FIDXServer) ReadAt(p []byte, off int64) (n int, err error) {
 }
 
 func (f *FIDXServer) WriteAt(p []byte, off int64) (n int, err error) {
-	return 0, fmt.Errorf("Read only")
+	return 0, fmt.Errorf("read only")
 }
 
 func (f *FIDXServer) Size() (int64, error) {
@@ -179,5 +179,5 @@ func (f *FIDXServer) Size() (int64, error) {
 }
 
 func (f *FIDXServer) Sync() error {
-	return fmt.Errorf("Read only")
+	return fmt.Errorf("read only")
 }

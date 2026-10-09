@@ -92,7 +92,7 @@ func run(baseURL, fingerprint, authID, secret, datastore, keyFile, backupType, b
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	written := uint64(0)
 	digest := make([]byte, 32)
 	for i := uint64(0); i < count; i++ {

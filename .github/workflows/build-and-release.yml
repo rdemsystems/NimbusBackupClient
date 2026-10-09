@@ -150,7 +150,12 @@ jobs:
                   continue
               for i in issues:
                   p = i.get("Pos", {})
-                  lines.append(f"{mod}/{p.get('Filename')}:{p.get('Line')}: {i.get('Text')} ({i.get('FromLinter')})")
+                  # Paths are relative to the module, or to the directory of the
+                  # .golangci.yml in use (gui/api reads gui's): keep the one
+                  # that exists.
+                  fn = p.get("Filename", "")
+                  path = next((c for c in (os.path.join(mod, fn), os.path.join(os.path.dirname(mod), fn)) if os.path.exists(c)), os.path.join(mod, fn))
+                  lines.append(f"{path}:{p.get('Line')}: {i.get('Text')} ({i.get('FromLinter')})")
           # "| " keeps setup-go's Go problem matcher off these lines.
           print("\n".join("| " + l for l in lines))
           if not lines:

@@ -245,6 +245,7 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 
 		// Create a cancellable context for this backup
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
 		// Set the backup context on the App so it can be cancelled
 		if appWithContext, ok := s.app.(interface {

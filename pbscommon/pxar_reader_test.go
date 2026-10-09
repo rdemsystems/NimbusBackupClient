@@ -573,7 +573,7 @@ func TestPXARExtractLeavesNoTempFiles(t *testing.T) {
 		t.Fatalf("ExtractAll: %v", err)
 	}
 	var leftovers []string
-	filepath.Walk(dest, func(p string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(dest, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}

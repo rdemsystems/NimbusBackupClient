@@ -86,7 +86,7 @@ func ioctlSetupSnapshot(ctlDevice, driver, device, cowFile string, minor int) er
 	if err != nil {
 		return fmt.Errorf("open %s: %w", ctlDevice, err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 
 	bdevPtr, err := unix.BytePtrFromString(device)
 	if err != nil {
@@ -128,7 +128,7 @@ func ioctlDestroySnapshot(ctlDevice, driver string, minor int) error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", ctlDevice, err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 
 	m := uint32(minor)
 	cmd := iow(magic, 4, unsafe.Sizeof(m))

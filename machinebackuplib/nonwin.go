@@ -18,7 +18,7 @@ func GetDiskSize(path string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Get the size by seeking to the end
 	size, err := file.Seek(0, io.SeekEnd)

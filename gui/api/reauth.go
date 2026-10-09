@@ -100,14 +100,14 @@ func (t *reauthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Another goroutine may already have refreshed the token while this request
 	// was in flight: retry with it instead of prompting the user a second time.
 	if now := resolveToken(t.tokenPath); now != "" && now != sent {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return send()
 	}
 
 	// Keep the 401 body: if the hook fails it is handed back untouched, so the
 	// caller still reports a proper "unauthorized" from the service.
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	token, hookErr := hook(sent)
 	if hookErr != nil || token == "" {

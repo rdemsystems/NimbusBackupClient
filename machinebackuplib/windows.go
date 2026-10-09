@@ -4,6 +4,7 @@
 package machinebackuplib
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -17,6 +18,9 @@ import (
 	"github.com/tawesoft/golib/v2/dialog"
 	"golang.org/x/sys/windows"
 )
+
+// errUploadAborted stops the disk reader once a chunk upload has failed.
+var errUploadAborted = errors.New("upload aborted")
 
 type DISK_EXTENT struct {
 	DiskNumber     uint32

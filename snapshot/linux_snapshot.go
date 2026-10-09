@@ -50,7 +50,7 @@ func moduleLoaded(module string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	want := strings.ReplaceAll(module, "-", "_")
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
@@ -104,7 +104,7 @@ func findMount(path string) (mountpoint, device, fstype string, err error) {
 	if err != nil {
 		return "", "", "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	bestLen := -1
 	sc := bufio.NewScanner(f)
@@ -212,7 +212,7 @@ func destroyStaleTracers(c SnapControl, device, originMount string) error {
 				c.Name, d.Minor, device, err))
 			continue
 		}
-		os.Remove(filepath.Join(originMount, filepath.Base(d.CowFile)))
+		_ = os.Remove(filepath.Join(originMount, filepath.Base(d.CowFile)))
 	}
 	return errors.Join(errs...)
 }
@@ -233,12 +233,12 @@ func createOne(c SnapControl, absPath string, needFiles bool) (*linuxSnapshot, s
 	}
 
 	cowFile := filepath.Join(mountpoint, fmt.Sprintf(".pbs_snapshot_%d.cow", minor))
-	os.Remove(cowFile)
+	_ = os.Remove(cowFile)
 
 	syscall.Sync()
 
 	if err := ioctlSetupSnapshot(c.CtlDevice, c.Name, device, cowFile, minor); err != nil {
-		os.Remove(cowFile)
+		_ = os.Remove(cowFile)
 		return nil, "", err
 	}
 
@@ -267,7 +267,7 @@ func createOne(c SnapControl, absPath string, needFiles bool) (*linuxSnapshot, s
 		return nil, "", errors.Join(err, cleanupOne(ls))
 	}
 	if err := mountReadOnly(snapDev, tmpMount, fstype); err != nil {
-		os.Remove(tmpMount)
+		_ = os.Remove(tmpMount)
 		return nil, "", errors.Join(err, cleanupOne(ls))
 	}
 	ls.mountpoint = tmpMount
@@ -313,9 +313,9 @@ func cleanupOne(ls *linuxSnapshot) error {
 	if ls.mountpoint != "" {
 		if err := syscall.Unmount(ls.mountpoint, 0); err != nil {
 
-			syscall.Unmount(ls.mountpoint, syscall.MNT_DETACH)
+			_ = syscall.Unmount(ls.mountpoint, syscall.MNT_DETACH)
 		}
-		os.Remove(ls.mountpoint)
+		_ = os.Remove(ls.mountpoint)
 		ls.mountpoint = ""
 	}
 	var retErr error
@@ -323,7 +323,7 @@ func cleanupOne(ls *linuxSnapshot) error {
 		retErr = fmt.Errorf("failed to destroy %s snapshot %d: %w", ls.control.Name, ls.minor, err)
 	}
 	if ls.cowFile != "" {
-		os.Remove(ls.cowFile)
+		_ = os.Remove(ls.cowFile)
 	}
 
 	trackedMu.Lock()

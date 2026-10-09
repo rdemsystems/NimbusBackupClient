@@ -29,7 +29,7 @@ func TestSnapshotEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(work)
+	defer func() { _ = os.RemoveAll(work) }()
 
 	img := filepath.Join(work, "disk.img")
 	if err := os.Truncate(img, 256<<20); err != nil {
@@ -40,7 +40,7 @@ func TestSnapshotEndToEnd(t *testing.T) {
 		if e := f.Truncate(256 << 20); e != nil {
 			t.Fatal(e)
 		}
-		f.Close()
+		_ = f.Close()
 	}
 
 	out, err := exec.Command("losetup", "--find", "--show", img).CombinedOutput()
@@ -48,7 +48,7 @@ func TestSnapshotEndToEnd(t *testing.T) {
 		t.Fatalf("losetup: %v: %s", err, out)
 	}
 	loop := strings.TrimSpace(string(out))
-	defer exec.Command("losetup", "-d", loop).Run()
+	defer func() { _ = exec.Command("losetup", "-d", loop).Run() }()
 
 	if out, err := exec.Command("mkfs.ext4", "-q", "-F", loop).CombinedOutput(); err != nil {
 		t.Fatalf("mkfs.ext4: %v: %s", err, out)
@@ -61,7 +61,7 @@ func TestSnapshotEndToEnd(t *testing.T) {
 	if err := syscall.Mount(loop, mnt, "ext4", 0, ""); err != nil {
 		t.Fatalf("mount %s: %v", loop, err)
 	}
-	defer syscall.Unmount(mnt, syscall.MNT_DETACH)
+	defer func() { _ = syscall.Unmount(mnt, syscall.MNT_DETACH) }()
 
 	const marker = "point-in-time-ok"
 	markerPath := filepath.Join(mnt, "marker.txt")
@@ -107,7 +107,7 @@ func TestSnapshotEndToEnd(t *testing.T) {
 		t.Fatal("backup callback was never invoked")
 	}
 
-	VSSCleanup()
+	_ = VSSCleanup()
 	trackedMu.Lock()
 	n := len(tracked)
 	trackedMu.Unlock()

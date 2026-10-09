@@ -50,7 +50,7 @@ func mountForMajMin(majmin string) string {
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	best := ""
 	bestIsRoot := false
@@ -141,7 +141,7 @@ func backupWholeDisk(client *pbscommon.PBSClient, dev string, index int, useSnap
 		return false, 0, err
 	}
 	total, err := df.Seek(0, io.SeekEnd)
-	df.Close()
+	_ = df.Close()
 	if err != nil {
 		return false, 0, err
 	}
@@ -347,7 +347,7 @@ func writeSegments(dev string, segments []diskSegment, total uint64, ch chan []b
 	if err != nil {
 		return err
 	}
-	defer disk.Close()
+	defer func() { _ = disk.Close() }()
 
 	block := make([]byte, pbscommon.PBS_FIXED_CHUNK_SIZE)
 	for _, seg := range segments {
@@ -366,7 +366,7 @@ func writeSegments(dev string, segments []diskSegment, total uint64, ch chan []b
 				return err
 			}
 			bad, ok = resilientCopy(sf, 0, length, block, emit, emitZeros)
-			sf.Close()
+			_ = sf.Close()
 			if bad > 0 {
 				log.Printf("\033[31;1mWarning: snapshot %s had %d unreadable sector(s) (~%s), zero-filled in the image\033[0m",
 					seg.snapDev, bad, BytesToString(int64(bad*sectorSize)))
@@ -415,7 +415,6 @@ func resilientCopy(src io.ReaderAt, srcOffset, length uint64, block []byte, emit
 				if !emitZeros(length - pos) {
 					return badSectors, false
 				}
-				pos = length
 			}
 			break
 		}
@@ -443,7 +442,6 @@ func resilientCopy(src io.ReaderAt, srcOffset, length uint64, block []byte, emit
 					}
 					pos = length
 				}
-				winEnd = pos
 				break
 			}
 			if rem := s - uint64(m); rem > 0 {

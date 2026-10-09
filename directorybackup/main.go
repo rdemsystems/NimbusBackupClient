@@ -163,8 +163,8 @@ func (c *ChunkState) Eof(client *pbscommon.PBSClient) error {
 }
 
 func main() {
-	var newchunk *atomic.Uint64 = new(atomic.Uint64)
-	var reusechunk *atomic.Uint64 = new(atomic.Uint64)
+	newchunk := new(atomic.Uint64)
+	reusechunk := new(atomic.Uint64)
 
 	cfg := loadConfig()
 
@@ -174,7 +174,7 @@ func main() {
 			flag.VisitAll(func(f *flag.Flag) {
 				usage += "-" + f.Name + " " + f.Usage + "\n"
 			})
-			dialog.Error(usage)
+			_ = dialog.Error(usage)
 		} else {
 			fmt.Println("All options are mandatory")
 
@@ -206,7 +206,7 @@ func main() {
 	lock_ok := L.AcquireProcessLock()
 	if !lock_ok {
 
-		dialog.Error("Backup jobs need to run exclusively, please wait until the previous job has finished")
+		_ = dialog.Error("Backup jobs need to run exclusively, please wait until the previous job has finished")
 		os.Exit(2)
 	}
 	defer L.ReleaseProcessLock()
@@ -340,7 +340,7 @@ func main() {
 			fmt.Println("Cannot connect to mail server: " + err.Error())
 			os.Exit(1)
 		}
-		defer client.Quit()
+		defer func() { _ = client.Quit() }()
 		for _, ccc := range cfg.SMTP.Mails {
 			err = clientcommon.SendMail(ccc.From, ccc.To, subject, msg, client)
 			if err != nil {
@@ -513,7 +513,7 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
 		if err != nil {
 			return nil, err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 	}
 	/**/
 

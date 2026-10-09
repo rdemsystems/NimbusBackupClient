@@ -75,7 +75,7 @@ func setReadOnly(dev *os.File, readonly bool) error {
 }
 
 func nbdStart(pbsclient *pbscommon.PBSClient, fidxdata []byte, nbd_index int) {
-	os.Remove("/tmp/pbsnbd")
+	_ = os.Remove("/tmp/pbsnbd")
 	l, err := net.Listen("unix", "/tmp/pbsnbd")
 	if err != nil {
 		panic(err)
@@ -126,7 +126,7 @@ func nbdStart(pbsclient *pbscommon.PBSClient, fidxdata []byte, nbd_index int) {
 	if err != nil {
 		panic(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	nbddev := fmt.Sprintf("/dev/nbd%d", nbd_index)
 	if _, err := os.Stat(nbddev); err != nil {
 		panic(fmt.Errorf("%s does not exist: the nbd module provides fewer instances than requested; try a lower -nbd index or increase nbds_max", nbddev))
@@ -135,9 +135,9 @@ func nbdStart(pbsclient *pbscommon.PBSClient, fidxdata []byte, nbd_index int) {
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
-	client.Disconnect(f)
+	_ = client.Disconnect(f)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
@@ -152,7 +152,7 @@ func nbdStart(pbsclient *pbscommon.PBSClient, fidxdata []byte, nbd_index int) {
 		}
 	}()
 
-	setReadOnly(f, true)
+	_ = setReadOnly(f, true)
 	fmt.Printf("Starting NBD on %s...\n", nbddev)
 	if err := client.Connect(conn, f, &client.Options{
 		ExportName: "FIDX",
@@ -279,6 +279,9 @@ func main() {
 
 		client.Connect(true, parts[0])
 		data, err := client.DownloadToBytes(parts[3])
+		if err != nil {
+			panic(err)
+		}
 		fmt.Println(len(data))
 		nbdStart(client, data, *nbdFlag)
 		return
@@ -430,7 +433,7 @@ func loadCryptConfig(keyPath, passphrase string) (*pbscommon.CryptConfig, error)
 // promptPassphrase reads a line from stdin without echoing it when stdin is a
 // terminal, and as a plain line otherwise (scripts, pipes, CI).
 func promptPassphrase(label string) (string, error) {
-	fmt.Fprint(os.Stdout, label)
+	_, _ = fmt.Fprint(os.Stdout, label)
 	fd := int(os.Stdin.Fd())
 	if term.IsTerminal(fd) {
 		b, err := term.ReadPassword(fd)

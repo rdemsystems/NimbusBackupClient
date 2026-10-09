@@ -191,7 +191,7 @@ func main() {
 			flag.VisitAll(func(f *flag.Flag) {
 				usage += "-" + f.Name + " " + f.Usage + "\n"
 			})
-			dialog.Error(usage)
+			_ = dialog.Error(usage)
 		} else {
 			fmt.Println("All options are mandatory")
 
@@ -221,7 +221,7 @@ func main() {
 	lock_ok := L.AcquireProcessLock()
 	if !lock_ok {
 
-		dialog.Error("Backup jobs need to run exclusively, please wait until the previous job has finished")
+		_ = dialog.Error("Backup jobs need to run exclusively, please wait until the previous job has finished")
 		os.Exit(2)
 	}
 	defer L.ReleaseProcessLock()
