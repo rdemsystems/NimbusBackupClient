@@ -48,6 +48,7 @@ carry the Nimbus identity, docs and CI.
 | 0025 | ci: upstream's real-PBS e2e suite gates the release, both interop directions | fork-only (test 9 + readback helper: upstream candidate) | `e2e.yml` called by `build-and-release.yml`, release needs it; test 9 reads back an official encrypted block backup with `machinebackup/readback`. |
 | 0026 | ci: run upstream's make lint over every module (informational) | fork-only | |
 | 0027 | test: framing test uploads uncompressed; e2e test 9 path works with a local client | upstream candidate | |
+| 0028 | ci: sign the Windows GUI, service and MSI with Azure Artifact Signing | fork-only | Account `github-nimbus`; active once `AZURE_SIGNING_PROFILE` is set. |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

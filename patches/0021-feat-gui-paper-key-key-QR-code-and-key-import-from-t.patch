@@ -1,7 +1,7 @@
 From 74d74d7df7fc94463b3efe8859d230d471c9a1f4 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 09:52:24 +0200
-Subject: [PATCH 21/27] feat(gui): paper key, key QR code and key import from
+Subject: [PATCH 21/28] feat(gui): paper key, key QR code and key import from
  text
 
 Next to the encryption key field:
