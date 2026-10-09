@@ -1,0 +1,426 @@
+From 013127e890c74ab56402989dd0b090bd336d9cd2 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 10:09:19 +0200
+Subject: [PATCH 24/27] feat(crypto): compressed encrypted chunks (ENCR_COMPR),
+ both ways
+
+proxmox-backup-client compresses then encrypts chunks and blobs by
+default: DataBlob::encode(compress = true) runs zstd::bulk::compress, a
+regular zstd frame, before AES-256-GCM, with ENCR_COMPR_BLOB_MAGIC_1_0.
+Such blobs were rejected on read ("zstd block format not supported"), so
+encrypted backups made with the official client could not be restored,
+and our encrypted chunks were uploaded uncompressed.
+
+- DecodeEncryptedBlob decrypts ENCR_COMPR and zstd-decodes the frame,
+  then checks the digest on the plaintext.
+- EncodeEncryptedCompressed compresses with the configured level and
+  keeps the compressed form only when smaller, as PBS does; UploadChunk
+  uses it for compressed uploads, and encrypted blobs are compressed.
+- Golden vector built with libzstd + OpenSSL the way PBS builds it
+  (testdata/gen_encr_compr_vector.py).
+---
+ CHANGELOG.md                                |  5 ++
+ pbscommon/crypt.go                          | 44 ++++++++---
+ pbscommon/crypt_compress_test.go            | 86 +++++++++++++++++++++
+ pbscommon/pbsapi.go                         | 49 ++++++------
+ pbscommon/pbsapi_crypt_test.go              | 29 +++++--
+ pbscommon/testdata/gen_encr_compr_vector.py | 69 +++++++++++++++++
+ 6 files changed, 241 insertions(+), 41 deletions(-)
+ create mode 100644 pbscommon/crypt_compress_test.go
+ create mode 100644 pbscommon/testdata/gen_encr_compr_vector.py
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index c296c43..4176157 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -44,6 +44,11 @@ replaces the fork's unreleased one.
+   also stores these facts in `machine-info.json.blob`.
+ 
+ ### Fixed
++- **Encrypted backups made by `proxmox-backup-client` now restore.** The official
++  client compresses then encrypts chunks by default (`ENCR_COMPR` blobs), which
++  could not be decoded. Our encrypted chunks and blobs are now compressed the
++  same way when it helps, instead of being uploaded uncompressed (less storage
++  and bandwidth for encrypted backups).
+ - Error messages now show the reason returned by PBS instead of "authentication
+   failed" for every refusal, e.g. `PBS refused the backup (HTTP 400): backup
+   owner check failed (…)`. 401 and 403 keep their own wording, and the raw
+diff --git a/pbscommon/crypt.go b/pbscommon/crypt.go
+index 5f5c370..e7a7423 100644
+--- a/pbscommon/crypt.go
++++ b/pbscommon/crypt.go
+@@ -203,19 +203,38 @@ func (c *CryptConfig) Open(iv, ciphertext, tag []byte) ([]byte, error) {
+ // As in proxmox-backup, the CRC32 (IEEE) covers everything after the 44 byte
+ // EncryptedDataBlobHeader, i.e. the ciphertext only. The server rejects blobs
+ // whose CRC does not match, so this detail is mandatory. This matches
+-// proxmox-backup `DataBlob::encode` with a CryptConfig.
+-//
+-// Note: the official client may additionally zstd-compress before encrypting
+-// and then use ENCR_COMPR_BLOB_MAGIC_1_0. Pure Go zstd implementations do not
+-// expose the raw block format, so we always emit the uncompressed variant,
+-// which the server and the official restore client accept unchanged.
++// proxmox-backup `DataBlob::encode` with a CryptConfig and compress = false;
++// see EncodeEncryptedCompressed for the compressed form.
+ func (c *CryptConfig) EncodeEncrypted(data []byte) ([]byte, error) {
++	return c.encodeEncrypted(data, blobEncryptedMagic)
++}
++
++// EncodeEncryptedCompressed is DataBlob::encode with a CryptConfig and
++// compress = true, what proxmox-backup-client does by default: the plaintext
++// is compressed into a regular zstd frame (zstd::bulk::compress), then
++// encrypted and framed with ENCR_COMPR_BLOB_MAGIC_1_0. As in PBS, the
++// compressed form is only used when it is smaller; otherwise this is
++// EncodeEncrypted.
++func (c *CryptConfig) EncodeEncryptedCompressed(data []byte, level zstd.EncoderLevel) ([]byte, error) {
++	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(level), zstd.WithEncoderConcurrency(1))
++	if err != nil {
++		return nil, err
++	}
++	compressed := enc.EncodeAll(data, nil)
++	_ = enc.Close()
++	if len(compressed) >= len(data) {
++		return c.EncodeEncrypted(data)
++	}
++	return c.encodeEncrypted(compressed, blobEncryptedComprMagic)
++}
++
++func (c *CryptConfig) encodeEncrypted(data, magic []byte) ([]byte, error) {
+ 	iv, ciphertext, tag, err := c.Seal(data)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 	out := make([]byte, 0, EncryptedDataBlobHeaderSize+len(ciphertext))
+-	out = append(out, blobEncryptedMagic...)
++	out = append(out, magic...)
+ 	out = append(out, 0, 0, 0, 0) // crc placeholder
+ 	out = append(out, iv...)
+ 	out = append(out, tag...)
+@@ -268,7 +287,7 @@ func DecodeEncryptedBlob(raw []byte, crypt *CryptConfig, digest []byte) ([]byte,
+ 			return nil, err
+ 		}
+ 		return plaintext, nil
+-	case bytes.Equal(magic, blobEncryptedMagic):
++	case bytes.Equal(magic, blobEncryptedMagic), bytes.Equal(magic, blobEncryptedComprMagic):
+ 		if crypt == nil {
+ 			return nil, errors.New("unable to decrypt blob: missing encryption key")
+ 		}
+@@ -284,12 +303,17 @@ func DecodeEncryptedBlob(raw []byte, crypt *CryptConfig, digest []byte) ([]byte,
+ 		if err != nil {
+ 			return nil, err
+ 		}
++		// ENCR_COMPR: the decrypted data is a zstd frame (what the official
++		// client writes by default).
++		if bytes.Equal(magic, blobEncryptedComprMagic) {
++			if plaintext, err = zstdDecodeAll(plaintext); err != nil {
++				return nil, fmt.Errorf("unable to decompress encrypted blob: %w", err)
++			}
++		}
+ 		if err := verifyPlaintextDigest(plaintext, crypt, digest); err != nil {
+ 			return nil, err
+ 		}
+ 		return plaintext, nil
+-	case bytes.Equal(magic, blobEncryptedComprMagic):
+-		return nil, errors.New("unable to decrypt blob: compressed encrypted blobs (zstd block format) are not supported")
+ 	default:
+ 		return nil, fmt.Errorf("unknown blob magic %v", magic)
+ 	}
+diff --git a/pbscommon/crypt_compress_test.go b/pbscommon/crypt_compress_test.go
+new file mode 100644
+index 0000000..dca881a
+--- /dev/null
++++ b/pbscommon/crypt_compress_test.go
+@@ -0,0 +1,86 @@
++package pbscommon
++
++import (
++	"bytes"
++	"crypto/rand"
++	"encoding/hex"
++	"strings"
++	"testing"
++
++	"github.com/klauspost/compress/zstd"
++)
++
++// vecEncrComprBlob is a compressed + encrypted DataBlob built the way
++// proxmox-backup's DataBlob::encode(compress = true) does, by
++// testdata/gen_encr_compr_vector.py: libzstd level 1 (the library the Rust
++// zstd crate binds) and OpenSSL AES-256-GCM, key 00 01 .. 1f, IV 64 .. 73.
++const vecEncrComprBlob = "e6591bbf0bbfd80b533581f56465666768696a6b6c6d6e6f707172733a618e343ee7017d8cb5b485b1ad5327f0066cac84a42725b3f9c98a17a5831d371e20e0de8e8360b0f0340df69a77ba1eb2fda904eb86af627d36756314a812bb312b95819521905434a87ad33bec5e5b39a68e0f73894789"
++
++var vecEncrComprPlain = strings.Repeat("Proxmox Backup compressed encrypted blob test vector. ", 8)
++
++// What the official client writes by default must restore.
++func TestDecodeEncrComprGoldenVector(t *testing.T) {
++	crypt := testCryptConfig(t)
++	raw, err := hex.DecodeString(vecEncrComprBlob)
++	if err != nil {
++		t.Fatal(err)
++	}
++	digest := crypt.ComputeDigest([]byte(vecEncrComprPlain))
++	got, err := DecodeEncryptedBlob(raw, crypt, digest[:])
++	if err != nil {
++		t.Fatalf("DecodeEncryptedBlob: %v", err)
++	}
++	if string(got) != vecEncrComprPlain {
++		t.Errorf("plaintext = %q", got)
++	}
++	if _, err := DecodeEncryptedBlob(raw, nil, nil); err == nil {
++		t.Error("decoded without a key")
++	}
++	raw[len(raw)-1] ^= 1
++	if _, err := DecodeEncryptedBlob(raw, crypt, nil); err == nil {
++		t.Error("tampered blob accepted")
++	}
++}
++
++func TestEncodeEncryptedCompressedRoundTrip(t *testing.T) {
++	crypt := testCryptConfig(t)
++	plain := bytes.Repeat([]byte("compressible chunk data "), 4096)
++	blob, err := crypt.EncodeEncryptedCompressed(plain, zstd.SpeedFastest)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !bytes.Equal(blob[:8], blobEncryptedComprMagic) {
++		t.Fatalf("magic = % x, want ENCR_COMPR", blob[:8])
++	}
++	if len(blob) >= len(plain) {
++		t.Errorf("not compressed: %d bytes for %d", len(blob), len(plain))
++	}
++	digest := crypt.ComputeDigest(plain)
++	got, err := DecodeEncryptedBlob(blob, crypt, digest[:])
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !bytes.Equal(got, plain) {
++		t.Error("round trip mismatch")
++	}
++}
++
++// Incompressible data stays in the plain encrypted form, as in PBS.
++func TestEncodeEncryptedCompressedFallsBack(t *testing.T) {
++	crypt := testCryptConfig(t)
++	plain := make([]byte, 64<<10)
++	if _, err := rand.Read(plain); err != nil {
++		t.Fatal(err)
++	}
++	blob, err := crypt.EncodeEncryptedCompressed(plain, zstd.SpeedDefault)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !bytes.Equal(blob[:8], blobEncryptedMagic) {
++		t.Fatalf("magic = % x, want ENCR (uncompressed)", blob[:8])
++	}
++	got, err := DecodeEncryptedBlob(blob, crypt, nil)
++	if err != nil || !bytes.Equal(got, plain) {
++		t.Fatalf("round trip: %v", err)
++	}
++}
+diff --git a/pbscommon/pbsapi.go b/pbscommon/pbsapi.go
+index 8c8a88d..ce5320e 100644
+--- a/pbscommon/pbsapi.go
++++ b/pbscommon/pbsapi.go
+@@ -814,22 +814,37 @@ func (pbs *PBSClient) defaultCryptMode() string {
+ 	return CryptModeNone
+ }
+ 
++// zstdLevel maps the configured compression level onto the zstd encoder.
++func (pbs *PBSClient) zstdLevel() zstd.EncoderLevel {
++	switch pbs.CompressionLevel {
++	case CompressionFastest:
++		return zstd.SpeedFastest
++	case CompressionBetter:
++		return zstd.SpeedBetterCompression
++	case CompressionBest:
++		return zstd.SpeedBestCompression
++	default: // CompressionDefault or empty
++		return zstd.SpeedDefault
++	}
++}
++
+ func (pbs *PBSClient) UploadChunk(writerid uint64, digest string, chunkdata []byte, dynamic bool, compressed bool) error {
+ 	var outBuffer []byte
+ 	var err error
+ 
+ 	if pbs.Crypt != nil {
+-		// Encrypted chunk: MAGIC || crc32 || IV || TAG || AES-256-GCM(plaintext).
+-		// Compression is deliberately skipped — the ENCR_COMPR variant needs
+-		// zstd's raw *block* API, which the pure-Go klauspost/compress
+-		// encoder does not expose. PBS and the official client both branch
+-		// on the magic, so the uncompressed-but-encrypted form is fully
+-		// interoperable. The `compressed` argument is therefore ignored
+-		// here; callers pass it for the unencrypted path only.
++		// Encrypted chunk: MAGIC || crc32 || IV || TAG || AES-256-GCM(data),
++		// where data is the zstd-compressed plaintext (ENCR_COMPR, what
++		// proxmox-backup-client writes by default) when compression is on
++		// and helps, the plaintext otherwise.
+ 		//
+ 		// `size` stays the *plaintext* length and `encoded-size` the framed
+ 		// length, matching backup_writer.rs's "size": chunk_len.
+-		outBuffer, err = pbs.Crypt.EncodeEncrypted(chunkdata)
++		if compressed {
++			outBuffer, err = pbs.Crypt.EncodeEncryptedCompressed(chunkdata, pbs.zstdLevel())
++		} else {
++			outBuffer, err = pbs.Crypt.EncodeEncrypted(chunkdata)
++		}
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -837,20 +852,7 @@ func (pbs *PBSClient) UploadChunk(writerid uint64, digest string, chunkdata []by
+ 		outBuffer = append(outBuffer, blobCompressedMagic...)
+ 		compressedData := make([]byte, 0)
+ 
+-		// Select compression level based on client configuration
+-		var encoderLevel zstd.EncoderLevel
+-		switch pbs.CompressionLevel {
+-		case CompressionFastest:
+-			encoderLevel = zstd.SpeedFastest
+-		case CompressionBetter:
+-			encoderLevel = zstd.SpeedBetterCompression
+-		case CompressionBest:
+-			encoderLevel = zstd.SpeedBestCompression
+-		default: // CompressionDefault or empty
+-			encoderLevel = zstd.SpeedDefault
+-		}
+-
+-		w, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(encoderLevel))
++		w, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(pbs.zstdLevel()))
+ 		compressedData = w.EncodeAll(chunkdata, compressedData)
+ 		checksum := crc32.Checksum(compressedData, crc32.IEEETable)
+ 		//binary.Write(outBuffer, binary.LittleEndian, checksum)
+@@ -982,7 +984,8 @@ func (pbs *PBSClient) uploadBlob(name string, data []byte, encrypt bool) error {
+ 
+ 	if encrypt && pbs.Crypt != nil {
+ 		var err error
+-		out, err = pbs.Crypt.EncodeEncrypted(data)
++		// Compressed when it helps, as proxmox-backup-client uploads blobs.
++		out, err = pbs.Crypt.EncodeEncryptedCompressed(data, pbs.zstdLevel())
+ 		if err != nil {
+ 			return fmt.Errorf("failed to encrypt blob %s: %w", name, err)
+ 		}
+diff --git a/pbscommon/pbsapi_crypt_test.go b/pbscommon/pbsapi_crypt_test.go
+index 461bc5b..b6668a2 100644
+--- a/pbscommon/pbsapi_crypt_test.go
++++ b/pbscommon/pbsapi_crypt_test.go
+@@ -134,22 +134,35 @@ func TestUploadChunkEncryptedFraming(t *testing.T) {
+ 	}
+ }
+ 
+-// An encrypted chunk upload must not silently fall back to the compressed
+-// framing even though the caller asked for compression.
+-func TestUploadChunkEncryptedIgnoresCompression(t *testing.T) {
++// An encrypted chunk upload with compression requested must use the
++// compressed AND encrypted framing (ENCR_COMPR, as proxmox-backup-client
++// does), never the unencrypted compressed one.
++func TestUploadChunkEncryptedCompresses(t *testing.T) {
+ 	srv, captured := newFakePBSServer(t)
+-	client := newTestClient(srv.URL, testCryptConfig(t))
++	crypt := testCryptConfig(t)
++	client := newTestClient(srv.URL, crypt)
+ 
+ 	pt := bytes.Repeat([]byte("A"), 1<<20)
+ 	if err := client.UploadChunk(1, client.ChunkDigestHex(pt), pt, true, true); err != nil {
+ 		t.Fatalf("UploadChunk: %v", err)
+ 	}
+ 	body := (*captured)[0].body
+-	if !IsEncryptedBlob(body) {
+-		t.Fatalf("expected encrypted framing, got magic % x", body[:8])
++	if !bytes.Equal(body[:8], blobEncryptedComprMagic) {
++		t.Fatalf("expected compressed+encrypted framing, got magic % x", body[:8])
++	}
++	if len(body) >= len(pt) {
++		t.Errorf("encrypted chunk not compressed: %d bytes for %d", len(body), len(pt))
++	}
++	if bytes.Contains(body, []byte("AAAA")) {
++		t.Error("plaintext leaked into the uploaded encrypted blob")
+ 	}
+-	if bytes.Contains(body[:EncryptedDataBlobHeaderSize+64], []byte("AAAA")) {
+-		t.Error("plaintext leaked into the uploaded encrypted blob header region")
++	digest := crypt.ComputeDigest(pt)
++	back, err := DecodeEncryptedBlob(body, crypt, digest[:])
++	if err != nil {
++		t.Fatalf("DecodeEncryptedBlob: %v", err)
++	}
++	if !bytes.Equal(back, pt) {
++		t.Error("decoded chunk does not match the plaintext")
+ 	}
+ }
+ 
+diff --git a/pbscommon/testdata/gen_encr_compr_vector.py b/pbscommon/testdata/gen_encr_compr_vector.py
+new file mode 100644
+index 0000000..f557fb7
+--- /dev/null
++++ b/pbscommon/testdata/gen_encr_compr_vector.py
+@@ -0,0 +1,69 @@
++#!/usr/bin/env python3
++"""Generate the ENCR_COMPR golden vector used by crypt_compress_test.go.
++
++Builds a compressed + encrypted PBS DataBlob the way proxmox-backup's
++DataBlob::encode(compress = true) does (pbs-datastore/src/data_blob.rs):
++zstd::bulk::compress(data, 1) -- a regular zstd frame from libzstd, the
++library the Rust zstd crate binds -- then AES-256-GCM through OpenSSL's
++libcrypto, framed as MAGIC || CRC32(ciphertext) || IV || TAG || ciphertext.
++Only the Python standard library, libzstd and libcrypto are needed:
++
++    python3 pbscommon/testdata/gen_encr_compr_vector.py
++"""
++import ctypes
++import ctypes.util
++import zlib
++
++zstd = ctypes.CDLL(ctypes.util.find_library("zstd"))
++zstd.ZSTD_compressBound.restype = ctypes.c_size_t
++zstd.ZSTD_compressBound.argtypes = [ctypes.c_size_t]
++zstd.ZSTD_compress.restype = ctypes.c_size_t
++zstd.ZSTD_compress.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_int]
++zstd.ZSTD_isError.argtypes = [ctypes.c_size_t]
++
++lib = ctypes.CDLL(ctypes.util.find_library("crypto"))
++lib.EVP_CIPHER_CTX_new.restype = ctypes.c_void_p
++lib.EVP_aes_256_gcm.restype = ctypes.c_void_p
++lib.EVP_EncryptInit_ex.argtypes = [ctypes.c_void_p] * 5
++lib.EVP_EncryptUpdate.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_int), ctypes.c_char_p, ctypes.c_int]
++lib.EVP_EncryptFinal_ex.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
++lib.EVP_CIPHER_CTX_ctrl.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
++lib.EVP_CIPHER_CTX_free.argtypes = [ctypes.c_void_p]
++EVP_CTRL_GCM_SET_IVLEN, EVP_CTRL_GCM_GET_TAG = 0x9, 0x10
++
++
++def zstd_compress(data, level):
++    out = ctypes.create_string_buffer(zstd.ZSTD_compressBound(len(data)))
++    n = zstd.ZSTD_compress(out, len(out), data, len(data), level)
++    assert not zstd.ZSTD_isError(n)
++    return out.raw[:n]
++
++
++def aes_256_gcm_encrypt(key, iv, data):
++    ctx = lib.EVP_CIPHER_CTX_new()
++    assert lib.EVP_EncryptInit_ex(ctx, lib.EVP_aes_256_gcm(), None, None, None) == 1
++    assert lib.EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, len(iv), None) == 1
++    assert lib.EVP_EncryptInit_ex(ctx, None, None, key, iv) == 1
++    out = ctypes.create_string_buffer(len(data) + 16)
++    n = ctypes.c_int(0)
++    assert lib.EVP_EncryptUpdate(ctx, out, ctypes.byref(n), data, len(data)) == 1
++    total = n.value
++    fin = ctypes.create_string_buffer(16)
++    assert lib.EVP_EncryptFinal_ex(ctx, fin, ctypes.byref(n)) == 1
++    tag = ctypes.create_string_buffer(16)
++    assert lib.EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, tag) == 1
++    lib.EVP_CIPHER_CTX_free(ctx)
++    return out.raw[:total], tag.raw
++
++
++ENCR_COMPR_BLOB_MAGIC = bytes([230, 89, 27, 191, 11, 191, 216, 11])
++key = bytes(range(32))
++iv = bytes(range(0x64, 0x74))
++plain = b"Proxmox Backup compressed encrypted blob test vector. " * 8
++
++compressed = zstd_compress(plain, 1)
++assert len(compressed) < len(plain)
++ct, tag = aes_256_gcm_encrypt(key, iv, compressed)
++blob = ENCR_COMPR_BLOB_MAGIC + zlib.crc32(ct).to_bytes(4, "little") + iv + tag + ct
++print("plain:", plain[:54].decode(), "x 8")
++print("blob:", blob.hex())
+-- 
+2.47.3
+

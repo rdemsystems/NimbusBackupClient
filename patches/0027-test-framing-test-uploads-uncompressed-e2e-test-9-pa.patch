@@ -1,0 +1,43 @@
+From 6404ba965ef44549c3853e628878a270b71006c2 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 10:13:26 +0200
+Subject: [PATCH 27/27] test: framing test uploads uncompressed; e2e test 9
+ path works with a local client
+
+---
+ pbscommon/pbsapi_crypt_test.go | 5 ++++-
+ testing/e2e/run.sh             | 2 +-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/pbscommon/pbsapi_crypt_test.go b/pbscommon/pbsapi_crypt_test.go
+index b6668a2..4fdaac7 100644
+--- a/pbscommon/pbsapi_crypt_test.go
++++ b/pbscommon/pbsapi_crypt_test.go
+@@ -94,7 +94,10 @@ func TestUploadChunkEncryptedFraming(t *testing.T) {
+ 	pt := bytes.Repeat([]byte("proxmox"), 4096) // 28672 bytes, compressible
+ 	digest := client.ChunkDigestHex(pt)
+ 
+-	if err := client.UploadChunk(7, digest, pt, false, true); err != nil {
++	// Uncompressed upload: the plain encrypted framing (header + ciphertext
++	// of the same length); the compressed form is covered by
++	// TestUploadChunkEncryptedCompresses.
++	if err := client.UploadChunk(7, digest, pt, false, false); err != nil {
+ 		t.Fatalf("UploadChunk: %v", err)
+ 	}
+ 
+diff --git a/testing/e2e/run.sh b/testing/e2e/run.sh
+index 627aed4..3615a45 100755
+--- a/testing/e2e/run.sh
++++ b/testing/e2e/run.sh
+@@ -241,7 +241,7 @@ test_official_encrypted_block_readback() {
+ 		warn "official client skipped -- nothing to read back"
+ 		return 0
+ 	fi
+-	pbc backup disk.img:/e2e/disk.img --backup-id e2e-pbc-block-enc \
++	pbc backup disk.img:disk.img --backup-id e2e-pbc-block-enc \
+ 		--keyfile key.pem >"$WORK/log-pbc-block-enc.txt" 2>&1 \
+ 		|| { cat "$WORK/log-pbc-block-enc.txt"; return 1; }
+ 
+-- 
+2.47.3
+

@@ -1,0 +1,295 @@
+From c7808ad9b6bee15d58943856df21b667ea85d677 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 10:11:41 +0200
+Subject: [PATCH 25/27] ci: upstream's real-PBS e2e suite gates the release,
+ both interop directions
+
+- e2e.yml becomes a reusable workflow called by build-and-release.yml on
+  every build; the release job needs it (it used to run on its own and
+  gate nothing).
+- New e2e test 9: an encrypted block backup made by the official
+  proxmox-backup-client (compressed + encrypted chunks) is read back by
+  our code through machinebackup/readback, a small helper reading a .fidx
+  of the latest snapshot via pbscommon, and compared byte for byte.
+- gofmt check extended to the files the fork adds or rewrites.
+---
+ .github/workflows/build-and-release.yml |  10 +-
+ .github/workflows/e2e.yml               |  29 ++++--
+ machinebackup/readback/main.go          | 119 ++++++++++++++++++++++++
+ testing/e2e/run.sh                      |  35 +++++++
+ 4 files changed, 182 insertions(+), 11 deletions(-)
+ create mode 100644 machinebackup/readback/main.go
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index 8866e0d..7a4143e 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -184,6 +184,14 @@ jobs:
+           ( cd snapshot && go mod tidy && go test ./... )
+           echo "::endgroup::"
+ 
++  # Upstream's end-to-end suite against a real PBS in Docker (testing/e2e):
++  # our backups restored by the official proxmox-backup-client, encrypted ones
++  # included, and official encrypted backups read back by our code. Gates the
++  # release.
++  e2e:
++    name: End-to-end (real PBS)
++    uses: ./.github/workflows/e2e.yml
++
+   # Build CLI for all platforms
+   build-cli:
+     name: Build CLI
+@@ -378,7 +386,7 @@ jobs:
+   release:
+     name: Create Release
+     if: startsWith(github.ref, 'refs/tags/v')
+-    needs: [build-cli, build-gui]
++    needs: [build-cli, build-gui, e2e]
+     runs-on: ubuntu-latest
+     permissions:
+       contents: write
+diff --git a/.github/workflows/e2e.yml b/.github/workflows/e2e.yml
+index 22871fc..3f25c3e 100644
+--- a/.github/workflows/e2e.yml
++++ b/.github/workflows/e2e.yml
+@@ -7,12 +7,14 @@ name: End-to-end tests
+ # the wrong place, a chunk digest computed over the wrong bytes.
+ 
+ on:
+-  push:
+-    # Fork: run the real-PBS interop suite on the published branch and on
+-    # upstream re-merge branches too.
+-    branches: [main, develop, master, github-release, 'merge-upstream-*']
+-  pull_request:
+-    branches: [main, develop]
++  # Fork: called by build-and-release.yml on every build, where it gates the
++  # release; can also be run by hand.
++  workflow_call:
++    inputs:
++      skip_official_client:
++        description: 'Skip the official-client interop assertions'
++        type: boolean
++        default: false
+   workflow_dispatch:
+     inputs:
+       skip_official_client:
+@@ -20,10 +22,6 @@ on:
+         type: boolean
+         default: false
+ 
+-concurrency:
+-  group: e2e-${{ github.ref }}
+-  cancel-in-progress: true
+-
+ env:
+   GO_VERSION: '1.25'
+ 
+@@ -85,6 +83,17 @@ jobs:
+             gui/config.go
+             gui/pbs_server.go
+             gui/main.go
++            pbscommon/paperkey.go
++            pbscommon/paperkey_test.go
++            pbscommon/crypt_compress_test.go
++            pbscommon/upgrade_error_test.go
++            pbscommon/pbsapi_crypt_test.go
++            gui/paperkey_gui.go
++            gui/scheduler.go
++            gui/service_identity.go
++            machinebackup/readback/main.go
++            machinebackuplib/machineinfo.go
++            machinebackuplib/qemu_config_test.go
+           )
+           out="$(gofmt -l "${files[@]}")"
+           if [ -n "$out" ]; then
+diff --git a/machinebackup/readback/main.go b/machinebackup/readback/main.go
+new file mode 100644
+index 0000000..7f2999f
+--- /dev/null
++++ b/machinebackup/readback/main.go
+@@ -0,0 +1,119 @@
++// Command readback is an end-to-end test helper (testing/e2e): it reads a
++// fixed-index image (.fidx) of the latest snapshot of a backup group back
++// through pbscommon, decrypting with -keyfile, and writes the image to -out.
++// It checks the reverse interop direction: snapshots written by the official
++// proxmox-backup-client (compressed + encrypted chunks by default) must be
++// readable by our code, as they are by the NBD server and the GUI restore.
++package main
++
++import (
++	"bytes"
++	"encoding/binary"
++	"encoding/hex"
++	"flag"
++	"fmt"
++	"os"
++
++	"pbscommon"
++)
++
++func main() {
++	baseURL := flag.String("baseurl", "", "PBS base URL, e.g. https://127.0.0.1:8007")
++	fingerprint := flag.String("certfingerprint", "", "PBS certificate fingerprint")
++	authID := flag.String("authid", "", "API token ID")
++	secret := flag.String("secret", "", "API token secret")
++	datastore := flag.String("datastore", "", "Datastore")
++	keyFile := flag.String("keyfile", "", "Encryption key file (unprotected)")
++	backupType := flag.String("type", "host", "Backup type")
++	backupID := flag.String("id", "", "Backup ID")
++	archive := flag.String("archive", "", "Fixed index archive name, e.g. disk.img.fidx")
++	out := flag.String("out", "", "Output image file")
++	flag.Parse()
++
++	if err := run(*baseURL, *fingerprint, *authID, *secret, *datastore, *keyFile, *backupType, *backupID, *archive, *out); err != nil {
++		fmt.Fprintln(os.Stderr, "readback:", err)
++		os.Exit(1)
++	}
++}
++
++func run(baseURL, fingerprint, authID, secret, datastore, keyFile, backupType, backupID, archive, out string) error {
++	client := &pbscommon.PBSClient{
++		BaseURL:         baseURL,
++		CertFingerPrint: fingerprint,
++		AuthID:          authID,
++		Secret:          secret,
++		Datastore:       datastore,
++		Insecure:        true,
++	}
++	if keyFile != "" {
++		crypt, err := pbscommon.LoadKeyFile(keyFile, nil)
++		if err != nil {
++			return err
++		}
++		client.Crypt = crypt
++	}
++
++	snaps, err := client.ListSnapshots()
++	if err != nil {
++		return fmt.Errorf("list snapshots: %w", err)
++	}
++	var latest *pbscommon.BackupManifest
++	for i := range snaps {
++		s := &snaps[i]
++		if s.BackupType == backupType && s.BackupID == backupID && (latest == nil || s.BackupTime > latest.BackupTime) {
++			latest = s
++		}
++	}
++	if latest == nil {
++		return fmt.Errorf("no snapshot %s/%s", backupType, backupID)
++	}
++
++	client.Manifest.BackupType = backupType
++	client.Manifest.BackupID = backupID
++	client.Manifest.BackupTime = latest.BackupTime
++	client.Connect(true, backupType)
++	defer client.Close()
++
++	index, err := client.DownloadToBytes(archive)
++	if err != nil {
++		return fmt.Errorf("download %s: %w", archive, err)
++	}
++	var hdr pbscommon.FIDXHeader
++	rdr := bytes.NewReader(index)
++	if err := binary.Read(rdr, binary.LittleEndian, &hdr); err != nil {
++		return fmt.Errorf("fidx header: %w", err)
++	}
++	if !bytes.Equal(hdr.Magic[:], []byte{47, 127, 65, 237, 145, 253, 15, 205}) || hdr.ChunkSize == 0 {
++		return fmt.Errorf("%s is not a fixed index", archive)
++	}
++	count := (hdr.Size + hdr.ChunkSize - 1) / hdr.ChunkSize
++
++	f, err := os.Create(out) // #nosec G304 -- test helper, path from the e2e script
++	if err != nil {
++		return err
++	}
++	defer f.Close()
++	written := uint64(0)
++	digest := make([]byte, 32)
++	for i := uint64(0); i < count; i++ {
++		if _, err := rdr.Read(digest); err != nil {
++			return fmt.Errorf("fidx digest %d: %w", i, err)
++		}
++		data, err := client.GetChunkData(hex.EncodeToString(digest))
++		if err != nil {
++			return fmt.Errorf("chunk %d: %w", i, err)
++		}
++		if rest := hdr.Size - written; uint64(len(data)) > rest {
++			data = data[:rest]
++		}
++		if _, err := f.Write(data); err != nil {
++			return err
++		}
++		written += uint64(len(data))
++	}
++	if written != hdr.Size {
++		return fmt.Errorf("wrote %d bytes, index says %d", written, hdr.Size)
++	}
++	fmt.Printf("readback: %s/%s %s -> %s (%d bytes, %d chunks)\n", backupType, backupID, archive, out, written, count)
++	return f.Close()
++}
+diff --git a/testing/e2e/run.sh b/testing/e2e/run.sh
+index db3b313..627aed4 100755
+--- a/testing/e2e/run.sh
++++ b/testing/e2e/run.sh
+@@ -229,6 +229,37 @@ test_block_backup_encrypted() {
+ 	assert_bytes_identical "$WORK/disk.img" "$WORK/restore-block-enc.img" "encrypted block backup"
+ }
+ 
++# ===========================================================================
++# Test 9: encrypted block backup by the OFFICIAL client -> read back by ours
++# ===========================================================================
++# The reverse direction: proxmox-backup-client compresses then encrypts its
++# chunks (ENCR_COMPR blobs) by default, and our readers (restore, NBD) must
++# decode them. The fixture mixes random and compressible regions, so both the
++# compressed and the plain encrypted forms are exercised.
++test_official_encrypted_block_readback() {
++	if ! pbc_available; then
++		warn "official client skipped -- nothing to read back"
++		return 0
++	fi
++	pbc backup disk.img:/e2e/disk.img --backup-id e2e-pbc-block-enc \
++		--keyfile key.pem >"$WORK/log-pbc-block-enc.txt" 2>&1 \
++		|| { cat "$WORK/log-pbc-block-enc.txt"; return 1; }
++
++	rm -f "$WORK/readback-block-enc.img"
++	"$REPO_ROOT/dist/e2e-readback" \
++		-baseurl "$PBS_BASEURL" \
++		-certfingerprint "$PBS_FINGERPRINT" \
++		-authid "$PBS_AUTHID" \
++		-secret "$PBS_TOKEN_SECRET" \
++		-datastore "$PBS_DATASTORE" \
++		-keyfile "$KEYFILE" \
++		-id e2e-pbc-block-enc \
++		-archive disk.img.fidx \
++		-out "$WORK/readback-block-enc.img" >"$WORK/log-readback.txt" 2>&1 \
++		|| { cat "$WORK/log-readback.txt"; return 1; }
++	assert_bytes_identical "$WORK/disk.img" "$WORK/readback-block-enc.img" "official encrypted block backup read back"
++}
++
+ # ===========================================================================
+ # Test 5: the official client can read our manifest and enumerate our snapshots
+ # ===========================================================================
+@@ -346,9 +377,12 @@ main() {
+ 	if [ "$E2E_SKIP_BUILD" != "1" ]; then
+ 		section "Building our CLIs"
+ 		make -C "$REPO_ROOT" cli || die "make cli failed"
++		( cd "$REPO_ROOT/machinebackup" && go build -o "$REPO_ROOT/dist/e2e-readback" ./readback ) \
++			|| die "building the readback helper failed"
+ 	fi
+ 	assert_file_exists "$REPO_ROOT/dist/proxmoxbackup-directory"
+ 	assert_file_exists "$REPO_ROOT/dist/proxmoxbackup-machine"
++	assert_file_exists "$REPO_ROOT/dist/e2e-readback"
+ 
+ 	section "Preparing fixtures"
+ 	make_directory_fixture
+@@ -367,6 +401,7 @@ main() {
+ 	run_test "6. PBS server-side verify"                           test_server_side_verify
+ 	run_test "7. chunk dedup on a second identical backup"         test_dedup_reuse
+ 	run_test "8. namespace round-trip (-namespace / --ns)"         test_namespace_roundtrip
++	run_test "9. official encrypted block backup -> our read back" test_official_encrypted_block_readback
+ 
+ 	section "Summary"
+ 	log "passed: ${#PASSED[@]}"
+-- 
+2.47.3
+

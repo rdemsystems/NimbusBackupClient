@@ -44,6 +44,10 @@ carry the Nimbus identity, docs and CI.
 | 0021 | feat(gui): paper key, key QR code and key import from text | upstream candidate | Print / show the QR code next to the key field; rebuild a key file from a scanned QR code or a paper key (protected keys unlocked). |
 | 0022 | docs: encryption, paper key and upstream re-merge in README and CHANGELOG | fork-only | |
 | 0023 | fix: review findings on the upstream rebuild | upstream candidate | `EncryptionKeyField` awaited the Wails Promise (upstream bug: fingerprint never shown); OVMF follows the boot disk; a changed provisioned schedule recomputes nextRun; a retired legacy folder is never a migration source. |
+| 0024 | feat(crypto): compressed encrypted chunks (ENCR_COMPR), both ways | upstream candidate | Upstream rejected ENCR_COMPR blobs, which `proxmox-backup-client` writes by default (official encrypted backups could not be restored), and uploaded encrypted chunks uncompressed. Golden vector from libzstd + OpenSSL. |
+| 0025 | ci: upstream's real-PBS e2e suite gates the release, both interop directions | fork-only (test 9 + readback helper: upstream candidate) | `e2e.yml` called by `build-and-release.yml`, release needs it; test 9 reads back an official encrypted block backup with `machinebackup/readback`. |
+| 0026 | ci: run upstream's make lint over every module (informational) | fork-only | |
+| 0027 | test: framing test uploads uncompressed; e2e test 9 path works with a local client | upstream candidate | |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts
@@ -91,10 +95,6 @@ git format-patch -o patches/ <upstream base>..HEAD -- . ':!patches'
 - **The GUI cannot use a passphrase-protected key file** (no console to
   prompt on): import it with "Import a key from text or a QR code", which
   writes an unprotected copy.
-- **Encrypted chunks are not compressed**: upstream emits the uncompressed
-  encrypted blob variant, so encrypted backups use more storage and bandwidth
-  than the official client's compressed and encrypted chunks. The fork's
-  previous encryption compressed first; to redo as an upstream PR.
 - **Worker error handling in `machinebackuplib.uploadWorker`**: the fork's
   fail-once dispatcher (no shared error variable, no dispatcher stuck after a
   worker error) was not carried over onto upstream's rewritten worker. To redo
