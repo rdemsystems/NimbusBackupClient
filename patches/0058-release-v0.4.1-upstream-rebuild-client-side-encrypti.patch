@@ -1,7 +1,7 @@
 From 3d88bea2bbbb06ca529dfff1bc987ae842b589d1 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 18:19:58 +0200
-Subject: [PATCH 58/58] =?UTF-8?q?release:=20v0.4.1=20=E2=80=94=20upstream?=
+Subject: [PATCH 58/59] =?UTF-8?q?release:=20v0.4.1=20=E2=80=94=20upstream?=
  =?UTF-8?q?=20rebuild,=20client-side=20encryption,=20signed=20binaries?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

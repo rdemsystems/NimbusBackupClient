@@ -1,7 +1,7 @@
 From af33bcfc1908dade007d986d30bc18e918a9a40c Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 17:20:10 +0200
-Subject: [PATCH 52/58] ci: install the signed MSI on Windows, fresh and as an
+Subject: [PATCH 52/59] ci: install the signed MSI on Windows, fresh and as an
  upgrade from 0.4.0
 
 A fresh install of this build's MSI, then the published 0.4.0 MSI upgraded

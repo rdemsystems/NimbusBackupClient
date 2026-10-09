@@ -1,7 +1,7 @@
 From 07856b92c067b240abb0db8b97eb4381107fc95f Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 11:28:15 +0200
-Subject: [PATCH 30/58] fix(ci): gosec G703 on upstream file operations; e2e
+Subject: [PATCH 30/59] fix(ci): gosec G703 on upstream file operations; e2e
  log tail as sub-4KB annotations
 
 ---

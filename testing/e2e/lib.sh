@@ -156,8 +156,15 @@ retry() {
 	return 0
 }
 
+# Ready means initialised, not just installed: `proxmox-backup-manager version`
+# answers before the daemon has generated its keys, and `datastore create`
+# then panics on the missing authkey.key (seen on a CI run). Also wait for the
+# API to answer on its port.
 pbs_ready() {
-	pbs_mgr version >/dev/null 2>&1
+	pbs_mgr version >/dev/null 2>&1 \
+		&& docker exec "$PBS_CONTAINER" test -s /etc/proxmox-backup/authkey.key \
+		&& docker exec "$PBS_CONTAINER" test -s /etc/proxmox-backup/proxy.pem \
+		&& curl -ks -o /dev/null "https://127.0.0.1:${PBS_PORT}/api2/json/version"
 }
 
 start_pbs() {

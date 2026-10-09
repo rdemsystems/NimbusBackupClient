@@ -1,7 +1,7 @@
 From 39d057e3ceca0d350c9dc37af13c9c01af5c9003 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 17:26:09 +0200
-Subject: [PATCH 55/58] fix(vss): a busy VSS is waited for, never wiped;
+Subject: [PATCH 55/59] fix(vss): a busy VSS is waited for, never wiped;
  cleanup spares shadows in use
 
 - "Shadow copy creation already in progress" ran vssadmin delete shadows

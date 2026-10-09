@@ -1,7 +1,7 @@
 From b331b705b7ebb2dbc16fe7f0b7179d1ba727959c Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:14:03 +0200
-Subject: [PATCH 11/58] installer: WiX icon ids WiX 3 accepts
+Subject: [PATCH 11/59] installer: WiX icon ids WiX 3 accepts
 
 Shortcut icons need an Id with the target's extension (AppIcon.ico), and
 WiX 3 sets the Programs & Features icon through ARPPRODUCTICON. The rest

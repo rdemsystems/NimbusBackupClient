@@ -1,7 +1,7 @@
 From d6b56ce6e2e82ac005120de68cae4918e2acadf7 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 17:22:50 +0200
-Subject: [PATCH 54/58] docs: the GUI path to the encryption key and the
+Subject: [PATCH 54/59] docs: the GUI path to the encryption key and the
  Running tab use the real labels
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

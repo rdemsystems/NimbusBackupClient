@@ -1,7 +1,7 @@
 From 7a22640b62bb6de568aa60dbc66d41ebd03a50ad Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 14:52:43 +0200
-Subject: [PATCH 42/58] feat(cli): -parallel N backs up several directories at
+Subject: [PATCH 42/59] feat(cli): -parallel N backs up several directories at
  once (issue #6)
 
 backup_parallel runs up to N directories of a multi-directory run at the same

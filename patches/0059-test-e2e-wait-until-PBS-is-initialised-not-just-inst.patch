@@ -1,0 +1,38 @@
+From 2f91057cb5128c9365d74f5177bac101bd7fd06e Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Fri, 9 Oct 2026 18:24:55 +0200
+Subject: [PATCH 59/59] test(e2e): wait until PBS is initialised, not just
+ installed
+
+proxmox-backup-manager version answers before the daemon has generated its
+keys; on the v0.4.1 tag run datastore create then panicked on the missing
+/etc/proxmox-backup/authkey.key. pbs_ready also waits for authkey.key,
+proxy.pem and an answer from the API port.
+---
+ testing/e2e/lib.sh | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/testing/e2e/lib.sh b/testing/e2e/lib.sh
+index 4299ba6..bea726f 100755
+--- a/testing/e2e/lib.sh
++++ b/testing/e2e/lib.sh
+@@ -156,8 +156,15 @@ retry() {
+ 	return 0
+ }
+ 
++# Ready means initialised, not just installed: `proxmox-backup-manager version`
++# answers before the daemon has generated its keys, and `datastore create`
++# then panics on the missing authkey.key (seen on a CI run). Also wait for the
++# API to answer on its port.
+ pbs_ready() {
+-	pbs_mgr version >/dev/null 2>&1
++	pbs_mgr version >/dev/null 2>&1 \
++		&& docker exec "$PBS_CONTAINER" test -s /etc/proxmox-backup/authkey.key \
++		&& docker exec "$PBS_CONTAINER" test -s /etc/proxmox-backup/proxy.pem \
++		&& curl -ks -o /dev/null "https://127.0.0.1:${PBS_PORT}/api2/json/version"
+ }
+ 
+ start_pbs() {
+-- 
+2.47.3
+
