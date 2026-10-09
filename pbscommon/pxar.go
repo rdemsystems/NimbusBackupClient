@@ -479,13 +479,16 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 
 	dir_start_pos := a.pos
 
+	// Permissions stay fixed (the project targets Windows, which has no
+	// Unix execute/traverse bits); the owner is the real one on Unix.
+	uid, gid := fileOwner(fileInfo)
 	entry := &PXARFileEntry{
 		hdr:   PXAR_ENTRY,
 		len:   56,
 		mode:  IFDIR | 0o777,
 		flags: 0,
-		uid:   1000, //This is fixed because this project for now targeting windows , on which execute, traverse etc permissions don't exist
-		gid:   1000,
+		uid:   uid,
+		gid:   gid,
 		mtime: MTime{
 			secs:    uint64(fileInfo.ModTime().Unix()),
 			nanos:   0,
@@ -755,13 +758,14 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
 	a.buffer.WriteString(basename)
 	a.buffer.WriteByte(0x00)
 
+	uid, gid := fileOwner(fileInfo)
 	entry := &PXARFileEntry{
 		hdr:   PXAR_ENTRY,
 		len:   56,
 		mode:  IFREG | 0o777,
 		flags: 0,
-		uid:   1000,
-		gid:   1000,
+		uid:   uid,
+		gid:   gid,
 		mtime: MTime{
 			secs:    uint64(fileInfo.ModTime().Unix()),
 			nanos:   0,
@@ -863,13 +867,14 @@ func (a *PXARArchive) WriteVirtualFile(filename string, data []byte, mtime uint6
 	a.buffer.WriteString(filename)
 	a.buffer.WriteByte(0x00)
 
+	uid, gid := processOwner()
 	entry := &PXARFileEntry{
 		hdr:   PXAR_ENTRY,
 		len:   56,
 		mode:  IFREG | 0o444,
 		flags: 0,
-		uid:   1000,
-		gid:   1000,
+		uid:   uid,
+		gid:   gid,
 		mtime: MTime{
 			secs:    mtime,
 			nanos:   0,
