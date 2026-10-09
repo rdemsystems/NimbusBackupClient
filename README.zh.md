@@ -219,6 +219,8 @@ wails build      # or: wails dev  (hot reload)
 
 Nimbus Backup 最初是 [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（用 Go 编写的 Proxmox Backup Client，作者 Tiziano Bacocco，GPLv3）的一个分支，我们在其基础上添加了 Windows GUI、服务、计划任务、多 PBS 和恢复功能。2026 年 9 月，上游合并了该 GUI 并使其品牌中立（“Proxmox Backup Client GUI”）。2026 年 10 月（0.4.1），Nimbus Backup 基于上游的当前代码重新构建，并采用了上游的客户端加密：**两个项目共享同一代码库。**
 
+Nimbus Backup 0.4.1 基于上游项目 `master` 分支的提交 `3c1b989`（2026 年 10 月 9 日）构建。目前还没有包含这些代码的上游 release：上游最新的 release v1.1.3（2026 年 5 月）早于 GUI 合并。
+
 本仓库在上游基础上增加的是一个有文档说明的补丁系列（[`patches/`](patches/README.md)），其中大部分已提交给上游：
 
 - **功能**：纸质密钥和密钥导入（二维码）、文件夹并行备份、多文件夹备份只用一个 VSS 快照、命令行排除项、根据真实机器生成的 Proxmox VE 虚拟机配置。

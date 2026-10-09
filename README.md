@@ -216,6 +216,8 @@ The brand is picked from the executable name: `NimbusBackup.exe` runs as Nimbus 
 
 Nimbus Backup started as a fork of [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client in Go, by Tiziano Bacocco, GPLv3), to which we added the Windows GUI, the service, scheduling, multi-PBS and restore. In September 2026, upstream merged that GUI back and made it brand-neutral ("Proxmox Backup Client GUI"). In October 2026 (0.4.1), Nimbus Backup was rebuilt on upstream's current code, adopting upstream's client-side encryption: **the two projects share the same code base.**
 
+Nimbus Backup 0.4.1 is built on upstream's `master` at commit `3c1b989` (9 October 2026). No upstream release has this code yet: upstream's latest release, v1.1.3 (May 2026), predates the GUI merge.
+
 What this repository adds on top of upstream is a documented patch series ([`patches/`](patches/README.md)), most of it offered upstream:
 
 - **Features**: paper key and key import (QR code), parallel folder backups, one VSS snapshot per multi-folder backup, CLI exclusions, a Proxmox VE VM config generated from the real machine.

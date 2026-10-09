@@ -219,6 +219,8 @@ wails build      # or: wails dev  (hot reload)
 
 Nimbus Backup は [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go)（Tiziano Bacocco による Go 製の Proxmox Backup Client、GPLv3）のフォークとして始まり、私たちはそこに Windows GUI、サービス、スケジューリング、複数 PBS 対応、リストア機能を追加しました。2026 年 9 月、アップストリームはこの GUI を取り込み、ブランド中立化しました（「Proxmox Backup Client GUI」）。2026 年 10 月（0.4.1）、Nimbus Backup はアップストリームの最新コードをもとに再構築され、アップストリームのクライアント側暗号化を採用しました：**両プロジェクトは同じコードベースを共有しています。**
 
+Nimbus Backup 0.4.1 は、アップストリームの `master` ブランチのコミット `3c1b989`（2026 年 10 月 9 日）をベースに構築されています。このコードを含むアップストリームのリリースはまだありません。最新のリリース v1.1.3（2026 年 5 月）は GUI の統合より前のものです。
+
 このリポジトリがアップストリームに加えているのは、文書化されたパッチシリーズ（[`patches/`](patches/README.md)）で、その大部分はアップストリームに提案済みです：
 
 - **機能**：ペーパーキーとキーのインポート（QR コード）、フォルダーの並列バックアップ、複数フォルダーのバックアップごとに 1 つの VSS スナップショット、コマンドラインでの除外指定、実マシンから生成される Proxmox VE の VM 構成。

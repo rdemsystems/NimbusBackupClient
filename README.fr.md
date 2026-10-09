@@ -221,6 +221,8 @@ La marque est déterminée par le nom de l'exécutable : `NimbusBackup.exe` s'af
 
 Nimbus Backup est né comme un fork de [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go) (Proxmox Backup Client en Go, par Tiziano Bacocco, GPLv3), auquel nous avons ajouté l'interface graphique Windows, le service, la planification, le multi-PBS et la restauration. En septembre 2026, le projet d'origine a intégré cette interface et l'a rendue neutre (« Proxmox Backup Client GUI »). En octobre 2026 (0.4.1), Nimbus Backup a été reconstruit sur le code actuel du projet d'origine, dont il reprend le chiffrement côté client : **les deux projets partagent le même code.**
 
+Nimbus Backup 0.4.1 est construit sur la branche `master` du projet d'origine, au commit `3c1b989` (9 octobre 2026). Aucune release du projet d'origine ne contient encore ce code : sa dernière release, la v1.1.3 (mai 2026), est antérieure à l'intégration de l'interface graphique.
+
 Ce dépôt ajoute par-dessus une série de patchs documentée ([`patches/`](patches/README.md)), en grande partie proposée au projet d'origine :
 
 - **Des fonctionnalités** : clé papier et import de clé (QR code), sauvegarde de dossiers en parallèle, un seul snapshot VSS par sauvegarde multi-dossiers, exclusions en ligne de commande, configuration de VM Proxmox VE générée à partir de la machine réelle.
