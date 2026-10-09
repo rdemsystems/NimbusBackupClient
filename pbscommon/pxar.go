@@ -460,7 +460,7 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 			len: uint64(16) + uint64(len(dirname)) + 1,
 		}
 
-		binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
+		_ = binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
 
 		a.buffer.WriteString(dirname)
 		a.buffer.WriteByte(0x00)
@@ -495,7 +495,7 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 			padding: 0,
 		},
 	}
-	binary.Write(&a.buffer, binary.LittleEndian, entry)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, entry)
 
 	if err := a.Flush(); err != nil {
 		return CatalogDir{}, err
@@ -657,13 +657,13 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 	}
 	goodbye_start := a.pos
 
-	binary.Write(&a.buffer, binary.LittleEndian, PXAR_GOODBYE)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, PXAR_GOODBYE)
 	goodbyelen := uint64(16 + 24*(len(goodbyteitems)+1))
-	binary.Write(&a.buffer, binary.LittleEndian, goodbyelen)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, goodbyelen)
 
 	for _, gi := range goodbyteitems {
 		gi.offset = a.pos - gi.offset
-		binary.Write(&a.buffer, binary.LittleEndian, gi)
+		_ = binary.Write(&a.buffer, binary.LittleEndian, gi)
 	}
 
 	gi := &GoodByeItem{
@@ -672,7 +672,7 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 		hash:   0xef5eed5b753e1555,
 	}
 
-	binary.Write(&a.buffer, binary.LittleEndian, gi)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, gi)
 
 	if err := a.Flush(); err != nil {
 		return CatalogDir{}, err
@@ -753,7 +753,7 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
 		len: uint64(16) + uint64(len(basename)) + 1,
 	}
 
-	binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
 
 	a.buffer.WriteString(basename)
 	a.buffer.WriteByte(0x00)
@@ -772,7 +772,7 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
 			padding: 0,
 		},
 	}
-	binary.Write(&a.buffer, binary.LittleEndian, entry)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, entry)
 
 	// The PXAR stream is a flat byte sequence: the next entry's header begins
 	// immediately after exactly declaredSize payload bytes. We commit declaredSize
@@ -781,10 +781,10 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
 	// and the read below (common for files in use WITHOUT VSS: logs, .pst, SQL .mdf)
 	// would otherwise desynchronise the whole archive and corrupt every entry that
 	// follows. So we cap reads at declaredSize and zero-pad any shortfall.
-	binary.Write(&a.buffer, binary.LittleEndian, PXAR_PAYLOAD)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, PXAR_PAYLOAD)
 	declaredSize := uint64(fileInfo.Size())
 	filesize := declaredSize + 16 //Payload size + header size
-	binary.Write(&a.buffer, binary.LittleEndian, filesize)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, filesize)
 
 	if err := a.Flush(); err != nil {
 		return CatalogFile{}, err
@@ -863,7 +863,7 @@ func (a *PXARArchive) WriteVirtualFile(filename string, data []byte, mtime uint6
 		hdr: PXAR_FILENAME,
 		len: uint64(16) + uint64(len(filename)) + 1,
 	}
-	binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, fname_entry)
 	a.buffer.WriteString(filename)
 	a.buffer.WriteByte(0x00)
 
@@ -881,11 +881,11 @@ func (a *PXARArchive) WriteVirtualFile(filename string, data []byte, mtime uint6
 			padding: 0,
 		},
 	}
-	binary.Write(&a.buffer, binary.LittleEndian, entry)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, entry)
 
-	binary.Write(&a.buffer, binary.LittleEndian, PXAR_PAYLOAD)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, PXAR_PAYLOAD)
 	filesize := uint64(len(data)) + 16
-	binary.Write(&a.buffer, binary.LittleEndian, filesize)
+	_ = binary.Write(&a.buffer, binary.LittleEndian, filesize)
 
 	a.buffer.Write(data)
 

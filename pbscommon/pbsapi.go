@@ -1306,7 +1306,9 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 				fmt.Printf("=== SENDING HTTP REQUEST TO PBS ===\n%s=== END REQUEST ===\n", redactedRequest)
 
 				// Send the request
-				conn.Write([]byte(fullRequest))
+				if _, err := conn.Write([]byte(fullRequest)); err != nil {
+					return nil, fmt.Errorf("send upgrade request: %w", err)
+				}
 				fmt.Print("Reading response to upgrade...\n")
 				buf := make([]byte, 0)
 				for !strings.HasSuffix(string(buf), "\r\n\r\n") && !strings.HasSuffix(string(buf), "\n\n") {
@@ -1337,7 +1339,7 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 						for _, line := range lines {
 							line = strings.TrimSpace(line)
 							if strings.HasPrefix(strings.ToLower(line), "content-length:") {
-								fmt.Sscanf(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), "%d", &contentLength)
+								_, _ = fmt.Sscanf(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), "%d", &contentLength)
 							}
 						}
 						var responseBody string
