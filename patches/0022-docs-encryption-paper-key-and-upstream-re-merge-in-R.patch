@@ -1,7 +1,7 @@
 From e476d63b424598d668ead7694a7e81beda253301 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 09:53:10 +0200
-Subject: [PATCH 22/58] docs: encryption, paper key and upstream re-merge in
+Subject: [PATCH 22/59] docs: encryption, paper key and upstream re-merge in
  README and CHANGELOG
 
 ---

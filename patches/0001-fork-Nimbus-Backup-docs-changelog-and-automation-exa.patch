@@ -1,7 +1,7 @@
 From defa336be6848c27c0128baf43401d345b49d02f Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 09:40:42 +0200
-Subject: [PATCH 01/58] fork: Nimbus Backup docs, changelog and automation
+Subject: [PATCH 01/59] fork: Nimbus Backup docs, changelog and automation
  examples
 
 Keep the fork's README (EN/FR), CHANGELOG, TODO and examples/automation

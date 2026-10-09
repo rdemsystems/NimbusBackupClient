@@ -1,7 +1,7 @@
 From ed9a96b9bc6dfc579e8d56c2f9bd213f666ccdb4 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 17:46:58 +0200
-Subject: [PATCH 56/58] fix(vss): take the in-use lease before the symlink; ci:
+Subject: [PATCH 56/59] fix(vss): take the in-use lease before the symlink; ci:
  bounded, diagnosable install test
 
 - The lease now exists before the snapshot symlink, so another process's

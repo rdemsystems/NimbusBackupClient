@@ -1,7 +1,7 @@
 From b3a5ed36ada2d97dc22705daee682640641654f5 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 15:58:09 +0200
-Subject: [PATCH 50/58] ci: verify the Authenticode signatures of every shipped
+Subject: [PATCH 50/59] ci: verify the Authenticode signatures of every shipped
  Windows file
 
 After signing, Get-AuthenticodeSignature must report Valid, a CN=RDEM SYSTEMS

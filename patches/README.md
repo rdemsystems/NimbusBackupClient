@@ -79,6 +79,7 @@ carry the Nimbus identity, docs and CI.
 | 0056 | fix(vss): take the in-use lease before the symlink; ci: bounded, diagnosable install test | upstream candidate (VSS part) |  |
 | 0057 | ci: quote msiexec arguments in the install test | fork-only |  |
 | 0058 | release: v0.4.1 | fork-only |  |
+| 0059 | test(e2e): wait until PBS is initialised, not just installed | upstream candidate | `datastore create` panicked on a missing authkey.key when the API answered before the keys existed. |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

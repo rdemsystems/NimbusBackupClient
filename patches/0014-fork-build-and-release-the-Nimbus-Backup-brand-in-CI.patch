@@ -1,7 +1,7 @@
 From 27cc30e848b55a9423f9ea558c1fc6d6629acc1b Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 23 Sep 2026 10:08:28 +0200
-Subject: [PATCH 14/58] fork: build and release the Nimbus Backup brand in CI
+Subject: [PATCH 14/59] fork: build and release the Nimbus Backup brand in CI
 
 Upstream's merge renamed every artifact in build-and-release.yml to
 ProxmoxBackupClient and replaced the Nimbus release notes; the fork

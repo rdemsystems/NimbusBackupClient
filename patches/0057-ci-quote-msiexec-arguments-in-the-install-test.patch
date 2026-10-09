@@ -1,7 +1,7 @@
 From 114ac250ae8f82f10597240dd7e171acfbf8552c Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 18:12:11 +0200
-Subject: [PATCH 57/58] ci: quote msiexec arguments in the install test
+Subject: [PATCH 57/59] ci: quote msiexec arguments in the install test
 
 Start-Process joins arguments without quoting: the uninstall log name
 contained a space ("Fresh install"), msiexec got a broken command line and

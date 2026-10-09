@@ -1,7 +1,7 @@
 From b664ee7c69825c54439227a61f5e4aab9c562073 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 17:20:10 +0200
-Subject: [PATCH 53/58] docs: state the upstream commit 0.4.1 is built on, in
+Subject: [PATCH 53/59] docs: state the upstream commit 0.4.1 is built on, in
  every README
 
 upstream master 3c1b989 (2026-10-09); no upstream release has this code yet
