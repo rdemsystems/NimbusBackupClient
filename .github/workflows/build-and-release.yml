@@ -570,6 +570,40 @@ jobs:
           }
           if ($bad -gt 0) { throw "$bad file(s) are not validly signed by RDEM SYSTEMS" }
 
+      # Windows Defender as users have it: GitHub runner images ship it with
+      # real-time protection off and C:\ and D:\ excluded. Turn real-time and
+      # cloud protection back on, drop the exclusions and update the
+      # signatures, so the install test below runs this build under Defender.
+      # Cloud block level stays at the desktop default: a stricter level would
+      # block releases on verdicts users never see. If Defender cannot be
+      # enabled on the runner the check is skipped with a warning.
+      - name: Enable Windows Defender
+        shell: pwsh
+        run: |
+          "DEFENDER_START=$((Get-Date).ToString('o'))" >> $env:GITHUB_ENV
+          try {
+            $pref = Get-MpPreference
+            if ($pref.ExclusionPath) { Remove-MpPreference -ExclusionPath $pref.ExclusionPath }
+            if ($pref.ExclusionProcess) { Remove-MpPreference -ExclusionProcess $pref.ExclusionProcess }
+            if ($pref.ExclusionExtension) { Remove-MpPreference -ExclusionExtension $pref.ExclusionExtension }
+            Set-MpPreference -DisableRealtimeMonitoring $false -DisableBehaviorMonitoring $false `
+              -DisableIOAVProtection $false -DisableScriptScanning $false -DisableArchiveScanning $false `
+              -DisableBlockAtFirstSeen $false -MAPSReporting Advanced -SubmitSamplesConsent SendSafeSamples `
+              -CloudBlockLevel Default
+            Update-MpSignature -UpdateSource MicrosoftUpdateServer
+            $st = Get-MpComputerStatus
+            if (-not $st.AMServiceEnabled -or -not $st.RealTimeProtectionEnabled) {
+              throw "service enabled: $($st.AMServiceEnabled), real-time protection: $($st.RealTimeProtectionEnabled)"
+            }
+            & "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -ValidateMapsConnection | Out-Null
+            $cloud = if ($LASTEXITCODE -eq 0) { 'cloud protection reachable' } else { 'cloud protection NOT reachable' }
+            $level = if ($LASTEXITCODE -eq 0) { 'notice' } else { 'warning' }
+            Write-Output "::$level title=Windows Defender::real-time protection on, signatures $($st.AntivirusSignatureVersion), $cloud"
+            "DEFENDER_ACTIVE=1" >> $env:GITHUB_ENV
+          } catch {
+            Write-Output "::warning title=Windows Defender::could not be enabled on this runner, the antivirus check is skipped: $_"
+          }
+
       # Install for real on this Windows runner, both ways users get it:
       # 1. a fresh install of this build's MSI on a clean machine;
       # 2. the published 0.4.0 MSI upgraded with this build's MSI.
@@ -634,6 +668,9 @@ jobs:
           Invoke-Msi '/i' "$PWD\dist\NimbusBackup.msi" "$logs\install-fresh.log" 'Fresh install'
           Test-Installed 'Fresh install'
           Test-Uninstall 'Fresh install'
+          # Defender detections up to here concern this build only; the
+          # Windows Defender check uses this mark to tell them from 0.4.0's.
+          (Get-Date).ToString('o') | Set-Content (Join-Path $env:RUNNER_TEMP 'fresh-install-done')
 
           $old = Join-Path $env:RUNNER_TEMP 'NimbusBackup-0.4.0.msi'
           Invoke-WebRequest -Uri 'https://github.com/rdemsystems/NimbusBackupClient/releases/download/v0.4.0/NimbusBackup.msi' -OutFile $old
@@ -644,6 +681,51 @@ jobs:
           Invoke-Msi '/i' "$PWD\dist\NimbusBackup.msi" "$logs\upgrade.log" 'Upgrading to this build'
           Test-Installed "Upgrade 0.4.0 -> $expected"
           Test-Uninstall 'Upgrade'
+
+      # Blocks the release when Defender flags this build: every shipped
+      # Windows file is scanned with cloud protection, and anything Defender
+      # caught while this build was installed and its service started fails
+      # the job. Detections during the upgrade phase may concern the
+      # published 0.4.0 files, so they are only reported as warnings.
+      - name: Windows Defender check
+        if: ${{ !cancelled() && env.DEFENDER_ACTIVE == '1' }}
+        shell: pwsh
+        run: |
+          $mpcmd = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          $bad = 0
+          $files = @('dist\NimbusBackup.exe', 'dist\NimbusBackupSVC.exe', 'dist\NimbusBackup.msi')
+          foreach ($f in $files) {
+            if (-not (Test-Path $f)) {
+              Write-Output "::error title=Defender ${f}::file missing, probably quarantined by Defender"
+              $bad++; continue
+            }
+            $out = & $mpcmd -Scan -ScanType 3 -File (Resolve-Path $f).Path -DisableRemediation 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              Write-Output "::notice title=Defender $(Split-Path $f -Leaf)::no threat found"
+            } else {
+              $msg = (($out | Out-String).Trim() -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A')
+              Write-Output "::error title=Defender $(Split-Path $f -Leaf) (MpCmdRun exit code $LASTEXITCODE)::$msg"
+              $bad++
+            }
+          }
+
+          $start = [datetime]::Parse($env:DEFENDER_START)
+          $markFile = Join-Path $env:RUNNER_TEMP 'fresh-install-done'
+          $freshDone = if (Test-Path $markFile) { [datetime]::Parse((Get-Content $markFile -Raw).Trim()) } else { [datetime]::MaxValue }
+          $names = @{}
+          Get-MpThreat -ErrorAction SilentlyContinue | ForEach-Object { $names[$_.ThreatID] = $_.ThreatName }
+          $detections = @(Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object { $_.InitialDetectionTime -ge $start })
+          foreach ($d in $detections) {
+            $what = "$($names[$d.ThreatID]) on $($d.Resources -join ', ') (process $($d.ProcessName))"
+            if ($d.InitialDetectionTime -le $freshDone) {
+              Write-Output "::error title=Defender detection (this build)::$what"
+              $bad++
+            } else {
+              Write-Output "::warning title=Defender detection (upgrade phase, may be 0.4.0)::$what"
+            }
+          }
+          if ($detections.Count -eq 0) { Write-Output "::notice title=Defender detections::none during the install tests" }
+          if ($bad -gt 0) { throw "Windows Defender flags this build ($bad finding(s)): the release is blocked" }
 
       - name: Upload GUI artifacts
         uses: actions/upload-artifact@v4
