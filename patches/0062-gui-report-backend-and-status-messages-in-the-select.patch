@@ -1,0 +1,1555 @@
+From cb4733773e4938ea315fc7590653c1ac483fd4a2 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Mon, 12 Oct 2026 14:34:39 +0200
+Subject: [PATCH 62/76] gui: report backend and status messages in the selected
+ language (issue #10)
+
+Many messages produced by the Go side (progress, errors, job history)
+and a dozen status messages in App.jsx were hard-coded in French, so an
+English UI showed e.g. "Session PBS perdue, attente ... avant retry".
+
+- Go: user-facing messages are now English, like the rest of the
+  backend output; tests updated to match.
+- api/cancel.go: still recognise the old French cancellation text.
+- App.jsx: hard-coded status messages go through t(), with new keys in
+  the five UI languages.
+---
+ gui/api/cancel.go                     |  2 +
+ gui/api/mode.go                       | 12 +++---
+ gui/api/server_test.go                |  8 ++--
+ gui/api_wrappers.go                   |  4 +-
+ gui/backup_inline.go                  | 20 +++++-----
+ gui/config.go                         | 56 +++++++++++++--------------
+ gui/crypt_key.go                      | 42 ++++++++++----------
+ gui/crypt_test.go                     |  2 +-
+ gui/frontend/src/App.jsx              | 34 ++++++++--------
+ gui/frontend/src/i18n/translations.js | 50 ++++++++++++++++++++++++
+ gui/login.go                          |  2 +-
+ gui/main.go                           | 48 +++++++++++------------
+ gui/paperkey_gui.go                   | 18 ++++-----
+ gui/pbs_server.go                     | 30 +++++++-------
+ gui/restore_inline.go                 |  8 ++--
+ gui/restore_search.go                 | 18 ++++-----
+ gui/restore_search_test.go            | 18 ++++-----
+ gui/scheduler.go                      | 18 ++++-----
+ gui/scheduler_test.go                 | 10 ++---
+ gui/service_api.go                    | 16 ++++----
+ gui/service_config_test.go            |  2 +-
+ 21 files changed, 235 insertions(+), 183 deletions(-)
+
+diff --git a/gui/api/cancel.go b/gui/api/cancel.go
+index cf41555..4b3b0fb 100644
+--- a/gui/api/cancel.go
++++ b/gui/api/cancel.go
+@@ -21,5 +21,7 @@ func isCancelled(err error) bool {
+ 	msg := err.Error()
+ 	return msg == cancelledMessage ||
+ 		strings.HasSuffix(msg, "Machine backup cancelled by user") ||
++		strings.HasSuffix(msg, "Backup cancelled by user") ||
++		// Wording used up to v0.4.1.
+ 		strings.HasSuffix(msg, "Backup annulé par l'utilisateur")
+ }
+diff --git a/gui/api/mode.go b/gui/api/mode.go
+index 1bea9cc..c446bcf 100644
+--- a/gui/api/mode.go
++++ b/gui/api/mode.go
+@@ -72,7 +72,7 @@ func ShouldWarnVSS(useVSS bool, mode ExecutionMode, isAdmin bool) (bool, string)
+ 	}
+ 
+ 	if mode == ModeStandalone && !isAdmin {
+-		return true, "VSS (Shadow Copy) nécessite les privilèges administrateur - veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS"
++		return true, "VSS (Shadow Copy) requires administrator privileges - restart the application as administrator or disable VSS"
+ 	}
+ 
+ 	return false, ""
+@@ -84,16 +84,16 @@ func GetModeDescription(mode ExecutionMode) string {
+ 	case ModeService:
+ 		return fmt.Sprintf(
+ 			"✅ Mode Service\n" +
+-				"Le service Windows gère les backups avec privilèges admin.\n" +
+-				"VSS (Shadow Copy) fonctionne automatiquement.",
++				"The Windows service runs backups with administrator privileges.\n" +
++				"VSS (Shadow Copy) works automatically.",
+ 		)
+ 	case ModeStandalone:
+ 		return fmt.Sprintf(
+ 			"⚠️ Mode Standalone\n" +
+-				"Backup direct sans service Windows.\n" +
+-				"VSS nécessite de lancer l'application en tant qu'administrateur.",
++				"Direct backup without the Windows service.\n" +
++				"VSS requires running the application as administrator.",
+ 		)
+ 	default:
+-		return "Mode inconnu"
++		return "Unknown mode"
+ 	}
+ }
+diff --git a/gui/api/server_test.go b/gui/api/server_test.go
+index 5c9ba1f..9f84d7b 100644
+--- a/gui/api/server_test.go
++++ b/gui/api/server_test.go
+@@ -230,7 +230,7 @@ func TestBackupRouteForwardsCompressionAndPBS(t *testing.T) {
+ // A job that cannot be started (unknown id, already running) is a conflict, and
+ // the service's message is what the caller sees.
+ func TestJobRunReportsFailure(t *testing.T) {
+-	h := &fakeHandler{runErr: fmt.Errorf("job \"Nightly\" est deja en cours d'execution")}
++	h := &fakeHandler{runErr: fmt.Errorf("job \"Nightly\" is already running")}
+ 	_, url, _ := newTestServer(t, h)
+ 
+ 	resp := doAuthed(t, http.MethodPost, url+"/jobs/run/job-42", "")
+@@ -241,7 +241,7 @@ func TestJobRunReportsFailure(t *testing.T) {
+ 	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+ 		t.Fatalf("decode error: %v", err)
+ 	}
+-	if !strings.Contains(errResp.Error, "deja en cours") {
++	if !strings.Contains(errResp.Error, "already running") {
+ 		t.Errorf("error = %q, want the service's message", errResp.Error)
+ 	}
+ 	if h.ranID != "" {
+@@ -369,14 +369,14 @@ func TestJobCreateForwardsEveryField(t *testing.T) {
+ 
+ // The GUI's client reports the service's own message when a run is refused.
+ func TestClientRunScheduledJobSurfacesServiceError(t *testing.T) {
+-	h := &fakeHandler{runErr: fmt.Errorf("job planifie \"nope\" introuvable")}
++	h := &fakeHandler{runErr: fmt.Errorf("scheduled job \"nope\" not found")}
+ 	_, _, client := newTestServer(t, h)
+ 
+ 	err := client.RunScheduledJob("nope")
+ 	if err == nil {
+ 		t.Fatalf("RunScheduledJob() succeeded for an unknown job")
+ 	}
+-	if !strings.Contains(err.Error(), "introuvable") {
++	if !strings.Contains(err.Error(), "not found") {
+ 		t.Errorf("error = %q, want the service's message", err)
+ 	}
+ }
+diff --git a/gui/api_wrappers.go b/gui/api_wrappers.go
+index 0a06aa5..6d3390b 100644
+--- a/gui/api_wrappers.go
++++ b/gui/api_wrappers.go
+@@ -55,7 +55,7 @@ func (a *App) DeleteScheduledJobFromMap(jobID string) error {
+ // persist and the connection test would keep reporting the server offline.
+ func (a *App) pinFingerprintLocal(id, fingerprint string) error {
+ 	if err := security.ValidateFingerprint(fingerprint); err != nil {
+-		return fmt.Errorf("empreinte certificat invalide: %w", err)
++		return fmt.Errorf("invalid certificate fingerprint: %w", err)
+ 	}
+ 	pbs, err := a.config.GetPBSServer(id)
+ 	if err != nil {
+@@ -64,7 +64,7 @@ func (a *App) pinFingerprintLocal(id, fingerprint string) error {
+ 	pbs.CertFingerprint = fingerprint
+ 	if err := a.config.UpdatePBSServer(pbs); err != nil {
+ 		writeDebugLog(fmt.Sprintf("pinFingerprintLocal: could not persist fingerprint for %q: %v", id, err))
+-		return fmt.Errorf("impossible d'enregistrer l'empreinte (config.json non accessible en écriture ?): %w", err)
++		return fmt.Errorf("cannot save the fingerprint (is config.json writable?): %w", err)
+ 	}
+ 	// Read the file back so the log states unambiguously whether the fingerprint
+ 	// reached disk — this separates a write/permission failure from a TLS-apply bug
+diff --git a/gui/backup_inline.go b/gui/backup_inline.go
+index 6432637..7dba5c3 100644
+--- a/gui/backup_inline.go
++++ b/gui/backup_inline.go
+@@ -332,10 +332,10 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
+ 				var msg string
+ 				failed := c.failedchunk.Load()
+ 				if failed > 0 {
+-					msg = fmt.Sprintf("Traité: %d MB (New: %d, Reused: %d, ⚠️ Failed: %d chunks)",
++					msg = fmt.Sprintf("Processed: %d MB (New: %d, Reused: %d, ⚠️ Failed: %d chunks)",
+ 						sizeMB, c.newchunk.Load(), c.reusechunk.Load(), failed)
+ 				} else {
+-					msg = fmt.Sprintf("Traité: %d MB (New: %d, Reused: %d chunks)",
++					msg = fmt.Sprintf("Processed: %d MB (New: %d, Reused: %d chunks)",
+ 						sizeMB, c.newchunk.Load(), c.reusechunk.Load())
+ 				}
+ 
+@@ -349,10 +349,10 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
+ 						progress = 0.9
+ 					}
+ 					if failed > 0 {
+-						msg = fmt.Sprintf("Traité: %d / %d MB (New: %d, Reused: %d, ⚠️ Failed: %d chunks)",
++						msg = fmt.Sprintf("Processed: %d / %d MB (New: %d, Reused: %d, ⚠️ Failed: %d chunks)",
+ 							sizeMB, totalSize/(1024*1024), c.newchunk.Load(), c.reusechunk.Load(), failed)
+ 					} else {
+-						msg = fmt.Sprintf("Traité: %d / %d MB (New: %d, Reused: %d chunks)",
++						msg = fmt.Sprintf("Processed: %d / %d MB (New: %d, Reused: %d chunks)",
+ 							sizeMB, totalSize/(1024*1024), c.newchunk.Load(), c.reusechunk.Load())
+ 					}
+ 				} else {
+@@ -624,9 +624,9 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
+ 
+ 	agg.DurationSec = time.Since(aggStart).Seconds()
+ 	if len(perDirErrors) > 0 {
+-		agg.Message = fmt.Sprintf("%d/%d dossiers en échec:\n%s", len(perDirErrors), len(opts.BackupObjects), strings.Join(perDirErrors, "\n"))
++		agg.Message = fmt.Sprintf("%d/%d folders failed:\n%s", len(perDirErrors), len(opts.BackupObjects), strings.Join(perDirErrors, "\n"))
+ 	} else {
+-		agg.Message = fmt.Sprintf("Backup de %d dossiers terminé (%d new, %d reused chunks)", len(opts.BackupObjects), agg.NewChunks, agg.ReusedChunks)
++		agg.Message = fmt.Sprintf("Backup of %d folders complete (%d new, %d reused chunks)", len(opts.BackupObjects), agg.NewChunks, agg.ReusedChunks)
+ 	}
+ 
+ 	if opts.OnComplete != nil {
+@@ -998,7 +998,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
+ 		if opts.Ctx != nil && opts.Ctx.Err() != nil {
+ 			writeBackupLog(fmt.Sprintf("Cancellation requested — stopping before backup of %s", dir))
+ 			if opts.OnComplete != nil {
+-				opts.OnComplete(false, "Backup annulé par l'utilisateur")
++				opts.OnComplete(false, "Backup cancelled by user")
+ 			}
+ 			return machinebackuplib.ErrCancelled
+ 		}
+@@ -1042,7 +1042,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
+ 					if opts.Ctx != nil && opts.Ctx.Err() != nil {
+ 						writeBackupLog("Cancellation requested during session-lost wait — aborting")
+ 						if opts.OnComplete != nil {
+-							opts.OnComplete(false, "Backup annulé par l'utilisateur")
++							opts.OnComplete(false, "Backup cancelled by user")
+ 						}
+ 						return machinebackuplib.ErrCancelled
+ 					}
+@@ -1050,7 +1050,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
+ 					if remaining <= 0 {
+ 						break
+ 					}
+-					progress(0, fmt.Sprintf("Session PBS perdue, attente %s avant retry (lock PBS en cours de libération)...",
++					progress(0, fmt.Sprintf("PBS session lost, waiting %s before retrying (PBS lock being released)...",
+ 						remaining.Round(time.Second)))
+ 					sleepFor := 30 * time.Second
+ 					if remaining < sleepFor {
+@@ -1153,7 +1153,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
+ 	progress(1.0, progressMsg)
+ 
+ 	if len(allSkipped) > 0 {
+-		completionMsg += fmt.Sprintf("\n⚠️  %d fichiers/dossiers ignorés (accès refusé ou junction points)", len(allSkipped))
++		completionMsg += fmt.Sprintf("\n⚠️  %d files/folders skipped (access denied or junction points)", len(allSkipped))
+ 		writeBackupLog(fmt.Sprintf("=== SKIPPED FILES/DIRECTORIES (%d) ===", len(allSkipped)))
+ 
+ 		// Log first 50 skipped files in detail
+diff --git a/gui/config.go b/gui/config.go
+index c2d15c4..9013913 100644
+--- a/gui/config.go
++++ b/gui/config.go
+@@ -331,7 +331,7 @@ func LoadConfig() *Config {
+ 			EncryptionKeyFile: config.EncryptionKeyFile,
+ 			Datastore:         config.Datastore,
+ 			Namespace:         config.Namespace,
+-			Description:       "Serveur PBS par défaut (migré depuis ancienne config)",
++			Description:       "Default PBS server (migrated from the previous config)",
+ 		}
+ 
+ 		// Initialize PBSServers map if nil
+@@ -371,51 +371,51 @@ func (c *Config) Save() error {
+ func (c *Config) Validate() error {
+ 	// Validate BaseURL
+ 	if c.BaseURL == "" {
+-		return fmt.Errorf("URL du serveur PBS requis")
++		return fmt.Errorf("PBS server URL is required")
+ 	}
+ 	if err := security.ValidateURL(c.BaseURL); err != nil {
+-		return fmt.Errorf("URL invalide: %w", err)
++		return fmt.Errorf("invalid URL: %w", err)
+ 	}
+ 
+ 	// Auth: an API token (AuthID+Secret), a stored username/password (a fresh
+ 	// ticket is minted per operation by App.withAuth), or an in-flight ticket.
+ 	if c.AuthID != "" {
+ 		if err := security.ValidateAuthID(c.AuthID); err != nil {
+-			return fmt.Errorf("authentication ID invalide: %w", err)
++			return fmt.Errorf("invalid authentication ID: %w", err)
+ 		}
+ 		if c.Secret == "" {
+-			return fmt.Errorf("secret requis")
++			return fmt.Errorf("secret is required")
+ 		}
+ 	} else if c.Ticket == "" && (c.Username == "" || c.Password == "") {
+-		return fmt.Errorf("authentification requise (API token ou utilisateur/mot de passe)")
++		return fmt.Errorf("authentication is required (API token or username/password)")
+ 	}
+ 
+ 	// Validate Datastore
+ 	if c.Datastore == "" {
+-		return fmt.Errorf("datastore requis")
++		return fmt.Errorf("datastore is required")
+ 	}
+ 	if err := security.ValidateDatastore(c.Datastore); err != nil {
+-		return fmt.Errorf("datastore invalide: %w", err)
++		return fmt.Errorf("invalid datastore: %w", err)
+ 	}
+ 
+ 	// Validate BackupID if present
+ 	if c.BackupID != "" {
+ 		if err := security.ValidateBackupID(c.BackupID); err != nil {
+-			return fmt.Errorf("backup ID invalide: %w", err)
++			return fmt.Errorf("invalid backup ID: %w", err)
+ 		}
+ 	}
+ 
+ 	// Validate Certificate Fingerprint if present
+ 	if c.CertFingerprint != "" {
+ 		if err := security.ValidateFingerprint(c.CertFingerprint); err != nil {
+-			return fmt.Errorf("empreinte certificat invalide: %w", err)
++			return fmt.Errorf("invalid certificate fingerprint: %w", err)
+ 		}
+ 	}
+ 
+ 	// Validate BackupDir if present
+ 	if c.BackupDir != "" {
+ 		if err := security.ValidatePath(c.BackupDir); err != nil {
+-			return fmt.Errorf("chemin de backup invalide: %w", err)
++			return fmt.Errorf("invalid backup path: %w", err)
+ 		}
+ 	}
+ 
+@@ -442,10 +442,10 @@ func (c *Config) validatePBSFields() error {
+ 	// Credentials first: they are what the legacy block is really about.
+ 	if c.AuthID != "" {
+ 		if err := security.ValidateAuthID(c.AuthID); err != nil {
+-			return fmt.Errorf("authentication ID invalide: %w", err)
++			return fmt.Errorf("invalid authentication ID: %w", err)
+ 		}
+ 		if c.Secret == "" {
+-			return fmt.Errorf("secret requis")
++			return fmt.Errorf("secret is required")
+ 		}
+ 	} else if c.Username != "" {
+ 		if err := security.ValidateUsername(c.Username); err != nil {
+@@ -462,27 +462,27 @@ func (c *Config) validatePBSFields() error {
+ 
+ 	if c.BaseURL != "" {
+ 		if err := security.ValidateURL(c.BaseURL); err != nil {
+-			return fmt.Errorf("URL du serveur PBS invalide: %w", err)
++			return fmt.Errorf("invalid PBS server URL: %w", err)
+ 		}
+ 	}
+ 	if c.CertFingerprint != "" {
+ 		if err := security.ValidateFingerprint(c.CertFingerprint); err != nil {
+-			return fmt.Errorf("empreinte certificat invalide: %w", err)
++			return fmt.Errorf("invalid certificate fingerprint: %w", err)
+ 		}
+ 	}
+ 	if c.Datastore != "" {
+ 		if err := security.ValidateDatastore(c.Datastore); err != nil {
+-			return fmt.Errorf("datastore invalide: %w", err)
++			return fmt.Errorf("invalid datastore: %w", err)
+ 		}
+ 	}
+ 	if c.BackupID != "" {
+ 		if err := security.ValidateBackupID(c.BackupID); err != nil {
+-			return fmt.Errorf("backup ID invalide: %w", err)
++			return fmt.Errorf("invalid backup ID: %w", err)
+ 		}
+ 	}
+ 	if c.BackupDir != "" {
+ 		if err := security.ValidatePath(c.BackupDir); err != nil {
+-			return fmt.Errorf("chemin de backup invalide: %w", err)
++			return fmt.Errorf("invalid backup path: %w", err)
+ 		}
+ 	}
+ 	return nil
+@@ -499,17 +499,17 @@ func (c *Config) validateEncryptionKeyFile() error {
+ 		return nil
+ 	}
+ 	if err := security.ValidatePath(c.EncryptionKeyFile); err != nil {
+-		return fmt.Errorf("chemin de cle de chiffrement invalide: %w", err)
++		return fmt.Errorf("invalid encryption key path: %w", err)
+ 	}
+ 	if _, err := os.Stat(c.EncryptionKeyFile); err != nil {
+-		return fmt.Errorf("fichier de cle de chiffrement illisible (%s): %w", c.EncryptionKeyFile, err)
++		return fmt.Errorf("encryption key file is unreadable (%s): %w", c.EncryptionKeyFile, err)
+ 	}
+ 	keyCfg, err := pbscommon.LoadKeyConfig(c.EncryptionKeyFile)
+ 	if err != nil {
+-		return fmt.Errorf("lecture du fichier de cle de chiffrement %s: %w", c.EncryptionKeyFile, err)
++		return fmt.Errorf("reading encryption key file %s: %w", c.EncryptionKeyFile, err)
+ 	}
+ 	if keyCfg.KDF != nil {
+-		return fmt.Errorf("le fichier de cle de chiffrement %s est protege par phrase de passe, ce que l'interface graphique ne peut pas deverrouiller: utilisez une cle creee avec `proxmox-backup-client key create --kdf none`, ou restaurez depuis la ligne de commande", c.EncryptionKeyFile)
++		return fmt.Errorf("encryption key file %s is protected by a passphrase, which the GUI cannot unlock: use a key created with `proxmox-backup-client key create --kdf none`, or restore from the command line", c.EncryptionKeyFile)
+ 	}
+ 	return nil
+ }
+@@ -561,13 +561,13 @@ func (c *Config) GetPBSServer(id string) (*PBSServer, error) {
+ 
+ 	// If still empty, return error
+ 	if id == "" {
+-		return nil, fmt.Errorf("aucun serveur PBS spécifié et pas de serveur par défaut")
++		return nil, fmt.Errorf("no PBS server specified and no default server")
+ 	}
+ 
+ 	// Get server by ID
+ 	pbs, exists := c.PBSServers[id]
+ 	if !exists {
+-		return nil, fmt.Errorf("serveur PBS '%s' introuvable", id)
++		return nil, fmt.Errorf("PBS server '%s' not found", id)
+ 	}
+ 
+ 	return pbs, nil
+@@ -594,7 +594,7 @@ func (c *Config) AddPBSServerMem(pbs *PBSServer) error {
+ 
+ 	// Check if ID already exists
+ 	if _, exists := c.PBSServers[pbs.ID]; exists {
+-		return fmt.Errorf("serveur PBS avec ID '%s' existe déjà", pbs.ID)
++		return fmt.Errorf("PBS server with ID '%s' already exists", pbs.ID)
+ 	}
+ 
+ 	c.PBSServers[pbs.ID] = pbs
+@@ -625,7 +625,7 @@ func (c *Config) AddPBSServer(pbs *PBSServer) error {
+ func (c *Config) UpdatePBSServerMem(pbs *PBSServer, requireCreds bool) error {
+ 	existing, exists := c.PBSServers[pbs.ID]
+ 	if !exists {
+-		return fmt.Errorf("serveur PBS '%s' introuvable", pbs.ID)
++		return fmt.Errorf("PBS server '%s' not found", pbs.ID)
+ 	}
+ 
+ 	// Selects the auth method, clears the other one, and applies the
+@@ -655,7 +655,7 @@ func (c *Config) UpdatePBSServer(pbs *PBSServer) error {
+ // WITHOUT persisting (see AddPBSServerMem).
+ func (c *Config) DeletePBSServerMem(id string) error {
+ 	if _, exists := c.PBSServers[id]; !exists {
+-		return fmt.Errorf("serveur PBS '%s' introuvable", id)
++		return fmt.Errorf("PBS server '%s' not found", id)
+ 	}
+ 
+ 	delete(c.PBSServers, id)
+@@ -697,7 +697,7 @@ func (c *Config) ListPBSServers() []*PBSServer {
+ // (see AddPBSServerMem).
+ func (c *Config) SetDefaultPBSMem(id string) error {
+ 	if _, exists := c.PBSServers[id]; !exists {
+-		return fmt.Errorf("serveur PBS '%s' introuvable", id)
++		return fmt.Errorf("PBS server '%s' not found", id)
+ 	}
+ 
+ 	c.DefaultPBSID = id
+diff --git a/gui/crypt_key.go b/gui/crypt_key.go
+index 0c426bb..de14368 100644
+--- a/gui/crypt_key.go
++++ b/gui/crypt_key.go
+@@ -42,18 +42,18 @@ func inspectKeyFile(path string) EncryptionKeyInfo {
+ 
+ 	st, err := os.Stat(path)
+ 	if err != nil {
+-		info.Reason = fmt.Sprintf("fichier introuvable ou illisible: %v", err)
++		info.Reason = fmt.Sprintf("file not found or unreadable: %v", err)
+ 		return info
+ 	}
+ 	info.Exists = true
+ 	if st.IsDir() {
+-		info.Reason = "le chemin designe un dossier, pas un fichier de cle"
++		info.Reason = "the path is a folder, not a key file"
+ 		return info
+ 	}
+ 
+ 	keyCfg, err := pbscommon.LoadKeyConfig(path)
+ 	if err != nil {
+-		info.Reason = fmt.Sprintf("lecture impossible: %v", err)
++		info.Reason = fmt.Sprintf("cannot read: %v", err)
+ 		return info
+ 	}
+ 	info.Fingerprint = keyCfg.Fingerprint
+@@ -63,14 +63,14 @@ func inspectKeyFile(path string) EncryptionKeyInfo {
+ 	info.PassphraseProtected = keyCfg.KDF != nil
+ 
+ 	if info.PassphraseProtected {
+-		info.Reason = "cle protegee par phrase de passe: l'interface graphique ne peut pas la deverrouiller (creez-la avec --kdf none)"
++		info.Reason = "key is protected by a passphrase: the GUI cannot unlock it (create it with --kdf none)"
+ 		return info
+ 	}
+ 
+ 	// Actually unlock it: a fingerprint alone does not prove the key material is
+ 	// intact, and a corrupt key would otherwise only fail mid-backup.
+ 	if _, err := keyCfg.CryptConfig(nil); err != nil {
+-		info.Reason = fmt.Sprintf("cle illisible: %v", err)
++		info.Reason = fmt.Sprintf("unreadable key: %v", err)
+ 		return info
+ 	}
+ 
+@@ -95,51 +95,51 @@ func (a *App) InspectEncryptionKeyFile(path string) EncryptionKeyInfo {
+ func (a *App) GenerateEncryptionKeyFile(path string) (EncryptionKeyInfo, error) {
+ 	path = strings.TrimSpace(path)
+ 	if path == "" {
+-		return EncryptionKeyInfo{}, fmt.Errorf("chemin de fichier de cle requis")
++		return EncryptionKeyInfo{}, fmt.Errorf("key file path is required")
+ 	}
+ 	if err := security.ValidatePath(path); err != nil {
+-		return EncryptionKeyInfo{}, fmt.Errorf("chemin de cle invalide: %w", err)
++		return EncryptionKeyInfo{}, fmt.Errorf("invalid key path: %w", err)
+ 	}
+ 
+ 	if _, err := os.Stat(path); err == nil {
+-		return EncryptionKeyInfo{}, fmt.Errorf("le fichier %s existe deja: refusing de l'ecraser, car cela rendrait illisibles les snapshots deja chiffres avec cette cle", path)
++		return EncryptionKeyInfo{}, fmt.Errorf("file %s already exists: refusing to overwrite it, as that would make snapshots already encrypted with that key unreadable", path)
+ 	} else if !os.IsNotExist(err) {
+-		return EncryptionKeyInfo{}, fmt.Errorf("verification de %s: %w", path, err)
++		return EncryptionKeyInfo{}, fmt.Errorf("checking %s: %w", path, err)
+ 	}
+ 
+ 	dir := filepath.Dir(path)
+ 	if st, err := os.Stat(dir); err != nil {
+ 		if !os.IsNotExist(err) {
+-			return EncryptionKeyInfo{}, fmt.Errorf("dossier %s: %w", dir, err)
++			return EncryptionKeyInfo{}, fmt.Errorf("folder %s: %w", dir, err)
+ 		}
+ 		if err := os.MkdirAll(dir, 0700); err != nil {
+-			return EncryptionKeyInfo{}, fmt.Errorf("creation du dossier %s: %w", dir, err)
++			return EncryptionKeyInfo{}, fmt.Errorf("creating folder %s: %w", dir, err)
+ 		}
+ 	} else if !st.IsDir() {
+-		return EncryptionKeyInfo{}, fmt.Errorf("%s n'est pas un dossier", dir)
++		return EncryptionKeyInfo{}, fmt.Errorf("%s is not a folder", dir)
+ 	}
+ 
+ 	encKey, err := pbscommon.GenerateEncryptionKey()
+ 	if err != nil {
+-		return EncryptionKeyInfo{}, fmt.Errorf("generation de la cle: %w", err)
++		return EncryptionKeyInfo{}, fmt.Errorf("generating the key: %w", err)
+ 	}
+ 	crypt, err := pbscommon.NewCryptConfig(encKey)
+ 	if err != nil {
+-		return EncryptionKeyInfo{}, fmt.Errorf("cle invalide: %w", err)
++		return EncryptionKeyInfo{}, fmt.Errorf("invalid key: %w", err)
+ 	}
+ 
+ 	// SaveKeyFile writes 0600. On Windows the mode is advisory only, so the key
+ 	// is additionally hidden from other users by ACL inheritance of the parent
+ 	// directory created above; nothing else to do here.
+ 	if err := pbscommon.SaveKeyFile(path, crypt); err != nil {
+-		return EncryptionKeyInfo{}, fmt.Errorf("ecriture de %s: %w", path, err)
++		return EncryptionKeyInfo{}, fmt.Errorf("writing %s: %w", path, err)
+ 	}
+ 
+ 	info := inspectKeyFile(path)
+ 	if !info.Usable {
+ 		// A key we just wrote that we cannot read back is a serious inconsistency;
+ 		// surface it instead of handing the frontend a silently unusable path.
+-		return EncryptionKeyInfo{}, fmt.Errorf("la cle %s a ete ecrite mais ne peut pas etre relue: %s", path, info.Reason)
++		return EncryptionKeyInfo{}, fmt.Errorf("key %s was written but cannot be read back: %s", path, info.Reason)
+ 	}
+ 	writeDebugLog(fmt.Sprintf("GenerateEncryptionKeyFile: created %s (fingerprint %s)", path, info.Fingerprint))
+ 	return info, nil
+@@ -167,11 +167,11 @@ func (a *App) OpenEncryptionKeyDialog() (string, error) {
+ 		defaultDir = os.TempDir()
+ 	}
+ 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+-		Title:            "Choisir le fichier de cle de chiffrement",
++		Title:            "Choose the encryption key file",
+ 		DefaultDirectory: defaultDir,
+ 		Filters: []runtime.FileFilter{
+-			{DisplayName: "Fichiers de cle PBS (*.json)", Pattern: "*.json"},
+-			{DisplayName: "Tous les fichiers (*.*)", Pattern: "*.*"},
++			{DisplayName: "PBS key files (*.json)", Pattern: "*.json"},
++			{DisplayName: "All files (*.*)", Pattern: "*.*"},
+ 		},
+ 	})
+ }
+@@ -193,11 +193,11 @@ func (a *App) OpenEncryptionKeySaveDialog() (string, error) {
+ 		}
+ 	}
+ 	return runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+-		Title:            "Enregistrer la nouvelle cle de chiffrement",
++		Title:            "Save the new encryption key",
+ 		DefaultDirectory: defaultDir,
+ 		DefaultFilename:  "encryption-key.json",
+ 		Filters: []runtime.FileFilter{
+-			{DisplayName: "Fichiers de cle PBS (*.json)", Pattern: "*.json"},
++			{DisplayName: "PBS key files (*.json)", Pattern: "*.json"},
+ 		},
+ 	})
+ }
+diff --git a/gui/crypt_test.go b/gui/crypt_test.go
+index 804ab7f..9e26f7d 100644
+--- a/gui/crypt_test.go
++++ b/gui/crypt_test.go
+@@ -243,7 +243,7 @@ func TestConfigValidateEncryptionKeyFile(t *testing.T) {
+ 		{"valid key file", good, ""},
+ 		{"missing file", missing, "missing.json"},
+ 		{"malformed file", notAKey, "garbage.json"},
+-		{"passphrase protected rejected", protected, "phrase de passe"},
++		{"passphrase protected rejected", protected, "passphrase"},
+ 		{"path traversal rejected", traversal, "cannot contain '..'"},
+ 	}
+ 	for _, tc := range tests {
+diff --git a/gui/frontend/src/App.jsx b/gui/frontend/src/App.jsx
+index 8b5a3d2..fd17e8d 100644
+--- a/gui/frontend/src/App.jsx
++++ b/gui/frontend/src/App.jsx
+@@ -651,7 +651,7 @@ function App() {
+       setServerTab('server')
+       await loadPBSServers()
+     } catch (err) {
+-      showStatus(`❌ Erreur: ${err}`, 'error')
++      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
+     }
+   }
+ 
+@@ -691,7 +691,7 @@ function App() {
+       setServerTab('server')
+       await loadPBSServers()
+     } catch (err) {
+-      showStatus(`❌ Erreur: ${err}`, 'error')
++      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
+     }
+   }
+ 
+@@ -710,7 +710,7 @@ function App() {
+       showStatus(`✅ ${t('statusServerDeleted')}`, 'success')
+       await loadPBSServers()
+     } catch (err) {
+-      showStatus(`❌ Erreur: ${err}`, 'error')
++      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
+     }
+   }
+ 
+@@ -725,7 +725,7 @@ function App() {
+       setDefaultPBSID(id)
+       showStatus(`✅ ${t('statusServerSetDefault').replace('{id}', id)}`, 'success')
+     } catch (err) {
+-      showStatus(`❌ Erreur: ${err}`, 'error')
++      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
+     }
+   }
+ 
+@@ -1004,7 +1004,7 @@ function App() {
+       setConfig(trimmedConfig)
+       showStatus(`✅ ${t('statusConfigSaved')}`, 'success')
+     } catch (err) {
+-      showStatus(`❌ Erreur : ${err}`, 'error')
++      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
+     }
+   }
+ 
+@@ -1122,7 +1122,7 @@ function App() {
+         const promise = new Promise((resolve) => {
+           unsub = EventsOn('backup:complete', (data) => {
+             if (typeof unsub === 'function') unsub()
+-            resolve(data || { success: false, message: 'completion sans données' })
++            resolve(data || { success: false, message: t('completionNoData') })
+           })
+         })
+         return { promise, cancel: () => { if (typeof unsub === 'function') unsub() } }
+@@ -1209,7 +1209,7 @@ function App() {
+     const dirList = backupDirs.split('\n').map(d => d.trim()).filter(d => d)
+ 
+     if (backupType === 'directory' && dirList.length === 0) {
+-      showStatus('❌ Au moins un répertoire requis', 'error')
++      showStatus(`❌ ${t('atLeastOneDir')}`, 'error')
+       return
+     }
+ 
+@@ -1252,17 +1252,17 @@ function App() {
+           if (!canModify) {
+             // Request elevation
+             if (RequestJobModificationElevation) {
+-              showStatus('⚠️ Privilèges administrateur requis pour modifier les jobs planifiés', 'warning')
++              showStatus(`⚠️ ${t('scheduleAdminRequired')}`, 'warning')
+               try {
+                 await RequestJobModificationElevation()
+               } catch (err) {
+-                showStatus(`❌ Échec de l'élévation des privilèges: ${err}`, 'error')
++                showStatus(`❌ ${t('elevationFailed', { error: err })}`, 'error')
+               }
+             }
+             return
+           }
+         } catch (err) {
+-          showStatus(`❌ Erreur vérification privilèges: ${err}`, 'error')
++          showStatus(`❌ ${t('privilegeCheckError', { err })}`, 'error')
+           return
+         }
+       }
+@@ -1290,13 +1290,13 @@ function App() {
+           // Update existing job
+           await UpdateScheduledJob(jobData)
+           setScheduledJobs(scheduledJobs.map(j => j.id === editingJobId ? jobData : j))
+-          showStatus(`✅ Backup modifié pour ${scheduleTime}`, 'success')
++          showStatus(`✅ ${t('scheduleUpdated', { time: scheduleTime })}`, 'success')
+           setEditingJobId(null)
+         } else {
+           // Create new job
+           await SaveScheduledJob(jobData)
+           setScheduledJobs([...scheduledJobs, jobData])
+-          showStatus(`✅ Backup planifié pour ${scheduleTime}`, 'success')
++          showStatus(`✅ ${t('scheduleCreated', { time: scheduleTime })}`, 'success')
+         }
+         // Reset form after save
+         setScheduleTime('02:00')
+@@ -1305,7 +1305,7 @@ function App() {
+         setBackupPBSID('')
+         setMachineBackupKind('host')
+       } catch (err) {
+-        showStatus(`❌ Erreur: ${err}`, 'error')
++        showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
+       }
+       return
+     }
+@@ -1374,7 +1374,7 @@ function App() {
+       return
+     }
+     if (!restoreBackupId) {
+-      showStatus('❌ Backup ID requis', 'error')
++      showStatus(`❌ ${t('backupIdRequired')}`, 'error')
+       return
+     }
+ 
+@@ -1388,7 +1388,7 @@ function App() {
+       const snaps = await ListSnapshots(restorePBSID || '', restoreBackupId)
+       setSnapshots(snaps || [])
+       setShowSnapshots(true)
+-      showStatus(`✅ ${snaps.length} snapshot(s) trouvé(s)`, 'success')
++      showStatus(`✅ ${t('snapshotsFound', { n: snaps.length })}`, 'success')
+     } catch (err) {
+       showStatus(`❌ ${err}`, 'error')
+     }
+@@ -2322,7 +2322,7 @@ function App() {
+                     <div>
+                       <strong>{job.name}</strong>
+                       <div style={{fontSize: '14px', color: '#6c757d', marginTop: '5px'}}>
+-                        ⏰ {job.scheduleTime} {job.runAtStartup && '• 🚀 Au démarrage'}
++                        ⏰ {job.scheduleTime} {job.runAtStartup && `• 🚀 ${t('atStartup')}`}
+                       </div>
+                       <div style={{fontSize: '13px', color: '#6c757d', marginTop: '3px'}}>
+                         📁 {(job.backupDirs || []).join(', ')}
+@@ -2381,7 +2381,7 @@ function App() {
+                               setEditingJobId(null)
+                             }
+                           } catch (err) {
+-                            showStatus(`❌ Erreur: ${err}`, 'error')
++                            showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
+                           }
+                         }}
+                       >
+diff --git a/gui/frontend/src/i18n/translations.js b/gui/frontend/src/i18n/translations.js
+index e8c9064..5ceee45 100644
+--- a/gui/frontend/src/i18n/translations.js
++++ b/gui/frontend/src/i18n/translations.js
+@@ -227,6 +227,16 @@ const translations = {
+       allPartsDone: "Tous les backups partiels terminés avec succès ({n}/{total})",
+       partialBackup: "Backup partiel: {ok}/{total} OK, {fail} échec(s) :\n{fails}",
+       splitBackupError: "Erreur split backup: {err}",
++      errWithMsg: "Erreur : {err}",
++      atLeastOneDir: "Au moins un répertoire requis",
++      scheduleAdminRequired: "Privilèges administrateur requis pour modifier les jobs planifiés",
++      privilegeCheckError: "Erreur de vérification des privilèges : {err}",
++      scheduleUpdated: "Backup modifié pour {time}",
++      scheduleCreated: "Backup planifié pour {time}",
++      backupIdRequired: "Backup ID requis",
++      snapshotsFound: "{n} snapshot(s) trouvé(s)",
++      atStartup: "Au démarrage",
++      completionNoData: "fin de backup signalée sans données",
+       backupInProgress: "Sauvegarde en cours...",
+       startBackup: "Démarrer la sauvegarde",
+       saveSchedule: "Enregistrer la planification",
+@@ -622,6 +632,16 @@ const translations = {
+       allPartsDone: "All partial backups completed successfully ({n}/{total})",
+       partialBackup: "Partial backup: {ok}/{total} OK, {fail} failure(s) :\n{fails}",
+       splitBackupError: "Split backup error: {err}",
++      errWithMsg: "Error: {err}",
++      atLeastOneDir: "At least one folder is required",
++      scheduleAdminRequired: "Administrator privileges are required to modify scheduled jobs",
++      privilegeCheckError: "Privilege check failed: {err}",
++      scheduleUpdated: "Backup updated for {time}",
++      scheduleCreated: "Backup scheduled for {time}",
++      backupIdRequired: "Backup ID is required",
++      snapshotsFound: "{n} snapshot(s) found",
++      atStartup: "At startup",
++      completionNoData: "completion reported without data",
+       backupInProgress: "Backup in progress...",
+       startBackup: "Start backup",
+       saveSchedule: "Save schedule",
+@@ -1018,6 +1038,16 @@ const translations = {
+       allPartsDone: "Tutti i backup parziali completati con successo ({n}/{total})",
+       partialBackup: "Backup parziale: {ok}/{total} OK, {fail} errore(i) :\n{fails}",
+       splitBackupError: "Errore split backup: {err}",
++      errWithMsg: "Errore: {err}",
++      atLeastOneDir: "È richiesta almeno una cartella",
++      scheduleAdminRequired: "Sono necessari privilegi di amministratore per modificare i job pianificati",
++      privilegeCheckError: "Verifica dei privilegi non riuscita: {err}",
++      scheduleUpdated: "Backup modificato per le {time}",
++      scheduleCreated: "Backup pianificato per le {time}",
++      backupIdRequired: "Backup ID obbligatorio",
++      snapshotsFound: "{n} snapshot trovati",
++      atStartup: "All'avvio",
++      completionNoData: "completamento segnalato senza dati",
+       backupInProgress: "Backup in corso...",
+       startBackup: "Avvia backup",
+       saveSchedule: "Salva pianificazione",
+@@ -1414,6 +1444,16 @@ const translations = {
+       allPartsDone: "Alle Teil-Backups erfolgreich abgeschlossen ({n}/{total})",
+       partialBackup: "Teil-Backup: {ok}/{total} OK, {fail} Fehler :\n{fails}",
+       splitBackupError: "Split-Backup-Fehler: {err}",
++      errWithMsg: "Fehler: {err}",
++      atLeastOneDir: "Mindestens ein Ordner ist erforderlich",
++      scheduleAdminRequired: "Zum Ändern geplanter Jobs sind Administratorrechte erforderlich",
++      privilegeCheckError: "Rechteprüfung fehlgeschlagen: {err}",
++      scheduleUpdated: "Backup für {time} geändert",
++      scheduleCreated: "Backup für {time} geplant",
++      backupIdRequired: "Backup-ID erforderlich",
++      snapshotsFound: "{n} Snapshot(s) gefunden",
++      atStartup: "Beim Start",
++      completionNoData: "Abschluss ohne Daten gemeldet",
+       backupInProgress: "Sicherung läuft...",
+       startBackup: "Sicherung starten",
+       saveSchedule: "Zeitplan speichern",
+@@ -1810,6 +1850,16 @@ const translations = {
+       allPartsDone: "Wszystkie częściowe kopie zakończone sukcesem ({n}/{total})",
+       partialBackup: "Częściowa kopia: {ok}/{total} OK, {fail} błąd(ów) :\n{fails}",
+       splitBackupError: "Błąd kopii dzielonej: {err}",
++      errWithMsg: "Błąd: {err}",
++      atLeastOneDir: "Wymagany jest co najmniej jeden folder",
++      scheduleAdminRequired: "Do modyfikacji zaplanowanych zadań wymagane są uprawnienia administratora",
++      privilegeCheckError: "Sprawdzenie uprawnień nie powiodło się: {err}",
++      scheduleUpdated: "Kopia zmieniona na {time}",
++      scheduleCreated: "Kopia zaplanowana na {time}",
++      backupIdRequired: "Wymagany jest Backup ID",
++      snapshotsFound: "Znaleziono snapshotów: {n}",
++      atStartup: "Przy uruchomieniu",
++      completionNoData: "zakończenie zgłoszone bez danych",
+       backupInProgress: "Kopia zapasowa w toku...",
+       startBackup: "Rozpocznij kopię zapasową",
+       saveSchedule: "Zapisz harmonogram",
+diff --git a/gui/login.go b/gui/login.go
+index 22497b7..228e574 100644
+--- a/gui/login.go
++++ b/gui/login.go
+@@ -35,7 +35,7 @@ func (a *App) withAuth(cfg *Config) (*Config, error) {
+ 			Insecure:        cfg.CertFingerprint != "",
+ 		}
+ 		if err := client.ObtainTicket(); err != nil {
+-			return cfg, fmt.Errorf("authentification utilisateur/mot de passe impossible: %w", err)
++			return cfg, fmt.Errorf("username/password authentication failed: %w", err)
+ 		}
+ 		cp := *cfg
+ 		cp.Ticket = client.Ticket
+diff --git a/gui/main.go b/gui/main.go
+index 3f839b9..9ba83d5 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -760,7 +760,7 @@ func (a *App) SaveConfig(config *Config) error {
+ 		return a.pushConfigToService()
+ 	}
+ 	if merged == nil {
+-		return fmt.Errorf("configuration vide")
++		return fmt.Errorf("empty configuration")
+ 	}
+ 
+ 	// Validate per part: a multi-PBS-only config has no legacy BaseURL and must
+@@ -1107,7 +1107,7 @@ func (a *App) GetServerFingerprint(baseURL string) (string, error) {
+ func (a *App) PinPBSServerFingerprint(id, fingerprint string) error {
+ 	writeDebugLog(fmt.Sprintf("PinPBSServerFingerprint(%s) called", id))
+ 	if err := security.ValidateFingerprint(fingerprint); err != nil {
+-		return fmt.Errorf("empreinte certificat invalide: %w", err)
++		return fmt.Errorf("invalid certificate fingerprint: %w", err)
+ 	}
+ 	// config.json lives under ProgramData and is owned by whichever process wrote it
+ 	// first. When the privileged service is running it owns the file, so the
+@@ -1176,7 +1176,7 @@ func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters [
+ 	case api.ModeStandalone:
+ 		// Direct execution - check admin if VSS requested
+ 		if useVSS && !isAdmin() {
+-			return fmt.Errorf("VSS (Shadow Copy) nécessite les privilèges administrateur - veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS")
++			return fmt.Errorf("VSS (Shadow Copy) requires administrator privileges - restart the application as administrator or disable VSS")
+ 		}
+ 		return a.startBackupDirect(backupType, backupDirs, driveLetters, excludeList, backupID, useVSS, compression, pbsID)
+ 	default:
+@@ -1214,7 +1214,7 @@ func (a *App) StartMachineBackup(backupType string, backupDevices []string, back
+ 	case api.ModeStandalone:
+ 		// Direct execution - check admin if VSS requested
+ 		if useVSS && !isAdmin() {
+-			return fmt.Errorf("VSS (Shadow Copy) nécessite les privilèges administrateur - veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS")
++			return fmt.Errorf("VSS (Shadow Copy) requires administrator privileges - restart the application as administrator or disable VSS")
+ 		}
+ 		return a.startMachineBackupDirect(backupType, backupDevices, backupID, useVSS, compression, pbsID, backupKind)
+ 	default:
+@@ -1240,7 +1240,7 @@ func (a *App) startBackupViaService(backupType string, backupDirs []string, driv
+ 	resp, err := a.apiClient.StartBackup(req)
+ 	if err != nil {
+ 		writeDebugLog(fmt.Sprintf("[Service Mode] Backup request failed: %v", err))
+-		return fmt.Errorf("échec de la communication avec le service: %w", err)
++		return fmt.Errorf("communication with the service failed: %w", err)
+ 	}
+ 
+ 	writeDebugLog(fmt.Sprintf("[Service Mode] Backup started: %s (JobID: %s)", resp.Message, resp.JobID))
+@@ -1272,7 +1272,7 @@ func (a *App) startMachineBackupViaService(backupType string, backupDevices []st
+ 	resp, err := a.apiClient.StartMachineBackup(req)
+ 	if err != nil {
+ 		writeDebugLog(fmt.Sprintf("[Service Mode] Machine backup request failed: %v", err))
+-		return fmt.Errorf("échec de la communication avec le service: %w", err)
++		return fmt.Errorf("communication with the service failed: %w", err)
+ 	}
+ 
+ 	writeDebugLog(fmt.Sprintf("[Service Mode] Machine backup started: %s (JobID: %s)", resp.Message, resp.JobID))
+@@ -1357,13 +1357,13 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
+ 
+ 	// Validate BackupID (now guaranteed to be non-empty)
+ 	if err := security.ValidateBackupID(backupID); err != nil {
+-		return fmt.Errorf("backup ID invalide: %w", err)
++		return fmt.Errorf("invalid backup ID: %w", err)
+ 	}
+ 
+ 	// Validate backup directories
+ 	for _, dir := range backupDirs {
+ 		if err := security.ValidatePath(dir); err != nil {
+-			return fmt.Errorf("chemin invalide '%s': %w", dir, err)
++			return fmt.Errorf("invalid path '%s': %w", dir, err)
+ 		}
+ 	}
+ 
+@@ -1391,13 +1391,13 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
+ 	var targetDirs []string
+ 	if backupType == "directory" {
+ 		if len(backupDirs) == 0 {
+-			return fmt.Errorf("au moins un répertoire de sauvegarde requis")
++			return fmt.Errorf("at least one backup folder is required")
+ 		}
+ 		targetDirs = backupDirs
+ 	}
+ 	if backupType == "machine" {
+ 		if len(driveLetters) == 0 {
+-			return fmt.Errorf("au moins un disque physique requis")
++			return fmt.Errorf("at least one physical disk is required")
+ 		}
+ 		// Physical drive paths are used directly (e.g., \\.\PhysicalDrive0)
+ 		targetDirs = driveLetters
+@@ -1569,7 +1569,7 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
+ 
+ 	// Validate BackupID (now guaranteed to be non-empty)
+ 	if err := security.ValidateBackupID(backupID); err != nil {
+-		return fmt.Errorf("backup ID invalide: %w", err)
++		return fmt.Errorf("invalid backup ID: %w", err)
+ 	}
+ 
+ 	// Validate backup devices
+@@ -1851,7 +1851,7 @@ func (a *App) ListSnapshots(pbsID, backupID string) ([]map[string]interface{}, e
+ 		cfg.Datastore, cfg.Namespace, cfg.CertFingerprint, backupID)
+ 	if err != nil {
+ 		writeDebugLog(fmt.Sprintf("ListSnapshotsInline failed: %v", err))
+-		return nil, fmt.Errorf("échec de la liste des snapshots: %v", err)
++		return nil, fmt.Errorf("listing snapshots failed: %v", err)
+ 	}
+ 
+ 	result := make([]map[string]interface{}, 0, len(snaps))
+@@ -1885,7 +1885,7 @@ func (a *App) ListSnapshotContents(pbsID, backupID string, snapshotUnix int64, f
+ 		return nil, err
+ 	}
+ 	if backupID == "" {
+-		return nil, fmt.Errorf("backup ID requis")
++		return nil, fmt.Errorf("backup ID is required")
+ 	}
+ 
+ 	opts := RestoreOptions{
+@@ -1919,7 +1919,7 @@ func (a *App) GetSnapshotMeta(pbsID, backupID string, snapshotUnix int64) (*Back
+ 		return nil, err
+ 	}
+ 	if backupID == "" {
+-		return nil, fmt.Errorf("backup ID requis")
++		return nil, fmt.Errorf("backup ID is required")
+ 	}
+ 
+ 	opts := RestoreOptions{
+@@ -1966,10 +1966,10 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
+ 		return err
+ 	}
+ 	if backupID == "" {
+-		return fmt.Errorf("backup ID requis")
++		return fmt.Errorf("backup ID is required")
+ 	}
+ 	if snapshotID == "" {
+-		return fmt.Errorf("ID du snapshot requis")
++		return fmt.Errorf("snapshot ID is required")
+ 	}
+ 
+ 	restoreMode := RestoreMode(mode)
+@@ -1981,16 +1981,16 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
+ 	// derives the target from the backup metadata sidecar.
+ 	if restoreMode != RestoreModeOriginal {
+ 		if destPath == "" {
+-			return fmt.Errorf("chemin de destination requis")
++			return fmt.Errorf("destination path is required")
+ 		}
+ 		if err := security.ValidatePath(destPath); err != nil {
+-			return fmt.Errorf("chemin de destination invalide: %w", err)
++			return fmt.Errorf("invalid destination path: %w", err)
+ 		}
+ 	}
+ 
+ 	timestamp, err := time.Parse("2006-01-02T15:04:05Z", snapshotID)
+ 	if err != nil {
+-		return fmt.Errorf("ID de snapshot invalide: %v", err)
++		return fmt.Errorf("invalid snapshot ID: %v", err)
+ 	}
+ 
+ 	emit := func(percent float64, message string) {
+@@ -2041,7 +2041,7 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
+ 			err = RestoreSnapshotInline(opts)
+ 		}()
+ 		success := err == nil
+-		msg := "Restauration terminée"
++		msg := "Restore complete"
+ 		if err != nil {
+ 			msg = err.Error()
+ 			writeDebugLog(fmt.Sprintf("Restore failed: %v", err))
+@@ -2070,7 +2070,7 @@ func (a *App) OpenDirectoryPicker() (dir string, err error) {
+ 	}
+ 	if a.isServiceProcess {
+ 		writeDebugLog("OpenDirectoryPicker: native picker skipped in the headless service process")
+-		return "", fmt.Errorf("sélecteur de dossier indisponible dans le service")
++		return "", fmt.Errorf("folder picker unavailable in the service")
+ 	}
+ 	defer func() {
+ 		if r := recover(); r != nil {
+@@ -2086,7 +2086,7 @@ func (a *App) OpenDirectoryPicker() (dir string, err error) {
+ 
+ 	writeDebugLog(fmt.Sprintf("OpenDirectoryPicker: opening folder picker (default=%s)", defaultDir))
+ 	dir, err = runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+-		Title:            "Choisir un dossier",
++		Title:            "Choose a folder",
+ 		DefaultDirectory: defaultDir,
+ 	})
+ 	writeDebugLog(fmt.Sprintf("OpenDirectoryPicker: returned dir=%q err=%v", dir, err))
+@@ -2105,7 +2105,7 @@ func (a *App) OpenRestoreDestDialog() (dir string, err error) {
+ 	// the previous guard disabled the picker for every GUI user with a service).
+ 	if a.isServiceProcess {
+ 		writeDebugLog("OpenRestoreDestDialog: native picker skipped in the headless service process — use manual path entry")
+-		return "", fmt.Errorf("sélecteur de dossier indisponible dans le service — saisissez le chemin de destination manuellement")
++		return "", fmt.Errorf("folder picker unavailable in the service — enter the destination path manually")
+ 	}
+ 	defer func() {
+ 		if r := recover(); r != nil {
+@@ -2123,7 +2123,7 @@ func (a *App) OpenRestoreDestDialog() (dir string, err error) {
+ 
+ 	writeDebugLog(fmt.Sprintf("OpenRestoreDestDialog: opening folder picker (default=%s)", defaultDir))
+ 	dir, err = runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+-		Title:            "Choisir le dossier de destination",
++		Title:            "Choose the destination folder",
+ 		DefaultDirectory: defaultDir,
+ 	})
+ 	writeDebugLog(fmt.Sprintf("OpenRestoreDestDialog: returned dir=%q err=%v", dir, err))
+diff --git a/gui/paperkey_gui.go b/gui/paperkey_gui.go
+index e469f36..275b400 100644
+--- a/gui/paperkey_gui.go
++++ b/gui/paperkey_gui.go
+@@ -39,7 +39,7 @@ type PaperKeyLabels struct {
+ func keyCopy(path, passphrase string) (*pbscommon.PaperKey, *pbscommon.KeyConfig, error) {
+ 	path = strings.TrimSpace(path)
+ 	if path == "" {
+-		return nil, nil, errors.New("aucun fichier de cle configure")
++		return nil, nil, errors.New("no key file configured")
+ 	}
+ 	kc, err := pbscommon.LoadKeyConfig(path)
+ 	if err != nil {
+@@ -104,7 +104,7 @@ func (a *App) ExportEncryptionPaperKey(path, passphrase string, labels PaperKeyL
+ 		return "", err
+ 	}
+ 	if err := os.WriteFile(out, page, 0o600); err != nil { // #nosec G703 -- path chosen by the user in a native save dialog
+-		return "", fmt.Errorf("ecriture de %s: %w", out, err)
++		return "", fmt.Errorf("writing %s: %w", out, err)
+ 	}
+ 	return out, nil
+ }
+@@ -122,7 +122,7 @@ func (a *App) ImportEncryptionKeyText(text, passphrase string) (EncryptionKeyInf
+ 		return EncryptionKeyInfo{}, err
+ 	}
+ 	if kc.KDF != nil && passphrase == "" {
+-		return EncryptionKeyInfo{}, errors.New("cette cle est protegee par une phrase de passe: saisissez-la pour l'importer")
++		return EncryptionKeyInfo{}, errors.New("this key is protected by a passphrase: enter it to import the key")
+ 	}
+ 	crypt, err := kc.CryptConfig([]byte(passphrase))
+ 	if err != nil {
+@@ -137,7 +137,7 @@ func (a *App) ImportEncryptionKeyText(text, passphrase string) (EncryptionKeyInf
+ 	}
+ 	info := inspectKeyFile(dest)
+ 	if !info.Usable {
+-		return EncryptionKeyInfo{}, fmt.Errorf("la cle %s a ete ecrite mais ne peut pas etre relue: %s", dest, info.Reason)
++		return EncryptionKeyInfo{}, fmt.Errorf("key %s was written but cannot be read back: %s", dest, info.Reason)
+ 	}
+ 	writeDebugLog(fmt.Sprintf("ImportEncryptionKeyText: wrote %s (fingerprint %s)", dest, info.Fingerprint))
+ 	return info, nil
+@@ -149,18 +149,18 @@ func (a *App) ImportEncryptionKeyText(text, passphrase string) (EncryptionKeyInf
+ func (a *App) writeNewKeyFile(path string, crypt *pbscommon.CryptConfig) error {
+ 	path = strings.TrimSpace(path)
+ 	if err := security.ValidatePath(path); err != nil {
+-		return fmt.Errorf("chemin de cle invalide: %w", err)
++		return fmt.Errorf("invalid key path: %w", err)
+ 	}
+ 	if _, err := os.Stat(path); err == nil { // #nosec G703 -- path chosen by the user in a native save dialog, validated above
+-		return fmt.Errorf("le fichier %s existe deja: il n'est jamais ecrase, choisissez un autre nom", path)
++		return fmt.Errorf("file %s already exists: it is never overwritten, choose another name", path)
+ 	} else if !os.IsNotExist(err) {
+-		return fmt.Errorf("verification de %s: %w", path, err)
++		return fmt.Errorf("checking %s: %w", path, err)
+ 	}
+ 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { // #nosec G703 -- see above
+-		return fmt.Errorf("creation du dossier %s: %w", filepath.Dir(path), err)
++		return fmt.Errorf("creating folder %s: %w", filepath.Dir(path), err)
+ 	}
+ 	if err := pbscommon.SaveKeyFile(path, crypt); err != nil {
+-		return fmt.Errorf("ecriture de %s: %w", path, err)
++		return fmt.Errorf("writing %s: %w", path, err)
+ 	}
+ 	return nil
+ }
+diff --git a/gui/pbs_server.go b/gui/pbs_server.go
+index 8352162..af85a85 100644
+--- a/gui/pbs_server.go
++++ b/gui/pbs_server.go
+@@ -70,7 +70,7 @@ func (pbs *PBSServer) sanitized() *PBSServer {
+ // real secrets live (false).
+ func normalizeServerAuth(existing, srv *PBSServer, requireCreds bool) error {
+ 	if srv == nil {
+-		return fmt.Errorf("serveur PBS vide")
++		return fmt.Errorf("empty PBS server")
+ 	}
+ 
+ 	if srv.AuthID != "" {
+@@ -84,11 +84,11 @@ func normalizeServerAuth(existing, srv *PBSServer, requireCreds bool) error {
+ 				// caller never received it — the service fills it in).
+ 				srv.Secret = existing.Secret
+ 			case requireCreds:
+-				return fmt.Errorf("secret requis pour l'authentification ID %q (un secret n'est pas reutilisable avec un autre authid)", srv.AuthID)
++				return fmt.Errorf("secret is required for auth ID %q (a secret cannot be reused with another auth ID)", srv.AuthID)
+ 			}
+ 		}
+ 		if srv.Secret == "" && requireCreds {
+-			return fmt.Errorf("secret requis pour l'authentification ID %q", srv.AuthID)
++			return fmt.Errorf("secret is required for auth ID %q", srv.AuthID)
+ 		}
+ 		return nil
+ 	}
+@@ -97,7 +97,7 @@ func normalizeServerAuth(existing, srv *PBSServer, requireCreds bool) error {
+ 	srv.AuthID = ""
+ 	srv.Secret = ""
+ 	if srv.Username == "" {
+-		return fmt.Errorf("API token (authid/secret) ou identifiant/mot de passe requis")
++		return fmt.Errorf("API token (authid/secret) or username/password is required")
+ 	}
+ 	if srv.Password == "" && existing != nil && existing.Username == srv.Username {
+ 		// Same user as stored: keep the stored password ("" when unknown to this
+@@ -105,7 +105,7 @@ func normalizeServerAuth(existing, srv *PBSServer, requireCreds bool) error {
+ 		srv.Password = existing.Password
+ 	}
+ 	if srv.Password == "" && requireCreds {
+-		return fmt.Errorf("mot de passe requis pour l'utilisateur %q", srv.Username)
++		return fmt.Errorf("password is required for user %q", srv.Username)
+ 	}
+ 	return nil
+ }
+@@ -117,44 +117,44 @@ func normalizeServerAuth(existing, srv *PBSServer, requireCreds bool) error {
+ func (pbs *PBSServer) validateFields() error {
+ 	// Validate ID
+ 	if pbs.ID == "" {
+-		return fmt.Errorf("PBS server ID requis")
++		return fmt.Errorf("PBS server ID is required")
+ 	}
+ 
+ 	// Validate Name
+ 	if pbs.Name == "" {
+-		return fmt.Errorf("PBS server name requis")
++		return fmt.Errorf("PBS server name is required")
+ 	}
+ 
+ 	// Validate BaseURL
+ 	if pbs.BaseURL == "" {
+-		return fmt.Errorf("URL du serveur PBS requis")
++		return fmt.Errorf("PBS server URL is required")
+ 	}
+ 	if err := security.ValidateURL(pbs.BaseURL); err != nil {
+-		return fmt.Errorf("URL invalide: %w", err)
++		return fmt.Errorf("invalid URL: %w", err)
+ 	}
+ 
+ 	// Auth: a server authenticates with EITHER an API token (AuthID+Secret) OR
+ 	// a username/password — never both, and never neither.
+ 	if pbs.AuthID != "" {
+ 		if err := security.ValidateAuthID(pbs.AuthID); err != nil {
+-			return fmt.Errorf("authentication ID invalide: %w", err)
++			return fmt.Errorf("invalid authentication ID: %w", err)
+ 		}
+ 	} else if pbs.Username == "" {
+-		return fmt.Errorf("API token (authid/secret) ou identifiant/mot de passe requis")
++		return fmt.Errorf("API token (authid/secret) or username/password is required")
+ 	}
+ 
+ 	// Validate Datastore
+ 	if pbs.Datastore == "" {
+-		return fmt.Errorf("datastore requis")
++		return fmt.Errorf("datastore is required")
+ 	}
+ 	if err := security.ValidateDatastore(pbs.Datastore); err != nil {
+-		return fmt.Errorf("datastore invalide: %w", err)
++		return fmt.Errorf("invalid datastore: %w", err)
+ 	}
+ 
+ 	// Validate Certificate Fingerprint if present
+ 	if pbs.CertFingerprint != "" {
+ 		if err := security.ValidateFingerprint(pbs.CertFingerprint); err != nil {
+-			return fmt.Errorf("empreinte certificat invalide: %w", err)
++			return fmt.Errorf("invalid certificate fingerprint: %w", err)
+ 		}
+ 	}
+ 
+@@ -185,7 +185,7 @@ func (pbs *PBSServer) validate(requireCreds bool) error {
+ 		return err
+ 	}
+ 	if requireCreds && pbs.AuthID != "" && pbs.Secret == "" {
+-		return fmt.Errorf("secret requis")
++		return fmt.Errorf("secret is required")
+ 	}
+ 	return nil
+ }
+diff --git a/gui/restore_inline.go b/gui/restore_inline.go
+index 0a756ae..08af1bd 100644
+--- a/gui/restore_inline.go
++++ b/gui/restore_inline.go
+@@ -519,7 +519,7 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
+ 
+ 	case RestoreModeAlternateAbs:
+ 		if opts.DestPath == "" {
+-			return nil, fmt.Errorf("dossier de destination requis")
++			return nil, fmt.Errorf("destination folder is required")
+ 		}
+ 		dest := opts.DestPath
+ 		return func(archivePath string) string {
+@@ -528,7 +528,7 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
+ 
+ 	case RestoreModeAlternateFlat:
+ 		if opts.DestPath == "" {
+-			return nil, fmt.Errorf("dossier de destination requis")
++			return nil, fmt.Errorf("destination folder is required")
+ 		}
+ 		// Empty selection means "restore everything" — flat is meaningless,
+ 		// fall back to abs so the user gets a sensible result instead of
+@@ -565,7 +565,7 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
+ 		}, nil
+ 
+ 	default:
+-		return nil, fmt.Errorf("mode de restauration inconnu : %q", string(mode))
++		return nil, fmt.Errorf("unknown restore mode: %q", string(mode))
+ 	}
+ }
+ 
+@@ -666,7 +666,7 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
+ 		var err error
+ 		meta, err = ReadSnapshotMetaInline(opts, false)
+ 		if err != nil {
+-			return fmt.Errorf("lecture du sidecar pour restauration in-place: %w", err)
++			return fmt.Errorf("reading the sidecar for in-place restore: %w", err)
+ 		}
+ 		// Validate immediately so the user sees the cross-host / cross-OS
+ 		// refusal before any chunk is downloaded.
+diff --git a/gui/restore_search.go b/gui/restore_search.go
+index f3184ee..6a366dd 100644
+--- a/gui/restore_search.go
++++ b/gui/restore_search.go
+@@ -143,7 +143,7 @@ func buildMatcher(mode SearchMatchMode, query string) (entryMatcher, error) {
+ 		// a user who explicitly wants case-sensitivity can override with (?-i).
+ 		re, err := regexp.Compile("(?i)" + query)
+ 		if err != nil {
+-			return nil, fmt.Errorf("expression régulière invalide: %v", err)
++			return nil, fmt.Errorf("invalid regular expression: %v", err)
+ 		}
+ 		return func(path string) bool { return re.MatchString(baseName(path)) }, nil
+ 
+@@ -151,7 +151,7 @@ func buildMatcher(mode SearchMatchMode, query string) (entryMatcher, error) {
+ 		if hasGlob(query) {
+ 			re, err := compileGlob(query)
+ 			if err != nil {
+-				return nil, fmt.Errorf("motif de recherche invalide: %v", err)
++				return nil, fmt.Errorf("invalid search pattern: %v", err)
+ 			}
+ 			return func(path string) bool { return re.MatchString(path) }, nil
+ 		}
+@@ -162,7 +162,7 @@ func buildMatcher(mode SearchMatchMode, query string) (entryMatcher, error) {
+ 		if hasGlob(query) {
+ 			re, err := compileGlob(query)
+ 			if err != nil {
+-				return nil, fmt.Errorf("motif de recherche invalide: %v", err)
++				return nil, fmt.Errorf("invalid search pattern: %v", err)
+ 			}
+ 			return func(path string) bool { return re.MatchString(baseName(path)) }, nil
+ 		}
+@@ -170,7 +170,7 @@ func buildMatcher(mode SearchMatchMode, query string) (entryMatcher, error) {
+ 		return func(path string) bool { return strings.Contains(strings.ToLower(baseName(path)), q) }, nil
+ 
+ 	default:
+-		return nil, fmt.Errorf("mode de recherche inconnu: %q", string(mode))
++		return nil, fmt.Errorf("unknown search mode: %q", string(mode))
+ 	}
+ }
+ 
+@@ -198,13 +198,13 @@ func joinOriginPath(meta *BackupMeta, archivePath string) string {
+ // AssembleMissing is set. Results are newest-snapshot-first.
+ func SearchFilesInline(opts SearchOptions) (*SearchResult, error) {
+ 	if opts.BaseURL == "" || ((opts.AuthID == "" || opts.Secret == "") && opts.Ticket == "") {
+-		return nil, fmt.Errorf("paramètres de connexion PBS requis")
++		return nil, fmt.Errorf("PBS connection parameters are required")
+ 	}
+ 	if opts.Datastore == "" {
+-		return nil, fmt.Errorf("datastore requis")
++		return nil, fmt.Errorf("datastore is required")
+ 	}
+ 	if strings.TrimSpace(opts.Query) == "" {
+-		return nil, fmt.Errorf("terme de recherche requis")
++		return nil, fmt.Errorf("search term is required")
+ 	}
+ 	matcher, err := buildMatcher(opts.Mode, opts.Query)
+ 	if err != nil {
+@@ -216,7 +216,7 @@ func SearchFilesInline(opts SearchOptions) (*SearchResult, error) {
+ 	snaps, err := ListSnapshotsInline(opts.BaseURL, opts.AuthID, opts.Secret, opts.Ticket, opts.CSRFToken,
+ 		opts.Datastore, opts.Namespace, opts.CertFingerprint, opts.HostPrefix)
+ 	if err != nil {
+-		return nil, fmt.Errorf("liste des snapshots: %v", err)
++		return nil, fmt.Errorf("listing snapshots: %v", err)
+ 	}
+ 
+ 	type target struct {
+@@ -336,7 +336,7 @@ func SearchFilesInline(opts SearchOptions) (*SearchResult, error) {
+ 	}
+ 
+ 	if opts.OnProgress != nil {
+-		opts.OnProgress(1.0, fmt.Sprintf("Terminé : %d résultat(s)", len(result.Hits)))
++		opts.OnProgress(1.0, fmt.Sprintf("Done: %d result(s)", len(result.Hits)))
+ 	}
+ 	writeBackupLog(fmt.Sprintf("Search done: %d hits, %d searched, %d assembled, %d skipped, truncated=%v cancelled=%v",
+ 		len(result.Hits), result.SnapshotsSearched, result.SnapshotsAssembled, result.SnapshotsSkipped, result.Truncated, result.Cancelled))
+diff --git a/gui/restore_search_test.go b/gui/restore_search_test.go
+index 5c6f06f..d5dc21b 100644
+--- a/gui/restore_search_test.go
++++ b/gui/restore_search_test.go
+@@ -197,12 +197,12 @@ func TestSearchBuildMatcherRegex(t *testing.T) {
+ func TestSearchBuildMatcherRejectsBadInput(t *testing.T) {
+ 	if _, err := buildMatcher(SearchModeRegex, "("); err == nil {
+ 		t.Error("expected an error for an invalid regexp")
+-	} else if !strings.Contains(err.Error(), "expression régulière invalide") {
++	} else if !strings.Contains(err.Error(), "invalid regular expression") {
+ 		t.Errorf("error = %q, want it to mention the regexp", err)
+ 	}
+ 	if _, err := buildMatcher(SearchMatchMode("nope"), "x"); err == nil {
+ 		t.Error("expected an error for an unknown mode")
+-	} else if !strings.Contains(err.Error(), "mode de recherche inconnu") {
++	} else if !strings.Contains(err.Error(), "unknown search mode") {
+ 		t.Errorf("error = %q, want it to mention the mode", err)
+ 	}
+ }
+@@ -292,11 +292,11 @@ func TestSearchFilesInlineValidatesOptions(t *testing.T) {
+ 		mutate  func(o *SearchOptions)
+ 		wantErr string
+ 	}{
+-		{"no base url", func(o *SearchOptions) { o.BaseURL = "" }, "paramètres de connexion"},
+-		{"no authid", func(o *SearchOptions) { o.AuthID = "" }, "paramètres de connexion"},
+-		{"no secret", func(o *SearchOptions) { o.Secret = "" }, "paramètres de connexion"},
+-		{"no datastore", func(o *SearchOptions) { o.Datastore = "" }, "datastore requis"},
+-		{"blank query", func(o *SearchOptions) { o.Query = "   " }, "terme de recherche requis"},
++		{"no base url", func(o *SearchOptions) { o.BaseURL = "" }, "connection parameters"},
++		{"no authid", func(o *SearchOptions) { o.AuthID = "" }, "connection parameters"},
++		{"no secret", func(o *SearchOptions) { o.Secret = "" }, "connection parameters"},
++		{"no datastore", func(o *SearchOptions) { o.Datastore = "" }, "datastore is required"},
++		{"blank query", func(o *SearchOptions) { o.Query = "   " }, "search term is required"},
+ 	}
+ 	for _, tc := range cases {
+ 		t.Run(tc.name, func(t *testing.T) {
+@@ -324,7 +324,7 @@ func TestSearchFilesInlineAcceptsTicketAuth(t *testing.T) {
+ 	}
+ 	if _, err := SearchFilesInline(o); err == nil {
+ 		t.Fatal("expected the snapshot listing to fail")
+-	} else if strings.Contains(err.Error(), "paramètres de connexion") {
++	} else if strings.Contains(err.Error(), "connection parameters") {
+ 		t.Errorf("ticket auth was rejected as missing credentials: %v", err)
+ 	}
+ }
+@@ -342,7 +342,7 @@ func TestSearchFilesInlineRejectsBadQueryBeforeNetwork(t *testing.T) {
+ 	if err == nil {
+ 		t.Fatal("expected an error")
+ 	}
+-	if strings.Contains(err.Error(), "liste des snapshots") {
++	if strings.Contains(err.Error(), "listing snapshots") {
+ 		t.Errorf("an invalid regexp reached the network call: %v", err)
+ 	}
+ }
+diff --git a/gui/scheduler.go b/gui/scheduler.go
+index d7650dc..7736416 100644
+--- a/gui/scheduler.go
++++ b/gui/scheduler.go
+@@ -389,15 +389,15 @@ func parseScheduleTime(scheduleTime string) (hour, min int, ok bool) {
+ // the user edits it instead of failing silently at its scheduled time.
+ func (j *ScheduledJob) validate() error {
+ 	if strings.TrimSpace(j.Name) == "" {
+-		return fmt.Errorf("job name requis")
++		return fmt.Errorf("job name is required")
+ 	}
+ 	if _, _, ok := parseScheduleTime(j.ScheduleTime); !ok && j.ScheduleTime != "" {
+-		return fmt.Errorf("heure de planification invalide (format HH:MM attendu): %q", j.ScheduleTime)
++		return fmt.Errorf("invalid schedule time (expected HH:MM): %q", j.ScheduleTime)
+ 	} else if j.ScheduleTime == "" && !j.RunAtStartup {
+-		return fmt.Errorf("heure de planification requise (format HH:MM)")
++		return fmt.Errorf("schedule time is required (HH:MM)")
+ 	}
+ 	if len(j.BackupDirs) == 0 && len(j.DriveLetters) == 0 {
+-		return fmt.Errorf("au moins un repertoire ou un disque a sauvegarder est requis")
++		return fmt.Errorf("at least one folder or disk to back up is required")
+ 	}
+ 	return nil
+ }
+@@ -633,7 +633,7 @@ func (a *App) CleanupAbandonedJobs() {
+ 		if entry.Status == "running" {
+ 			writeDebugLog(fmt.Sprintf("Marking abandoned job as failed: %s", entry.Name))
+ 			history[i].Status = "failed"
+-			history[i].Message = "Abandonné (application interrompue)"
++			history[i].Message = "Abandoned (application interrupted)"
+ 			history[i].Timestamp = time.Now().Format(time.RFC3339)
+ 			modified = true
+ 		}
+@@ -847,7 +847,7 @@ func (a *App) runClaimedJob(job ScheduledJob) {
+ 		Name:       job.Name,
+ 		Timestamp:  time.Now().Format(time.RFC3339),
+ 		Status:     "success",
+-		Message:    "Backup terminé",
++		Message:    "Backup complete",
+ 		BackupDirs: job.BackupDirs,
+ 		BackupID:   job.BackupID,
+ 		UseVSS:     job.UseVSS,
+@@ -856,7 +856,7 @@ func (a *App) runClaimedJob(job ScheduledJob) {
+ 	if err != nil {
+ 		writeDebugLog(fmt.Sprintf("Scheduled job error: %v", err))
+ 		historyEntry.Status = "failed"
+-		historyEntry.Message = fmt.Sprintf("Erreur: %v", err)
++		historyEntry.Message = fmt.Sprintf("Error: %v", err)
+ 	}
+ 
+ 	if err := a.AddJobHistory(historyEntry); err != nil {
+@@ -937,7 +937,7 @@ func (a *App) runScheduledJobNow(jobID string) error {
+ 			continue
+ 		}
+ 		if !claimJob(job.ID) {
+-			return fmt.Errorf("job %q est deja en cours d'execution", job.Name)
++			return fmt.Errorf("job %q is already running", job.Name)
+ 		}
+ 		writeDebugLog(fmt.Sprintf("Manual run of scheduled job: %s", job.Name))
+ 		go func() {
+@@ -946,7 +946,7 @@ func (a *App) runScheduledJobNow(jobID string) error {
+ 		}()
+ 		return nil
+ 	}
+-	return fmt.Errorf("job planifie %q introuvable", jobID)
++	return fmt.Errorf("scheduled job %q not found", jobID)
+ }
+ 
+ // jobToMap converts a ScheduledJob to the wire map understood by
+diff --git a/gui/scheduler_test.go b/gui/scheduler_test.go
+index 7e7a103..5084271 100644
+--- a/gui/scheduler_test.go
++++ b/gui/scheduler_test.go
+@@ -231,12 +231,12 @@ func TestSaveScheduledJobValidates(t *testing.T) {
+ 		mutate  func(*ScheduledJob)
+ 		wantErr string
+ 	}{
+-		{"missing name", func(j *ScheduledJob) { j.Name = "  " }, "name requis"},
++		{"missing name", func(j *ScheduledJob) { j.Name = "  " }, "name is required"},
+ 		{"unparseable schedule", func(j *ScheduledJob) { j.ScheduleTime = "tomorrow" }, "HH:MM"},
+ 		{"hour out of range", func(j *ScheduledJob) { j.ScheduleTime = "25:00" }, "HH:MM"},
+ 		{"minute out of range", func(j *ScheduledJob) { j.ScheduleTime = "02:75" }, "HH:MM"},
+-		{"no schedule and no startup run", func(j *ScheduledJob) { j.ScheduleTime = ""; j.RunAtStartup = false }, "planification requise"},
+-		{"nothing to back up", func(j *ScheduledJob) { j.BackupDirs = nil; j.DriveLetters = nil }, "repertoire ou un disque"},
++		{"no schedule and no startup run", func(j *ScheduledJob) { j.ScheduleTime = ""; j.RunAtStartup = false }, "schedule time is required"},
++		{"nothing to back up", func(j *ScheduledJob) { j.BackupDirs = nil; j.DriveLetters = nil }, "folder or disk"},
+ 	}
+ 
+ 	for _, tt := range tests {
+@@ -554,7 +554,7 @@ func TestRunScheduledJobNowUnknownJob(t *testing.T) {
+ 	if err == nil {
+ 		t.Fatalf("RunScheduledJobNow() succeeded for an unknown job")
+ 	}
+-	if !strings.Contains(err.Error(), "introuvable") {
++	if !strings.Contains(err.Error(), "not found") {
+ 		t.Errorf("error = %q, want it to mention the unknown job", err)
+ 	}
+ }
+@@ -583,7 +583,7 @@ func TestRunScheduledJobNowRejectsRunningJob(t *testing.T) {
+ 	if err == nil {
+ 		t.Fatalf("RunScheduledJobNow() accepted a job that is already running")
+ 	}
+-	if !strings.Contains(err.Error(), "deja en cours") {
++	if !strings.Contains(err.Error(), "already running") {
+ 		t.Errorf("error = %q, want it to report the running job", err)
+ 	}
+ 	if calls != 0 {
+diff --git a/gui/service_api.go b/gui/service_api.go
+index 1817d58..68b8b6f 100644
+--- a/gui/service_api.go
++++ b/gui/service_api.go
+@@ -65,12 +65,12 @@ func (a *App) GetFullConfigForAPI() map[string]interface{} {
+ // config.json) untouched.
+ func (a *App) SaveFullConfigFromAPI(doc map[string]interface{}) error {
+ 	if doc == nil {
+-		return fmt.Errorf("document de configuration vide")
++		return fmt.Errorf("empty configuration document")
+ 	}
+ 
+ 	b, err := json.Marshal(doc)
+ 	if err != nil {
+-		return fmt.Errorf("document de configuration invalide: %w", err)
++		return fmt.Errorf("invalid configuration document: %w", err)
+ 	}
+ 
+ 	// Unmarshal into a Config: unknown keys (the *_set markers, hostname) are
+@@ -78,7 +78,7 @@ func (a *App) SaveFullConfigFromAPI(doc map[string]interface{}) error {
+ 	// never populated from the wire.
+ 	var incoming Config
+ 	if err := json.Unmarshal(b, &incoming); err != nil {
+-		return fmt.Errorf("document de configuration invalide: %w", err)
++		return fmt.Errorf("invalid configuration document: %w", err)
+ 	}
+ 	// Config.Username/Password are json:"-" (runtime-only), so a client that
+ 	// does send legacy user/password credentials would otherwise have them
+@@ -160,10 +160,10 @@ func (a *App) SaveFullConfigFromAPI(doc map[string]interface{}) error {
+ 			// the incoming one is empty, and requires the selected method to
+ 			// actually have a usable credential (the service holds them all).
+ 			if err := normalizeServerAuth(old[id], srv, true); err != nil {
+-				return fmt.Errorf("serveur PBS %q: %w", id, err)
++				return fmt.Errorf("PBS server %q: %w", id, err)
+ 			}
+ 			if err := srv.Validate(); err != nil {
+-				return fmt.Errorf("serveur PBS %q: %w", id, err)
++				return fmt.Errorf("PBS server %q: %w", id, err)
+ 			}
+ 			next[id] = srv
+ 		}
+@@ -327,7 +327,7 @@ func (a *App) MintPBSTicketForAPI(id string) (*api.PBSTicket, error) {
+ 	if cfg.AuthID != "" {
+ 		// Token server: mint the ticket from the token itself.
+ 		if cfg.Secret == "" {
+-			return nil, fmt.Errorf("serveur %q: secret manquant", srv.ID)
++			return nil, fmt.Errorf("server %q: missing secret", srv.ID)
+ 		}
+ 		client := &pbscommon.PBSClient{
+ 			BaseURL:         cfg.BaseURL,
+@@ -337,7 +337,7 @@ func (a *App) MintPBSTicketForAPI(id string) (*api.PBSTicket, error) {
+ 			Insecure:        cfg.CertFingerprint != "",
+ 		}
+ 		if err := client.ObtainTicket(); err != nil {
+-			return nil, fmt.Errorf("émission du ticket impossible: %w", err)
++			return nil, fmt.Errorf("cannot obtain a ticket: %w", err)
+ 		}
+ 		cfg.Ticket = client.Ticket
+ 		cfg.CSRFToken = client.CSRFToken
+@@ -350,7 +350,7 @@ func (a *App) MintPBSTicketForAPI(id string) (*api.PBSTicket, error) {
+ 	}
+ 
+ 	if cfg.Ticket == "" {
+-		return nil, fmt.Errorf("serveur %q: aucun ticket obtenu", srv.ID)
++		return nil, fmt.Errorf("server %q: no ticket obtained", srv.ID)
+ 	}
+ 
+ 	return &api.PBSTicket{
+diff --git a/gui/service_config_test.go b/gui/service_config_test.go
+index 018c702..0722673 100644
+--- a/gui/service_config_test.go
++++ b/gui/service_config_test.go
+@@ -251,7 +251,7 @@ func TestSaveFullConfigFromAPI_EmptyCredentialKeepsStoredOne(t *testing.T) {
+ 		if err == nil {
+ 			t.Fatalf("save accepted a new username without a password")
+ 		}
+-		if !strings.Contains(err.Error(), "mot de passe") {
++		if !strings.Contains(err.Error(), "password") {
+ 			t.Errorf("error = %q, want it to ask for the new password", err)
+ 		}
+ 	})
+-- 
+2.47.3
+

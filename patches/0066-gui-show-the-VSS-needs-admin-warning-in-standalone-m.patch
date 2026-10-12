@@ -1,0 +1,49 @@
+From 6c37ad6fbddbbcc62df5ccf6fd587792cf988766 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Mon, 12 Oct 2026 15:01:34 +0200
+Subject: [PATCH 66/76] gui: show the VSS-needs-admin warning in standalone
+ mode
+
+The Backup tab compared systemInfo.mode with 'Standalone', but the
+backend sends ExecutionMode.String(), "Standalone Mode", so the warning
+for VSS without administrator rights never appeared.
+
+Found by CJInvent/NimbusBackupClient's GUI audit (docs/V4-GUI-AUDIT.md).
+---
+ gui/frontend/src/App.jsx | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/gui/frontend/src/App.jsx b/gui/frontend/src/App.jsx
+index fd17e8d..1660a6d 100644
+--- a/gui/frontend/src/App.jsx
++++ b/gui/frontend/src/App.jsx
+@@ -81,7 +81,7 @@ function App() {
+     url: brandBuyUrl || 'https://www.proxmox.com/en/downloads.php#download-proxmox-backup-server',
+     text: (brand.buy_storage_texts && brand.buy_storage_texts[language]) || brand.buy_storage_text || t('orderStorageCTA')
+   }
+-  const [systemInfo, setSystemInfo] = useState({ mode: 'Standalone', is_admin: false, service_available: false, os: '' })
++  const [systemInfo, setSystemInfo] = useState({ mode: 'Standalone Mode', is_admin: false, service_available: false, os: '' })
+   const [config, setConfig] = useState({
+     baseurl: '',
+     certfingerprint: '',
+@@ -465,7 +465,7 @@ function App() {
+         // Load system info (mode, admin status, service availability)
+         if (GetSystemInfo) {
+           const sysInfo = await GetSystemInfo()
+-          setSystemInfo(sysInfo || { mode: 'Standalone', is_admin: false, service_available: false })
++          setSystemInfo(sysInfo || { mode: 'Standalone Mode', is_admin: false, service_available: false })
+         }
+ 
+         // Load last backup directories to pre-fill the form
+@@ -2155,7 +2155,7 @@ function App() {
+               />
+               {t('useSnapshotting')}
+             </label>
+-            {config.usevss && systemInfo.mode === 'Standalone' && !systemInfo.is_admin && (
++            {config.usevss && systemInfo.mode === 'Standalone Mode' && !systemInfo.is_admin && (
+               <div className="info-box" style={{marginTop: '10px', backgroundColor: '#fff3cd', borderColor: '#ffc107'}}>
+                 ⚠️ <strong>{t('vssAdminRequired')}</strong><br/>
+                 {t('vssAdminHint')}
+-- 
+2.47.3
+

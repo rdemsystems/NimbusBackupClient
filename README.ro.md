@@ -16,6 +16,8 @@ Nimbus Backup este build-ul RDEM Systems al [Proxmox Backup Client GO](https://g
 
 📖 **Documentație completă, ghid de instalare și găzduire PBS:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
 
+> 🔏 **Doar versiunile noastre sunt oficiale.** Versiunile Nimbus Backup sunt publicate **doar** pe [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) și [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Începând cu 0.4.1, fiecare binar Windows oficial (GUI, serviciu, MSI) este **semnat de RDEM SYSTEMS**: clic dreapta pe fișier → *Proprietăți* → *Semnături digitale*, sau `Get-AuthenticodeSignature`. Există fork-uri ale acestui proiect GPL care păstrează numele Nimbus Backup și pe RDEM Systems ca autor; versiunile lor **nu** sunt produse, semnate sau susținute de RDEM Systems.
+
 ## 📦 Descărcare
 
 👉 **[Descărcați cea mai recentă versiune](https://github.com/rdemsystems/NimbusBackupClient/releases)**

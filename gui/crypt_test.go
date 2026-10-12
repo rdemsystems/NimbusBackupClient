@@ -243,7 +243,7 @@ func TestConfigValidateEncryptionKeyFile(t *testing.T) {
 		{"valid key file", good, ""},
 		{"missing file", missing, "missing.json"},
 		{"malformed file", notAKey, "garbage.json"},
-		{"passphrase protected rejected", protected, "phrase de passe"},
+		{"passphrase protected rejected", protected, "passphrase"},
 		{"path traversal rejected", traversal, "cannot contain '..'"},
 	}
 	for _, tc := range tests {

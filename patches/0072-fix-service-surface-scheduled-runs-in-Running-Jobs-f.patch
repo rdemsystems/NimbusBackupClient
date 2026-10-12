@@ -1,0 +1,846 @@
+From 48cd85584cbe0dab778b14f0c2f9ba7c6c8a7d44 Mon Sep 17 00:00:00 2001
+From: Tiziano Bacocco <tizbac2@gmail.com>
+Date: Mon, 12 Oct 2026 11:24:45 +0200
+Subject: [PATCH 72/76] fix(service): surface scheduled runs in Running Jobs,
+ fix duplicate GUI instances, locale-proof state ACLs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Three service-mode bugs:
+
+Running machine backup never showed up: the Running Jobs tab lists
+GET /backup/jobs, which only the two HTTP start handlers ever filled.
+Scheduled runs and "Run now" start in runScheduledBackup instead, so the
+service executed them invisibly. The service now hands the API server to
+the App (SetJobReporter); runScheduledBackup registers an inline job,
+dispatchProgress feeds it live progress, and a deferred close records the
+outcome (idempotent, so a run that dies before its own OnComplete cannot
+sit at "running" forever). The scheduler starts LAST so run-at-startup
+jobs are visible from their first second. Applies to the Windows and the
+Unix service; covered by TestRunScheduledBackupPublishesToJobReporter.
+
+Duplicate GUI instances: after an elevated relaunch the Global mutex is
+held at high integrity, and a medium-IL launch then gets ERROR_ACCESS_DENIED
+from CreateMutex instead of ERROR_ALREADY_EXISTS. That error fell into
+"allow launch on error", so every desktop launch opened another window.
+ACCESS_DENIED now counts as "another instance exists" (someone does hold
+the name): activate the existing window and exit. Activation also searches
+the per-brand window title ("<Brand> v<version>") instead of only the
+hardcoded default, so branded builds focus their own window instead of
+appearing to do nothing.
+
+Token/json configs locked everyone out: hardenWindowsACLs referenced
+"SYSTEM"/"BUILTIN\Administrators" by English name and stripped
+inheritance in the same icacls run. On a localized Windows the grant
+fails, leaving the file with an EMPTY DACL — no user, not even SYSTEM
+(owner keeps WRITE_DAC but no file access), could read or write the
+api-token or any JSON config. Grants now use SIDs (*S-1-5-18,
+*S-1-5-32-544) in their own invocation BEFORE the inheritance strip, so a
+failure can only stay over-permissive, never unreachable, and icacls
+output is logged instead of discarded. api.setTokenFileACL builds its
+trustees from SIDs as well, with file-specific access masks.
+
+Upstream: tizbac/proxmoxbackupclient_go@44969cf1ef181528b19e17ae21d0a578a12c91cd
+---
+ gui/api/auth_windows.go        | 52 +++++++++++++------
+ gui/api/server_inline.go       | 76 +++++++++++++++++++++++++++
+ gui/app_types.go               | 21 ++++++--
+ gui/backup_control.go          | 72 ++++++++++++++++++++++----
+ gui/scheduler.go               | 37 ++++++++++---
+ gui/scheduler_test.go          | 95 ++++++++++++++++++++++++++++++++++
+ gui/service.go                 | 92 ++++++++++++++++++++++----------
+ gui/service_unix.go            | 16 ++++--
+ gui/single_instance_windows.go | 95 ++++++++++++++++++++++------------
+ 9 files changed, 455 insertions(+), 101 deletions(-)
+ create mode 100644 gui/api/server_inline.go
+
+diff --git a/gui/api/auth_windows.go b/gui/api/auth_windows.go
+index 20b7882..a669d84 100644
+--- a/gui/api/auth_windows.go
++++ b/gui/api/auth_windows.go
+@@ -6,6 +6,7 @@ package api
+ import (
+ 	"fmt"
+ 	"os"
++	"runtime"
+ 	"strings"
+ 
+ 	"golang.org/x/sys/windows"
+@@ -52,36 +53,55 @@ func EnsureToken(path string) (string, error) {
+ func canReadTokenFile(string) bool { return true }
+ 
+ // setTokenFileACL sets the DACL on the token file to allow only
+-// Administrators and SYSTEM (the service account) to read it.
++// Administrators and SYSTEM to read it.
+ // This ensures only elevated processes can read the token and call the API.
++//
++// The trustees are built from SIDs, not from account names: on a localized
++// (non-English) Windows "NT AUTHORITY\SYSTEM" / "BUILTIN\Administrators" do
++// not resolve, SetEntriesInAcl fails and the file keeps whatever DACL it
++// already had — the same locale bug that, in the icacls-based
++// hardenWindowsACLs, used to leave files with an empty DACL that nobody
++// (SYSTEM included) could read. S-1-5-18 = SYSTEM, S-1-5-32-544 =
++// BUILTIN\Administrators; both are locale-independent.
+ func setTokenFileACL(path string) error {
+-	// Build a fresh DACL from scratch (nil merged ACL): only SYSTEM and
+-	// Administrators get access. Windows resolves the well-known names to
+-	// SIDs during SetEntriesInAcl.
++	sysSID, err := windows.StringToSid("S-1-5-18")
++	if err != nil {
++		return fmt.Errorf("system SID: %w", err)
++	}
++	admSID, err := windows.StringToSid("S-1-5-32-544")
++	if err != nil {
++		return fmt.Errorf("administrators SID: %w", err)
++	}
++
++	trustee := func(sid *windows.SID) windows.TRUSTEE {
++		return windows.TRUSTEE{
++			TrusteeForm:  windows.TRUSTEE_IS_SID,
++			TrusteeType:  windows.TRUSTEE_IS_UNKNOWN,
++			TrusteeValue: windows.TrusteeValueFromSID(sid),
++		}
++	}
++
+ 	newAcl, err := windows.ACLFromEntries(
+ 		[]windows.EXPLICIT_ACCESS{
+ 			{
+-				Trustee: windows.TRUSTEE{
+-					TrusteeForm:  windows.TRUSTEE_IS_NAME,
+-					TrusteeType:  windows.TRUSTEE_IS_UNKNOWN,
+-					TrusteeValue: windows.TrusteeValueFromString(`NT AUTHORITY\SYSTEM`),
+-				},
+-				AccessPermissions: windows.GENERIC_READ | windows.GENERIC_WRITE,
++				Trustee:           trustee(sysSID),
++				AccessPermissions: windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE,
+ 				AccessMode:        windows.SET_ACCESS,
+ 				Inheritance:       windows.NO_INHERITANCE,
+ 			},
+ 			{
+-				Trustee: windows.TRUSTEE{
+-					TrusteeForm:  windows.TRUSTEE_IS_NAME,
+-					TrusteeType:  windows.TRUSTEE_IS_UNKNOWN,
+-					TrusteeValue: windows.TrusteeValueFromString(`BUILTIN\Administrators`),
+-				},
+-				AccessPermissions: windows.GENERIC_READ | windows.GENERIC_WRITE,
++				Trustee:           trustee(admSID),
++				AccessPermissions: windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE,
+ 				AccessMode:        windows.SET_ACCESS,
+ 				Inheritance:       windows.NO_INHERITANCE,
+ 			},
+ 		},
+ 		nil)
++	// The Trustee values hold raw pointers to the SIDs; SetEntriesInAcl (in
++	// ACLFromEntries above) is what dereferences them, so keep them alive
++	// until it has returned.
++	runtime.KeepAlive(sysSID)
++	runtime.KeepAlive(admSID)
+ 	if err != nil {
+ 		return fmt.Errorf("create ACL: %w", err)
+ 	}
+diff --git a/gui/api/server_inline.go b/gui/api/server_inline.go
+new file mode 100644
+index 0000000..5acc878
+--- /dev/null
++++ b/gui/api/server_inline.go
+@@ -0,0 +1,76 @@
++package api
++
++import (
++	"fmt"
++	"log"
++	"time"
++)
++
++// This file publishes backups that did NOT start through an HTTP handler into
++// the same progress map the handlers fill. The GUI's Running Jobs tab lists
++// GET /backup/jobs, so before this existed a backup executed by the service
++// scheduler (scheduled run or "Run now" — see main.runScheduledBackup) ran
++// invisibly: it was executing, but never showed up anywhere in the GUI.
++
++// RegisterInlineJob creates the progress entry for such a run and returns its
++// job ID, which is the key ReportInlineJobProgress/ReportInlineJobComplete use
++// afterwards. title is what the GUI shows before the first progress update.
++func (s *Server) RegisterInlineJob(title string) string {
++	jobID := fmt.Sprintf("backup-scheduled-%d-%d", time.Now().Unix(), jobIDSeq.Add(1))
++
++	s.progressMutex.Lock()
++	s.backupProgress[jobID] = &BackupProgress{
++		JobID:     jobID,
++		Running:   true,
++		Progress:  0,
++		Message:   title,
++		StartTime: time.Now().Format(time.RFC3339),
++	}
++	s.progressMutex.Unlock()
++
++	log.Printf("[API] Scheduled/inline job registered: %s (%s)", jobID, title)
++	return jobID
++}
++
++// ReportInlineJobProgress feeds a live update (completion fraction 0.0-1.0)
++// into the entry RegisterInlineJob created. Updates for an entry that is no
++// longer running are dropped, exactly like the handler-side callbacks do.
++func (s *Server) ReportInlineJobProgress(jobID string, frac float64, message string) {
++	s.progressMutex.Lock()
++	if p, exists := s.backupProgress[jobID]; exists && p.Running {
++		p.Progress = frac * 100
++		p.Message = message
++	}
++	s.progressMutex.Unlock()
++}
++
++// ReportInlineJobComplete closes the entry once the run has finished; it is
++// the single closing path for inline entries (App.dispatchComplete only
++// reaches the callbacks registered by the HTTP handlers). The guard keeps it
++// idempotent — a repeat call, or one arriving after the entry was evicted, is
++// a no-op — so runScheduledBackup's deferred close can always fire without
++// racing the backup's own OnComplete. Without this the entry would sit at
++// "running" forever when the backup failed before OnComplete (PBS resolve
++// errors, missing config, …). Every entry it closes gets the same eviction
++// grace period as handler-started jobs.
++func (s *Server) ReportInlineJobComplete(jobID string, success bool, message string) {
++	s.progressMutex.Lock()
++	p, exists := s.backupProgress[jobID]
++	if !exists || p.Complete {
++		s.progressMutex.Unlock()
++		return
++	}
++	p.Running = false
++	p.Complete = true
++	p.Success = success
++	p.Message = message
++	if success {
++		p.Progress = 100
++	} else {
++		p.Error = message
++	}
++	s.progressMutex.Unlock()
++
++	log.Printf("[API] Scheduled/inline job %s finished (success=%v): %s", jobID, success, message)
++	s.scheduleEviction(jobID)
++}
+diff --git a/gui/app_types.go b/gui/app_types.go
+index 4c74c7b..9b59894 100644
+--- a/gui/app_types.go
++++ b/gui/app_types.go
+@@ -30,20 +30,31 @@ type App struct {
+ 
+ 	// cancelFuncs tracks cancellation functions for running backup jobs.
+ 	// Key is jobID, value is the cancel function to call for graceful stop.
+-	cancelFuncs     map[string]context.CancelFunc
+-	cancelFuncsMu   sync.Mutex
++	cancelFuncs   map[string]context.CancelFunc
++	cancelFuncsMu sync.Mutex
+ 
+ 	// backupCtx is the context for the currently running backup (set by API handler
+ 	// for service mode to enable cancellation). Protected by backupCtxMu.
+-	backupCtx     context.Context
+-	backupCancel  context.CancelFunc
+-	backupCtxMu   sync.RWMutex
++	backupCtx    context.Context
++	backupCancel context.CancelFunc
++	backupCtxMu  sync.RWMutex
+ 
+ 	// delegatedJobID is the service job the GUI is currently polling. The Stop
+ 	// button calls CancelBackup with no id, so the GUI has to remember which
+ 	// service-side job to cancel.
+ 	delegatedJobID   string
+ 	delegatedJobIDMu sync.Mutex
++
++	// jobReporter, when set (the service builds wire their API server here via
++	// SetJobReporter), publishes backups that start OUTSIDE an HTTP handler —
++	// scheduled runs and "Run now" — into the API server's progress map, which
++	// is what the GUI's Running Jobs tab lists. nil in the GUI build; tests
++	// install a fake to cover the wiring.
++	jobReporter JobReporter
++	// inlineJobID is the reporter entry of the scheduled run currently
++	// executing (guarded by inlineJobMu). Empty when no such run is active.
++	inlineJobID string
++	inlineJobMu sync.Mutex
+ }
+ 
+ // isDelegatedToService reports whether this (non-service) GUI process is
+diff --git a/gui/backup_control.go b/gui/backup_control.go
+index ec8d2a3..4263c6e 100644
+--- a/gui/backup_control.go
++++ b/gui/backup_control.go
+@@ -25,6 +25,46 @@ func (a *App) SetProgressCallbacks(jobID string, onProgress func(string, float64
+ 	a.callbacksMutex.Unlock()
+ }
+ 
++// JobReporter is the slice of the API server the App needs to publish a
++// backup that did NOT start through an HTTP handler: the service wires its
++// *api.Server here (SetJobReporter) so scheduled runs and "Run now" appear in
++// GET /backup/jobs — what the GUI's Running Jobs tab lists. The GUI build
++// leaves it nil (the frontend shows local runs via Wails events, and
++// handler-started runs register their own callbacks); tests install a fake.
++type JobReporter interface {
++	RegisterInlineJob(title string) string
++	ReportInlineJobProgress(jobID string, frac float64, message string)
++	ReportInlineJobComplete(jobID string, success bool, message string)
++}
++
++// SetJobReporter installs the progress sink for runs that bypass the HTTP
++// handlers. Called by both service entry points right after the API server is
++// built and before the scheduler starts.
++func (a *App) SetJobReporter(r JobReporter) {
++	a.jobReporter = r
++}
++
++// setInlineJobID/currentInlineJobID/clearInlineJobID track the reporter entry
++// of the scheduled run currently executing (runScheduledBackup sets it for the
++// duration of the run so dispatchProgress can feed the right entry).
++func (a *App) setInlineJobID(id string) {
++	a.inlineJobMu.Lock()
++	a.inlineJobID = id
++	a.inlineJobMu.Unlock()
++}
++
++func (a *App) currentInlineJobID() string {
++	a.inlineJobMu.Lock()
++	defer a.inlineJobMu.Unlock()
++	return a.inlineJobID
++}
++
++func (a *App) clearInlineJobID() {
++	a.inlineJobMu.Lock()
++	a.inlineJobID = ""
++	a.inlineJobMu.Unlock()
++}
++
+ // SetBackupContext sets the context and cancel function for the currently
+ // running backup. Called by the API handler so CancelBackup can stop the backup.
+ func (a *App) SetBackupContext(ctx context.Context, cancel context.CancelFunc) {
+@@ -66,22 +106,34 @@ func (a *App) RegisterBackupCancel(jobID string, cancel context.CancelFunc) {
+ }
+ 
+ // dispatchProgress forwards a live-progress update (fraction, 0.0-1.0) to every
+-// job callback registered via SetProgressCallbacks. It reports whether at least
+-// one callback consumed the update, so the GUI build can fall back to emitting
+-// a Wails event in standalone mode.
++// job callback registered via SetProgressCallbacks, and to the inline job
++// registered by runScheduledBackup (scheduled runs have no HTTP-handler
++// callbacks of their own). It reports whether at least one consumer took the
++// update, so the GUI build can fall back to emitting a Wails event in
++// standalone mode.
+ func (a *App) dispatchProgress(percent float64, message string) bool {
+-	a.callbacksMutex.RLock()
+-	defer a.callbacksMutex.RUnlock()
++	consumed := false
+ 
+-	if len(a.callbacksMap) == 0 {
+-		return false
+-	}
++	a.callbacksMutex.RLock()
+ 	for jobID, callbacks := range a.callbacksMap {
+ 		if callbacks != nil && callbacks.onProgress != nil {
+ 			callbacks.onProgress(jobID, percent, message)
++			consumed = true
+ 		}
+ 	}
+-	return true
++	a.callbacksMutex.RUnlock()
++
++	// A scheduled run (see runScheduledBackup) registers its own reporter
++	// entry instead of callbacksMap ones — feed it too, or the GUI's Running
++	// Jobs tab would show the job stuck at 0% for the whole backup.
++	if a.jobReporter != nil {
++		if id := a.currentInlineJobID(); id != "" {
++			a.jobReporter.ReportInlineJobProgress(id, percent, message)
++			consumed = true
++		}
++	}
++
++	return consumed
+ }
+ 
+ // dispatchComplete forwards the terminal update to every registered callback and
+@@ -200,4 +252,4 @@ func (a *App) CancelBackup(jobID string) error {
+ 	a.backupCancel = nil
+ 	a.backupCtxMu.Unlock()
+ 	return nil
+-}
+\ No newline at end of file
++}
+diff --git a/gui/scheduler.go b/gui/scheduler.go
+index 395eac8..0802cc2 100644
+--- a/gui/scheduler.go
++++ b/gui/scheduler.go
+@@ -771,12 +771,37 @@ func releaseJob(jobID string) {
+ 	delete(runningJobs, jobID)
+ }
+ 
+-// runScheduledBackup performs the backup of a scheduled job: it goes through
+-// the test seam App.scheduledBackupFn when one is installed, otherwise it
+-// dispatches on the job type - machine jobs through StartMachineBackup
+-// (the only path that carries the job's host/vm BackupKind), directory jobs
+-// through StartBackup.
+-func (a *App) runScheduledBackup(job ScheduledJob) error {
++// runScheduledBackup performs the backup of a scheduled job.
++//
++// In service mode the run is first published to the API server's progress map
++// (SetJobReporter): GET /backup/jobs — the list behind the GUI's Running Jobs
++// tab — only ever knew about backups started inside an HTTP handler, so a
++// scheduled run executed by the service (a machine backup in particular) ran
++// invisibly. The entry is registered before the test seam so this wiring is
++// covered without an API server.
++//
++// The backup itself goes through the test seam App.scheduledBackupFn when one
++// is installed, otherwise it dispatches on the job type: machine jobs through
++// StartMachineBackup (the only path that carries the job's host/vm
++// BackupKind), directory jobs through StartBackup.
++func (a *App) runScheduledBackup(job ScheduledJob) (err error) {
++	if a.jobReporter != nil {
++		rep := a.jobReporter
++		jobID := rep.RegisterInlineJob(fmt.Sprintf("Scheduled: %s", job.Name))
++		a.setInlineJobID(jobID)
++		defer func() {
++			a.clearInlineJobID()
++			// The only closing path for the inline entry: dispatchComplete
++			// only reaches HTTP-handler-registered callbacks. Idempotent, so
++			// it is safe whether or not the backup's own OnComplete fired.
++			if err != nil {
++				rep.ReportInlineJobComplete(jobID, false, fmt.Sprintf("Scheduled backup failed: %v", err))
++			} else {
++				rep.ReportInlineJobComplete(jobID, true, "Scheduled backup completed successfully")
++			}
++		}()
++	}
++
+ 	if a.scheduledBackupFn != nil {
+ 		return a.scheduledBackupFn(job)
+ 	}
+diff --git a/gui/scheduler_test.go b/gui/scheduler_test.go
+index 48e0d76..0597169 100644
+--- a/gui/scheduler_test.go
++++ b/gui/scheduler_test.go
+@@ -626,3 +626,98 @@ func TestCalculateNextRun(t *testing.T) {
+ 		t.Errorf("next run %s is not at 02:30", next)
+ 	}
+ }
++
++// fakeJobReporter stands in for the API server's progress map: it records
++// what runScheduledBackup publishes, so the "scheduled runs must show up in
++// the Running Jobs tab" wiring is covered without an HTTP server.
++type fakeJobReporter struct {
++	mu         sync.Mutex
++	titles     []string
++	progresses []inlineProgress
++	completes  []inlineComplete
++}
++
++type inlineProgress struct {
++	id      string
++	frac    float64
++	message string
++}
++
++type inlineComplete struct {
++	id      string
++	success bool
++	message string
++}
++
++func (f *fakeJobReporter) RegisterInlineJob(title string) string {
++	f.mu.Lock()
++	defer f.mu.Unlock()
++	f.titles = append(f.titles, title)
++	return fmt.Sprintf("inline-%d", len(f.titles))
++}
++
++func (f *fakeJobReporter) ReportInlineJobProgress(id string, frac float64, message string) {
++	f.mu.Lock()
++	defer f.mu.Unlock()
++	f.progresses = append(f.progresses, inlineProgress{id, frac, message})
++}
++
++func (f *fakeJobReporter) ReportInlineJobComplete(id string, success bool, message string) {
++	f.mu.Lock()
++	defer f.mu.Unlock()
++	f.completes = append(f.completes, inlineComplete{id, success, message})
++}
++
++// A scheduled run must be published to the job reporter: registered before the
++// backup, fed with live progress while it runs, and closed with the run's
++// outcome. That is the whole mechanism that puts a service-side scheduled run
++// (a machine backup in particular) into GET /backup/jobs — the list behind the
++// GUI's Running Jobs tab, which used to stay empty while the backup ran.
++func TestRunScheduledBackupPublishesToJobReporter(t *testing.T) {
++	a := newSchedulerTestApp(t)
++	rep := &fakeJobReporter{}
++	a.SetJobReporter(rep)
++	job := sampleJob()
++
++	// Success: the seam stands in for StartBackup/StartMachineBackup and, like
++	// their OnProgress callbacks, dispatches live progress.
++	a.scheduledBackupFn = func(j ScheduledJob) error {
++		a.dispatchProgress(0.42, "sending data")
++		return nil
++	}
++	if err := a.runScheduledBackup(job); err != nil {
++		t.Fatalf("runScheduledBackup() error = %v", err)
++	}
++
++	if len(rep.titles) != 1 || !strings.Contains(rep.titles[0], job.Name) {
++		t.Fatalf("registered titles = %v, want one containing %q", rep.titles, job.Name)
++	}
++	if len(rep.progresses) != 1 || rep.progresses[0].id != "inline-1" ||
++		rep.progresses[0].frac != 0.42 || rep.progresses[0].message != "sending data" {
++		t.Errorf("progresses = %+v, want [inline-1 0.42 sending data]", rep.progresses)
++	}
++	if len(rep.completes) != 1 || !rep.completes[0].success {
++		t.Errorf("completes = %+v, want a single success entry", rep.completes)
++	}
++
++	// Failure: the entry must close too — a run that dies before its own
++	// OnComplete (PBS resolve error, missing config) would otherwise sit at
++	// "running" in the jobs list forever.
++	rep2 := &fakeJobReporter{}
++	a.SetJobReporter(rep2)
++	a.scheduledBackupFn = func(ScheduledJob) error {
++		return fmt.Errorf("pbs refused the snapshot")
++	}
++	if err := a.runScheduledBackup(job); err == nil {
++		t.Fatal("runScheduledBackup() error = nil, want the seam's error")
++	}
++	if len(rep2.completes) != 1 || rep2.completes[0].success ||
++		!strings.Contains(rep2.completes[0].message, "pbs refused the snapshot") {
++		t.Errorf("completes = %+v, want one failure mentioning the cause", rep2.completes)
++	}
++
++	// The inline entry must not leak into whatever runs next.
++	if id := a.currentInlineJobID(); id != "" {
++		t.Errorf("currentInlineJobID() = %q after the run, want empty", id)
++	}
++}
+diff --git a/gui/service.go b/gui/service.go
+index cc795fd..37e04db 100644
+--- a/gui/service.go
++++ b/gui/service.go
+@@ -11,6 +11,7 @@ import (
+ 	"os/exec"
+ 	"path/filepath"
+ 	"runtime/debug"
++	"strings"
+ 	"time"
+ 
+ 	"pbscommon"
+@@ -91,9 +92,6 @@ func (s *BackupService) run() {
+ 	// Recalculate stale nextRun values (e.g. after service restart or missed window)
+ 	s.app.RecalculateNextRuns()
+ 
+-	// Start the scheduler
+-	s.app.StartScheduler()
+-
+ 	// Start HTTP API server for GUI communication (token-authenticated — H-01).
+ 	// If token init fails the server keeps an empty token and rejects every
+ 	// request (fail closed) rather than exposing the privileged API unauthenticated.
+@@ -109,6 +107,13 @@ func (s *BackupService) run() {
+ 	s.apiServer = api.NewServer("127.0.0.1:18765", s.app, apiToken, appVersion)
+ 	writeDebugLog("Starting HTTP API server on 127.0.0.1:18765")
+ 
++	// Hand the API server to the App as the progress sink for backups that do
++	// NOT start through an HTTP handler — scheduled runs and "Run now". The
++	// GUI's Running Jobs tab lists GET /backup/jobs, and without this the
++	// service executed scheduled machine backups that never appeared anywhere
++	// in the GUI.
++	s.app.SetJobReporter(s.apiServer)
++
+ 	// Periodic token regeneration (default 24h, PBSGO_TOKEN_ROTATION/GRACE to
+ 	// tune, rotation=0 to disable): the replaced token keeps authenticating
+ 	// for the grace window, and a GUI that outlives it gets a 401 and repeats
+@@ -123,6 +128,12 @@ func (s *BackupService) run() {
+ 		}
+ 	}()
+ 
++	// Start the scheduler LAST, once the reporter above is installed: a job
++	// flagged "run at startup" fires synchronously from here, and startup is
++	// exactly when the user opens the GUI to watch it — by then its run must
++	// already be visible in the jobs list.
++	s.app.StartScheduler()
++
+ 	// Keep the service running (scheduler and API server run in background goroutines)
+ 	writeDebugLog("Service main loop started, waiting for stop signal")
+ 	<-s.stopChan // Block until stop signal received
+@@ -197,10 +208,28 @@ func IsServiceMode() bool {
+ 	return false
+ }
+ 
+-// hardenWindowsACLs applies restrictive ACLs to the service state directory:
+-// - api-token: readable by SYSTEM and BUILTIN\Administrators (for elevated GUI fetch)
+-// - config.json, scheduled_jobs.json, job_history.json: SYSTEM-only
+-// Best-effort: if icacls.exe is missing or fails, we log and continue.
++// hardenWindowsACLs applies restrictive DACLs to the service state directory:
++//   - api-token: SYSTEM (F) + BUILTIN\Administrators (R) — a user session only
++//     reads it through an elevated (UAC) fetch, see api.EnsureToken;
++//   - config.json, scheduled_jobs.json, job_history.json: SYSTEM-only (every
++//     GUI access goes through the service API).
++//
++// Two details are load-bearing, both learned from a production lockout:
++//
++//   - Trustees are referenced by SID (*S-1-5-18 = NT AUTHORITY\SYSTEM,
++//     *S-1-5-32-544 = BUILTIN\Administrators), never by the English account
++//     names: on a localized (non-English) Windows those names do not resolve,
++//     the /grant:r fails — and with /inheritance:r in the same command line
++//     the file was left with an EMPTY DACL. No user could read or write it,
++//     not even SYSTEM itself: the owner keeps WRITE_DAC (to repair the DACL)
++//     but gets no file access at all, which locked the GUI out of the token
++//     and every JSON config.
++//   - The grant runs in its own icacls invocation BEFORE the inheritance
++//     strip, so a failure can only leave the file MORE permissive than
++//     intended (the inherited ACL), never unreachable.
++//
++// Best-effort: if icacls.exe is missing or a file is not there yet, we log
++// and continue — service startup must never depend on it.
+ func hardenWindowsACLs(stateDir string) {
+ 	icacls, err := exec.LookPath("icacls.exe")
+ 	if err != nil {
+@@ -208,30 +237,39 @@ func hardenWindowsACLs(stateDir string) {
+ 		return
+ 	}
+ 
+-	tokenPath := filepath.Join(stateDir, "api-token")
+-	configFiles := []string{
+-		filepath.Join(stateDir, "config.json"),
+-		filepath.Join(stateDir, "scheduled_jobs.json"),
+-		filepath.Join(stateDir, "job_history.json"),
++	run := func(target string, args ...string) {
++		out, err := exec.Command(icacls, append([]string{target}, args...)...).CombinedOutput()
++		if err != nil {
++			// Keep icacls' own output: without it a failing grant is
++			// indistinguishable from a missing file and the empty-DACL
++			// lockout above would be undebuggable.
++			writeDebugLog(fmt.Sprintf("icacls on %s failed (non-fatal): %v: %s",
++				target, err, strings.TrimSpace(string(out))))
++		}
+ 	}
+ 
+-	// api-token: SYSTEM:(OI)(CI)F + BUILTIN\Administrators:(OI)(CI)R
+-	// (OI)(CI) = Object Inherit + Container Inherit (for future files)
+-	if _, err := exec.Command(icacls, tokenPath,
+-		"/inheritance:r", // remove inherited ACEs
+-		"/grant:r", "SYSTEM:(OI)(CI)F",
+-		"/grant:r", "BUILTIN\\Administrators:(OI)(CI)R",
+-	).CombinedOutput(); err != nil {
+-		writeDebugLog(fmt.Sprintf("icacls on api-token failed (non-fatal): %v", err))
++	targets := []struct {
++		path string
++		// extra trustees granted before inheritance is stripped; "" = SYSTEM only
++		grant string
++	}{
++		{filepath.Join(stateDir, "api-token"), "*S-1-5-32-544:R"},
++		{filepath.Join(stateDir, "config.json"), ""},
++		{filepath.Join(stateDir, "scheduled_jobs.json"), ""},
++		{filepath.Join(stateDir, "job_history.json"), ""},
+ 	}
+ 
+-	// Config files: SYSTEM-only (F = full control)
+-	for _, f := range configFiles {
+-		if _, err := exec.Command(icacls, f,
+-			"/inheritance:r",
+-			"/grant:r", "SYSTEM:(OI)(CI)F",
+-		).CombinedOutput(); err != nil {
+-			writeDebugLog(fmt.Sprintf("icacls on %s failed (non-fatal): %v", f, err))
++	for _, t := range targets {
++		if _, err := os.Stat(t.path); err != nil {
++			writeDebugLog(fmt.Sprintf("ACL hardening: %s not present, skipped", t.path))
++			continue
++		}
++		// Grant first (SYSTEM must always keep access), strip inherited ACEs
++		// only after every grant succeeded — see the comment above.
++		run(t.path, "/grant:r", "*S-1-5-18:F")
++		if t.grant != "" {
++			run(t.path, "/grant:r", t.grant)
+ 		}
++		run(t.path, "/inheritance:r")
+ 	}
+ }
+diff --git a/gui/service_unix.go b/gui/service_unix.go
+index 7659653..83cf659 100644
+--- a/gui/service_unix.go
++++ b/gui/service_unix.go
+@@ -75,9 +75,6 @@ func (s *BackupService) run() {
+ 	// Recalculate stale nextRun values (e.g. after restart or missed window)
+ 	s.app.RecalculateNextRuns()
+ 
+-	// Start the scheduler
+-	s.app.StartScheduler()
+-
+ 	// Start HTTP API server for GUI communication (token-authenticated — H-01).
+ 	// If token init fails the server keeps an empty token and rejects every
+ 	// request (fail closed) rather than exposing the privileged API unauthenticated.
+@@ -88,6 +85,13 @@ func (s *BackupService) run() {
+ 	s.apiServer = api.NewServer("127.0.0.1:18765", s.app, apiToken, appVersion)
+ 	writeDebugLog("Starting HTTP API server on 127.0.0.1:18765")
+ 
++	// Hand the API server to the App as the progress sink for backups that do
++	// NOT start through an HTTP handler — scheduled runs and "Run now". The
++	// GUI's Running Jobs tab lists GET /backup/jobs, and without this the
++	// service executed scheduled backups that never appeared anywhere in the
++	// GUI (see main.runScheduledBackup).
++	s.app.SetJobReporter(s.apiServer)
++
+ 	// Regenerate the token on a schedule (default 24h, PBSGO_TOKEN_ROTATION to
+ 	// change, =0 to disable): a secret that lives forever in user sessions
+ 	// would outlive every legitimate reason to hold it. The server keeps
+@@ -104,6 +108,12 @@ func (s *BackupService) run() {
+ 		}
+ 	}()
+ 
++	// Start the scheduler LAST, once the reporter above is installed: a job
++	// flagged "run at startup" fires synchronously from here, and startup is
++	// exactly when the user opens the GUI to watch it — by then its run must
++	// already be visible in the jobs list.
++	s.app.StartScheduler()
++
+ 	// Keep the service running (scheduler and API server run in background
+ 	// goroutines). systemd (Type=simple) signals SIGTERM on stop; kardianos
+ 	// does not translate it, so we catch it here and run the same graceful
+diff --git a/gui/single_instance_windows.go b/gui/single_instance_windows.go
+index 03b3faf..840befb 100644
+--- a/gui/single_instance_windows.go
++++ b/gui/single_instance_windows.go
+@@ -3,6 +3,7 @@
+ package main
+ 
+ import (
++	"errors"
+ 	"fmt"
+ 	"syscall"
+ 	"unsafe"
+@@ -16,11 +17,11 @@ const (
+ )
+ 
+ var (
+-	user32           = windows.NewLazySystemDLL("user32.dll")
+-	procFindWindow   = user32.NewProc("FindWindowW")
++	user32            = windows.NewLazySystemDLL("user32.dll")
++	procFindWindow    = user32.NewProc("FindWindowW")
+ 	procSetForeground = user32.NewProc("SetForegroundWindow")
+-	procShowWindow   = user32.NewProc("ShowWindow")
+-	procIsIconic     = user32.NewProc("IsIconic")
++	procShowWindow    = user32.NewProc("ShowWindow")
++	procIsIconic      = user32.NewProc("IsIconic")
+ )
+ 
+ const (
+@@ -38,16 +39,38 @@ func CheckSingleInstance() bool {
+ 		return true // Allow launch on error
+ 	}
+ 
+-	// Try to create or open the mutex
+ 	mutex, err := windows.CreateMutex(nil, false, mutexNamePtr)
+-	if err != nil && err != windows.ERROR_ALREADY_EXISTS {
++
++	// Does the named mutex already exist (i.e. is another instance running)?
++	// Three cases end up here:
++	//
++	//   - success + ERROR_ALREADY_EXISTS: same integrity level, the normal case.
++	//   - ERROR_ALREADY_EXISTS as the error itself: belt and braces for the
++	//     same situation.
++	//   - ERROR_ACCESS_DENIED: the mutex exists but was created at a HIGHER
++	//     integrity level — an elevated relaunch leaves exactly that behind
++	//     (requestElevationWindows hands the lock to the UAC-elevated copy).
++	//     Mandatory integrity control refuses a medium-IL process any access,
++	//     so CreateMutex fails with ACCESS_DENIED instead of reporting
++	//     ALREADY_EXISTS. The old code treated any other error as "no other
++	//     instance, go ahead" — which is why a second GUI window kept
++	//     appearing next to the elevated one. Being locked out of the name
++	//     means someone else holds it; that IS a duplicate.
++	duplicate := false
++	switch {
++	case err == nil:
++		duplicate = windows.GetLastError() == windows.ERROR_ALREADY_EXISTS
++	case errors.Is(err, windows.ERROR_ALREADY_EXISTS):
++		duplicate = true
++	case errors.Is(err, windows.ERROR_ACCESS_DENIED):
++		writeDebugLog(fmt.Sprintf("Mutex %s exists at a higher integrity level (elevated instance): %v", mutexName, err))
++		duplicate = true
++	default:
+ 		writeDebugLog(fmt.Sprintf("Failed to create mutex: %v", err))
+ 		return true // Allow launch on error
+ 	}
+ 
+-	// Check if mutex already existed (GetLastError returns ERROR_ALREADY_EXISTS even when CreateMutex succeeds)
+-	lastErr := windows.GetLastError()
+-	if lastErr == windows.ERROR_ALREADY_EXISTS {
++	if duplicate {
+ 		writeDebugLog("Another instance is already running - attempting to bring it to foreground")
+ 
+ 		// Try to find and activate the existing window
+@@ -57,7 +80,8 @@ func CheckSingleInstance() bool {
+ 			writeDebugLog("Could not find existing window to activate")
+ 		}
+ 
+-		// Close our mutex handle and exit
++		// Close our mutex handle and exit (the handle is 0 when CreateMutex
++		// failed outright, e.g. the ACCESS_DENIED case above).
+ 		if mutex != 0 {
+ 			windows.CloseHandle(mutex)
+ 		}
+@@ -86,33 +110,36 @@ func ReleaseSingleInstance() {
+ 	}
+ }
+ 
+-// activateExistingWindow finds the existing Proxmox Backup Client window and brings it to foreground
++// activateExistingWindow finds the existing client window and brings it to
++// foreground.
+ func activateExistingWindow() bool {
+-	windowNamePtr, err := syscall.UTF16PtrFromString(windowName)
+-	if err != nil {
+-		return false
++	// The Wails window title is "<Brand> v<version>" (main.go's options), and
++	// the brand is derived from the executable name — "Proxmox Backup Client",
++	// "Nimbus Backup", "Acme Backup", "Etitech Backup". Searching only for the
++	// hardcoded windowName meant a branded build never matched its own window:
++	// the second launch exited without showing anything. Try the brand first,
++	// then the default brand as a fallback.
++	brand := BrandFromExecutable().Title
++	titles := []string{
++		brand + " v" + appVersion,
++		brand,
++	}
++	if windowName != brand {
++		titles = append(titles, windowName+" v"+appVersion, windowName)
+ 	}
+ 
+-	// Find window by title (Wails uses the app title as window title)
+-	hwnd, _, _ := procFindWindow.Call(
+-		0, // lpClassName - null to search all classes
+-		uintptr(unsafe.Pointer(windowNamePtr)),
+-	)
+-
+-	if hwnd == 0 {
+-		// Try with the current version suffix (Wails titles the window
+-		// "Proxmox Backup Client v<appVersion>"). Derived from appVersion so it never
+-		// goes stale across releases.
+-		for _, suffix := range []string{" v" + appVersion} {
+-			titleWithVersion := windowName + suffix
+-			titlePtr, _ := syscall.UTF16PtrFromString(titleWithVersion)
+-			hwnd, _, _ = procFindWindow.Call(
+-				0,
+-				uintptr(unsafe.Pointer(titlePtr)),
+-			)
+-			if hwnd != 0 {
+-				break
+-			}
++	var hwnd uintptr
++	for _, title := range titles {
++		titlePtr, err := syscall.UTF16PtrFromString(title)
++		if err != nil {
++			continue
++		}
++		hwnd, _, _ = procFindWindow.Call(
++			0, // lpClassName - null to search all classes
++			uintptr(unsafe.Pointer(titlePtr)),
++		)
++		if hwnd != 0 {
++			break
+ 		}
+ 	}
+ 
+-- 
+2.47.3
+

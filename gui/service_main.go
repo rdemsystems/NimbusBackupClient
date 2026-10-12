@@ -12,6 +12,10 @@ import (
 )
 
 func main() {
+	// First statement: a service has no console and its stderr is discarded,
+	// so stdlib log output must go to the rotating log.
+	redirectStdlibLog()
+
 	// Service configuration.
 	//
 	// On Windows the Name MUST equal the name the MSI registered the service

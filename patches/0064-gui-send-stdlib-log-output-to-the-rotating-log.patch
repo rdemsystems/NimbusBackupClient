@@ -1,0 +1,127 @@
+From 7cf20ad83983eaf3fafa358dbd524921b48cf208 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Mon, 12 Oct 2026 15:00:44 +0200
+Subject: [PATCH 64/76] gui: send stdlib log output to the rotating log
+
+log.SetOutput was never called, so the standard log package kept writing
+to stderr, which the SCM discards for a service: every log.Printf of the
+service process (machinebackuplib's notes, log.Fatal in service_main.go,
+third-party packages) went nowhere. Both main() functions now redirect
+it to writeDebugLog first thing.
+
+Adapted from CJInvent/NimbusBackupClient 729abbd.
+---
+ gui/logredirect.go      | 50 +++++++++++++++++++++++++++++++++++++++++
+ gui/logredirect_test.go | 11 +++++++++
+ gui/main.go             |  4 ++++
+ gui/service_main.go     |  4 ++++
+ 4 files changed, 69 insertions(+)
+ create mode 100644 gui/logredirect.go
+ create mode 100644 gui/logredirect_test.go
+
+diff --git a/gui/logredirect.go b/gui/logredirect.go
+new file mode 100644
+index 0000000..248ff1f
+--- /dev/null
++++ b/gui/logredirect.go
+@@ -0,0 +1,50 @@
++package main
++
++// logredirect.go routes Go's standard log package into the rotating log the
++// rest of the client writes to (writeDebugLog).
++//
++// A Windows service has no console: whatever a process started by the SCM
++// writes to os.Stderr is discarded. The stdlib log package defaults to
++// os.Stderr, so before this file every log.Printf in the service process
++// (machinebackuplib's progress and padding notes, log.Fatal in
++// service_main.go, third-party packages) was written nowhere.
++//
++// No recursion: writeLogToLogger writes to the rotating logger and to
++// os.Stderr with fmt, and never calls the stdlib log package.
++//
++// Adapted from CJInvent/NimbusBackupClient 729abbd.
++
++import (
++	"bytes"
++	"io"
++	"log"
++)
++
++// debugLogWriter adapts writeDebugLog to io.Writer so it can back log.SetOutput.
++type debugLogWriter struct{}
++
++// Write forwards each line to the rotating log. A multi-line message (a
++// formatted error, a panic dump) arrives as one Write; splitting keeps every
++// line on its own timestamped row.
++func (debugLogWriter) Write(p []byte) (int, error) {
++	for _, line := range bytes.Split(bytes.TrimRight(p, "\n"), []byte("\n")) {
++		if len(bytes.TrimSpace(line)) == 0 {
++			continue
++		}
++		writeDebugLog(string(line))
++	}
++	// Always report the whole input as consumed: a short count would make the
++	// log package report an error about the logger itself.
++	return len(p), nil
++}
++
++// redirectStdlibLog points the standard log package at the rotating log. It is
++// the first statement of both main() functions; anything logged before it
++// goes to stderr. The flags are cleared because writeLogToLogger already
++// stamps every line with its own prefix and timestamp.
++func redirectStdlibLog() {
++	log.SetFlags(0)
++	log.SetOutput(debugLogWriter{})
++}
++
++var _ io.Writer = debugLogWriter{}
+diff --git a/gui/logredirect_test.go b/gui/logredirect_test.go
+new file mode 100644
+index 0000000..1592cdd
+--- /dev/null
++++ b/gui/logredirect_test.go
+@@ -0,0 +1,11 @@
++package main
++
++import "testing"
++
++func TestDebugLogWriterConsumesWholeInput(t *testing.T) {
++	in := []byte("first line\n\nsecond line\n")
++	n, err := debugLogWriter{}.Write(in)
++	if err != nil || n != len(in) {
++		t.Fatalf("Write = (%d, %v), want (%d, nil)", n, err, len(in))
++	}
++}
+diff --git a/gui/main.go b/gui/main.go
+index 9ba83d5..02fd8e1 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -58,6 +58,10 @@ func init() {
+ }
+ 
+ func main() {
++	// Route stdlib log into the rotating log before anything can log, so the
++	// GUI and the service share one logging path.
++	redirectStdlibLog()
++
+ 	// Elevated token-fetch child: this process was launched elevated ONLY to
+ 	// read the service token file and hand it back (see token_elevated.go).
+ 	// It must run before flag parsing, single-instance and everything else —
+diff --git a/gui/service_main.go b/gui/service_main.go
+index 9cc58e9..a4f527c 100644
+--- a/gui/service_main.go
++++ b/gui/service_main.go
+@@ -12,6 +12,10 @@ import (
+ )
+ 
+ func main() {
++	// First statement: a service has no console and its stderr is discarded,
++	// so stdlib log output must go to the rotating log.
++	redirectStdlibLog()
++
+ 	// Service configuration.
+ 	//
+ 	// On Windows the Name MUST equal the name the MSI registered the service
+-- 
+2.47.3
+

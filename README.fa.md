@@ -18,6 +18,8 @@ Nimbus Backup نسخه‌ی RDEM Systems از [Proxmox Backup Client GO](https:/
 
 📖 **مستندات کامل، راهنمای نصب و میزبانی PBS:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
 
+> 🔏 **فقط نسخه‌های ما رسمی هستند.** نسخه‌های Nimbus Backup **فقط** در [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) و [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github) منتشر می‌شوند. از نسخه 0.4.1 به بعد، هر فایل اجرایی رسمی ویندوز (رابط گرافیکی، سرویس، MSI) **توسط RDEM SYSTEMS امضای دیجیتال شده است**: روی فایل راست‌کلیک کنید ← *Properties* ← *Digital Signatures*، یا از `Get-AuthenticodeSignature` استفاده کنید. فورک‌هایی از این پروژه GPL وجود دارند که هنوز نام Nimbus Backup و RDEM Systems را به عنوان سازنده حفظ کرده‌اند؛ نسخه‌های آن‌ها **توسط RDEM Systems ساخته، امضا یا پشتیبانی نمی‌شوند**.
+
 ## 📦 دانلود
 
 👉 **[دانلود آخرین نسخه](https://github.com/rdemsystems/NimbusBackupClient/releases)**

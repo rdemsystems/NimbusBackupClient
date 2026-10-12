@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -15,7 +16,26 @@ var (
 	trayInitialized = false
 	menuShow        *systray.MenuItem
 	menuQuit        *systray.MenuItem
+
+	// trayExitedCh is closed once systray's message loop has removed the icon
+	// (see onExit). Code about to os.Exit waits on it, with its own bound and
+	// its own exit code.
+	trayExitedCh   = make(chan struct{})
+	trayExitedOnce sync.Once
 )
+
+// markTrayExited closes trayExitedCh exactly once. Called from onExit.
+func markTrayExited() {
+	trayExitedOnce.Do(func() { close(trayExitedCh) })
+}
+
+// waitForTrayExit blocks until the tray icon is removed or timeout elapses.
+func waitForTrayExit(timeout time.Duration) {
+	select {
+	case <-trayExitedCh:
+	case <-time.After(timeout):
+	}
+}
 
 // preventCloseToTray reports whether closing the main window should be
 // intercepted and turned into a hide-to-tray. On Windows the tray keeps the
@@ -68,14 +88,15 @@ func onReady(a *App) func() {
 					runtime.WindowUnminimise(a.ctx)
 				case <-menuQuit.ClickedCh:
 					writeDebugLog("Tray: Quit clicked")
-					// Quit systray first
+					// Ask systray to remove the icon and Wails to shut down.
 					systray.Quit()
-					// Request Wails shutdown
 					runtime.Quit(a.ctx)
-					// Force exit after short delay if graceful shutdown doesn't work
+					// Exit once the icon is confirmed gone (bounded in case the
+					// message loop is stuck). The old blind 2 s timer could exit
+					// before Shell_NotifyIcon(NIM_DELETE) ran, leaving a ghost icon.
 					go func() {
-						time.Sleep(2 * time.Second)
-						writeDebugLog("Force exit after timeout")
+						waitForTrayExit(3 * time.Second)
+						writeDebugLog("Tray: exiting after Quit")
 						os.Exit(0)
 					}()
 				}
@@ -86,8 +107,16 @@ func onReady(a *App) func() {
 	}
 }
 
+// onExit is called by systray's message loop only after it has removed the
+// icon with Shell_NotifyIcon(NIM_DELETE). systray never sets the icon's GUID,
+// so Windows cannot clean it up after the process is gone: an os.Exit that
+// does not wait for this leaves a ghost icon until it is hovered or Explorer
+// restarts.
+//
+// Adapted from CJInvent/NimbusBackupClient 9a7097e.
 func onExit() {
-	writeDebugLog("System tray exiting")
+	writeDebugLog("System tray exiting (icon removed)")
+	markTrayExited()
 }
 
 // MinimizeToTray hides the window and minimizes to tray

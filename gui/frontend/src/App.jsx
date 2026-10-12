@@ -81,7 +81,7 @@ function App() {
     url: brandBuyUrl || 'https://www.proxmox.com/en/downloads.php#download-proxmox-backup-server',
     text: (brand.buy_storage_texts && brand.buy_storage_texts[language]) || brand.buy_storage_text || t('orderStorageCTA')
   }
-  const [systemInfo, setSystemInfo] = useState({ mode: 'Standalone', is_admin: false, service_available: false, os: '' })
+  const [systemInfo, setSystemInfo] = useState({ mode: 'Standalone Mode', is_admin: false, service_available: false, os: '' })
   const [config, setConfig] = useState({
     baseurl: '',
     certfingerprint: '',
@@ -465,7 +465,7 @@ function App() {
         // Load system info (mode, admin status, service availability)
         if (GetSystemInfo) {
           const sysInfo = await GetSystemInfo()
-          setSystemInfo(sysInfo || { mode: 'Standalone', is_admin: false, service_available: false })
+          setSystemInfo(sysInfo || { mode: 'Standalone Mode', is_admin: false, service_available: false })
         }
 
         // Load last backup directories to pre-fill the form
@@ -651,7 +651,7 @@ function App() {
       setServerTab('server')
       await loadPBSServers()
     } catch (err) {
-      showStatus(`❌ Erreur: ${err}`, 'error')
+      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
     }
   }
 
@@ -691,7 +691,7 @@ function App() {
       setServerTab('server')
       await loadPBSServers()
     } catch (err) {
-      showStatus(`❌ Erreur: ${err}`, 'error')
+      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
     }
   }
 
@@ -710,7 +710,7 @@ function App() {
       showStatus(`✅ ${t('statusServerDeleted')}`, 'success')
       await loadPBSServers()
     } catch (err) {
-      showStatus(`❌ Erreur: ${err}`, 'error')
+      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
     }
   }
 
@@ -725,7 +725,7 @@ function App() {
       setDefaultPBSID(id)
       showStatus(`✅ ${t('statusServerSetDefault').replace('{id}', id)}`, 'success')
     } catch (err) {
-      showStatus(`❌ Erreur: ${err}`, 'error')
+      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
     }
   }
 
@@ -1004,7 +1004,7 @@ function App() {
       setConfig(trimmedConfig)
       showStatus(`✅ ${t('statusConfigSaved')}`, 'success')
     } catch (err) {
-      showStatus(`❌ Erreur : ${err}`, 'error')
+      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
     }
   }
 
@@ -1122,7 +1122,7 @@ function App() {
         const promise = new Promise((resolve) => {
           unsub = EventsOn('backup:complete', (data) => {
             if (typeof unsub === 'function') unsub()
-            resolve(data || { success: false, message: 'completion sans données' })
+            resolve(data || { success: false, message: t('completionNoData') })
           })
         })
         return { promise, cancel: () => { if (typeof unsub === 'function') unsub() } }
@@ -1199,6 +1199,13 @@ function App() {
     }
   }
 
+  // VM-kind machine backups need a Proxmox VM ID (100..999999999), entered in
+  // the dedicated VM ID field. Computed here so the same rule gates the
+  // Start/Save button, shows the inline hint and blocks handleStartBackup.
+  const vmBackupIdInvalid = backupType === 'machine'
+    && machineBackupKind === 'vm'
+    && !(/^\d+$/.test(machineVMID.trim()) && Number(machineVMID.trim()) >= 100 && Number(machineVMID.trim()) <= 999999999)
+
   const handleStartBackup = async () => {
     if (!StartBackup) {
       showStatus(t('wailsRuntimeUnavailable'), 'error')
@@ -1209,7 +1216,7 @@ function App() {
     const dirList = backupDirs.split('\n').map(d => d.trim()).filter(d => d)
 
     if (backupType === 'directory' && dirList.length === 0) {
-      showStatus('❌ Au moins un répertoire requis', 'error')
+      showStatus(`❌ ${t('atLeastOneDir')}`, 'error')
       return
     }
 
@@ -1252,17 +1259,17 @@ function App() {
           if (!canModify) {
             // Request elevation
             if (RequestJobModificationElevation) {
-              showStatus('⚠️ Privilèges administrateur requis pour modifier les jobs planifiés', 'warning')
+              showStatus(`⚠️ ${t('scheduleAdminRequired')}`, 'warning')
               try {
                 await RequestJobModificationElevation()
               } catch (err) {
-                showStatus(`❌ Échec de l'élévation des privilèges: ${err}`, 'error')
+                showStatus(`❌ ${t('elevationFailed', { error: err })}`, 'error')
               }
             }
             return
           }
         } catch (err) {
-          showStatus(`❌ Erreur vérification privilèges: ${err}`, 'error')
+          showStatus(`❌ ${t('privilegeCheckError', { err })}`, 'error')
           return
         }
       }
@@ -1290,13 +1297,13 @@ function App() {
           // Update existing job
           await UpdateScheduledJob(jobData)
           setScheduledJobs(scheduledJobs.map(j => j.id === editingJobId ? jobData : j))
-          showStatus(`✅ Backup modifié pour ${scheduleTime}`, 'success')
+          showStatus(`✅ ${t('scheduleUpdated', { time: scheduleTime })}`, 'success')
           setEditingJobId(null)
         } else {
           // Create new job
           await SaveScheduledJob(jobData)
           setScheduledJobs([...scheduledJobs, jobData])
-          showStatus(`✅ Backup planifié pour ${scheduleTime}`, 'success')
+          showStatus(`✅ ${t('scheduleCreated', { time: scheduleTime })}`, 'success')
         }
         // Reset form after save
         setScheduleTime('02:00')
@@ -1305,7 +1312,7 @@ function App() {
         setBackupPBSID('')
         setMachineBackupKind('host')
       } catch (err) {
-        showStatus(`❌ Erreur: ${err}`, 'error')
+        showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
       }
       return
     }
@@ -1374,7 +1381,7 @@ function App() {
       return
     }
     if (!restoreBackupId) {
-      showStatus('❌ Backup ID requis', 'error')
+      showStatus(`❌ ${t('backupIdRequired')}`, 'error')
       return
     }
 
@@ -1388,7 +1395,7 @@ function App() {
       const snaps = await ListSnapshots(restorePBSID || '', restoreBackupId)
       setSnapshots(snaps || [])
       setShowSnapshots(true)
-      showStatus(`✅ ${snaps.length} snapshot(s) trouvé(s)`, 'success')
+      showStatus(`✅ ${t('snapshotsFound', { n: snaps.length })}`, 'success')
     } catch (err) {
       showStatus(`❌ ${err}`, 'error')
     }
@@ -2133,6 +2140,11 @@ function App() {
                 placeholder="9001"
               />
               <div className="info-box" style={{marginTop: '8px'}}>💡 {t('machineVMIDHint')}</div>
+              {vmBackupIdInvalid && (
+                <div style={{marginTop: '6px', fontSize: '13px', color: '#dc3545'}}>
+                  ⚠️ {t('vmidInvalid')}
+                </div>
+              )}
             </div>
           ) : (
             <div className="form-group">
@@ -2155,7 +2167,7 @@ function App() {
               />
               {t('useSnapshotting')}
             </label>
-            {config.usevss && systemInfo.mode === 'Standalone' && !systemInfo.is_admin && (
+            {config.usevss && systemInfo.mode === 'Standalone Mode' && !systemInfo.is_admin && (
               <div className="info-box" style={{marginTop: '10px', backgroundColor: '#fff3cd', borderColor: '#ffc107'}}>
                 ⚠️ <strong>{t('vssAdminRequired')}</strong><br/>
                 {t('vssAdminHint')}
@@ -2280,7 +2292,7 @@ function App() {
             </div>
           )}
 
-          <button className="btn" onClick={handleStartBackup} disabled={backupRunning || (progress > 0 && progress < 100)}>
+          <button className="btn" onClick={handleStartBackup} disabled={backupRunning || (progress > 0 && progress < 100) || vmBackupIdInvalid}>
             {backupMode === 'oneshot'
               ? (backupRunning || (progress > 0 && progress < 100) ? `⏳ ${t('backupInProgress')}` : `🚀 ${t('startBackup')}`)
               : (editingJobId ? `✏️ ${t('updateSchedule')}` : `💾 ${t('saveSchedule')}`)
@@ -2322,10 +2334,12 @@ function App() {
                     <div>
                       <strong>{job.name}</strong>
                       <div style={{fontSize: '14px', color: '#6c757d', marginTop: '5px'}}>
-                        ⏰ {job.scheduleTime} {job.runAtStartup && '• 🚀 Au démarrage'}
+                        ⏰ {job.scheduleTime} {job.runAtStartup && `• 🚀 ${t('atStartup')}`}
                       </div>
                       <div style={{fontSize: '13px', color: '#6c757d', marginTop: '3px'}}>
-                        📁 {(job.backupDirs || []).join(', ')}
+                        {job.backupType === 'machine'
+                          ? `💾 ${(job.driveLetters || []).join(', ')}${job.backup_kind ? ` • ${job.backup_kind}` : ''}`
+                          : `📁 ${(job.backupDirs || []).join(', ')}`}
                       </div>
                     </div>
                     <div style={{display: 'flex', gap: '10px'}}>
@@ -2381,7 +2395,7 @@ function App() {
                               setEditingJobId(null)
                             }
                           } catch (err) {
-                            showStatus(`❌ Erreur: ${err}`, 'error')
+                            showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
                           }
                         }}
                       >

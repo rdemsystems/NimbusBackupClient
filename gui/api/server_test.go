@@ -230,7 +230,7 @@ func TestBackupRouteForwardsCompressionAndPBS(t *testing.T) {
 // A job that cannot be started (unknown id, already running) is a conflict, and
 // the service's message is what the caller sees.
 func TestJobRunReportsFailure(t *testing.T) {
-	h := &fakeHandler{runErr: fmt.Errorf("job \"Nightly\" est deja en cours d'execution")}
+	h := &fakeHandler{runErr: fmt.Errorf("job \"Nightly\" is already running")}
 	_, url, _ := newTestServer(t, h)
 
 	resp := doAuthed(t, http.MethodPost, url+"/jobs/run/job-42", "")
@@ -241,7 +241,7 @@ func TestJobRunReportsFailure(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
-	if !strings.Contains(errResp.Error, "deja en cours") {
+	if !strings.Contains(errResp.Error, "already running") {
 		t.Errorf("error = %q, want the service's message", errResp.Error)
 	}
 	if h.ranID != "" {
@@ -369,14 +369,14 @@ func TestJobCreateForwardsEveryField(t *testing.T) {
 
 // The GUI's client reports the service's own message when a run is refused.
 func TestClientRunScheduledJobSurfacesServiceError(t *testing.T) {
-	h := &fakeHandler{runErr: fmt.Errorf("job planifie \"nope\" introuvable")}
+	h := &fakeHandler{runErr: fmt.Errorf("scheduled job \"nope\" not found")}
 	_, _, client := newTestServer(t, h)
 
 	err := client.RunScheduledJob("nope")
 	if err == nil {
 		t.Fatalf("RunScheduledJob() succeeded for an unknown job")
 	}
-	if !strings.Contains(err.Error(), "introuvable") {
+	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("error = %q, want the service's message", err)
 	}
 }

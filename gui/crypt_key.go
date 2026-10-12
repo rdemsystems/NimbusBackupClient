@@ -42,18 +42,18 @@ func inspectKeyFile(path string) EncryptionKeyInfo {
 
 	st, err := os.Stat(path)
 	if err != nil {
-		info.Reason = fmt.Sprintf("fichier introuvable ou illisible: %v", err)
+		info.Reason = fmt.Sprintf("file not found or unreadable: %v", err)
 		return info
 	}
 	info.Exists = true
 	if st.IsDir() {
-		info.Reason = "le chemin designe un dossier, pas un fichier de cle"
+		info.Reason = "the path is a folder, not a key file"
 		return info
 	}
 
 	keyCfg, err := pbscommon.LoadKeyConfig(path)
 	if err != nil {
-		info.Reason = fmt.Sprintf("lecture impossible: %v", err)
+		info.Reason = fmt.Sprintf("cannot read: %v", err)
 		return info
 	}
 	info.Fingerprint = keyCfg.Fingerprint
@@ -63,14 +63,14 @@ func inspectKeyFile(path string) EncryptionKeyInfo {
 	info.PassphraseProtected = keyCfg.KDF != nil
 
 	if info.PassphraseProtected {
-		info.Reason = "cle protegee par phrase de passe: l'interface graphique ne peut pas la deverrouiller (creez-la avec --kdf none)"
+		info.Reason = "key is protected by a passphrase: the GUI cannot unlock it (create it with --kdf none)"
 		return info
 	}
 
 	// Actually unlock it: a fingerprint alone does not prove the key material is
 	// intact, and a corrupt key would otherwise only fail mid-backup.
 	if _, err := keyCfg.CryptConfig(nil); err != nil {
-		info.Reason = fmt.Sprintf("cle illisible: %v", err)
+		info.Reason = fmt.Sprintf("unreadable key: %v", err)
 		return info
 	}
 
@@ -95,51 +95,51 @@ func (a *App) InspectEncryptionKeyFile(path string) EncryptionKeyInfo {
 func (a *App) GenerateEncryptionKeyFile(path string) (EncryptionKeyInfo, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return EncryptionKeyInfo{}, fmt.Errorf("chemin de fichier de cle requis")
+		return EncryptionKeyInfo{}, fmt.Errorf("key file path is required")
 	}
 	if err := security.ValidatePath(path); err != nil {
-		return EncryptionKeyInfo{}, fmt.Errorf("chemin de cle invalide: %w", err)
+		return EncryptionKeyInfo{}, fmt.Errorf("invalid key path: %w", err)
 	}
 
 	if _, err := os.Stat(path); err == nil {
-		return EncryptionKeyInfo{}, fmt.Errorf("le fichier %s existe deja: refusing de l'ecraser, car cela rendrait illisibles les snapshots deja chiffres avec cette cle", path)
+		return EncryptionKeyInfo{}, fmt.Errorf("file %s already exists: refusing to overwrite it, as that would make snapshots already encrypted with that key unreadable", path)
 	} else if !os.IsNotExist(err) {
-		return EncryptionKeyInfo{}, fmt.Errorf("verification de %s: %w", path, err)
+		return EncryptionKeyInfo{}, fmt.Errorf("checking %s: %w", path, err)
 	}
 
 	dir := filepath.Dir(path)
 	if st, err := os.Stat(dir); err != nil {
 		if !os.IsNotExist(err) {
-			return EncryptionKeyInfo{}, fmt.Errorf("dossier %s: %w", dir, err)
+			return EncryptionKeyInfo{}, fmt.Errorf("folder %s: %w", dir, err)
 		}
 		if err := os.MkdirAll(dir, 0700); err != nil {
-			return EncryptionKeyInfo{}, fmt.Errorf("creation du dossier %s: %w", dir, err)
+			return EncryptionKeyInfo{}, fmt.Errorf("creating folder %s: %w", dir, err)
 		}
 	} else if !st.IsDir() {
-		return EncryptionKeyInfo{}, fmt.Errorf("%s n'est pas un dossier", dir)
+		return EncryptionKeyInfo{}, fmt.Errorf("%s is not a folder", dir)
 	}
 
 	encKey, err := pbscommon.GenerateEncryptionKey()
 	if err != nil {
-		return EncryptionKeyInfo{}, fmt.Errorf("generation de la cle: %w", err)
+		return EncryptionKeyInfo{}, fmt.Errorf("generating the key: %w", err)
 	}
 	crypt, err := pbscommon.NewCryptConfig(encKey)
 	if err != nil {
-		return EncryptionKeyInfo{}, fmt.Errorf("cle invalide: %w", err)
+		return EncryptionKeyInfo{}, fmt.Errorf("invalid key: %w", err)
 	}
 
 	// SaveKeyFile writes 0600. On Windows the mode is advisory only, so the key
 	// is additionally hidden from other users by ACL inheritance of the parent
 	// directory created above; nothing else to do here.
 	if err := pbscommon.SaveKeyFile(path, crypt); err != nil {
-		return EncryptionKeyInfo{}, fmt.Errorf("ecriture de %s: %w", path, err)
+		return EncryptionKeyInfo{}, fmt.Errorf("writing %s: %w", path, err)
 	}
 
 	info := inspectKeyFile(path)
 	if !info.Usable {
 		// A key we just wrote that we cannot read back is a serious inconsistency;
 		// surface it instead of handing the frontend a silently unusable path.
-		return EncryptionKeyInfo{}, fmt.Errorf("la cle %s a ete ecrite mais ne peut pas etre relue: %s", path, info.Reason)
+		return EncryptionKeyInfo{}, fmt.Errorf("key %s was written but cannot be read back: %s", path, info.Reason)
 	}
 	writeDebugLog(fmt.Sprintf("GenerateEncryptionKeyFile: created %s (fingerprint %s)", path, info.Fingerprint))
 	return info, nil
@@ -167,11 +167,11 @@ func (a *App) OpenEncryptionKeyDialog() (string, error) {
 		defaultDir = os.TempDir()
 	}
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "Choisir le fichier de cle de chiffrement",
+		Title:            "Choose the encryption key file",
 		DefaultDirectory: defaultDir,
 		Filters: []runtime.FileFilter{
-			{DisplayName: "Fichiers de cle PBS (*.json)", Pattern: "*.json"},
-			{DisplayName: "Tous les fichiers (*.*)", Pattern: "*.*"},
+			{DisplayName: "PBS key files (*.json)", Pattern: "*.json"},
+			{DisplayName: "All files (*.*)", Pattern: "*.*"},
 		},
 	})
 }
@@ -193,11 +193,11 @@ func (a *App) OpenEncryptionKeySaveDialog() (string, error) {
 		}
 	}
 	return runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:            "Enregistrer la nouvelle cle de chiffrement",
+		Title:            "Save the new encryption key",
 		DefaultDirectory: defaultDir,
 		DefaultFilename:  "encryption-key.json",
 		Filters: []runtime.FileFilter{
-			{DisplayName: "Fichiers de cle PBS (*.json)", Pattern: "*.json"},
+			{DisplayName: "PBS key files (*.json)", Pattern: "*.json"},
 		},
 	})
 }

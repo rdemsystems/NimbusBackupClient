@@ -1,0 +1,157 @@
+From 8cd657dd089dcb3be6cb8d3dd12346c8ff455588 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Mon, 12 Oct 2026 15:02:00 +0200
+Subject: [PATCH 67/76] gui: do not leave ghost tray icons behind
+
+systray never sets the icon's GUID, so Windows only removes the icon if
+this process calls Shell_NotifyIcon(NIM_DELETE) before exiting. The Quit
+handler exited on a blind 2 s timer that could beat that call, and a
+panic in main() exited without it. Quit now waits for systray's onExit
+(fired after NIM_DELETE), bounded to 3 s; a crash gets a 300 ms chance
+to remove the icon, with its exit code unchanged.
+
+Adapted from CJInvent/NimbusBackupClient 9a7097e.
+---
+ gui/main.go               |  2 ++
+ gui/tray.go               | 41 +++++++++++++++++++++++++++++++++------
+ gui/tray_crash_other.go   |  7 +++++++
+ gui/tray_crash_windows.go | 21 ++++++++++++++++++++
+ 4 files changed, 65 insertions(+), 6 deletions(-)
+ create mode 100644 gui/tray_crash_other.go
+ create mode 100644 gui/tray_crash_windows.go
+
+diff --git a/gui/main.go b/gui/main.go
+index 98542bb..dd2f235 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -89,6 +89,8 @@ func main() {
+ 			writeDebugLog(crashMsg)
+ 			writeCrashReport(crashMsg)
+ 			fmt.Fprint(os.Stderr, "\n!!! APPLICATION CRASHED !!!\nSee crash_report.txt for details\n")
++			// A crash used to skip the tray's own icon removal, leaking it.
++			attemptTrayCleanupBeforeCrash()
+ 			os.Exit(1)
+ 		}
+ 	}()
+diff --git a/gui/tray.go b/gui/tray.go
+index 998315c..d0e4434 100644
+--- a/gui/tray.go
++++ b/gui/tray.go
+@@ -5,6 +5,7 @@ package main
+ import (
+ 	"fmt"
+ 	"os"
++	"sync"
+ 	"time"
+ 
+ 	"github.com/getlantern/systray"
+@@ -15,8 +16,27 @@ var (
+ 	trayInitialized = false
+ 	menuShow        *systray.MenuItem
+ 	menuQuit        *systray.MenuItem
++
++	// trayExitedCh is closed once systray's message loop has removed the icon
++	// (see onExit). Code about to os.Exit waits on it, with its own bound and
++	// its own exit code.
++	trayExitedCh   = make(chan struct{})
++	trayExitedOnce sync.Once
+ )
+ 
++// markTrayExited closes trayExitedCh exactly once. Called from onExit.
++func markTrayExited() {
++	trayExitedOnce.Do(func() { close(trayExitedCh) })
++}
++
++// waitForTrayExit blocks until the tray icon is removed or timeout elapses.
++func waitForTrayExit(timeout time.Duration) {
++	select {
++	case <-trayExitedCh:
++	case <-time.After(timeout):
++	}
++}
++
+ // preventCloseToTray reports whether closing the main window should be
+ // intercepted and turned into a hide-to-tray. On Windows the tray keeps the
+ // app alive, so we swallow the close.
+@@ -68,14 +88,15 @@ func onReady(a *App) func() {
+ 					runtime.WindowUnminimise(a.ctx)
+ 				case <-menuQuit.ClickedCh:
+ 					writeDebugLog("Tray: Quit clicked")
+-					// Quit systray first
++					// Ask systray to remove the icon and Wails to shut down.
+ 					systray.Quit()
+-					// Request Wails shutdown
+ 					runtime.Quit(a.ctx)
+-					// Force exit after short delay if graceful shutdown doesn't work
++					// Exit once the icon is confirmed gone (bounded in case the
++					// message loop is stuck). The old blind 2 s timer could exit
++					// before Shell_NotifyIcon(NIM_DELETE) ran, leaving a ghost icon.
+ 					go func() {
+-						time.Sleep(2 * time.Second)
+-						writeDebugLog("Force exit after timeout")
++						waitForTrayExit(3 * time.Second)
++						writeDebugLog("Tray: exiting after Quit")
+ 						os.Exit(0)
+ 					}()
+ 				}
+@@ -86,8 +107,16 @@ func onReady(a *App) func() {
+ 	}
+ }
+ 
++// onExit is called by systray's message loop only after it has removed the
++// icon with Shell_NotifyIcon(NIM_DELETE). systray never sets the icon's GUID,
++// so Windows cannot clean it up after the process is gone: an os.Exit that
++// does not wait for this leaves a ghost icon until it is hovered or Explorer
++// restarts.
++//
++// Adapted from CJInvent/NimbusBackupClient 9a7097e.
+ func onExit() {
+-	writeDebugLog("System tray exiting")
++	writeDebugLog("System tray exiting (icon removed)")
++	markTrayExited()
+ }
+ 
+ // MinimizeToTray hides the window and minimizes to tray
+diff --git a/gui/tray_crash_other.go b/gui/tray_crash_other.go
+new file mode 100644
+index 0000000..ba7dc16
+--- /dev/null
++++ b/gui/tray_crash_other.go
+@@ -0,0 +1,7 @@
++//go:build !windows && !service
++// +build !windows,!service
++
++package main
++
++// attemptTrayCleanupBeforeCrash is a no-op off Windows: there is no tray icon.
++func attemptTrayCleanupBeforeCrash() {}
+diff --git a/gui/tray_crash_windows.go b/gui/tray_crash_windows.go
+new file mode 100644
+index 0000000..99f0182
+--- /dev/null
++++ b/gui/tray_crash_windows.go
+@@ -0,0 +1,21 @@
++//go:build windows && !service
++// +build windows,!service
++
++package main
++
++import (
++	"time"
++
++	"github.com/getlantern/systray"
++)
++
++// attemptTrayCleanupBeforeCrash gives a panic a short chance to remove the
++// tray icon before main's recover handler exits. systray.Quit only posts a
++// window message, so this cannot hang, and it does not change the exit code.
++func attemptTrayCleanupBeforeCrash() {
++	if !trayInitialized {
++		return
++	}
++	systray.Quit()
++	waitForTrayExit(300 * time.Millisecond)
++}
+-- 
+2.47.3
+

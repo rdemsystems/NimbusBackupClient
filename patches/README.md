@@ -80,6 +80,23 @@ carry the Nimbus identity, docs and CI.
 | 0057 | ci: quote msiexec arguments in the install test | fork-only |  |
 | 0058 | release: v0.4.1 | fork-only |  |
 | 0059 | test(e2e): wait until PBS is initialised, not just installed | upstream candidate | `datastore create` panicked on a missing authkey.key when the API answered before the keys existed. |
+| 0060 | ci: block the release when Windows Defender flags the build | fork-only | |
+| 0061 | fork: restore the Nimbus Backup icon and logo | fork-only | The rebuild brought back upstream's regenerated `gui/build/windows/icon.ico` (an "f"); About showed the placeholder `nimbus.svg`. |
+| 0062 | gui: report backend and status messages in the selected language (issue #10) | upstream candidate | Go user-facing messages in English (were French); App.jsx literals through `t()`. |
+| 0063 | machinebackup: read VSS snapshot volumes to the device end | upstream candidate | `FSCTL_ALLOW_EXTENDED_DASD_IO`: the NTFS backup boot sector was zero-padded. From CJInvent d496ada. |
+| 0064 | gui: send stdlib log output to the rotating log | upstream candidate | The service's `log.Printf` went to the discarded stderr. From CJInvent 729abbd. |
+| 0065 | gui: WebView2 user data in Local AppData for new installs | upstream candidate | Roaming failed for domain accounts without a roaming profile; an existing folder is kept (localStorage). From CJInvent 756d388. |
+| 0066 | gui: show the VSS-needs-admin warning in standalone mode | upstream candidate | Compared with `'Standalone'`, backend sends `"Standalone Mode"`. Found by CJInvent's GUI audit. |
+| 0067 | gui: do not leave ghost tray icons behind | upstream candidate | Quit waits for systray's `onExit` (after `NIM_DELETE`); a crash gets 300 ms. From CJInvent 9a7097e. |
+| 0068 | docs: CHANGELOG for the next release (issue #10, icon, CJInvent fixes) | fork-only | `Fixes #10`. |
+| 0069 | snapshot: delete our VSS shadow copies after every backup, through the VSS API | upstream (tizbac/proxmoxbackupclient_go@630ed7b) | Taken ahead of the next rebuild; conflict with 0055/0056 resolved by keeping the in-use check. Drop at the next rebuild. |
+| 0070 | machinebackup: skip hashing blank (all-zero) chunks | upstream (tizbac/proxmoxbackupclient_go@eae0068) | Drop at the next rebuild. |
+| 0071 | fix(sched): honour machine backup kind (host/vm) | upstream (tizbac/proxmoxbackupclient_go@0839562) | Fork: VM ID check on the dedicated VM ID field (0019). Drop at the next rebuild, keep the fork's VM ID field. |
+| 0072 | fix(service): Running Jobs, duplicate GUI instances, locale-proof ACLs | upstream (tizbac/proxmoxbackupclient_go@44969cf) | Drop at the next rebuild. |
+| 0073 | gui: commit wails-generated SetJobReporter bindings | upstream (tizbac/proxmoxbackupclient_go@07859b0) | Drop at the next rebuild. |
+| 0074 | docs: CHANGELOG for the upstream fixes taken into the next release | fork-only | |
+| 0075 | docs: official builds are published and signed by RDEM Systems only | fork-only | Notice in every README (EN, FR and the 11 AI translations). |
+| 0076 | release: v0.4.2 | fork-only | |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

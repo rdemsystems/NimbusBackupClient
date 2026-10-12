@@ -1,0 +1,200 @@
+From 88400a28008a10979aeb1b80289c0ea394efa0f0 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Mon, 12 Oct 2026 15:31:41 +0200
+Subject: [PATCH 75/76] docs: official builds are published and signed by RDEM
+ Systems only
+
+Every README now says where official Nimbus Backup releases are
+published (rdemsystems/NimbusBackupClient, nimbus.rdem-systems.com),
+that official Windows binaries are code-signed by RDEM SYSTEMS since
+0.4.1 and how to check it, and that forks of the project still carrying
+the Nimbus Backup name and RDEM Systems as author are not made, signed
+or supported by RDEM Systems.
+---
+ README.ar.md | 2 ++
+ README.de.md | 2 ++
+ README.el.md | 2 ++
+ README.es.md | 2 ++
+ README.fa.md | 2 ++
+ README.fr.md | 2 ++
+ README.it.md | 2 ++
+ README.ja.md | 2 ++
+ README.md    | 2 ++
+ README.ro.md | 2 ++
+ README.ru.md | 2 ++
+ README.sv.md | 2 ++
+ README.zh.md | 2 ++
+ 13 files changed, 26 insertions(+)
+
+diff --git a/README.ar.md b/README.ar.md
+index 3b5c31c..80f7aa5 100644
+--- a/README.ar.md
++++ b/README.ar.md
+@@ -18,6 +18,8 @@ Nimbus Backup هو إصدار RDEM Systems من [Proxmox Backup Client GO](https
+ 
+ 📖 **التوثيق الكامل ودليل التثبيت واستضافة PBS:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **الإصدارات الرسمية هي إصداراتنا فقط.** تُنشر إصدارات Nimbus Backup **حصريًا** على [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) و [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). منذ الإصدار 0.4.1، كل ملف Windows رسمي (الواجهة الرسومية، الخدمة، MSI) **موقَّع رقميًا من RDEM SYSTEMS**: انقر بزر الماوس الأيمن على الملف ← *خصائص* ← *التوقيعات الرقمية*، أو استخدم `Get-AuthenticodeSignature`. توجد تفرعات (forks) من هذا المشروع المرخّص بـ GPL ما زالت تحمل اسم Nimbus Backup وتذكر RDEM Systems كمؤلف؛ إصداراتها **ليست** من إنتاج RDEM Systems ولا موقَّعة ولا مدعومة منها.
++
+ ## 📦 التنزيل
+ 
+ 👉 **[تنزيل أحدث إصدار](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.de.md b/README.de.md
+index ba7be3a..509690f 100644
+--- a/README.de.md
++++ b/README.de.md
+@@ -16,6 +16,8 @@ Nimbus Backup ist der Build von RDEM Systems von [Proxmox Backup Client GO](http
+ 
+ 📖 **Vollständige Dokumentation, Installationsanleitung und PBS-Hosting:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **Nur unsere Builds sind offiziell.** Nimbus-Backup-Releases werden **ausschließlich** auf [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) und [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github) veröffentlicht. Seit 0.4.1 ist jede offizielle Windows-Datei (GUI, Dienst, MSI) **von RDEM SYSTEMS signiert**: Rechtsklick auf die Datei → *Eigenschaften* → *Digitale Signaturen*, oder `Get-AuthenticodeSignature`. Es gibt Forks dieses GPL-Projekts, die weiterhin den Namen Nimbus Backup und RDEM Systems als Autor tragen; deren Builds werden von RDEM Systems **weder erstellt noch signiert noch unterstützt**.
++
+ ## 📦 Download
+ 
+ 👉 **[Neueste Version herunterladen](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.el.md b/README.el.md
+index 9251bd3..4468905 100644
+--- a/README.el.md
++++ b/README.el.md
+@@ -16,6 +16,8 @@
+ 
+ 📖 **Πλήρης τεκμηρίωση, οδηγός εγκατάστασης και φιλοξενία PBS:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **Επίσημες είναι μόνο οι δικές μας εκδόσεις.** Οι εκδόσεις του Nimbus Backup δημοσιεύονται **μόνο** στο [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) και στο [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Από την 0.4.1, κάθε επίσημο εκτελέσιμο Windows (GUI, υπηρεσία, MSI) είναι **υπογεγραμμένο από την RDEM SYSTEMS**: δεξί κλικ στο αρχείο → *Ιδιότητες* → *Ψηφιακές υπογραφές*, ή `Get-AuthenticodeSignature`. Υπάρχουν forks αυτού του έργου GPL που διατηρούν το όνομα Nimbus Backup και την RDEM Systems ως δημιουργό· οι εκδόσεις τους **δεν** παράγονται, δεν υπογράφονται και δεν υποστηρίζονται από την RDEM Systems.
++
+ ## 📦 Λήψη
+ 
+ 👉 **[Λήψη της τελευταίας έκδοσης](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.es.md b/README.es.md
+index 91811da..10d3927 100644
+--- a/README.es.md
++++ b/README.es.md
+@@ -16,6 +16,8 @@ Nimbus Backup es la compilación de RDEM Systems de [Proxmox Backup Client GO](h
+ 
+ 📖 **Documentación completa, guía de instalación y alojamiento PBS:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **Solo nuestras compilaciones son oficiales.** Las versiones de Nimbus Backup se publican **únicamente** en [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) y [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Desde la 0.4.1, cada binario oficial de Windows (GUI, servicio, MSI) está **firmado por RDEM SYSTEMS**: clic derecho en el archivo → *Propiedades* → *Firmas digitales*, o `Get-AuthenticodeSignature`. Existen forks de este proyecto GPL que conservan el nombre Nimbus Backup y a RDEM Systems como autor; sus compilaciones **no** son producidas, firmadas ni soportadas por RDEM Systems.
++
+ ## 📦 Descarga
+ 
+ 👉 **[Descargar la última versión](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.fa.md b/README.fa.md
+index 62d58ef..250443a 100644
+--- a/README.fa.md
++++ b/README.fa.md
+@@ -18,6 +18,8 @@ Nimbus Backup نسخه‌ی RDEM Systems از [Proxmox Backup Client GO](https:/
+ 
+ 📖 **مستندات کامل، راهنمای نصب و میزبانی PBS:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **فقط نسخه‌های ما رسمی هستند.** نسخه‌های Nimbus Backup **فقط** در [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) و [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github) منتشر می‌شوند. از نسخه 0.4.1 به بعد، هر فایل اجرایی رسمی ویندوز (رابط گرافیکی، سرویس، MSI) **توسط RDEM SYSTEMS امضای دیجیتال شده است**: روی فایل راست‌کلیک کنید ← *Properties* ← *Digital Signatures*، یا از `Get-AuthenticodeSignature` استفاده کنید. فورک‌هایی از این پروژه GPL وجود دارند که هنوز نام Nimbus Backup و RDEM Systems را به عنوان سازنده حفظ کرده‌اند؛ نسخه‌های آن‌ها **توسط RDEM Systems ساخته، امضا یا پشتیبانی نمی‌شوند**.
++
+ ## 📦 دانلود
+ 
+ 👉 **[دانلود آخرین نسخه](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.fr.md b/README.fr.md
+index c4359a8..72b5df7 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -13,6 +13,8 @@ Nimbus Backup est la version RDEM Systems de [Proxmox Backup Client GO](https://
+ 
+ 📖 **Documentation complète, guide d'installation et hébergement PBS :** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/blog/sauvegarder-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **Seules nos versions sont officielles.** Les versions de Nimbus Backup sont publiées **uniquement** sur [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) et [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/?utm_source=github). Depuis la 0.4.1, chaque binaire Windows officiel (GUI, service, MSI) est **signé par RDEM SYSTEMS** : clic droit sur le fichier → *Propriétés* → *Signatures numériques*, ou `Get-AuthenticodeSignature`. Il existe des forks de ce projet GPL qui gardent le nom Nimbus Backup et RDEM Systems comme auteur ; leurs binaires ne sont **ni produits, ni signés, ni supportés** par RDEM Systems.
++
+ ## 📦 Téléchargement
+ 
+ 👉 **[Télécharger la dernière version](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.it.md b/README.it.md
+index 8927a0f..78caa20 100644
+--- a/README.it.md
++++ b/README.it.md
+@@ -16,6 +16,8 @@ Nimbus Backup è la build di RDEM Systems di [Proxmox Backup Client GO](https://
+ 
+ 📖 **Documentazione completa, guida all'installazione e hosting PBS:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **Solo le nostre build sono ufficiali.** Le release di Nimbus Backup sono pubblicate **solo** su [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) e [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Dalla 0.4.1 ogni binario Windows ufficiale (GUI, servizio, MSI) è **firmato da RDEM SYSTEMS**: clic destro sul file → *Proprietà* → *Firme digitali*, oppure `Get-AuthenticodeSignature`. Esistono fork di questo progetto GPL che mantengono il nome Nimbus Backup e RDEM Systems come autore: le loro build **non** sono prodotte, firmate né supportate da RDEM Systems.
++
+ ## 📦 Download
+ 
+ 👉 **[Scarica l'ultima release](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.ja.md b/README.ja.md
+index cd279ea..345f6d2 100644
+--- a/README.ja.md
++++ b/README.ja.md
+@@ -16,6 +16,8 @@ Nimbus Backup は [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxba
+ 
+ 📖 **完全なドキュメント、インストールガイド、PBS ホスティング：** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **公式ビルドは当社のもののみです。** Nimbus Backup のリリースは [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) と [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github) で**のみ**公開されています。0.4.1 以降、公式の Windows バイナリ（GUI、サービス、MSI）はすべて **RDEM SYSTEMS によってコード署名**されています：ファイルを右クリック → *プロパティ* → *デジタル署名*、または `Get-AuthenticodeSignature` で確認できます。Nimbus Backup の名前と作者 RDEM Systems を残したままの GPL フォークが存在しますが、それらのビルドは RDEM Systems が作成・署名・サポートしたものでは**ありません**。
++
+ ## 📦 ダウンロード
+ 
+ 👉 **[最新リリースをダウンロード](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.md b/README.md
+index 0f33b18..245fa48 100644
+--- a/README.md
++++ b/README.md
+@@ -13,6 +13,8 @@ Nimbus Backup is the RDEM Systems build of [Proxmox Backup Client GO](https://gi
+ 
+ 📖 **Full documentation, installation guide and PBS hosting:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **Official builds only from us.** Nimbus Backup releases are published **only** on [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) and [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Since 0.4.1, every official Windows binary (GUI, service, MSI) is **code-signed by RDEM SYSTEMS**: right-click the file → *Properties* → *Digital Signatures*, or run `Get-AuthenticodeSignature`. Forks of this GPL project exist that still carry the Nimbus Backup name and RDEM Systems as author; their builds are **not** made, signed or supported by RDEM Systems.
++
+ ## 📦 Download
+ 
+ 👉 **[Download the latest release](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.ro.md b/README.ro.md
+index 3d99365..9665844 100644
+--- a/README.ro.md
++++ b/README.ro.md
+@@ -16,6 +16,8 @@ Nimbus Backup este build-ul RDEM Systems al [Proxmox Backup Client GO](https://g
+ 
+ 📖 **Documentație completă, ghid de instalare și găzduire PBS:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **Doar versiunile noastre sunt oficiale.** Versiunile Nimbus Backup sunt publicate **doar** pe [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) și [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Începând cu 0.4.1, fiecare binar Windows oficial (GUI, serviciu, MSI) este **semnat de RDEM SYSTEMS**: clic dreapta pe fișier → *Proprietăți* → *Semnături digitale*, sau `Get-AuthenticodeSignature`. Există fork-uri ale acestui proiect GPL care păstrează numele Nimbus Backup și pe RDEM Systems ca autor; versiunile lor **nu** sunt produse, semnate sau susținute de RDEM Systems.
++
+ ## 📦 Descărcare
+ 
+ 👉 **[Descărcați cea mai recentă versiune](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.ru.md b/README.ru.md
+index 52c37df..2ab62f5 100644
+--- a/README.ru.md
++++ b/README.ru.md
+@@ -16,6 +16,8 @@ Nimbus Backup — это сборка RDEM Systems проекта [Proxmox Backu
+ 
+ 📖 **Полная документация, руководство по установке и хостинг PBS:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **Официальны только наши сборки.** Релизы Nimbus Backup публикуются **только** на [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) и [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Начиная с 0.4.1 каждый официальный бинарный файл Windows (GUI, служба, MSI) **подписан RDEM SYSTEMS**: правый клик по файлу → *Свойства* → *Цифровые подписи*, или `Get-AuthenticodeSignature`. Существуют форки этого GPL-проекта, сохранившие название Nimbus Backup и RDEM Systems в качестве автора; их сборки RDEM Systems **не создаёт, не подписывает и не поддерживает**.
++
+ ## 📦 Загрузка
+ 
+ 👉 **[Скачать последний релиз](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.sv.md b/README.sv.md
+index 8ee6c29..4ea86ba 100644
+--- a/README.sv.md
++++ b/README.sv.md
+@@ -16,6 +16,8 @@ Nimbus Backup är RDEM Systems build av [Proxmox Backup Client GO](https://githu
+ 
+ 📖 **Fullständig dokumentation, installationsguide och PBS-hosting:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **Endast våra byggen är officiella.** Nimbus Backup publiceras **endast** på [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) och [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Sedan 0.4.1 är varje officiell Windows-fil (GUI, tjänst, MSI) **kodsignerad av RDEM SYSTEMS**: högerklicka på filen → *Egenskaper* → *Digitala signaturer*, eller kör `Get-AuthenticodeSignature`. Det finns forkar av detta GPL-projekt som behåller namnet Nimbus Backup och RDEM Systems som upphovsman; deras byggen är **inte** gjorda, signerade eller supporterade av RDEM Systems.
++
+ ## 📦 Nedladdning
+ 
+ 👉 **[Ladda ner den senaste versionen](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+diff --git a/README.zh.md b/README.zh.md
+index 26230ca..2cf21ec 100644
+--- a/README.zh.md
++++ b/README.zh.md
+@@ -16,6 +16,8 @@ Nimbus Backup 是 RDEM Systems 对 [Proxmox Backup Client GO](https://github.com
+ 
+ 📖 **完整文档、安装指南和 PBS 托管：** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
+ 
++> 🔏 **只有我们发布的版本才是官方版本。** Nimbus Backup 的版本**仅**在 [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) 和 [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github) 发布。自 0.4.1 起，每个官方 Windows 二进制文件（GUI、服务、MSI）都**由 RDEM SYSTEMS 代码签名**：右键单击文件 → *属性* → *数字签名*，或运行 `Get-AuthenticodeSignature`。存在一些仍使用 Nimbus Backup 名称并以 RDEM Systems 为作者的 GPL 项目分支；它们的构建**并非**由 RDEM Systems 制作、签名或支持。
++
+ ## 📦 下载
+ 
+ 👉 **[下载最新版本](https://github.com/rdemsystems/NimbusBackupClient/releases)**
+-- 
+2.47.3
+

@@ -13,6 +13,8 @@ Nimbus Backup is the RDEM Systems build of [Proxmox Backup Client GO](https://gi
 
 📖 **Full documentation, installation guide and PBS hosting:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
 
+> 🔏 **Official builds only from us.** Nimbus Backup releases are published **only** on [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) and [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Since 0.4.1, every official Windows binary (GUI, service, MSI) is **code-signed by RDEM SYSTEMS**: right-click the file → *Properties* → *Digital Signatures*, or run `Get-AuthenticodeSignature`. Forks of this GPL project exist that still carry the Nimbus Backup name and RDEM Systems as author; their builds are **not** made, signed or supported by RDEM Systems.
+
 ## 📦 Download
 
 👉 **[Download the latest release](https://github.com/rdemsystems/NimbusBackupClient/releases)**

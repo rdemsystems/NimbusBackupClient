@@ -72,7 +72,7 @@ func ShouldWarnVSS(useVSS bool, mode ExecutionMode, isAdmin bool) (bool, string)
 	}
 
 	if mode == ModeStandalone && !isAdmin {
-		return true, "VSS (Shadow Copy) nécessite les privilèges administrateur - veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS"
+		return true, "VSS (Shadow Copy) requires administrator privileges - restart the application as administrator or disable VSS"
 	}
 
 	return false, ""
@@ -84,16 +84,16 @@ func GetModeDescription(mode ExecutionMode) string {
 	case ModeService:
 		return fmt.Sprintf(
 			"✅ Mode Service\n" +
-				"Le service Windows gère les backups avec privilèges admin.\n" +
-				"VSS (Shadow Copy) fonctionne automatiquement.",
+				"The Windows service runs backups with administrator privileges.\n" +
+				"VSS (Shadow Copy) works automatically.",
 		)
 	case ModeStandalone:
 		return fmt.Sprintf(
 			"⚠️ Mode Standalone\n" +
-				"Backup direct sans service Windows.\n" +
-				"VSS nécessite de lancer l'application en tant qu'administrateur.",
+				"Direct backup without the Windows service.\n" +
+				"VSS requires running the application as administrator.",
 		)
 	default:
-		return "Mode inconnu"
+		return "Unknown mode"
 	}
 }

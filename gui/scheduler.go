@@ -389,15 +389,15 @@ func parseScheduleTime(scheduleTime string) (hour, min int, ok bool) {
 // the user edits it instead of failing silently at its scheduled time.
 func (j *ScheduledJob) validate() error {
 	if strings.TrimSpace(j.Name) == "" {
-		return fmt.Errorf("job name requis")
+		return fmt.Errorf("job name is required")
 	}
 	if _, _, ok := parseScheduleTime(j.ScheduleTime); !ok && j.ScheduleTime != "" {
-		return fmt.Errorf("heure de planification invalide (format HH:MM attendu): %q", j.ScheduleTime)
+		return fmt.Errorf("invalid schedule time (expected HH:MM): %q", j.ScheduleTime)
 	} else if j.ScheduleTime == "" && !j.RunAtStartup {
-		return fmt.Errorf("heure de planification requise (format HH:MM)")
+		return fmt.Errorf("schedule time is required (HH:MM)")
 	}
 	if len(j.BackupDirs) == 0 && len(j.DriveLetters) == 0 {
-		return fmt.Errorf("au moins un repertoire ou un disque a sauvegarder est requis")
+		return fmt.Errorf("at least one folder or disk to back up is required")
 	}
 	return nil
 }
@@ -633,7 +633,7 @@ func (a *App) CleanupAbandonedJobs() {
 		if entry.Status == "running" {
 			writeDebugLog(fmt.Sprintf("Marking abandoned job as failed: %s", entry.Name))
 			history[i].Status = "failed"
-			history[i].Message = "Abandonné (application interrompue)"
+			history[i].Message = "Abandoned (application interrupted)"
 			history[i].Timestamp = time.Now().Format(time.RFC3339)
 			modified = true
 		}
@@ -771,10 +771,37 @@ func releaseJob(jobID string) {
 	delete(runningJobs, jobID)
 }
 
-// runScheduledBackup performs the backup of a scheduled job: it goes through
-// the test seam App.scheduledBackupFn when one is installed, otherwise through
-// StartBackup (which routes through mode detection: service or direct).
-func (a *App) runScheduledBackup(job ScheduledJob) error {
+// runScheduledBackup performs the backup of a scheduled job.
+//
+// In service mode the run is first published to the API server's progress map
+// (SetJobReporter): GET /backup/jobs — the list behind the GUI's Running Jobs
+// tab — only ever knew about backups started inside an HTTP handler, so a
+// scheduled run executed by the service (a machine backup in particular) ran
+// invisibly. The entry is registered before the test seam so this wiring is
+// covered without an API server.
+//
+// The backup itself goes through the test seam App.scheduledBackupFn when one
+// is installed, otherwise it dispatches on the job type: machine jobs through
+// StartMachineBackup (the only path that carries the job's host/vm
+// BackupKind), directory jobs through StartBackup.
+func (a *App) runScheduledBackup(job ScheduledJob) (err error) {
+	if a.jobReporter != nil {
+		rep := a.jobReporter
+		jobID := rep.RegisterInlineJob(fmt.Sprintf("Scheduled: %s", job.Name))
+		a.setInlineJobID(jobID)
+		defer func() {
+			a.clearInlineJobID()
+			// The only closing path for the inline entry: dispatchComplete
+			// only reaches HTTP-handler-registered callbacks. Idempotent, so
+			// it is safe whether or not the backup's own OnComplete fired.
+			if err != nil {
+				rep.ReportInlineJobComplete(jobID, false, fmt.Sprintf("Scheduled backup failed: %v", err))
+			} else {
+				rep.ReportInlineJobComplete(jobID, true, "Scheduled backup completed successfully")
+			}
+		}()
+	}
+
 	if a.scheduledBackupFn != nil {
 		return a.scheduledBackupFn(job)
 	}
@@ -791,6 +818,29 @@ func (a *App) runScheduledBackup(job ScheduledJob) error {
 	driveLetters := job.DriveLetters
 	if len(driveLetters) == 0 {
 		driveLetters = []string{}
+	}
+
+	// Machine jobs: StartBackup has no parameter for the job's host/vm kind, so
+	// routing them through it dropped the user's selection - the service build
+	// hardcoded BackupType "vm" (a host-kind job attempted a P2V/VM snapshot)
+	// and the standalone path fell back to the directory branch. StartMachineBackup
+	// is the path the GUI's one-shot machine backups take and takes backupKind
+	// explicitly. "" = jobs saved before backup_kind existed; the GUI's default
+	// selection is "host".
+	if job.BackupType == "machine" {
+		kind := job.BackupKind
+		if kind == "" {
+			kind = "host"
+		}
+		return a.StartMachineBackup(
+			job.BackupType,
+			driveLetters,
+			job.BackupID,
+			job.UseVSS,
+			compression,
+			job.PBSID,
+			kind,
+		)
 	}
 
 	// StartBackup routes through mode detection (service or direct).
@@ -847,7 +897,7 @@ func (a *App) runClaimedJob(job ScheduledJob) {
 		Name:       job.Name,
 		Timestamp:  time.Now().Format(time.RFC3339),
 		Status:     "success",
-		Message:    "Backup terminé",
+		Message:    "Backup complete",
 		BackupDirs: job.BackupDirs,
 		BackupID:   job.BackupID,
 		UseVSS:     job.UseVSS,
@@ -856,7 +906,7 @@ func (a *App) runClaimedJob(job ScheduledJob) {
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("Scheduled job error: %v", err))
 		historyEntry.Status = "failed"
-		historyEntry.Message = fmt.Sprintf("Erreur: %v", err)
+		historyEntry.Message = fmt.Sprintf("Error: %v", err)
 	}
 
 	if err := a.AddJobHistory(historyEntry); err != nil {
@@ -937,7 +987,7 @@ func (a *App) runScheduledJobNow(jobID string) error {
 			continue
 		}
 		if !claimJob(job.ID) {
-			return fmt.Errorf("job %q est deja en cours d'execution", job.Name)
+			return fmt.Errorf("job %q is already running", job.Name)
 		}
 		writeDebugLog(fmt.Sprintf("Manual run of scheduled job: %s", job.Name))
 		go func() {
@@ -946,7 +996,7 @@ func (a *App) runScheduledJobNow(jobID string) error {
 		}()
 		return nil
 	}
-	return fmt.Errorf("job planifie %q introuvable", jobID)
+	return fmt.Errorf("scheduled job %q not found", jobID)
 }
 
 // jobToMap converts a ScheduledJob to the wire map understood by
@@ -994,10 +1044,17 @@ func apiJobsToSlice(apiJobs []map[string]interface{}) []ScheduledJob {
 			UseVSS:       firstBool(m, "useVSS", "use_vss"),
 			BackupType:   firstStr(m, "backupType", "backup_type"),
 			ExcludeList:  firstStrSlice(m, "excludeList", "exclude_list"),
-			Compression:  firstStr(m, "compression"),
-			LastRun:      firstStr(m, "lastRun", "last_run"),
-			NextRun:      firstStr(m, "nextRun", "next_run"),
-			Enabled:      firstBool(m, "enabled"),
+			// jobToMap's JSON round-trip emits backup_kind and pbs_id under
+			// their canonical json tags. Not reading them here stripped the
+			// host/vm kind AND the selected PBS server off a job on its way
+			// from the service to the GUI, so the run used the default PBS
+			// and the wrong backup type.
+			PBSID:       firstStr(m, "pbs_id", "pbsID"),
+			BackupKind:  firstStr(m, "backup_kind", "backupKind"),
+			Compression: firstStr(m, "compression"),
+			LastRun:     firstStr(m, "lastRun", "last_run"),
+			NextRun:     firstStr(m, "nextRun", "next_run"),
+			Enabled:     firstBool(m, "enabled"),
 		}
 		out = append(out, j)
 	}
