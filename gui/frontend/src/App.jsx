@@ -1199,6 +1199,13 @@ function App() {
     }
   }
 
+  // VM-kind machine backups need a Proxmox VM ID (100..999999999), entered in
+  // the dedicated VM ID field. Computed here so the same rule gates the
+  // Start/Save button, shows the inline hint and blocks handleStartBackup.
+  const vmBackupIdInvalid = backupType === 'machine'
+    && machineBackupKind === 'vm'
+    && !(/^\d+$/.test(machineVMID.trim()) && Number(machineVMID.trim()) >= 100 && Number(machineVMID.trim()) <= 999999999)
+
   const handleStartBackup = async () => {
     if (!StartBackup) {
       showStatus(t('wailsRuntimeUnavailable'), 'error')
@@ -2133,6 +2140,11 @@ function App() {
                 placeholder="9001"
               />
               <div className="info-box" style={{marginTop: '8px'}}>💡 {t('machineVMIDHint')}</div>
+              {vmBackupIdInvalid && (
+                <div style={{marginTop: '6px', fontSize: '13px', color: '#dc3545'}}>
+                  ⚠️ {t('vmidInvalid')}
+                </div>
+              )}
             </div>
           ) : (
             <div className="form-group">
@@ -2280,7 +2292,7 @@ function App() {
             </div>
           )}
 
-          <button className="btn" onClick={handleStartBackup} disabled={backupRunning || (progress > 0 && progress < 100)}>
+          <button className="btn" onClick={handleStartBackup} disabled={backupRunning || (progress > 0 && progress < 100) || vmBackupIdInvalid}>
             {backupMode === 'oneshot'
               ? (backupRunning || (progress > 0 && progress < 100) ? `⏳ ${t('backupInProgress')}` : `🚀 ${t('startBackup')}`)
               : (editingJobId ? `✏️ ${t('updateSchedule')}` : `💾 ${t('saveSchedule')}`)
@@ -2325,7 +2337,9 @@ function App() {
                         ⏰ {job.scheduleTime} {job.runAtStartup && `• 🚀 ${t('atStartup')}`}
                       </div>
                       <div style={{fontSize: '13px', color: '#6c757d', marginTop: '3px'}}>
-                        📁 {(job.backupDirs || []).join(', ')}
+                        {job.backupType === 'machine'
+                          ? `💾 ${(job.driveLetters || []).join(', ')}${job.backup_kind ? ` • ${job.backup_kind}` : ''}`
+                          : `📁 ${(job.backupDirs || []).join(', ')}`}
                       </div>
                     </div>
                     <div style={{display: 'flex', gap: '10px'}}>
