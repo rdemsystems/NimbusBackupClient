@@ -60,7 +60,7 @@ var brandCatalog = map[string]Brand{
 	"nimbusbackup": {
 		Name:        "nimbusbackup",
 		Title:       "Nimbus Backup",
-		Logo:        "/brands/nimbus.svg",
+		Logo:        "/brands/nimbus.webp",
 		Accent:      "#667eea",
 		AccentHover: "#5a67d8",
 		BrandURL:    "https://nimbus.rdem-systems.com/en/?utm_source=NimbusGui&utm_medium=tooling",
