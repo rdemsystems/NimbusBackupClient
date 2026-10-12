@@ -5,7 +5,7 @@ All notable changes to Proxmox Backup Client (GUI) will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.2] - 2026-10-12
 
 ### Fixed
 - **Error and progress messages in French while the interface is in English** (issue #10): messages produced by the backup engine (progress such as "PBS session lost, waiting ... before retrying", errors, job history) and a dozen status messages of the interface were hard-coded in French. Engine messages are now in English and the interface's own messages follow the selected language.
@@ -15,7 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The window could fail to open for a domain account without a roaming profile** (typically when the GUI is run elevated as another user): new installs keep WebView2's data in Local AppData. Existing installs keep their folder, and their chosen language.
 - **The "VSS requires administrator rights" warning never appeared** in standalone mode.
 - **Ghost icons piling up in the notification area**: quitting from the tray, or a crash, could leave the icon behind.
-
 - **Scheduled disk backups ran as the wrong type** (from upstream, tizbac/proxmoxbackupclient_go@0839562): through the service a "host" machine job was run as a "vm" one, and a job lost its PBS server and type on its way from the service to the interface. Scheduled machine jobs now keep both, and list their disks instead of a folder.
 - **Scheduled backups invisible in the Running tab** (from upstream, tizbac/proxmoxbackupclient_go@44969cf): scheduled and "Run now" backups executed by the service now appear there with live progress.
 - **The interface opened twice** after a launch as administrator (same upstream commit): the second launch now brings the running window to the front.
@@ -24,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Faster disk backups on mostly empty disks** (from upstream, tizbac/proxmoxbackupclient_go@eae0068): blank areas are no longer hashed chunk by chunk.
+- **README: official builds**: releases are published only on rdemsystems/NimbusBackupClient and nimbus.rdem-systems.com, and official Windows binaries are signed by RDEM SYSTEMS; forks still carrying the Nimbus Backup name are not RDEM Systems builds.
 
 Several of these fixes come from upstream (tizbac/proxmoxbackupclient_go) and from the CJInvent/NimbusBackupClient fork; each commit names its source.
 
