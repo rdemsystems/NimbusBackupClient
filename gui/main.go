@@ -156,6 +156,8 @@ func main() {
 		app.hydrateFromService()
 	}
 
+	webviewDataDir := webviewUserDataDir()
+
 	// Create application options. No MaxWidth/MaxHeight: Windows caps a
 	// maximised window at the max size, so "maximise" only moved the window
 	// to the top-left corner (issue #1). Small screens are handled by
@@ -182,7 +184,7 @@ func main() {
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 			DisableWindowIcon:    false,
-			WebviewUserDataPath:  filepath.Join(os.Getenv("APPDATA"), "ProxmoxBackupClient"),
+			WebviewUserDataPath:  webviewDataDir,
 		},
 	}
 
