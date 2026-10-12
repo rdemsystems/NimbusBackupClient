@@ -94,6 +94,22 @@ const IOCTL_DISK_GET_DRIVE_LAYOUT_EX = 0x00070050
 const IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x00560000
 const IOCTL_DISK_GET_LENGTH_INFO = 0x0007405C
 
+// FSCTL_ALLOW_EXTENDED_DASD_IO lifts the file system's bound on volume-handle
+// reads. See allowExtendedDASD.
+const FSCTL_ALLOW_EXTENDED_DASD_IO = 0x00090083
+
+// allowExtendedDASD lets reads on a volume handle reach the end of the device
+// instead of stopping at the end of the file system on it. NTFS sizes itself
+// one sector short of its partition (the last sector holds the backup boot
+// sector) and cuts off any volume-handle read that crosses its own end, so
+// without this flag that sector is replaced by the zero padding below.
+// Adapted from CJInvent/NimbusBackupClient d496ada.
+func allowExtendedDASD(f *os.File) error {
+	var bytesReturned uint32
+	return windows.DeviceIoControl(windows.Handle(f.Fd()), FSCTL_ALLOW_EXTENDED_DASD_IO,
+		nil, 0, nil, 0, &bytesReturned, nil)
+}
+
 var (
 	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
@@ -560,6 +576,11 @@ func BackupWindowsDisk(client *pbscommon.PBSClient, index int, progressCallback 
 					return err
 				}
 				defer snapshot_file.Close()
+				if err := allowExtendedDASD(snapshot_file); err != nil {
+					// Not fatal: the read stops at the file system end and the
+					// tail is zero-padded, as before.
+					log.Printf("FSCTL_ALLOW_EXTENDED_DASD_IO refused on snapshot %s, the partition tail will be zero-padded: %v", snap.Id, err)
+				}
 
 				l, err := GetDiskLength(strings.TrimRight(snap.ObjectPath, "\\"))
 				if err != nil {
