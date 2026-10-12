@@ -1,7 +1,7 @@
 From 2f91057cb5128c9365d74f5177bac101bd7fd06e Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Fri, 9 Oct 2026 18:24:55 +0200
-Subject: [PATCH 59/74] test(e2e): wait until PBS is initialised, not just
+Subject: [PATCH 59/75] test(e2e): wait until PBS is initialised, not just
  installed
 
 proxmox-backup-manager version answers before the daemon has generated its

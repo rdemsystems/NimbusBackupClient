@@ -1,7 +1,7 @@
 From 97c177a33cf370781d40a748318a38c99a70dd02 Mon Sep 17 00:00:00 2001
 From: mjb-is <mjb-is@users.noreply.github.com>
 Date: Mon, 12 Oct 2026 01:27:10 +0100
-Subject: [PATCH 70/74] machinebackup: skip hashing blank (all-zero) chunks
+Subject: [PATCH 70/75] machinebackup: skip hashing blank (all-zero) chunks
 
 Every 4 MiB chunk of a machine image is SHA-256 hashed to get its digest,
 even when it is all zeros. Blank space is a large share of most disks

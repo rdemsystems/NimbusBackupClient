@@ -95,6 +95,7 @@ carry the Nimbus identity, docs and CI.
 | 0072 | fix(service): Running Jobs, duplicate GUI instances, locale-proof ACLs | upstream (tizbac/proxmoxbackupclient_go@44969cf) | Drop at the next rebuild. |
 | 0073 | gui: commit wails-generated SetJobReporter bindings | upstream (tizbac/proxmoxbackupclient_go@07859b0) | Drop at the next rebuild. |
 | 0074 | docs: CHANGELOG for the upstream fixes taken into the next release | fork-only | |
+| 0075 | docs: official builds are published and signed by RDEM Systems only | fork-only | Notice in every README (EN, FR and the 11 AI translations). |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

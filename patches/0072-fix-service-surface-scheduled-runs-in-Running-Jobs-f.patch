@@ -1,7 +1,7 @@
 From 48cd85584cbe0dab778b14f0c2f9ba7c6c8a7d44 Mon Sep 17 00:00:00 2001
 From: Tiziano Bacocco <tizbac2@gmail.com>
 Date: Mon, 12 Oct 2026 11:24:45 +0200
-Subject: [PATCH 72/74] fix(service): surface scheduled runs in Running Jobs,
+Subject: [PATCH 72/75] fix(service): surface scheduled runs in Running Jobs,
  fix duplicate GUI instances, locale-proof state ACLs
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
