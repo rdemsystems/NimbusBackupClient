@@ -16,6 +16,8 @@
 
 📖 **Πλήρης τεκμηρίωση, οδηγός εγκατάστασης και φιλοξενία PBS:** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
 
+> 🔏 **Επίσημες είναι μόνο οι δικές μας εκδόσεις.** Οι εκδόσεις του Nimbus Backup δημοσιεύονται **μόνο** στο [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) και στο [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Από την 0.4.1, κάθε επίσημο εκτελέσιμο Windows (GUI, υπηρεσία, MSI) είναι **υπογεγραμμένο από την RDEM SYSTEMS**: δεξί κλικ στο αρχείο → *Ιδιότητες* → *Ψηφιακές υπογραφές*, ή `Get-AuthenticodeSignature`. Υπάρχουν forks αυτού του έργου GPL που διατηρούν το όνομα Nimbus Backup και την RDEM Systems ως δημιουργό· οι εκδόσεις τους **δεν** παράγονται, δεν υπογράφονται και δεν υποστηρίζονται από την RDEM Systems.
+
 ## 📦 Λήψη
 
 👉 **[Λήψη της τελευταίας έκδοσης](https://github.com/rdemsystems/NimbusBackupClient/releases)**

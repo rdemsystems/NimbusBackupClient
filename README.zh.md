@@ -16,6 +16,8 @@ Nimbus Backup 是 RDEM Systems 对 [Proxmox Backup Client GO](https://github.com
 
 📖 **完整文档、安装指南和 PBS 托管：** [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/blog/backup-windows-proxmox-backup-server/?utm_source=github&utm_medium=readme&utm_campaign=nbc-readme-top)
 
+> 🔏 **只有我们发布的版本才是官方版本。** Nimbus Backup 的版本**仅**在 [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) 和 [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github) 发布。自 0.4.1 起，每个官方 Windows 二进制文件（GUI、服务、MSI）都**由 RDEM SYSTEMS 代码签名**：右键单击文件 → *属性* → *数字签名*，或运行 `Get-AuthenticodeSignature`。存在一些仍使用 Nimbus Backup 名称并以 RDEM Systems 为作者的 GPL 项目分支；它们的构建**并非**由 RDEM Systems 制作、签名或支持。
+
 ## 📦 下载
 
 👉 **[下载最新版本](https://github.com/rdemsystems/NimbusBackupClient/releases)**
