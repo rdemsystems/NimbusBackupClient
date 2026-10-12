@@ -1,7 +1,7 @@
 From 8f410df6513916c4fa9509f5b98a526c076c92a5 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Mon, 12 Oct 2026 14:34:39 +0200
-Subject: [PATCH 61/67] fork: restore the Nimbus Backup icon and logo
+Subject: [PATCH 61/68] fork: restore the Nimbus Backup icon and logo
 
 The upstream rebuild brought back upstream's regenerated
 gui/build/windows/icon.ico (an "f" glyph), so 0.4.1 shipped with a

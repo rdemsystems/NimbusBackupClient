@@ -1,0 +1,38 @@
+From 1597f1eeac6fdb6c3fd1ebee3a498f1b9014eb08 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Mon, 12 Oct 2026 15:09:07 +0200
+Subject: [PATCH 68/68] docs: CHANGELOG for the next release (issue #10, icon,
+ CJInvent fixes)
+
+Fixes #10.
+---
+ CHANGELOG.md | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 16b517a..42d7666 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,19 @@ All notable changes to Proxmox Backup Client (GUI) will be documented in this fi
+ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
++## [Unreleased]
++
++### Fixed
++- **Error and progress messages in French while the interface is in English** (issue #10): messages produced by the backup engine (progress such as "PBS session lost, waiting ... before retrying", errors, job history) and a dozen status messages of the interface were hard-coded in French. Engine messages are now in English and the interface's own messages follow the selected language.
++- **The Nimbus Backup icon and logo are back**: 0.4.1 showed upstream's icon in the title bar and taskbar, and a placeholder logo in the About tab.
++- **Disk backups now include the last sector of each NTFS volume** (the backup boot sector), which was replaced by zeros: the shadow copy is read up to the end of the partition.
++- **Service diagnostics no longer lost**: messages the service wrote through Go's standard logger (disk backup notes, startup failures) went nowhere; they now go to the service log.
++- **The window could fail to open for a domain account without a roaming profile** (typically when the GUI is run elevated as another user): new installs keep WebView2's data in Local AppData. Existing installs keep their folder, and their chosen language.
++- **The "VSS requires administrator rights" warning never appeared** in standalone mode.
++- **Ghost icons piling up in the notification area**: quitting from the tray, or a crash, could leave the icon behind.
++
++Several of these fixes come from the CJInvent/NimbusBackupClient fork (credited in each commit).
++
+ ## [0.4.1] - 2026-10-09
+ 
+ Second **re-merge with upstream** (tizbac/proxmoxbackupclient_go, October
+-- 
+2.47.3
+

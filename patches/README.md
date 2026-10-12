@@ -88,6 +88,7 @@ carry the Nimbus identity, docs and CI.
 | 0065 | gui: WebView2 user data in Local AppData for new installs | upstream candidate | Roaming failed for domain accounts without a roaming profile; an existing folder is kept (localStorage). From CJInvent 756d388. |
 | 0066 | gui: show the VSS-needs-admin warning in standalone mode | upstream candidate | Compared with `'Standalone'`, backend sends `"Standalone Mode"`. Found by CJInvent's GUI audit. |
 | 0067 | gui: do not leave ghost tray icons behind | upstream candidate | Quit waits for systray's `onExit` (after `NIM_DELETE`); a crash gets 300 ms. From CJInvent 9a7097e. |
+| 0068 | docs: CHANGELOG for the next release (issue #10, icon, CJInvent fixes) | fork-only | `Fixes #10`. |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts
