@@ -55,7 +55,7 @@ func (a *App) DeleteScheduledJobFromMap(jobID string) error {
 // persist and the connection test would keep reporting the server offline.
 func (a *App) pinFingerprintLocal(id, fingerprint string) error {
 	if err := security.ValidateFingerprint(fingerprint); err != nil {
-		return fmt.Errorf("empreinte certificat invalide: %w", err)
+		return fmt.Errorf("invalid certificate fingerprint: %w", err)
 	}
 	pbs, err := a.config.GetPBSServer(id)
 	if err != nil {
@@ -64,7 +64,7 @@ func (a *App) pinFingerprintLocal(id, fingerprint string) error {
 	pbs.CertFingerprint = fingerprint
 	if err := a.config.UpdatePBSServer(pbs); err != nil {
 		writeDebugLog(fmt.Sprintf("pinFingerprintLocal: could not persist fingerprint for %q: %v", id, err))
-		return fmt.Errorf("impossible d'enregistrer l'empreinte (config.json non accessible en écriture ?): %w", err)
+		return fmt.Errorf("cannot save the fingerprint (is config.json writable?): %w", err)
 	}
 	// Read the file back so the log states unambiguously whether the fingerprint
 	// reached disk — this separates a write/permission failure from a TLS-apply bug

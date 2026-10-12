@@ -251,7 +251,7 @@ func TestSaveFullConfigFromAPI_EmptyCredentialKeepsStoredOne(t *testing.T) {
 		if err == nil {
 			t.Fatalf("save accepted a new username without a password")
 		}
-		if !strings.Contains(err.Error(), "mot de passe") {
+		if !strings.Contains(err.Error(), "password") {
 			t.Errorf("error = %q, want it to ask for the new password", err)
 		}
 	})

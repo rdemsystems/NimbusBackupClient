@@ -760,7 +760,7 @@ func (a *App) SaveConfig(config *Config) error {
 		return a.pushConfigToService()
 	}
 	if merged == nil {
-		return fmt.Errorf("configuration vide")
+		return fmt.Errorf("empty configuration")
 	}
 
 	// Validate per part: a multi-PBS-only config has no legacy BaseURL and must
@@ -1107,7 +1107,7 @@ func (a *App) GetServerFingerprint(baseURL string) (string, error) {
 func (a *App) PinPBSServerFingerprint(id, fingerprint string) error {
 	writeDebugLog(fmt.Sprintf("PinPBSServerFingerprint(%s) called", id))
 	if err := security.ValidateFingerprint(fingerprint); err != nil {
-		return fmt.Errorf("empreinte certificat invalide: %w", err)
+		return fmt.Errorf("invalid certificate fingerprint: %w", err)
 	}
 	// config.json lives under ProgramData and is owned by whichever process wrote it
 	// first. When the privileged service is running it owns the file, so the
@@ -1176,7 +1176,7 @@ func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters [
 	case api.ModeStandalone:
 		// Direct execution - check admin if VSS requested
 		if useVSS && !isAdmin() {
-			return fmt.Errorf("VSS (Shadow Copy) nécessite les privilèges administrateur - veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS")
+			return fmt.Errorf("VSS (Shadow Copy) requires administrator privileges - restart the application as administrator or disable VSS")
 		}
 		return a.startBackupDirect(backupType, backupDirs, driveLetters, excludeList, backupID, useVSS, compression, pbsID)
 	default:
@@ -1214,7 +1214,7 @@ func (a *App) StartMachineBackup(backupType string, backupDevices []string, back
 	case api.ModeStandalone:
 		// Direct execution - check admin if VSS requested
 		if useVSS && !isAdmin() {
-			return fmt.Errorf("VSS (Shadow Copy) nécessite les privilèges administrateur - veuillez redémarrer l'application en tant qu'administrateur ou désactiver VSS")
+			return fmt.Errorf("VSS (Shadow Copy) requires administrator privileges - restart the application as administrator or disable VSS")
 		}
 		return a.startMachineBackupDirect(backupType, backupDevices, backupID, useVSS, compression, pbsID, backupKind)
 	default:
@@ -1240,7 +1240,7 @@ func (a *App) startBackupViaService(backupType string, backupDirs []string, driv
 	resp, err := a.apiClient.StartBackup(req)
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("[Service Mode] Backup request failed: %v", err))
-		return fmt.Errorf("échec de la communication avec le service: %w", err)
+		return fmt.Errorf("communication with the service failed: %w", err)
 	}
 
 	writeDebugLog(fmt.Sprintf("[Service Mode] Backup started: %s (JobID: %s)", resp.Message, resp.JobID))
@@ -1272,7 +1272,7 @@ func (a *App) startMachineBackupViaService(backupType string, backupDevices []st
 	resp, err := a.apiClient.StartMachineBackup(req)
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("[Service Mode] Machine backup request failed: %v", err))
-		return fmt.Errorf("échec de la communication avec le service: %w", err)
+		return fmt.Errorf("communication with the service failed: %w", err)
 	}
 
 	writeDebugLog(fmt.Sprintf("[Service Mode] Machine backup started: %s (JobID: %s)", resp.Message, resp.JobID))
@@ -1357,13 +1357,13 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 
 	// Validate BackupID (now guaranteed to be non-empty)
 	if err := security.ValidateBackupID(backupID); err != nil {
-		return fmt.Errorf("backup ID invalide: %w", err)
+		return fmt.Errorf("invalid backup ID: %w", err)
 	}
 
 	// Validate backup directories
 	for _, dir := range backupDirs {
 		if err := security.ValidatePath(dir); err != nil {
-			return fmt.Errorf("chemin invalide '%s': %w", dir, err)
+			return fmt.Errorf("invalid path '%s': %w", dir, err)
 		}
 	}
 
@@ -1391,13 +1391,13 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 	var targetDirs []string
 	if backupType == "directory" {
 		if len(backupDirs) == 0 {
-			return fmt.Errorf("au moins un répertoire de sauvegarde requis")
+			return fmt.Errorf("at least one backup folder is required")
 		}
 		targetDirs = backupDirs
 	}
 	if backupType == "machine" {
 		if len(driveLetters) == 0 {
-			return fmt.Errorf("au moins un disque physique requis")
+			return fmt.Errorf("at least one physical disk is required")
 		}
 		// Physical drive paths are used directly (e.g., \\.\PhysicalDrive0)
 		targetDirs = driveLetters
@@ -1569,7 +1569,7 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 
 	// Validate BackupID (now guaranteed to be non-empty)
 	if err := security.ValidateBackupID(backupID); err != nil {
-		return fmt.Errorf("backup ID invalide: %w", err)
+		return fmt.Errorf("invalid backup ID: %w", err)
 	}
 
 	// Validate backup devices
@@ -1851,7 +1851,7 @@ func (a *App) ListSnapshots(pbsID, backupID string) ([]map[string]interface{}, e
 		cfg.Datastore, cfg.Namespace, cfg.CertFingerprint, backupID)
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("ListSnapshotsInline failed: %v", err))
-		return nil, fmt.Errorf("échec de la liste des snapshots: %v", err)
+		return nil, fmt.Errorf("listing snapshots failed: %v", err)
 	}
 
 	result := make([]map[string]interface{}, 0, len(snaps))
@@ -1885,7 +1885,7 @@ func (a *App) ListSnapshotContents(pbsID, backupID string, snapshotUnix int64, f
 		return nil, err
 	}
 	if backupID == "" {
-		return nil, fmt.Errorf("backup ID requis")
+		return nil, fmt.Errorf("backup ID is required")
 	}
 
 	opts := RestoreOptions{
@@ -1919,7 +1919,7 @@ func (a *App) GetSnapshotMeta(pbsID, backupID string, snapshotUnix int64) (*Back
 		return nil, err
 	}
 	if backupID == "" {
-		return nil, fmt.Errorf("backup ID requis")
+		return nil, fmt.Errorf("backup ID is required")
 	}
 
 	opts := RestoreOptions{
@@ -1966,10 +1966,10 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
 		return err
 	}
 	if backupID == "" {
-		return fmt.Errorf("backup ID requis")
+		return fmt.Errorf("backup ID is required")
 	}
 	if snapshotID == "" {
-		return fmt.Errorf("ID du snapshot requis")
+		return fmt.Errorf("snapshot ID is required")
 	}
 
 	restoreMode := RestoreMode(mode)
@@ -1981,16 +1981,16 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
 	// derives the target from the backup metadata sidecar.
 	if restoreMode != RestoreModeOriginal {
 		if destPath == "" {
-			return fmt.Errorf("chemin de destination requis")
+			return fmt.Errorf("destination path is required")
 		}
 		if err := security.ValidatePath(destPath); err != nil {
-			return fmt.Errorf("chemin de destination invalide: %w", err)
+			return fmt.Errorf("invalid destination path: %w", err)
 		}
 	}
 
 	timestamp, err := time.Parse("2006-01-02T15:04:05Z", snapshotID)
 	if err != nil {
-		return fmt.Errorf("ID de snapshot invalide: %v", err)
+		return fmt.Errorf("invalid snapshot ID: %v", err)
 	}
 
 	emit := func(percent float64, message string) {
@@ -2041,7 +2041,7 @@ func (a *App) RestoreSnapshot(pbsID, backupID, snapshotID, destPath, mode string
 			err = RestoreSnapshotInline(opts)
 		}()
 		success := err == nil
-		msg := "Restauration terminée"
+		msg := "Restore complete"
 		if err != nil {
 			msg = err.Error()
 			writeDebugLog(fmt.Sprintf("Restore failed: %v", err))
@@ -2070,7 +2070,7 @@ func (a *App) OpenDirectoryPicker() (dir string, err error) {
 	}
 	if a.isServiceProcess {
 		writeDebugLog("OpenDirectoryPicker: native picker skipped in the headless service process")
-		return "", fmt.Errorf("sélecteur de dossier indisponible dans le service")
+		return "", fmt.Errorf("folder picker unavailable in the service")
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -2086,7 +2086,7 @@ func (a *App) OpenDirectoryPicker() (dir string, err error) {
 
 	writeDebugLog(fmt.Sprintf("OpenDirectoryPicker: opening folder picker (default=%s)", defaultDir))
 	dir, err = runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "Choisir un dossier",
+		Title:            "Choose a folder",
 		DefaultDirectory: defaultDir,
 	})
 	writeDebugLog(fmt.Sprintf("OpenDirectoryPicker: returned dir=%q err=%v", dir, err))
@@ -2105,7 +2105,7 @@ func (a *App) OpenRestoreDestDialog() (dir string, err error) {
 	// the previous guard disabled the picker for every GUI user with a service).
 	if a.isServiceProcess {
 		writeDebugLog("OpenRestoreDestDialog: native picker skipped in the headless service process — use manual path entry")
-		return "", fmt.Errorf("sélecteur de dossier indisponible dans le service — saisissez le chemin de destination manuellement")
+		return "", fmt.Errorf("folder picker unavailable in the service — enter the destination path manually")
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -2123,7 +2123,7 @@ func (a *App) OpenRestoreDestDialog() (dir string, err error) {
 
 	writeDebugLog(fmt.Sprintf("OpenRestoreDestDialog: opening folder picker (default=%s)", defaultDir))
 	dir, err = runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "Choisir le dossier de destination",
+		Title:            "Choose the destination folder",
 		DefaultDirectory: defaultDir,
 	})
 	writeDebugLog(fmt.Sprintf("OpenRestoreDestDialog: returned dir=%q err=%v", dir, err))

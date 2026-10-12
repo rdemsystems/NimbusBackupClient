@@ -332,10 +332,10 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 				var msg string
 				failed := c.failedchunk.Load()
 				if failed > 0 {
-					msg = fmt.Sprintf("Traité: %d MB (New: %d, Reused: %d, ⚠️ Failed: %d chunks)",
+					msg = fmt.Sprintf("Processed: %d MB (New: %d, Reused: %d, ⚠️ Failed: %d chunks)",
 						sizeMB, c.newchunk.Load(), c.reusechunk.Load(), failed)
 				} else {
-					msg = fmt.Sprintf("Traité: %d MB (New: %d, Reused: %d chunks)",
+					msg = fmt.Sprintf("Processed: %d MB (New: %d, Reused: %d chunks)",
 						sizeMB, c.newchunk.Load(), c.reusechunk.Load())
 				}
 
@@ -349,10 +349,10 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 						progress = 0.9
 					}
 					if failed > 0 {
-						msg = fmt.Sprintf("Traité: %d / %d MB (New: %d, Reused: %d, ⚠️ Failed: %d chunks)",
+						msg = fmt.Sprintf("Processed: %d / %d MB (New: %d, Reused: %d, ⚠️ Failed: %d chunks)",
 							sizeMB, totalSize/(1024*1024), c.newchunk.Load(), c.reusechunk.Load(), failed)
 					} else {
-						msg = fmt.Sprintf("Traité: %d / %d MB (New: %d, Reused: %d chunks)",
+						msg = fmt.Sprintf("Processed: %d / %d MB (New: %d, Reused: %d chunks)",
 							sizeMB, totalSize/(1024*1024), c.newchunk.Load(), c.reusechunk.Load())
 					}
 				} else {
@@ -624,9 +624,9 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 
 	agg.DurationSec = time.Since(aggStart).Seconds()
 	if len(perDirErrors) > 0 {
-		agg.Message = fmt.Sprintf("%d/%d dossiers en échec:\n%s", len(perDirErrors), len(opts.BackupObjects), strings.Join(perDirErrors, "\n"))
+		agg.Message = fmt.Sprintf("%d/%d folders failed:\n%s", len(perDirErrors), len(opts.BackupObjects), strings.Join(perDirErrors, "\n"))
 	} else {
-		agg.Message = fmt.Sprintf("Backup de %d dossiers terminé (%d new, %d reused chunks)", len(opts.BackupObjects), agg.NewChunks, agg.ReusedChunks)
+		agg.Message = fmt.Sprintf("Backup of %d folders complete (%d new, %d reused chunks)", len(opts.BackupObjects), agg.NewChunks, agg.ReusedChunks)
 	}
 
 	if opts.OnComplete != nil {
@@ -998,7 +998,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		if opts.Ctx != nil && opts.Ctx.Err() != nil {
 			writeBackupLog(fmt.Sprintf("Cancellation requested — stopping before backup of %s", dir))
 			if opts.OnComplete != nil {
-				opts.OnComplete(false, "Backup annulé par l'utilisateur")
+				opts.OnComplete(false, "Backup cancelled by user")
 			}
 			return machinebackuplib.ErrCancelled
 		}
@@ -1042,7 +1042,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 					if opts.Ctx != nil && opts.Ctx.Err() != nil {
 						writeBackupLog("Cancellation requested during session-lost wait — aborting")
 						if opts.OnComplete != nil {
-							opts.OnComplete(false, "Backup annulé par l'utilisateur")
+							opts.OnComplete(false, "Backup cancelled by user")
 						}
 						return machinebackuplib.ErrCancelled
 					}
@@ -1050,7 +1050,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 					if remaining <= 0 {
 						break
 					}
-					progress(0, fmt.Sprintf("Session PBS perdue, attente %s avant retry (lock PBS en cours de libération)...",
+					progress(0, fmt.Sprintf("PBS session lost, waiting %s before retrying (PBS lock being released)...",
 						remaining.Round(time.Second)))
 					sleepFor := 30 * time.Second
 					if remaining < sleepFor {
@@ -1153,7 +1153,7 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	progress(1.0, progressMsg)
 
 	if len(allSkipped) > 0 {
-		completionMsg += fmt.Sprintf("\n⚠️  %d fichiers/dossiers ignorés (accès refusé ou junction points)", len(allSkipped))
+		completionMsg += fmt.Sprintf("\n⚠️  %d files/folders skipped (access denied or junction points)", len(allSkipped))
 		writeBackupLog(fmt.Sprintf("=== SKIPPED FILES/DIRECTORIES (%d) ===", len(allSkipped)))
 
 		// Log first 50 skipped files in detail

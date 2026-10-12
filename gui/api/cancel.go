@@ -21,5 +21,7 @@ func isCancelled(err error) bool {
 	msg := err.Error()
 	return msg == cancelledMessage ||
 		strings.HasSuffix(msg, "Machine backup cancelled by user") ||
+		strings.HasSuffix(msg, "Backup cancelled by user") ||
+		// Wording used up to v0.4.1.
 		strings.HasSuffix(msg, "Backup annulé par l'utilisateur")
 }

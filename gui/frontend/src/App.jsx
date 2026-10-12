@@ -651,7 +651,7 @@ function App() {
       setServerTab('server')
       await loadPBSServers()
     } catch (err) {
-      showStatus(`❌ Erreur: ${err}`, 'error')
+      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
     }
   }
 
@@ -691,7 +691,7 @@ function App() {
       setServerTab('server')
       await loadPBSServers()
     } catch (err) {
-      showStatus(`❌ Erreur: ${err}`, 'error')
+      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
     }
   }
 
@@ -710,7 +710,7 @@ function App() {
       showStatus(`✅ ${t('statusServerDeleted')}`, 'success')
       await loadPBSServers()
     } catch (err) {
-      showStatus(`❌ Erreur: ${err}`, 'error')
+      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
     }
   }
 
@@ -725,7 +725,7 @@ function App() {
       setDefaultPBSID(id)
       showStatus(`✅ ${t('statusServerSetDefault').replace('{id}', id)}`, 'success')
     } catch (err) {
-      showStatus(`❌ Erreur: ${err}`, 'error')
+      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
     }
   }
 
@@ -1004,7 +1004,7 @@ function App() {
       setConfig(trimmedConfig)
       showStatus(`✅ ${t('statusConfigSaved')}`, 'success')
     } catch (err) {
-      showStatus(`❌ Erreur : ${err}`, 'error')
+      showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
     }
   }
 
@@ -1122,7 +1122,7 @@ function App() {
         const promise = new Promise((resolve) => {
           unsub = EventsOn('backup:complete', (data) => {
             if (typeof unsub === 'function') unsub()
-            resolve(data || { success: false, message: 'completion sans données' })
+            resolve(data || { success: false, message: t('completionNoData') })
           })
         })
         return { promise, cancel: () => { if (typeof unsub === 'function') unsub() } }
@@ -1209,7 +1209,7 @@ function App() {
     const dirList = backupDirs.split('\n').map(d => d.trim()).filter(d => d)
 
     if (backupType === 'directory' && dirList.length === 0) {
-      showStatus('❌ Au moins un répertoire requis', 'error')
+      showStatus(`❌ ${t('atLeastOneDir')}`, 'error')
       return
     }
 
@@ -1252,17 +1252,17 @@ function App() {
           if (!canModify) {
             // Request elevation
             if (RequestJobModificationElevation) {
-              showStatus('⚠️ Privilèges administrateur requis pour modifier les jobs planifiés', 'warning')
+              showStatus(`⚠️ ${t('scheduleAdminRequired')}`, 'warning')
               try {
                 await RequestJobModificationElevation()
               } catch (err) {
-                showStatus(`❌ Échec de l'élévation des privilèges: ${err}`, 'error')
+                showStatus(`❌ ${t('elevationFailed', { error: err })}`, 'error')
               }
             }
             return
           }
         } catch (err) {
-          showStatus(`❌ Erreur vérification privilèges: ${err}`, 'error')
+          showStatus(`❌ ${t('privilegeCheckError', { err })}`, 'error')
           return
         }
       }
@@ -1290,13 +1290,13 @@ function App() {
           // Update existing job
           await UpdateScheduledJob(jobData)
           setScheduledJobs(scheduledJobs.map(j => j.id === editingJobId ? jobData : j))
-          showStatus(`✅ Backup modifié pour ${scheduleTime}`, 'success')
+          showStatus(`✅ ${t('scheduleUpdated', { time: scheduleTime })}`, 'success')
           setEditingJobId(null)
         } else {
           // Create new job
           await SaveScheduledJob(jobData)
           setScheduledJobs([...scheduledJobs, jobData])
-          showStatus(`✅ Backup planifié pour ${scheduleTime}`, 'success')
+          showStatus(`✅ ${t('scheduleCreated', { time: scheduleTime })}`, 'success')
         }
         // Reset form after save
         setScheduleTime('02:00')
@@ -1305,7 +1305,7 @@ function App() {
         setBackupPBSID('')
         setMachineBackupKind('host')
       } catch (err) {
-        showStatus(`❌ Erreur: ${err}`, 'error')
+        showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
       }
       return
     }
@@ -1374,7 +1374,7 @@ function App() {
       return
     }
     if (!restoreBackupId) {
-      showStatus('❌ Backup ID requis', 'error')
+      showStatus(`❌ ${t('backupIdRequired')}`, 'error')
       return
     }
 
@@ -1388,7 +1388,7 @@ function App() {
       const snaps = await ListSnapshots(restorePBSID || '', restoreBackupId)
       setSnapshots(snaps || [])
       setShowSnapshots(true)
-      showStatus(`✅ ${snaps.length} snapshot(s) trouvé(s)`, 'success')
+      showStatus(`✅ ${t('snapshotsFound', { n: snaps.length })}`, 'success')
     } catch (err) {
       showStatus(`❌ ${err}`, 'error')
     }
@@ -2322,7 +2322,7 @@ function App() {
                     <div>
                       <strong>{job.name}</strong>
                       <div style={{fontSize: '14px', color: '#6c757d', marginTop: '5px'}}>
-                        ⏰ {job.scheduleTime} {job.runAtStartup && '• 🚀 Au démarrage'}
+                        ⏰ {job.scheduleTime} {job.runAtStartup && `• 🚀 ${t('atStartup')}`}
                       </div>
                       <div style={{fontSize: '13px', color: '#6c757d', marginTop: '3px'}}>
                         📁 {(job.backupDirs || []).join(', ')}
@@ -2381,7 +2381,7 @@ function App() {
                               setEditingJobId(null)
                             }
                           } catch (err) {
-                            showStatus(`❌ Erreur: ${err}`, 'error')
+                            showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
                           }
                         }}
                       >

@@ -389,15 +389,15 @@ func parseScheduleTime(scheduleTime string) (hour, min int, ok bool) {
 // the user edits it instead of failing silently at its scheduled time.
 func (j *ScheduledJob) validate() error {
 	if strings.TrimSpace(j.Name) == "" {
-		return fmt.Errorf("job name requis")
+		return fmt.Errorf("job name is required")
 	}
 	if _, _, ok := parseScheduleTime(j.ScheduleTime); !ok && j.ScheduleTime != "" {
-		return fmt.Errorf("heure de planification invalide (format HH:MM attendu): %q", j.ScheduleTime)
+		return fmt.Errorf("invalid schedule time (expected HH:MM): %q", j.ScheduleTime)
 	} else if j.ScheduleTime == "" && !j.RunAtStartup {
-		return fmt.Errorf("heure de planification requise (format HH:MM)")
+		return fmt.Errorf("schedule time is required (HH:MM)")
 	}
 	if len(j.BackupDirs) == 0 && len(j.DriveLetters) == 0 {
-		return fmt.Errorf("au moins un repertoire ou un disque a sauvegarder est requis")
+		return fmt.Errorf("at least one folder or disk to back up is required")
 	}
 	return nil
 }
@@ -633,7 +633,7 @@ func (a *App) CleanupAbandonedJobs() {
 		if entry.Status == "running" {
 			writeDebugLog(fmt.Sprintf("Marking abandoned job as failed: %s", entry.Name))
 			history[i].Status = "failed"
-			history[i].Message = "Abandonné (application interrompue)"
+			history[i].Message = "Abandoned (application interrupted)"
 			history[i].Timestamp = time.Now().Format(time.RFC3339)
 			modified = true
 		}
@@ -847,7 +847,7 @@ func (a *App) runClaimedJob(job ScheduledJob) {
 		Name:       job.Name,
 		Timestamp:  time.Now().Format(time.RFC3339),
 		Status:     "success",
-		Message:    "Backup terminé",
+		Message:    "Backup complete",
 		BackupDirs: job.BackupDirs,
 		BackupID:   job.BackupID,
 		UseVSS:     job.UseVSS,
@@ -856,7 +856,7 @@ func (a *App) runClaimedJob(job ScheduledJob) {
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("Scheduled job error: %v", err))
 		historyEntry.Status = "failed"
-		historyEntry.Message = fmt.Sprintf("Erreur: %v", err)
+		historyEntry.Message = fmt.Sprintf("Error: %v", err)
 	}
 
 	if err := a.AddJobHistory(historyEntry); err != nil {
@@ -937,7 +937,7 @@ func (a *App) runScheduledJobNow(jobID string) error {
 			continue
 		}
 		if !claimJob(job.ID) {
-			return fmt.Errorf("job %q est deja en cours d'execution", job.Name)
+			return fmt.Errorf("job %q is already running", job.Name)
 		}
 		writeDebugLog(fmt.Sprintf("Manual run of scheduled job: %s", job.Name))
 		go func() {
@@ -946,7 +946,7 @@ func (a *App) runScheduledJobNow(jobID string) error {
 		}()
 		return nil
 	}
-	return fmt.Errorf("job planifie %q introuvable", jobID)
+	return fmt.Errorf("scheduled job %q not found", jobID)
 }
 
 // jobToMap converts a ScheduledJob to the wire map understood by

@@ -331,7 +331,7 @@ func LoadConfig() *Config {
 			EncryptionKeyFile: config.EncryptionKeyFile,
 			Datastore:         config.Datastore,
 			Namespace:         config.Namespace,
-			Description:       "Serveur PBS par défaut (migré depuis ancienne config)",
+			Description:       "Default PBS server (migrated from the previous config)",
 		}
 
 		// Initialize PBSServers map if nil
@@ -371,51 +371,51 @@ func (c *Config) Save() error {
 func (c *Config) Validate() error {
 	// Validate BaseURL
 	if c.BaseURL == "" {
-		return fmt.Errorf("URL du serveur PBS requis")
+		return fmt.Errorf("PBS server URL is required")
 	}
 	if err := security.ValidateURL(c.BaseURL); err != nil {
-		return fmt.Errorf("URL invalide: %w", err)
+		return fmt.Errorf("invalid URL: %w", err)
 	}
 
 	// Auth: an API token (AuthID+Secret), a stored username/password (a fresh
 	// ticket is minted per operation by App.withAuth), or an in-flight ticket.
 	if c.AuthID != "" {
 		if err := security.ValidateAuthID(c.AuthID); err != nil {
-			return fmt.Errorf("authentication ID invalide: %w", err)
+			return fmt.Errorf("invalid authentication ID: %w", err)
 		}
 		if c.Secret == "" {
-			return fmt.Errorf("secret requis")
+			return fmt.Errorf("secret is required")
 		}
 	} else if c.Ticket == "" && (c.Username == "" || c.Password == "") {
-		return fmt.Errorf("authentification requise (API token ou utilisateur/mot de passe)")
+		return fmt.Errorf("authentication is required (API token or username/password)")
 	}
 
 	// Validate Datastore
 	if c.Datastore == "" {
-		return fmt.Errorf("datastore requis")
+		return fmt.Errorf("datastore is required")
 	}
 	if err := security.ValidateDatastore(c.Datastore); err != nil {
-		return fmt.Errorf("datastore invalide: %w", err)
+		return fmt.Errorf("invalid datastore: %w", err)
 	}
 
 	// Validate BackupID if present
 	if c.BackupID != "" {
 		if err := security.ValidateBackupID(c.BackupID); err != nil {
-			return fmt.Errorf("backup ID invalide: %w", err)
+			return fmt.Errorf("invalid backup ID: %w", err)
 		}
 	}
 
 	// Validate Certificate Fingerprint if present
 	if c.CertFingerprint != "" {
 		if err := security.ValidateFingerprint(c.CertFingerprint); err != nil {
-			return fmt.Errorf("empreinte certificat invalide: %w", err)
+			return fmt.Errorf("invalid certificate fingerprint: %w", err)
 		}
 	}
 
 	// Validate BackupDir if present
 	if c.BackupDir != "" {
 		if err := security.ValidatePath(c.BackupDir); err != nil {
-			return fmt.Errorf("chemin de backup invalide: %w", err)
+			return fmt.Errorf("invalid backup path: %w", err)
 		}
 	}
 
@@ -442,10 +442,10 @@ func (c *Config) validatePBSFields() error {
 	// Credentials first: they are what the legacy block is really about.
 	if c.AuthID != "" {
 		if err := security.ValidateAuthID(c.AuthID); err != nil {
-			return fmt.Errorf("authentication ID invalide: %w", err)
+			return fmt.Errorf("invalid authentication ID: %w", err)
 		}
 		if c.Secret == "" {
-			return fmt.Errorf("secret requis")
+			return fmt.Errorf("secret is required")
 		}
 	} else if c.Username != "" {
 		if err := security.ValidateUsername(c.Username); err != nil {
@@ -462,27 +462,27 @@ func (c *Config) validatePBSFields() error {
 
 	if c.BaseURL != "" {
 		if err := security.ValidateURL(c.BaseURL); err != nil {
-			return fmt.Errorf("URL du serveur PBS invalide: %w", err)
+			return fmt.Errorf("invalid PBS server URL: %w", err)
 		}
 	}
 	if c.CertFingerprint != "" {
 		if err := security.ValidateFingerprint(c.CertFingerprint); err != nil {
-			return fmt.Errorf("empreinte certificat invalide: %w", err)
+			return fmt.Errorf("invalid certificate fingerprint: %w", err)
 		}
 	}
 	if c.Datastore != "" {
 		if err := security.ValidateDatastore(c.Datastore); err != nil {
-			return fmt.Errorf("datastore invalide: %w", err)
+			return fmt.Errorf("invalid datastore: %w", err)
 		}
 	}
 	if c.BackupID != "" {
 		if err := security.ValidateBackupID(c.BackupID); err != nil {
-			return fmt.Errorf("backup ID invalide: %w", err)
+			return fmt.Errorf("invalid backup ID: %w", err)
 		}
 	}
 	if c.BackupDir != "" {
 		if err := security.ValidatePath(c.BackupDir); err != nil {
-			return fmt.Errorf("chemin de backup invalide: %w", err)
+			return fmt.Errorf("invalid backup path: %w", err)
 		}
 	}
 	return nil
@@ -499,17 +499,17 @@ func (c *Config) validateEncryptionKeyFile() error {
 		return nil
 	}
 	if err := security.ValidatePath(c.EncryptionKeyFile); err != nil {
-		return fmt.Errorf("chemin de cle de chiffrement invalide: %w", err)
+		return fmt.Errorf("invalid encryption key path: %w", err)
 	}
 	if _, err := os.Stat(c.EncryptionKeyFile); err != nil {
-		return fmt.Errorf("fichier de cle de chiffrement illisible (%s): %w", c.EncryptionKeyFile, err)
+		return fmt.Errorf("encryption key file is unreadable (%s): %w", c.EncryptionKeyFile, err)
 	}
 	keyCfg, err := pbscommon.LoadKeyConfig(c.EncryptionKeyFile)
 	if err != nil {
-		return fmt.Errorf("lecture du fichier de cle de chiffrement %s: %w", c.EncryptionKeyFile, err)
+		return fmt.Errorf("reading encryption key file %s: %w", c.EncryptionKeyFile, err)
 	}
 	if keyCfg.KDF != nil {
-		return fmt.Errorf("le fichier de cle de chiffrement %s est protege par phrase de passe, ce que l'interface graphique ne peut pas deverrouiller: utilisez une cle creee avec `proxmox-backup-client key create --kdf none`, ou restaurez depuis la ligne de commande", c.EncryptionKeyFile)
+		return fmt.Errorf("encryption key file %s is protected by a passphrase, which the GUI cannot unlock: use a key created with `proxmox-backup-client key create --kdf none`, or restore from the command line", c.EncryptionKeyFile)
 	}
 	return nil
 }
@@ -561,13 +561,13 @@ func (c *Config) GetPBSServer(id string) (*PBSServer, error) {
 
 	// If still empty, return error
 	if id == "" {
-		return nil, fmt.Errorf("aucun serveur PBS spécifié et pas de serveur par défaut")
+		return nil, fmt.Errorf("no PBS server specified and no default server")
 	}
 
 	// Get server by ID
 	pbs, exists := c.PBSServers[id]
 	if !exists {
-		return nil, fmt.Errorf("serveur PBS '%s' introuvable", id)
+		return nil, fmt.Errorf("PBS server '%s' not found", id)
 	}
 
 	return pbs, nil
@@ -594,7 +594,7 @@ func (c *Config) AddPBSServerMem(pbs *PBSServer) error {
 
 	// Check if ID already exists
 	if _, exists := c.PBSServers[pbs.ID]; exists {
-		return fmt.Errorf("serveur PBS avec ID '%s' existe déjà", pbs.ID)
+		return fmt.Errorf("PBS server with ID '%s' already exists", pbs.ID)
 	}
 
 	c.PBSServers[pbs.ID] = pbs
@@ -625,7 +625,7 @@ func (c *Config) AddPBSServer(pbs *PBSServer) error {
 func (c *Config) UpdatePBSServerMem(pbs *PBSServer, requireCreds bool) error {
 	existing, exists := c.PBSServers[pbs.ID]
 	if !exists {
-		return fmt.Errorf("serveur PBS '%s' introuvable", pbs.ID)
+		return fmt.Errorf("PBS server '%s' not found", pbs.ID)
 	}
 
 	// Selects the auth method, clears the other one, and applies the
@@ -655,7 +655,7 @@ func (c *Config) UpdatePBSServer(pbs *PBSServer) error {
 // WITHOUT persisting (see AddPBSServerMem).
 func (c *Config) DeletePBSServerMem(id string) error {
 	if _, exists := c.PBSServers[id]; !exists {
-		return fmt.Errorf("serveur PBS '%s' introuvable", id)
+		return fmt.Errorf("PBS server '%s' not found", id)
 	}
 
 	delete(c.PBSServers, id)
@@ -697,7 +697,7 @@ func (c *Config) ListPBSServers() []*PBSServer {
 // (see AddPBSServerMem).
 func (c *Config) SetDefaultPBSMem(id string) error {
 	if _, exists := c.PBSServers[id]; !exists {
-		return fmt.Errorf("serveur PBS '%s' introuvable", id)
+		return fmt.Errorf("PBS server '%s' not found", id)
 	}
 
 	c.DefaultPBSID = id

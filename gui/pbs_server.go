@@ -70,7 +70,7 @@ func (pbs *PBSServer) sanitized() *PBSServer {
 // real secrets live (false).
 func normalizeServerAuth(existing, srv *PBSServer, requireCreds bool) error {
 	if srv == nil {
-		return fmt.Errorf("serveur PBS vide")
+		return fmt.Errorf("empty PBS server")
 	}
 
 	if srv.AuthID != "" {
@@ -84,11 +84,11 @@ func normalizeServerAuth(existing, srv *PBSServer, requireCreds bool) error {
 				// caller never received it — the service fills it in).
 				srv.Secret = existing.Secret
 			case requireCreds:
-				return fmt.Errorf("secret requis pour l'authentification ID %q (un secret n'est pas reutilisable avec un autre authid)", srv.AuthID)
+				return fmt.Errorf("secret is required for auth ID %q (a secret cannot be reused with another auth ID)", srv.AuthID)
 			}
 		}
 		if srv.Secret == "" && requireCreds {
-			return fmt.Errorf("secret requis pour l'authentification ID %q", srv.AuthID)
+			return fmt.Errorf("secret is required for auth ID %q", srv.AuthID)
 		}
 		return nil
 	}
@@ -97,7 +97,7 @@ func normalizeServerAuth(existing, srv *PBSServer, requireCreds bool) error {
 	srv.AuthID = ""
 	srv.Secret = ""
 	if srv.Username == "" {
-		return fmt.Errorf("API token (authid/secret) ou identifiant/mot de passe requis")
+		return fmt.Errorf("API token (authid/secret) or username/password is required")
 	}
 	if srv.Password == "" && existing != nil && existing.Username == srv.Username {
 		// Same user as stored: keep the stored password ("" when unknown to this
@@ -105,7 +105,7 @@ func normalizeServerAuth(existing, srv *PBSServer, requireCreds bool) error {
 		srv.Password = existing.Password
 	}
 	if srv.Password == "" && requireCreds {
-		return fmt.Errorf("mot de passe requis pour l'utilisateur %q", srv.Username)
+		return fmt.Errorf("password is required for user %q", srv.Username)
 	}
 	return nil
 }
@@ -117,44 +117,44 @@ func normalizeServerAuth(existing, srv *PBSServer, requireCreds bool) error {
 func (pbs *PBSServer) validateFields() error {
 	// Validate ID
 	if pbs.ID == "" {
-		return fmt.Errorf("PBS server ID requis")
+		return fmt.Errorf("PBS server ID is required")
 	}
 
 	// Validate Name
 	if pbs.Name == "" {
-		return fmt.Errorf("PBS server name requis")
+		return fmt.Errorf("PBS server name is required")
 	}
 
 	// Validate BaseURL
 	if pbs.BaseURL == "" {
-		return fmt.Errorf("URL du serveur PBS requis")
+		return fmt.Errorf("PBS server URL is required")
 	}
 	if err := security.ValidateURL(pbs.BaseURL); err != nil {
-		return fmt.Errorf("URL invalide: %w", err)
+		return fmt.Errorf("invalid URL: %w", err)
 	}
 
 	// Auth: a server authenticates with EITHER an API token (AuthID+Secret) OR
 	// a username/password — never both, and never neither.
 	if pbs.AuthID != "" {
 		if err := security.ValidateAuthID(pbs.AuthID); err != nil {
-			return fmt.Errorf("authentication ID invalide: %w", err)
+			return fmt.Errorf("invalid authentication ID: %w", err)
 		}
 	} else if pbs.Username == "" {
-		return fmt.Errorf("API token (authid/secret) ou identifiant/mot de passe requis")
+		return fmt.Errorf("API token (authid/secret) or username/password is required")
 	}
 
 	// Validate Datastore
 	if pbs.Datastore == "" {
-		return fmt.Errorf("datastore requis")
+		return fmt.Errorf("datastore is required")
 	}
 	if err := security.ValidateDatastore(pbs.Datastore); err != nil {
-		return fmt.Errorf("datastore invalide: %w", err)
+		return fmt.Errorf("invalid datastore: %w", err)
 	}
 
 	// Validate Certificate Fingerprint if present
 	if pbs.CertFingerprint != "" {
 		if err := security.ValidateFingerprint(pbs.CertFingerprint); err != nil {
-			return fmt.Errorf("empreinte certificat invalide: %w", err)
+			return fmt.Errorf("invalid certificate fingerprint: %w", err)
 		}
 	}
 
@@ -185,7 +185,7 @@ func (pbs *PBSServer) validate(requireCreds bool) error {
 		return err
 	}
 	if requireCreds && pbs.AuthID != "" && pbs.Secret == "" {
-		return fmt.Errorf("secret requis")
+		return fmt.Errorf("secret is required")
 	}
 	return nil
 }

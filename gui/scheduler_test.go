@@ -231,12 +231,12 @@ func TestSaveScheduledJobValidates(t *testing.T) {
 		mutate  func(*ScheduledJob)
 		wantErr string
 	}{
-		{"missing name", func(j *ScheduledJob) { j.Name = "  " }, "name requis"},
+		{"missing name", func(j *ScheduledJob) { j.Name = "  " }, "name is required"},
 		{"unparseable schedule", func(j *ScheduledJob) { j.ScheduleTime = "tomorrow" }, "HH:MM"},
 		{"hour out of range", func(j *ScheduledJob) { j.ScheduleTime = "25:00" }, "HH:MM"},
 		{"minute out of range", func(j *ScheduledJob) { j.ScheduleTime = "02:75" }, "HH:MM"},
-		{"no schedule and no startup run", func(j *ScheduledJob) { j.ScheduleTime = ""; j.RunAtStartup = false }, "planification requise"},
-		{"nothing to back up", func(j *ScheduledJob) { j.BackupDirs = nil; j.DriveLetters = nil }, "repertoire ou un disque"},
+		{"no schedule and no startup run", func(j *ScheduledJob) { j.ScheduleTime = ""; j.RunAtStartup = false }, "schedule time is required"},
+		{"nothing to back up", func(j *ScheduledJob) { j.BackupDirs = nil; j.DriveLetters = nil }, "folder or disk"},
 	}
 
 	for _, tt := range tests {
@@ -554,7 +554,7 @@ func TestRunScheduledJobNowUnknownJob(t *testing.T) {
 	if err == nil {
 		t.Fatalf("RunScheduledJobNow() succeeded for an unknown job")
 	}
-	if !strings.Contains(err.Error(), "introuvable") {
+	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("error = %q, want it to mention the unknown job", err)
 	}
 }
@@ -583,7 +583,7 @@ func TestRunScheduledJobNowRejectsRunningJob(t *testing.T) {
 	if err == nil {
 		t.Fatalf("RunScheduledJobNow() accepted a job that is already running")
 	}
-	if !strings.Contains(err.Error(), "deja en cours") {
+	if !strings.Contains(err.Error(), "already running") {
 		t.Errorf("error = %q, want it to report the running job", err)
 	}
 	if calls != 0 {

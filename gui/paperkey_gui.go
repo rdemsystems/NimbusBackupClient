@@ -39,7 +39,7 @@ type PaperKeyLabels struct {
 func keyCopy(path, passphrase string) (*pbscommon.PaperKey, *pbscommon.KeyConfig, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return nil, nil, errors.New("aucun fichier de cle configure")
+		return nil, nil, errors.New("no key file configured")
 	}
 	kc, err := pbscommon.LoadKeyConfig(path)
 	if err != nil {
@@ -104,7 +104,7 @@ func (a *App) ExportEncryptionPaperKey(path, passphrase string, labels PaperKeyL
 		return "", err
 	}
 	if err := os.WriteFile(out, page, 0o600); err != nil { // #nosec G703 -- path chosen by the user in a native save dialog
-		return "", fmt.Errorf("ecriture de %s: %w", out, err)
+		return "", fmt.Errorf("writing %s: %w", out, err)
 	}
 	return out, nil
 }
@@ -122,7 +122,7 @@ func (a *App) ImportEncryptionKeyText(text, passphrase string) (EncryptionKeyInf
 		return EncryptionKeyInfo{}, err
 	}
 	if kc.KDF != nil && passphrase == "" {
-		return EncryptionKeyInfo{}, errors.New("cette cle est protegee par une phrase de passe: saisissez-la pour l'importer")
+		return EncryptionKeyInfo{}, errors.New("this key is protected by a passphrase: enter it to import the key")
 	}
 	crypt, err := kc.CryptConfig([]byte(passphrase))
 	if err != nil {
@@ -137,7 +137,7 @@ func (a *App) ImportEncryptionKeyText(text, passphrase string) (EncryptionKeyInf
 	}
 	info := inspectKeyFile(dest)
 	if !info.Usable {
-		return EncryptionKeyInfo{}, fmt.Errorf("la cle %s a ete ecrite mais ne peut pas etre relue: %s", dest, info.Reason)
+		return EncryptionKeyInfo{}, fmt.Errorf("key %s was written but cannot be read back: %s", dest, info.Reason)
 	}
 	writeDebugLog(fmt.Sprintf("ImportEncryptionKeyText: wrote %s (fingerprint %s)", dest, info.Fingerprint))
 	return info, nil
@@ -149,18 +149,18 @@ func (a *App) ImportEncryptionKeyText(text, passphrase string) (EncryptionKeyInf
 func (a *App) writeNewKeyFile(path string, crypt *pbscommon.CryptConfig) error {
 	path = strings.TrimSpace(path)
 	if err := security.ValidatePath(path); err != nil {
-		return fmt.Errorf("chemin de cle invalide: %w", err)
+		return fmt.Errorf("invalid key path: %w", err)
 	}
 	if _, err := os.Stat(path); err == nil { // #nosec G703 -- path chosen by the user in a native save dialog, validated above
-		return fmt.Errorf("le fichier %s existe deja: il n'est jamais ecrase, choisissez un autre nom", path)
+		return fmt.Errorf("file %s already exists: it is never overwritten, choose another name", path)
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("verification de %s: %w", path, err)
+		return fmt.Errorf("checking %s: %w", path, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { // #nosec G703 -- see above
-		return fmt.Errorf("creation du dossier %s: %w", filepath.Dir(path), err)
+		return fmt.Errorf("creating folder %s: %w", filepath.Dir(path), err)
 	}
 	if err := pbscommon.SaveKeyFile(path, crypt); err != nil {
-		return fmt.Errorf("ecriture de %s: %w", path, err)
+		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
 }

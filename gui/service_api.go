@@ -65,12 +65,12 @@ func (a *App) GetFullConfigForAPI() map[string]interface{} {
 // config.json) untouched.
 func (a *App) SaveFullConfigFromAPI(doc map[string]interface{}) error {
 	if doc == nil {
-		return fmt.Errorf("document de configuration vide")
+		return fmt.Errorf("empty configuration document")
 	}
 
 	b, err := json.Marshal(doc)
 	if err != nil {
-		return fmt.Errorf("document de configuration invalide: %w", err)
+		return fmt.Errorf("invalid configuration document: %w", err)
 	}
 
 	// Unmarshal into a Config: unknown keys (the *_set markers, hostname) are
@@ -78,7 +78,7 @@ func (a *App) SaveFullConfigFromAPI(doc map[string]interface{}) error {
 	// never populated from the wire.
 	var incoming Config
 	if err := json.Unmarshal(b, &incoming); err != nil {
-		return fmt.Errorf("document de configuration invalide: %w", err)
+		return fmt.Errorf("invalid configuration document: %w", err)
 	}
 	// Config.Username/Password are json:"-" (runtime-only), so a client that
 	// does send legacy user/password credentials would otherwise have them
@@ -160,10 +160,10 @@ func (a *App) SaveFullConfigFromAPI(doc map[string]interface{}) error {
 			// the incoming one is empty, and requires the selected method to
 			// actually have a usable credential (the service holds them all).
 			if err := normalizeServerAuth(old[id], srv, true); err != nil {
-				return fmt.Errorf("serveur PBS %q: %w", id, err)
+				return fmt.Errorf("PBS server %q: %w", id, err)
 			}
 			if err := srv.Validate(); err != nil {
-				return fmt.Errorf("serveur PBS %q: %w", id, err)
+				return fmt.Errorf("PBS server %q: %w", id, err)
 			}
 			next[id] = srv
 		}
@@ -327,7 +327,7 @@ func (a *App) MintPBSTicketForAPI(id string) (*api.PBSTicket, error) {
 	if cfg.AuthID != "" {
 		// Token server: mint the ticket from the token itself.
 		if cfg.Secret == "" {
-			return nil, fmt.Errorf("serveur %q: secret manquant", srv.ID)
+			return nil, fmt.Errorf("server %q: missing secret", srv.ID)
 		}
 		client := &pbscommon.PBSClient{
 			BaseURL:         cfg.BaseURL,
@@ -337,7 +337,7 @@ func (a *App) MintPBSTicketForAPI(id string) (*api.PBSTicket, error) {
 			Insecure:        cfg.CertFingerprint != "",
 		}
 		if err := client.ObtainTicket(); err != nil {
-			return nil, fmt.Errorf("émission du ticket impossible: %w", err)
+			return nil, fmt.Errorf("cannot obtain a ticket: %w", err)
 		}
 		cfg.Ticket = client.Ticket
 		cfg.CSRFToken = client.CSRFToken
@@ -350,7 +350,7 @@ func (a *App) MintPBSTicketForAPI(id string) (*api.PBSTicket, error) {
 	}
 
 	if cfg.Ticket == "" {
-		return nil, fmt.Errorf("serveur %q: aucun ticket obtenu", srv.ID)
+		return nil, fmt.Errorf("server %q: no ticket obtained", srv.ID)
 	}
 
 	return &api.PBSTicket{

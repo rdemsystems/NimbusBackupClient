@@ -519,7 +519,7 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 
 	case RestoreModeAlternateAbs:
 		if opts.DestPath == "" {
-			return nil, fmt.Errorf("dossier de destination requis")
+			return nil, fmt.Errorf("destination folder is required")
 		}
 		dest := opts.DestPath
 		return func(archivePath string) string {
@@ -528,7 +528,7 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 
 	case RestoreModeAlternateFlat:
 		if opts.DestPath == "" {
-			return nil, fmt.Errorf("dossier de destination requis")
+			return nil, fmt.Errorf("destination folder is required")
 		}
 		// Empty selection means "restore everything" — flat is meaningless,
 		// fall back to abs so the user gets a sensible result instead of
@@ -565,7 +565,7 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 		}, nil
 
 	default:
-		return nil, fmt.Errorf("mode de restauration inconnu : %q", string(mode))
+		return nil, fmt.Errorf("unknown restore mode: %q", string(mode))
 	}
 }
 
@@ -666,7 +666,7 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		var err error
 		meta, err = ReadSnapshotMetaInline(opts, false)
 		if err != nil {
-			return fmt.Errorf("lecture du sidecar pour restauration in-place: %w", err)
+			return fmt.Errorf("reading the sidecar for in-place restore: %w", err)
 		}
 		// Validate immediately so the user sees the cross-host / cross-OS
 		// refusal before any chunk is downloaded.
