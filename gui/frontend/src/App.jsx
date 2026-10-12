@@ -81,7 +81,7 @@ function App() {
     url: brandBuyUrl || 'https://www.proxmox.com/en/downloads.php#download-proxmox-backup-server',
     text: (brand.buy_storage_texts && brand.buy_storage_texts[language]) || brand.buy_storage_text || t('orderStorageCTA')
   }
-  const [systemInfo, setSystemInfo] = useState({ mode: 'Standalone', is_admin: false, service_available: false, os: '' })
+  const [systemInfo, setSystemInfo] = useState({ mode: 'Standalone Mode', is_admin: false, service_available: false, os: '' })
   const [config, setConfig] = useState({
     baseurl: '',
     certfingerprint: '',
@@ -465,7 +465,7 @@ function App() {
         // Load system info (mode, admin status, service availability)
         if (GetSystemInfo) {
           const sysInfo = await GetSystemInfo()
-          setSystemInfo(sysInfo || { mode: 'Standalone', is_admin: false, service_available: false })
+          setSystemInfo(sysInfo || { mode: 'Standalone Mode', is_admin: false, service_available: false })
         }
 
         // Load last backup directories to pre-fill the form
@@ -2155,7 +2155,7 @@ function App() {
               />
               {t('useSnapshotting')}
             </label>
-            {config.usevss && systemInfo.mode === 'Standalone' && !systemInfo.is_admin && (
+            {config.usevss && systemInfo.mode === 'Standalone Mode' && !systemInfo.is_admin && (
               <div className="info-box" style={{marginTop: '10px', backgroundColor: '#fff3cd', borderColor: '#ffc107'}}>
                 ⚠️ <strong>{t('vssAdminRequired')}</strong><br/>
                 {t('vssAdminHint')}
