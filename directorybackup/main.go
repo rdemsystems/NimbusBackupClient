@@ -264,13 +264,13 @@ func main() {
 	begin := time.Now()
 	var readErrors []string
 	if len(dirs) == 1 {
-		readErrors, err = backup(client, newchunk, reusechunk, cfg.PxarOut, dirs[0], cfg.UseVSS, excludes)
+		readErrors, err = backup(client, newchunk, reusechunk, cfg.PxarOut, dirs[0], cfg.UseVSS, excludes, cfg.NoMTime)
 	} else if len(dirs) > 1 {
 		baseID := cfg.BackupID
 		if baseID == "" {
 			baseID = hostname
 		}
-		readErrors, err = backup_many(newClient, newchunk, reusechunk, cfg.PxarOut, dirs, baseID, cfg.UseVSS, excludes, cfg.Parallel)
+		readErrors, err = backup_many(newClient, newchunk, reusechunk, cfg.PxarOut, dirs, baseID, cfg.UseVSS, excludes, cfg.Parallel, cfg.NoMTime)
 	} else if cfg.BackupStreamName != "" {
 		sn := cfg.BackupStreamName
 		if !strings.HasSuffix(sn, ".didx") {
@@ -365,7 +365,7 @@ func main() {
 // directory that fails does not stop the others; the failures are joined into
 // the returned error. Up to parallel directories (at least 1) are backed up at
 // the same time, from one snapshot set taken for all of them (backup_parallel).
-func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool, excludes []string, parallel int) ([]string, error) {
+func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool, excludes []string, parallel int, noMTime bool) ([]string, error) {
 	if pxarOut != "" {
 		return nil, fmt.Errorf("-pxarout writes a single archive and cannot be combined with several -backupdir")
 	}
@@ -379,7 +379,7 @@ func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), 
 		ids[id] = dir
 	}
 
-	return backup_parallel(newClient, newchunk, reusechunk, dirs, baseID, usevss, excludes, max(parallel, 1))
+	return backup_parallel(newClient, newchunk, reusechunk, dirs, baseID, usevss, excludes, max(parallel, 1), noMTime)
 }
 
 // backup_parallel backs up dirs with up to parallel directories at a time (1:
@@ -389,7 +389,7 @@ func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), 
 // rather than each at its own turn. It also keeps concurrent runs safe:
 // concurrent snapshot creations collide ("VSS busy"), and the busy-recovery
 // path deletes every shadow copy, pulling it from under the other directories.
-func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dirs []string, baseID string, usevss bool, excludes []string, parallel int) ([]string, error) {
+func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dirs []string, baseID string, usevss bool, excludes []string, parallel int, noMTime bool) ([]string, error) {
 	parallel = min(parallel, len(dirs))
 	fmt.Printf("Backing up %d directories, %d at a time\n", len(dirs), parallel)
 
@@ -404,7 +404,7 @@ func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, erro
 			go func() {
 				defer wg.Done()
 				defer func() { <-sem }()
-				readErrs[i], failures[i] = backup_one(newClient, newchunk, reusechunk, dir, readDirOf(dir), baseID, excludes)
+				readErrs[i], failures[i] = backup_one(newClient, newchunk, reusechunk, dir, readDirOf(dir), baseID, excludes, noMTime)
 			}()
 		}
 		wg.Wait()
@@ -452,7 +452,7 @@ func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, erro
 				failures = append(failures, fmt.Errorf("%s: ticket login failed: %w", dir, cerr))
 				continue
 			}
-			dirReadErrors, derr := backup(client, newchunk, reusechunk, "", dir, true, excludes)
+			dirReadErrors, derr := backup(client, newchunk, reusechunk, "", dir, true, excludes, noMTime)
 			client.Close()
 			readErrors = append(readErrors, dirReadErrors...)
 			if derr != nil {
@@ -467,7 +467,7 @@ func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, erro
 // backup_one backs up one directory of a parallel run as backup group
 // <base>_<dir>, reading readDir (its snapshot path under VSS) and committing the
 // snapshot even on read errors, like backup().
-func backup_one(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dir, readDir, baseID string, excludes []string) ([]string, error) {
+func backup_one(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dir, readDir, baseID string, excludes []string, noMTime bool) ([]string, error) {
 	if readDir == "" {
 		return nil, fmt.Errorf("%s: no snapshot was taken for this directory", dir)
 	}
@@ -481,7 +481,7 @@ func backup_one(newClient func(backupID string) (*pbscommon.PBSClient, error), n
 	// locked until the connection times out.
 	defer client.Close()
 
-	readErrors, err := backup_real(client, newchunk, reusechunk, "", readDir, dir, excludes)
+	readErrors, err := backup_real(client, newchunk, reusechunk, "", readDir, dir, excludes, noMTime)
 	if readDir != dir {
 		err = unmapSnapshotPath(err, readDir, dir)
 		for i := range readErrors {
@@ -561,7 +561,7 @@ func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uin
 // backup_real archives backupdir (the VSS snapshot path when VSS is used);
 // excludeRoot is the original directory, so absolute exclusion patterns match
 // whatever path is actually read.
-func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, excludeRoot string, excludes []string) ([]string, error) {
+func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, excludeRoot string, excludes []string, noMTime bool) ([]string, error) {
 	client.Connect(false, "host")
 	knownChunks := haxmap.New[string, bool]()
 
@@ -569,6 +569,7 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
 	archive.ArchiveName = "backup.pxar.didx"
 	archive.ExcludeList = excludes
 	archive.ExcludeRoot = excludeRoot
+	archive.NoMTime = noMTime
 
 	previousDidx, err := client.DownloadPreviousToBytes(archive.ArchiveName)
 	if err != nil {
@@ -665,7 +666,7 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
 	return archive.ReadErrors, nil
 }
 
-func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, usevss bool, excludes []string) ([]string, error) {
+func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, usevss bool, excludes []string, noMTime bool) ([]string, error) {
 
 	fmt.Printf("Starting backup of %s\n", backupdir)
 	var err error
@@ -681,7 +682,7 @@ func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, px
 			}
 			//Remove VSS snapshot on windows, on linux for now NOP
 			var e error
-			readErrors, e = backup_real(client, newchunk, reusechunk, pxarOut, snapshotDir, originalDir, excludes)
+			readErrors, e = backup_real(client, newchunk, reusechunk, pxarOut, snapshotDir, originalDir, excludes, noMTime)
 			return e
 
 		})
@@ -690,7 +691,7 @@ func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, px
 			readErrors[i] = unmapSnapshotPathString(readErrors[i], snapshotDir, originalDir)
 		}
 	} else {
-		readErrors, err = backup_real(client, newchunk, reusechunk, pxarOut, backupdir, originalDir, excludes)
+		readErrors, err = backup_real(client, newchunk, reusechunk, pxarOut, backupdir, originalDir, excludes, noMTime)
 	}
 
 	if err != nil {
