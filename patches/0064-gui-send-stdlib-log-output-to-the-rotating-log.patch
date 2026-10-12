@@ -1,7 +1,7 @@
 From 7cf20ad83983eaf3fafa358dbd524921b48cf208 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Mon, 12 Oct 2026 15:00:44 +0200
-Subject: [PATCH 64/68] gui: send stdlib log output to the rotating log
+Subject: [PATCH 64/74] gui: send stdlib log output to the rotating log
 
 log.SetOutput was never called, so the standard log package kept writing
 to stderr, which the SCM discards for a service: every log.Printf of the

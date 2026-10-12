@@ -1,0 +1,181 @@
+From 6ba5deb523337ab82a1d52cf4d1325618ca89345 Mon Sep 17 00:00:00 2001
+From: Tiziano Bacocco <tizbac2@gmail.com>
+Date: Mon, 12 Oct 2026 10:38:42 +0200
+Subject: [PATCH 71/74] fix(sched): honour machine backup kind (host/vm); VM
+ backup ID must be numeric
+
+Scheduled machine backups ignored the job's backup type:
+
+- runScheduledBackup routed machine jobs through StartBackup, which has no
+  parameter for the host/vm kind. The service build hardcoded BackupType
+  "vm" (a host-kind job attempted a P2V/VM snapshot), the standalone path
+  fell into the directory branch. Machine jobs now go through
+  StartMachineBackup with the job's backup_kind (default "host").
+- apiJobsToSlice did not read backup_kind/pbs_id, so in service mode BOTH
+  the kind and the selected PBS server were stripped from a job on its way
+  from the service to the GUI (covered now by
+  TestGetScheduledJobsForAPIRoundTrip).
+
+Frontend:
+
+- Scheduled job list showed a folder icon + backupDirs for every job;
+  machine jobs now show a disk icon, their drives and the kind (directory
+  jobs keep the folder icon).
+- "vm" machine backups require a numeric backup ID (Proxmox VM ID, e.g.
+  100): vmBackupIdInvalid disables the Start/Save button, shows an inline
+  hint under the Backup ID field and blocks handleStartBackup - the guard
+  sits before the scheduled/oneshot split, so a bad job can neither start
+  nor be saved/updated. New vmBackupIdNumeric string in en/fr/it/de/pl.
+- frontend dist rebuilt (tracked in git).
+
+Fork: the fork has a dedicated VM ID field (machineVMID), so the numeric check, the disabled Start/Save button and the inline hint use it and the existing vmidInvalid string instead of the Backup ID field; frontend dist left to the CI build.
+
+Upstream: tizbac/proxmoxbackupclient_go@083956265c9c3831b50560eac823f82f5f3fa942
+---
+ gui/frontend/src/App.jsx | 18 ++++++++++++++--
+ gui/scheduler.go         | 44 ++++++++++++++++++++++++++++++++++------
+ gui/scheduler_test.go    |  9 +++++++-
+ 3 files changed, 62 insertions(+), 9 deletions(-)
+
+diff --git a/gui/frontend/src/App.jsx b/gui/frontend/src/App.jsx
+index 1660a6d..6ca196b 100644
+--- a/gui/frontend/src/App.jsx
++++ b/gui/frontend/src/App.jsx
+@@ -1199,6 +1199,13 @@ function App() {
+     }
+   }
+ 
++  // VM-kind machine backups need a Proxmox VM ID (100..999999999), entered in
++  // the dedicated VM ID field. Computed here so the same rule gates the
++  // Start/Save button, shows the inline hint and blocks handleStartBackup.
++  const vmBackupIdInvalid = backupType === 'machine'
++    && machineBackupKind === 'vm'
++    && !(/^\d+$/.test(machineVMID.trim()) && Number(machineVMID.trim()) >= 100 && Number(machineVMID.trim()) <= 999999999)
++
+   const handleStartBackup = async () => {
+     if (!StartBackup) {
+       showStatus(t('wailsRuntimeUnavailable'), 'error')
+@@ -2133,6 +2140,11 @@ function App() {
+                 placeholder="9001"
+               />
+               <div className="info-box" style={{marginTop: '8px'}}>💡 {t('machineVMIDHint')}</div>
++              {vmBackupIdInvalid && (
++                <div style={{marginTop: '6px', fontSize: '13px', color: '#dc3545'}}>
++                  ⚠️ {t('vmidInvalid')}
++                </div>
++              )}
+             </div>
+           ) : (
+             <div className="form-group">
+@@ -2280,7 +2292,7 @@ function App() {
+             </div>
+           )}
+ 
+-          <button className="btn" onClick={handleStartBackup} disabled={backupRunning || (progress > 0 && progress < 100)}>
++          <button className="btn" onClick={handleStartBackup} disabled={backupRunning || (progress > 0 && progress < 100) || vmBackupIdInvalid}>
+             {backupMode === 'oneshot'
+               ? (backupRunning || (progress > 0 && progress < 100) ? `⏳ ${t('backupInProgress')}` : `🚀 ${t('startBackup')}`)
+               : (editingJobId ? `✏️ ${t('updateSchedule')}` : `💾 ${t('saveSchedule')}`)
+@@ -2325,7 +2337,9 @@ function App() {
+                         ⏰ {job.scheduleTime} {job.runAtStartup && `• 🚀 ${t('atStartup')}`}
+                       </div>
+                       <div style={{fontSize: '13px', color: '#6c757d', marginTop: '3px'}}>
+-                        📁 {(job.backupDirs || []).join(', ')}
++                        {job.backupType === 'machine'
++                          ? `💾 ${(job.driveLetters || []).join(', ')}${job.backup_kind ? ` • ${job.backup_kind}` : ''}`
++                          : `📁 ${(job.backupDirs || []).join(', ')}`}
+                       </div>
+                     </div>
+                     <div style={{display: 'flex', gap: '10px'}}>
+diff --git a/gui/scheduler.go b/gui/scheduler.go
+index 7736416..395eac8 100644
+--- a/gui/scheduler.go
++++ b/gui/scheduler.go
+@@ -772,8 +772,10 @@ func releaseJob(jobID string) {
+ }
+ 
+ // runScheduledBackup performs the backup of a scheduled job: it goes through
+-// the test seam App.scheduledBackupFn when one is installed, otherwise through
+-// StartBackup (which routes through mode detection: service or direct).
++// the test seam App.scheduledBackupFn when one is installed, otherwise it
++// dispatches on the job type - machine jobs through StartMachineBackup
++// (the only path that carries the job's host/vm BackupKind), directory jobs
++// through StartBackup.
+ func (a *App) runScheduledBackup(job ScheduledJob) error {
+ 	if a.scheduledBackupFn != nil {
+ 		return a.scheduledBackupFn(job)
+@@ -793,6 +795,29 @@ func (a *App) runScheduledBackup(job ScheduledJob) error {
+ 		driveLetters = []string{}
+ 	}
+ 
++	// Machine jobs: StartBackup has no parameter for the job's host/vm kind, so
++	// routing them through it dropped the user's selection - the service build
++	// hardcoded BackupType "vm" (a host-kind job attempted a P2V/VM snapshot)
++	// and the standalone path fell back to the directory branch. StartMachineBackup
++	// is the path the GUI's one-shot machine backups take and takes backupKind
++	// explicitly. "" = jobs saved before backup_kind existed; the GUI's default
++	// selection is "host".
++	if job.BackupType == "machine" {
++		kind := job.BackupKind
++		if kind == "" {
++			kind = "host"
++		}
++		return a.StartMachineBackup(
++			job.BackupType,
++			driveLetters,
++			job.BackupID,
++			job.UseVSS,
++			compression,
++			job.PBSID,
++			kind,
++		)
++	}
++
+ 	// StartBackup routes through mode detection (service or direct).
+ 	return a.StartBackup(
+ 		job.BackupType,
+@@ -994,10 +1019,17 @@ func apiJobsToSlice(apiJobs []map[string]interface{}) []ScheduledJob {
+ 			UseVSS:       firstBool(m, "useVSS", "use_vss"),
+ 			BackupType:   firstStr(m, "backupType", "backup_type"),
+ 			ExcludeList:  firstStrSlice(m, "excludeList", "exclude_list"),
+-			Compression:  firstStr(m, "compression"),
+-			LastRun:      firstStr(m, "lastRun", "last_run"),
+-			NextRun:      firstStr(m, "nextRun", "next_run"),
+-			Enabled:      firstBool(m, "enabled"),
++			// jobToMap's JSON round-trip emits backup_kind and pbs_id under
++			// their canonical json tags. Not reading them here stripped the
++			// host/vm kind AND the selected PBS server off a job on its way
++			// from the service to the GUI, so the run used the default PBS
++			// and the wrong backup type.
++			PBSID:       firstStr(m, "pbs_id", "pbsID"),
++			BackupKind:  firstStr(m, "backup_kind", "backupKind"),
++			Compression: firstStr(m, "compression"),
++			LastRun:     firstStr(m, "lastRun", "last_run"),
++			NextRun:     firstStr(m, "nextRun", "next_run"),
++			Enabled:     firstBool(m, "enabled"),
+ 		}
+ 		out = append(out, j)
+ 	}
+diff --git a/gui/scheduler_test.go b/gui/scheduler_test.go
+index 5084271..48e0d76 100644
+--- a/gui/scheduler_test.go
++++ b/gui/scheduler_test.go
+@@ -181,7 +181,14 @@ func TestJobWireMapDecodesBackIntoEveryField(t *testing.T) {
+ // expose the historical snake_case aliases older GUI builds read.
+ func TestGetScheduledJobsForAPIRoundTrip(t *testing.T) {
+ 	a := newSchedulerTestApp(t)
+-	if err := a.SaveScheduledJob(sampleJob()); err != nil {
++	// backup_kind and pbs_id are how a machine job remembers the host/vm
++	// selection and the target PBS server; the API round-trip used to drop
++	// both (apiJobsToSlice did not read them), so a scheduled machine run
++	// silently executed with the wrong backup type on the default PBS.
++	job := sampleJob()
++	job.BackupKind = "vm"
++	job.PBSID = "site-b"
++	if err := a.SaveScheduledJob(job); err != nil {
+ 		t.Fatalf("SaveScheduledJob() error = %v", err)
+ 	}
+ 
+-- 
+2.47.3
+

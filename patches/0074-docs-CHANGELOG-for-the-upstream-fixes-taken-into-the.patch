@@ -1,0 +1,35 @@
+From 023ffdc10262739953b695e52e6ff29e8887c806 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Mon, 12 Oct 2026 15:28:55 +0200
+Subject: [PATCH 74/74] docs: CHANGELOG for the upstream fixes taken into the
+ next release
+
+---
+ CHANGELOG.md | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 42d7666..364e837 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -16,7 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ - **The "VSS requires administrator rights" warning never appeared** in standalone mode.
+ - **Ghost icons piling up in the notification area**: quitting from the tray, or a crash, could leave the icon behind.
+ 
+-Several of these fixes come from the CJInvent/NimbusBackupClient fork (credited in each commit).
++- **Scheduled disk backups ran as the wrong type** (from upstream, tizbac/proxmoxbackupclient_go@0839562): through the service a "host" machine job was run as a "vm" one, and a job lost its PBS server and type on its way from the service to the interface. Scheduled machine jobs now keep both, and list their disks instead of a folder.
++- **Scheduled backups invisible in the Running tab** (from upstream, tizbac/proxmoxbackupclient_go@44969cf): scheduled and "Run now" backups executed by the service now appear there with live progress.
++- **The interface opened twice** after a launch as administrator (same upstream commit): the second launch now brings the running window to the front.
++- **Configuration locked on non-English Windows** (same upstream commit): the service granted access to its files by English account names (`BUILTIN\Administrators`), which can fail on a French or other localized Windows and leave the files readable by no one. Access is now granted by SID.
++- **Shadow copies left on the disk after every backup** (from upstream, tizbac/proxmoxbackupclient_go@630ed7b): they were deleted with `vssadmin`, which refuses backup shadow copies, so they piled up and took disk space. They are now deleted through the VSS API as soon as the backup is done.
++
++### Changed
++- **Faster disk backups on mostly empty disks** (from upstream, tizbac/proxmoxbackupclient_go@eae0068): blank areas are no longer hashed chunk by chunk.
++
++Several of these fixes come from upstream (tizbac/proxmoxbackupclient_go) and from the CJInvent/NimbusBackupClient fork; each commit names its source.
+ 
+ ## [0.4.1] - 2026-10-09
+ 
+-- 
+2.47.3
+
