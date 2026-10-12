@@ -1,7 +1,7 @@
 From 8cd657dd089dcb3be6cb8d3dd12346c8ff455588 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Mon, 12 Oct 2026 15:02:00 +0200
-Subject: [PATCH 67/75] gui: do not leave ghost tray icons behind
+Subject: [PATCH 67/76] gui: do not leave ghost tray icons behind
 
 systray never sets the icon's GUID, so Windows only removes the icon if
 this process calls Shell_NotifyIcon(NIM_DELETE) before exiting. The Quit
