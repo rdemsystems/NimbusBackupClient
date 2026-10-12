@@ -1,0 +1,102 @@
+From 1d3922ea40b106b08e72072f49cb1d67a2b1c104 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Mon, 12 Oct 2026 15:01:22 +0200
+Subject: [PATCH 65/67] gui: WebView2 user data in Local AppData for new
+ installs
+
+The WebView2 user-data folder was %APPDATA%\ProxmoxBackupClient
+(Roaming). For a domain account whose roaming profile is not provisioned
+on the machine, WebView2 cannot create it and the window never opens.
+New installs now use %LOCALAPPDATA%\ProxmoxBackupClient\WebView2,
+pre-created so a failure is logged with its path. An existing Roaming
+folder is kept, since it holds the frontend's localStorage (the chosen
+language).
+
+Adapted from CJInvent/NimbusBackupClient 756d388.
+---
+ gui/main.go        |  4 +++-
+ gui/webview_dir.go | 50 ++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 53 insertions(+), 1 deletion(-)
+ create mode 100644 gui/webview_dir.go
+
+diff --git a/gui/main.go b/gui/main.go
+index 02fd8e1..98542bb 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -156,6 +156,8 @@ func main() {
+ 		app.hydrateFromService()
+ 	}
+ 
++	webviewDataDir := webviewUserDataDir()
++
+ 	// Create application options. No MaxWidth/MaxHeight: Windows caps a
+ 	// maximised window at the max size, so "maximise" only moved the window
+ 	// to the top-left corner (issue #1). Small screens are handled by
+@@ -182,7 +184,7 @@ func main() {
+ 			WebviewIsTransparent: false,
+ 			WindowIsTranslucent:  false,
+ 			DisableWindowIcon:    false,
+-			WebviewUserDataPath:  filepath.Join(os.Getenv("APPDATA"), "ProxmoxBackupClient"),
++			WebviewUserDataPath:  webviewDataDir,
+ 		},
+ 	}
+ 
+diff --git a/gui/webview_dir.go b/gui/webview_dir.go
+new file mode 100644
+index 0000000..9f09677
+--- /dev/null
++++ b/gui/webview_dir.go
+@@ -0,0 +1,50 @@
++//go:build !service
++// +build !service
++
++package main
++
++import (
++	"fmt"
++	"os"
++	"path/filepath"
++)
++
++// webviewUserDataDir picks the WebView2 user-data folder (Windows only; the
++// option is ignored elsewhere).
++//
++// It used to be %APPDATA%\ProxmoxBackupClient (Roaming). For a domain account
++// whose roaming profile is not provisioned on the machine, typically when the
++// GUI is elevated as another user, WebView2 cannot create that folder and the
++// window never opens. Local AppData is always provisioned per profile and is
++// Microsoft's recommended location.
++//
++// An existing Roaming folder is kept: it holds the frontend's localStorage
++// (the chosen language among others), which moving would reset.
++//
++// Adapted from CJInvent/NimbusBackupClient 756d388.
++func webviewUserDataDir() string {
++	if roaming := os.Getenv("APPDATA"); roaming != "" {
++		legacy := filepath.Join(roaming, "ProxmoxBackupClient")
++		if st, err := os.Stat(legacy); err == nil && st.IsDir() { // #nosec G703 -- path built from the user's APPDATA/LOCALAPPDATA/TEMP env vars + fixed names
++			return legacy
++		}
++	}
++
++	base := os.Getenv("LOCALAPPDATA")
++	if base == "" {
++		base = os.Getenv("APPDATA")
++	}
++	if base == "" {
++		base = os.TempDir()
++	}
++	dir := filepath.Join(base, "ProxmoxBackupClient", "WebView2")
++	// Pre-create it so a failure is logged with its path instead of ending in
++	// WebView2's own dead-end dialog.
++	if err := os.MkdirAll(dir, 0o700); err != nil { // #nosec G703 -- path built from the user's APPDATA/LOCALAPPDATA/TEMP env vars + fixed names
++		writeDebugLog(fmt.Sprintf("WebView2 data dir %s cannot be created: %v; using the temp dir", dir, err))
++		dir = filepath.Join(os.TempDir(), "ProxmoxBackupClient", "WebView2")
++		_ = os.MkdirAll(dir, 0o700) // #nosec G703 -- path built from the user's APPDATA/LOCALAPPDATA/TEMP env vars + fixed names
++	}
++	writeDebugLog(fmt.Sprintf("WebView2 user-data path: %s", dir))
++	return dir
++}
+-- 
+2.47.3
+
