@@ -58,6 +58,10 @@ func init() {
 }
 
 func main() {
+	// Route stdlib log into the rotating log before anything can log, so the
+	// GUI and the service share one logging path.
+	redirectStdlibLog()
+
 	// Elevated token-fetch child: this process was launched elevated ONLY to
 	// read the service token file and hand it back (see token_elevated.go).
 	// It must run before flag parsing, single-instance and everything else —
