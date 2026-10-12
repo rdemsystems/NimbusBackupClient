@@ -89,6 +89,8 @@ func main() {
 			writeDebugLog(crashMsg)
 			writeCrashReport(crashMsg)
 			fmt.Fprint(os.Stderr, "\n!!! APPLICATION CRASHED !!!\nSee crash_report.txt for details\n")
+			// A crash used to skip the tray's own icon removal, leaking it.
+			attemptTrayCleanupBeforeCrash()
 			os.Exit(1)
 		}
 	}()
