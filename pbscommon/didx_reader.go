@@ -2,8 +2,6 @@ package pbscommon
 
 import (
 	"container/list"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -97,10 +95,12 @@ func (r *DIDXReaderAt) chunkAt(ci int) ([]byte, error) {
 		return nil, fmt.Errorf("chunk %s (index %d): decompressed size %d != expected %d", digest, ci, len(chunk), end-start)
 	}
 	// PBS dynamic-index digests are the SHA-256 of the chunk plaintext, or the
-	// id_key-salted digest for an encrypted snapshot (see PBSClient.ChunkDigest).
-	// A mismatch means a corrupted or tampered chunk — fail rather than serve
-	// wrong data.
-	if r.pbs.ChunkDigestHex(chunk) != digest && !legacyEncryptedDigest(r.pbs, chunk, digest) {
+	// id_key-salted digest for an encrypted snapshot (see PBSClient.ChunkDigest;
+	// with a key loaded both are accepted, for snapshots taken without it and
+	// for the encrypted ones the 0.4.1/0.4.2 GUI indexed under the plain
+	// digest, rdemsystems/NimbusBackupClient#13). A mismatch means a corrupted
+	// or tampered chunk, so fail rather than serve wrong data.
+	if !r.pbs.ChunkMatchesDigest(chunk, digest) {
 		return nil, fmt.Errorf("chunk %s (index %d): content hash mismatch", digest, ci)
 	}
 	r.cache.put(ci, chunk)
@@ -199,19 +199,4 @@ func (c *chunkCache) put(idx int, data []byte) {
 		c.ll.Remove(oldest)
 		delete(c.items, oldest.Value.(*chunkCacheEntry).idx)
 	}
-}
-
-// legacyEncryptedDigest accepts an encrypted snapshot's chunk indexed under the
-// bare sha256(plaintext) instead of sha256(plaintext || id_key). The GUI and
-// service directory backup of 0.4.1 and 0.4.2 wrote such snapshots
-// (rdemsystems/NimbusBackupClient#13); without this they could not be restored
-// at all. Accepting it keeps the check meaningful: the bare sha256 still binds
-// the chunk to the index, and an encrypted chunk has also passed AES-GCM
-// authentication under the key on its way here.
-func legacyEncryptedDigest(pbs *PBSClient, chunk []byte, digest string) bool {
-	if pbs.Crypt == nil {
-		return false
-	}
-	sum := sha256.Sum256(chunk)
-	return hex.EncodeToString(sum[:]) == digest
 }
