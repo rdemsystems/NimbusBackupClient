@@ -471,7 +471,24 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 		})
 		return nil
 	})
+	restoreDirTimes(extracted)
 	return extracted, err
+}
+
+// restoreDirTimes sets each extracted directory's mtime once nothing more is
+// written into it: creating a child bumps its parent's mtime, so doing it at
+// mkdir time left every directory at the restore time
+// (rdemsystems/NimbusBackupClient#12). The walk is depth-first pre-order, so
+// going backwards handles children before their parents.
+func restoreDirTimes(extracted []PXARExtractedFile) {
+	for i := len(extracted) - 1; i >= 0; i-- {
+		f := extracted[i]
+		if !f.IsDir || f.Skipped || f.ModTime <= 0 {
+			continue
+		}
+		t := time.Unix(f.ModTime, 0)
+		_ = os.Chtimes(f.Path, t, t)
+	}
 }
 
 // isUnsafeArchivePath reports whether a PXAR entry path could escape the restore
