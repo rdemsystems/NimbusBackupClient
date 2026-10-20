@@ -73,6 +73,7 @@ jobs:
             machinebackuplib/slugify_test.go
             nbd/fidxserver.go
             nbd/fidxserver_test.go
+            gui/e2e_live_test.go
             gui/restore_inline.go
             gui/restore_search.go
             gui/restore_search_test.go
@@ -131,6 +132,13 @@ jobs:
             ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: ${{ runner.os }}-go-
+
+      # Test 11 runs the GUI package's live test (gui/e2e_live_test.go),
+      # which needs the same system libraries as the GUI unit tests.
+      - name: Install GUI test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev
 
       - name: Run end-to-end suite
         id: run-e2e

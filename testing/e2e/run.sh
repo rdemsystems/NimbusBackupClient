@@ -261,6 +261,40 @@ test_official_encrypted_block_readback() {
 }
 
 # ===========================================================================
+# Test 11: encrypted backup by the GUI/service writer -> our readers + official
+# ===========================================================================
+# The CLI tests above never run the writer the GUI and the service use
+# (gui/backup_inline.go), which once indexed encrypted chunks under the bare
+# sha256 (rdemsystems/NimbusBackupClient#13). gui/e2e_live_test.go backs up
+# the fixture with it and a key file, then reads the snapshot back through the
+# GUI's catalog, search and restore (and test 1's unencrypted snapshot with the
+# key loaded). The official client must then restore the same snapshot.
+test_gui_encrypted_roundtrip() {
+	( cd "$REPO_ROOT/gui" && E2E_LIVE=1 \
+		PBS_BASEURL="$PBS_BASEURL" PBS_FINGERPRINT="$PBS_FINGERPRINT" \
+		PBS_AUTHID="$PBS_AUTHID" PBS_TOKEN_SECRET="$PBS_TOKEN_SECRET" \
+		PBS_DATASTORE="$PBS_DATASTORE" \
+		E2E_SRC="$WORK/src" E2E_KEYFILE="$KEYFILE" E2E_OUT="$WORK/gui-live" \
+		E2E_BACKUP_ID=e2e-gui-enc E2E_PLAIN_ID=e2e-dir \
+		timeout 900 go test -count=1 -v -run '^TestE2ELiveInlineEncrypted$' . ) \
+		>"$WORK/log-gui-enc.txt" 2>&1 \
+		|| { cat "$WORK/log-gui-enc.txt"; return 1; }
+	grep -E '^\s+e2e_live_test.go:[0-9]+: ' "$WORK/log-gui-enc.txt" || true
+	ok "GUI writer: encrypted backup read back by our catalog, search and restore"
+
+	if ! pbc_available; then
+		warn "official client skipped -- GUI snapshot not restored by it"
+		return 0
+	fi
+	pbc_restore_must_fail host/e2e-gui-enc backup.pxar.didx restore-gui-enc-pbc-nokey
+	pbc_restore host/e2e-gui-enc backup.pxar.didx restore-gui-enc-pbc --keyfile key.pem
+	# The GUI adds its metadata file at the archive root; nothing else differs.
+	assert_file_exists "$WORK/restore-gui-enc-pbc/.proxmox_backup_client_meta.json"
+	rm -f "$WORK/restore-gui-enc-pbc/.proxmox_backup_client_meta.json"
+	assert_tree_identical "$WORK/src" "$WORK/restore-gui-enc-pbc" "GUI encrypted backup restored by the official client"
+}
+
+# ===========================================================================
 # Test 5: the official client can read our manifest and enumerate our snapshots
 # ===========================================================================
 test_manifest_interop() {
@@ -441,6 +475,7 @@ main() {
 	run_test "8. namespace round-trip (-namespace / --ns)"         test_namespace_roundtrip
 	run_test "9. official encrypted block backup -> our read back" test_official_encrypted_block_readback
 	run_test "10. parallel directories + exclusions -> official"   test_parallel_with_exclusions
+	run_test "11. GUI encrypted backup -> our readers + official"  test_gui_encrypted_roundtrip
 
 	section "Summary"
 	log "passed: ${#PASSED[@]}"
