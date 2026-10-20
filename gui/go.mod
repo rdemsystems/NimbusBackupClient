@@ -1,6 +1,6 @@
 module github.com/tizbac/proxmoxbackupclient_go/gui
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/alphadose/haxmap v1.4.1
@@ -8,8 +8,8 @@ require (
 	github.com/kardianos/service v1.3.0
 	github.com/tizbac/proxmoxbackupclient_go/gui/api v0.0.0
 	github.com/wailsapp/wails/v2 v2.13.0
-	golang.org/x/crypto v0.51.0
-	golang.org/x/sys v0.44.0
+	golang.org/x/crypto v0.58.0
+	golang.org/x/sys v0.49.0
 	machinebackuplib v0.0.0-00010101000000-000000000000
 	pbscommon v0.0.0
 	retry v0.0.0
@@ -56,8 +56,8 @@ require (
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )
 

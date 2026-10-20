@@ -14,7 +14,7 @@ on:
           - specific
 
 env:
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.26.9'
 
 jobs:
   update-deps:
