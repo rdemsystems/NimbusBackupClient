@@ -1256,8 +1256,8 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 		pbs.Client.CloseIdleConnections()
 
 		// If it's an http2.Transport, force close it
-		if h2Transport, ok := pbs.Client.Transport.(*http2.Transport); ok {
-			h2Transport.CloseIdleConnections()
+		if h2Transport, ok := pbs.Client.Transport.(*http2.Transport); ok { //nolint:staticcheck // SA1019: the PBS upgrade hands its own socket to x/net http2; see Connect
+			h2Transport.CloseIdleConnections() //nolint:staticcheck // SA1019: the PBS upgrade hands its own socket to x/net http2; see Connect
 		}
 
 		// Nil out the transport to ensure it's garbage collected
@@ -1274,8 +1274,17 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 	// connections and detect dead connections quickly. Without this, a silently
 	// dropped connection (firewall, NAT timeout, etc.) only manifests when the
 	// next chunk upload fails, wasting minutes of backup time.
+	//
+	// x/net v0.61 deprecates http2.Transport in favour of net/http
+	// (http.ClientConn, Go 1.26). This session cannot move as is: it dials TLS
+	// itself, sends PBS's HTTP/1.1 upgrade request on that socket and only then
+	// speaks HTTP/2 on it, refuses any redial (a redial would open a second PBS
+	// session with stale writer ids) and relies on ReadIdleTimeout/PingTimeout
+	// to detect a dropped link. Moving that to net/http is a change of its own,
+	// to be proven by the end-to-end suite; the deprecated type is still
+	// maintained meanwhile.
 	pbs.Client = http.Client{
-		Transport: &http2.Transport{
+		Transport: &http2.Transport{ //nolint:staticcheck // SA1019: the PBS upgrade hands its own socket to x/net http2; see Connect
 			ReadIdleTimeout: 30 * time.Second,
 			PingTimeout:     15 * time.Second,
 
@@ -1425,8 +1434,8 @@ func (pbs *PBSClient) Close() {
 	}
 
 	if pbs.Client.Transport != nil {
-		if h2, ok := pbs.Client.Transport.(*http2.Transport); ok {
-			h2.CloseIdleConnections()
+		if h2, ok := pbs.Client.Transport.(*http2.Transport); ok { //nolint:staticcheck // SA1019: the PBS upgrade hands its own socket to x/net http2; see Connect
+			h2.CloseIdleConnections() //nolint:staticcheck // SA1019: the PBS upgrade hands its own socket to x/net http2; see Connect
 		} else {
 			pbs.Client.CloseIdleConnections()
 		}
