@@ -38,7 +38,7 @@ func startFakeSMTP(t *testing.T) *fakeSMTP {
 		t.Fatal(err)
 	}
 	s := &fakeSMTP{ln: ln}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -62,9 +62,9 @@ func (s *fakeSMTP) mails() []fakeMail {
 }
 
 func (s *fakeSMTP) serve(c net.Conn) {
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	r := bufio.NewReader(c)
-	reply := func(l string) { fmt.Fprintf(c, "%s\r\n", l) }
+	reply := func(l string) { _, _ = fmt.Fprintf(c, "%s\r\n", l) }
 	reply("220 localhost fake ESMTP")
 	var cur fakeMail
 	for {
@@ -263,7 +263,7 @@ func TestFailedBackupSendsMail(t *testing.T) {
 	if subject != "Backup Failed" {
 		t.Errorf("subject %q, want %q", subject, "Backup Failed")
 	}
-	if !strings.Contains(body, "Last error is: ") || !strings.Contains(body, "needs a numeric VM ID") {
+	if !strings.Contains(body, "Last error is: ") || !strings.Contains(body, "needs a Proxmox VM ID") {
 		t.Errorf("body does not carry the backup error:\n%s", body)
 	}
 	t.Logf("subject: %s\nbody:\n%s", subject, body)

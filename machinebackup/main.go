@@ -212,7 +212,7 @@ func sendMail(smtpCfg *machinebackuplib.SMTPConfig, mailCtx clientcommon.MailCtx
 	if err != nil {
 		return fmt.Errorf("cannot connect to mail server: %w", err)
 	}
-	defer client.Quit()
+	defer func() { _ = client.Quit() }()
 	for _, m := range smtpCfg.Mails {
 		if err := clientcommon.SendMail(m.From, m.To, subject, body, client); err != nil {
 			return fmt.Errorf("cannot send email to %s: %w", m.To, err)
