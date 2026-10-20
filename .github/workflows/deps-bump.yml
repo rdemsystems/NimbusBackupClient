@@ -22,9 +22,9 @@ jobs:
     name: Bump, tidy and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -116,7 +116,7 @@ jobs:
         if: always()
         run: git diff -- '*go.mod' '*go.sum' go.work > deps-bump.patch; wc -l deps-bump.patch
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: deps-bump-patch
