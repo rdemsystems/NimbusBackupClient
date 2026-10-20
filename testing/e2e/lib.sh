@@ -187,8 +187,14 @@ start_pbs() {
 	# The datastore/config/log trees are *named volumes* rather than host
 	# bind mounts: the container runs as root and would leave root-owned files
 	# behind that the (possibly non-root) invoking user cannot clean up.
+	# --hostname: PBS puts the node's FQDN in its self-signed certificate's
+	# CN, limited to 64 characters. Without it the FQDN is the container id
+	# plus the runner's DNS search domain, which on some GitHub runners is
+	# longer than that: certificate generation then fails ("ASN1 string too
+	# long, maxsize=64") and the API never comes up.
 	docker run -d \
 		--name "$PBS_CONTAINER" \
+		--hostname pbs-e2e.test \
 		-p "127.0.0.1:${PBS_PORT}:8007" \
 		--tmpfs /run:rw,mode=1777 \
 		-v "${PBS_CONTAINER}-etc:/etc/proxmox-backup" \

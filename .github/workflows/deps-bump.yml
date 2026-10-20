@@ -51,7 +51,7 @@ jobs:
           # go.work must not list an older language version than its
           # modules (x/net >= v0.59 declares go 1.26.0).
           max=$(grep -h '^go ' $(find . -name go.mod -not -path '*/frontend/*') | awk '{print $2}' | sort -V | tail -1)
-          go work edit -go="$max"
+          env -u GOWORK go work edit -go="$max"
           git diff --stat
 
       # Through the workspace (go.work): machinebackuplib has no replace
