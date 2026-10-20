@@ -2614,7 +2614,7 @@ function App() {
               <br/>✅ {t('restoreBetaFilesDirs')}
               <br/>✅ {t('restoreBetaSelective')}
               <br/>✅ {t('restoreBetaTimestamps')}
-              <br/>❌ {t('restoreBetaACLs')}
+              <br/>✅ {t('restoreBetaACLs')}
             </p>
           </div>
 
