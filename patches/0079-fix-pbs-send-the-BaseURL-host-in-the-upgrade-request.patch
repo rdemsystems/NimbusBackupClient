@@ -1,0 +1,80 @@
+From b3c66ba5f2d3b902a1c4fd7060861f96fe65ee5b Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Tue, 20 Oct 2026 16:28:27 +0200
+Subject: [PATCH 079/108] fix(pbs): send the BaseURL host in the upgrade
+ request's Host header
+
+The hand-written HTTP/1.1 upgrade request sent the dial address as Host,
+which always carries the port: "pbs.example.com:443" for
+https://pbs.example.com. A reverse proxy routing on an exact Host match
+(HAProxy hdr(host)) found no backend and answered 503. The header is now
+the host as written in BaseURL, like net/http and proxmox-backup-client
+send it. Covered by TestUpgradeHostHeader.
+
+tizbac/proxmoxbackupclient_go issue: #89
+https://github.com/tizbac/proxmoxbackupclient_go/issues/89
+---
+ pbscommon/pbsapi.go             | 14 +++++++++++++-
+ pbscommon/upgrade_error_test.go | 17 +++++++++++++++++
+ 2 files changed, 30 insertions(+), 1 deletion(-)
+
+diff --git a/pbscommon/pbsapi.go b/pbscommon/pbsapi.go
+index 2c73854..84ac897 100644
+--- a/pbscommon/pbsapi.go
++++ b/pbscommon/pbsapi.go
+@@ -441,6 +441,18 @@ func (pbs *PBSClient) redactRequest(s string) string {
+ 		fmt.Sprintf("PBSAPIToken=%s:<redacted>", pbs.AuthID), 1)
+ }
+ 
++// upgradeHostHeader is the Host header of the hand-written HTTP/1.1 upgrade
++// request: the host of BaseURL as written, like net/http and
++// proxmox-backup-client send it, and not the dial address, which always
++// carries the port. "pbs.example.com:443" defeats a reverse proxy routing on
++// an exact Host match (tizbac/proxmoxbackupclient_go issue: #89).
++func upgradeHostHeader(baseURL, addr string) string {
++	if u, err := url.Parse(baseURL); err == nil && u.Host != "" {
++		return u.Host
++	}
++	return addr
++}
++
+ // ticketResp mirrors the JSON returned by POST /api2/json/access/ticket.
+ type ticketResp struct {
+ 	Data struct {
+@@ -1290,7 +1302,7 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
+ 				} else {
+ 					requestLines = append(requestLines, "GET /api2/json/reader?"+q.Encode()+" HTTP/1.1")
+ 				}
+-				requestLines = append(requestLines, "Host: "+addr)
++				requestLines = append(requestLines, "Host: "+upgradeHostHeader(pbs.BaseURL, addr))
+ 				requestLines = append(requestLines, pbs.authHeaderLines()...)
+ 				if !reader {
+ 					requestLines = append(requestLines, "Upgrade: proxmox-backup-protocol-v1")
+diff --git a/pbscommon/upgrade_error_test.go b/pbscommon/upgrade_error_test.go
+index afbf183..92e748d 100644
+--- a/pbscommon/upgrade_error_test.go
++++ b/pbscommon/upgrade_error_test.go
+@@ -77,3 +77,20 @@ func TestUpgradeRejectionOmitsHeaders(t *testing.T) {
+ 		t.Errorf("status = %d %q", err.StatusCode, err.Status)
+ 	}
+ }
++
++// The upgrade request's Host is the BaseURL host as written: a default port
++// must not appear when the URL has none, or a reverse proxy routing on the
++// exact Host misses it (tizbac/proxmoxbackupclient_go issue: #89).
++func TestUpgradeHostHeader(t *testing.T) {
++	cases := []struct{ baseURL, addr, want string }{
++		{"https://pbs.example.com", "pbs.example.com:443", "pbs.example.com"},
++		{"https://pbs.example.com:8007", "pbs.example.com:8007", "pbs.example.com:8007"},
++		{"https://[2001:db8::1]:8007", "[2001:db8::1]:8007", "[2001:db8::1]:8007"},
++		{"", "10.0.0.1:8007", "10.0.0.1:8007"},
++	}
++	for _, c := range cases {
++		if got := upgradeHostHeader(c.baseURL, c.addr); got != c.want {
++			t.Errorf("upgradeHostHeader(%q, %q) = %q, want %q", c.baseURL, c.addr, got, c.want)
++		}
++	}
++}
+-- 
+2.47.3
+

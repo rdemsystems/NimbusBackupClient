@@ -1,0 +1,355 @@
+From 4a6aa03d87cf3f935c54a9087fb6638a6b68546e Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Tue, 20 Oct 2026 17:04:14 +0200
+Subject: [PATCH 100/108] test(e2e): encrypted backup by the GUI/service
+ writer, read back by our readers and the official client
+
+The suite only ran the CLIs: the writer the GUI and the service use
+(RunBackupInline / ChunkState) never met a real PBS, which let it index
+encrypted chunks under the bare sha256 (issue #13), and no GUI read path
+(catalog, search, restore) ever read an encrypted directory backup.
+
+Test 11 runs gui/e2e_live_test.go (skipped outside the suite) against the
+suite's PBS: an encrypted backup with RunBackupInline and the official
+client's key file; the catalog read directly (ListSnapshotContents' silent
+fallback to the data archive hid the #13 failure); a search; a restore
+compared byte for byte with the source; the same restore refused without
+the key; and test 1's unencrypted snapshot restored with the key loaded.
+The official client then restores the GUI snapshot identically (minus the
+GUI's metadata file) and refuses it without the key.
+
+The e2e job installs the GUI test libraries; the new file is gofmt-checked.
+---
+ .github/workflows/e2e.yml |   8 ++
+ gui/e2e_live_test.go      | 226 ++++++++++++++++++++++++++++++++++++++
+ testing/e2e/README.md     |   1 +
+ testing/e2e/run.sh        |  35 ++++++
+ 4 files changed, 270 insertions(+)
+ create mode 100644 gui/e2e_live_test.go
+
+diff --git a/.github/workflows/e2e.yml b/.github/workflows/e2e.yml
+index ef8ee57..9bfd908 100644
+--- a/.github/workflows/e2e.yml
++++ b/.github/workflows/e2e.yml
+@@ -73,6 +73,7 @@ jobs:
+             machinebackuplib/slugify_test.go
+             nbd/fidxserver.go
+             nbd/fidxserver_test.go
++            gui/e2e_live_test.go
+             gui/restore_inline.go
+             gui/restore_search.go
+             gui/restore_search_test.go
+@@ -132,6 +133,13 @@ jobs:
+           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+           restore-keys: ${{ runner.os }}-go-
+ 
++      # Test 11 runs the GUI package's live test (gui/e2e_live_test.go),
++      # which needs the same system libraries as the GUI unit tests.
++      - name: Install GUI test dependencies
++        run: |
++          sudo apt-get update
++          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev
++
+       - name: Run end-to-end suite
+         id: run-e2e
+         env:
+diff --git a/gui/e2e_live_test.go b/gui/e2e_live_test.go
+new file mode 100644
+index 0000000..d2cb733
+--- /dev/null
++++ b/gui/e2e_live_test.go
+@@ -0,0 +1,226 @@
++package main
++
++import (
++	"bytes"
++	"crypto/sha256"
++	"io/fs"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"pbscommon"
++)
++
++// Live round trip of the GUI/service code path against a real PBS, run by the
++// end-to-end suite (testing/e2e/run.sh, test 11) and skipped otherwise.
++//
++// The CLI tests of the suite never exercise RunBackupInline / ChunkState, the
++// writer the GUI and the service use: it indexed encrypted chunks under the
++// bare sha256 (rdemsystems/NimbusBackupClient#13) and nothing caught it. This
++// test backs up a folder with that writer and a key file, then reads the
++// snapshot back through every GUI read path: catalog, search and restore. The
++// suite then restores the same snapshot with the official client.
++//
++// Environment (set by run.sh): E2E_LIVE=1, PBS_BASEURL, PBS_FINGERPRINT,
++// PBS_AUTHID, PBS_TOKEN_SECRET, PBS_DATASTORE, E2E_SRC (folder to back up),
++// E2E_KEYFILE (unprotected key file), E2E_OUT (scratch folder), E2E_BACKUP_ID,
++// and optionally E2E_PLAIN_ID: an unencrypted backup group, restored with the
++// key loaded.
++func TestE2ELiveInlineEncrypted(t *testing.T) {
++	if os.Getenv("E2E_LIVE") != "1" {
++		t.Skip("live end-to-end test: run through testing/e2e/run.sh")
++	}
++	env := func(name string) string {
++		v := os.Getenv(name)
++		if v == "" {
++			t.Fatalf("%s is not set", name)
++		}
++		return v
++	}
++	baseURL, fp := env("PBS_BASEURL"), env("PBS_FINGERPRINT")
++	authID, secret, store := env("PBS_AUTHID"), env("PBS_TOKEN_SECRET"), env("PBS_DATASTORE")
++	src, out, backupID := env("E2E_SRC"), env("E2E_OUT"), env("E2E_BACKUP_ID")
++
++	keyCfg, err := pbscommon.LoadKeyConfig(env("E2E_KEYFILE"))
++	if err != nil {
++		t.Fatalf("LoadKeyConfig: %v", err)
++	}
++	crypt, err := keyCfg.CryptConfig(nil)
++	if err != nil {
++		t.Fatalf("CryptConfig: %v", err)
++	}
++
++	// 1. Encrypted backup with the GUI/service writer.
++	var rs *BackupStatus
++	err = RunBackupInline(BackupOptions{
++		BaseURL: baseURL, AuthID: authID, Secret: secret, Datastore: store, CertFingerprint: fp,
++		BackupObjects: []string{src}, BackupID: backupID, BackupType: "host", Kind: "directory",
++		Compression: "fastest", Crypt: crypt,
++		OnResult: func(s *BackupStatus) { rs = s },
++	})
++	if err != nil || rs == nil || !rs.Success() {
++		t.Fatalf("encrypted backup: %v %+v", err, rs)
++	}
++	snapTime := time.Unix(rs.BackupTime, 0).UTC()
++	t.Logf("encrypted snapshot host/%s/%s", backupID, snapTime.Format(time.RFC3339))
++
++	opts := RestoreOptions{
++		BaseURL: baseURL, AuthID: authID, Secret: secret, Datastore: store, CertFingerprint: fp,
++		BackupID: backupID, SnapshotTime: snapTime, Crypt: crypt,
++		Mode: RestoreModeAlternateAbs, Overwrite: true,
++	}
++
++	// 2. Catalog: the browse tree and the search read it. ListSnapshotContents
++	// falls back to walking the data archive when the catalog cannot be read,
++	// which hid the "no key" failure of #13, so the catalog is read directly.
++	entries, _, ok := listSnapshotViaCatalog(opts, nil)
++	if !ok {
++		t.Fatal("the catalog of the encrypted snapshot could not be read")
++	}
++	if !hasEntrySuffix(entries, "subdir/nested/deep.txt") {
++		t.Errorf("catalog has %d entries but not subdir/nested/deep.txt", len(entries))
++	}
++
++	// 3. Search.
++	res, err := SearchFilesInline(SearchOptions{
++		BaseURL: baseURL, AuthID: authID, Secret: secret, Datastore: store, CertFingerprint: fp,
++		HostPrefix: backupID, Query: "deep.txt", Mode: SearchModeName,
++		From: snapTime.Add(-time.Hour), To: snapTime.Add(time.Hour),
++		AssembleMissing: true, Crypt: crypt,
++	})
++	if err != nil {
++		t.Fatalf("search: %v", err)
++	}
++	if len(res.Hits) == 0 || res.SnapshotsSkipped != 0 {
++		t.Errorf("search: %d hits, %d snapshots searched, %d skipped; want a hit and no skip",
++			len(res.Hits), res.SnapshotsSearched, res.SnapshotsSkipped)
++	}
++
++	// 4. Restore, compared with the source.
++	opts.DestPath = filepath.Join(out, "restore-gui-enc")
++	if err := os.MkdirAll(opts.DestPath, 0o755); err != nil {
++		t.Fatal(err)
++	}
++	if err := RestoreSnapshotInline(opts); err != nil {
++		t.Fatalf("restore with the key: %v", err)
++	}
++	assertTreeRestored(t, src, opts.DestPath, "encrypted snapshot")
++
++	// 5. Without the key the restore must fail, not write ciphertext.
++	noKey := opts
++	noKey.Crypt = nil
++	noKey.DestPath = filepath.Join(out, "restore-gui-enc-nokey")
++	if err := os.MkdirAll(noKey.DestPath, 0o755); err != nil {
++		t.Fatal(err)
++	}
++	if err := RestoreSnapshotInline(noKey); err == nil {
++		t.Error("restoring the encrypted snapshot without the key succeeded")
++	}
++
++	// 6. An unencrypted snapshot restored with the key loaded (the GUI loads
++	// the server's key for every read, older plain snapshots included).
++	if plainID := os.Getenv("E2E_PLAIN_ID"); plainID != "" {
++		snaps, err := ListSnapshotsInline(baseURL, authID, secret, "", "", store, "", fp, plainID)
++		if err != nil {
++			t.Fatalf("listing %s: %v", plainID, err)
++		}
++		// The listing matches backup IDs partially (e2e-dir also lists
++		// e2e-dir-enc): keep the latest snapshot of exactly plainID.
++		var latest *SnapshotInfo
++		for i := range snaps {
++			if snaps[i].BackupID == plainID && (latest == nil || snaps[i].BackupTime.After(latest.BackupTime)) {
++				latest = &snaps[i]
++			}
++		}
++		if latest == nil {
++			t.Fatalf("no snapshot of %s among %d listed", plainID, len(snaps))
++		}
++		plain := opts
++		plain.BackupID, plain.SnapshotTime = plainID, latest.BackupTime
++		plain.DestPath = filepath.Join(out, "restore-plain-withkey")
++		if err := os.MkdirAll(plain.DestPath, 0o755); err != nil {
++			t.Fatal(err)
++		}
++		if err := RestoreSnapshotInline(plain); err != nil {
++			t.Fatalf("restoring the unencrypted %s with the key loaded: %v", plainID, err)
++		}
++		assertTreeRestored(t, src, plain.DestPath, "unencrypted snapshot read with the key loaded")
++	}
++}
++
++func hasEntrySuffix(entries []SnapshotEntry, suffix string) bool {
++	for _, e := range entries {
++		if strings.HasSuffix(e.Path, suffix) {
++			return true
++		}
++	}
++	return false
++}
++
++// assertTreeRestored checks that every file and folder of src is in the restore
++// below dest, byte-identical. The restore lands under dest at the archive path,
++// so its root is the folder holding src's hello.txt; the metadata file the GUI
++// adds at the archive root is the only extra entry allowed.
++func assertTreeRestored(t *testing.T, src, dest, label string) {
++	t.Helper()
++	root := ""
++	_ = filepath.WalkDir(dest, func(p string, d fs.DirEntry, err error) error {
++		if err == nil && !d.IsDir() && d.Name() == "hello.txt" && root == "" {
++			root = filepath.Dir(p)
++		}
++		return nil
++	})
++	if root == "" {
++		t.Fatalf("%s: hello.txt not found under %s", label, dest)
++	}
++
++	want := treeOf(t, src)
++	got := treeOf(t, root)
++	delete(got, BackupMetaFilename)
++	for p, w := range want {
++		g, ok := got[p]
++		switch {
++		case !ok:
++			t.Errorf("%s: %s missing from the restore", label, p)
++		case !bytes.Equal(g, w):
++			t.Errorf("%s: %s differs from the source", label, p)
++		}
++	}
++	for p := range got {
++		if _, ok := want[p]; !ok {
++			t.Errorf("%s: unexpected %s in the restore", label, p)
++		}
++	}
++	t.Logf("%s: %d entries identical", label, len(want))
++}
++
++// treeOf maps every entry below root to the sha256 of its content (files) or
++// to nil (folders).
++func treeOf(t *testing.T, root string) map[string][]byte {
++	t.Helper()
++	tree := map[string][]byte{}
++	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
++		if err != nil || p == root {
++			return err
++		}
++		rel, _ := filepath.Rel(root, p)
++		rel = filepath.ToSlash(rel)
++		if d.IsDir() {
++			tree[rel] = nil
++			return nil
++		}
++		data, err := os.ReadFile(p) // #nosec G304 -- test fixture paths
++		if err != nil {
++			return err
++		}
++		sum := sha256.Sum256(data)
++		tree[rel] = sum[:]
++		return nil
++	})
++	if err != nil {
++		t.Fatalf("walking %s: %v", root, err)
++	}
++	return tree
++}
+diff --git a/testing/e2e/README.md b/testing/e2e/README.md
+index dfb7485..3483b02 100644
+--- a/testing/e2e/README.md
++++ b/testing/e2e/README.md
+@@ -55,6 +55,7 @@ Every setting is an environment variable with a sensible default:
+ | 5 | Manifest interop | The official client lists our snapshots, restores our `index.json.blob`, and the manifest has a valid signature, a `key-fingerprint`, `crypt-mode: encrypt` on every archive, and exactly the key set that proxmox-backup declares. |
+ | 6 | PBS server-side verify | `proxmox-backup-manager verify` reads every chunk and archive back and reports `TASK OK`. |
+ | 7 | Dedup | A second identical backup reports chunk reuse. |
++| 11 | **Encrypted** backup by the **GUI/service** writer → our readers + official restore | `gui/e2e_live_test.go` backs up with `RunBackupInline` and the key, then reads the snapshot through the GUI's catalog (no fallback allowed), search and restore (byte-identical), refuses it without the key, and restores test 1's unencrypted snapshot with the key loaded. The official client then restores it identically and refuses it without the key. |
+ 
+ Tests 3 and 4 use a key file created by the **official** client, which doubles
+ as an assertion that our key-file parser is compatible.
+diff --git a/testing/e2e/run.sh b/testing/e2e/run.sh
+index 402e43e..92e9a06 100755
+--- a/testing/e2e/run.sh
++++ b/testing/e2e/run.sh
+@@ -260,6 +260,40 @@ test_official_encrypted_block_readback() {
+ 	assert_bytes_identical "$WORK/disk.img" "$WORK/readback-block-enc.img" "official encrypted block backup read back"
+ }
+ 
++# ===========================================================================
++# Test 11: encrypted backup by the GUI/service writer -> our readers + official
++# ===========================================================================
++# The CLI tests above never run the writer the GUI and the service use
++# (gui/backup_inline.go), which once indexed encrypted chunks under the bare
++# sha256 (rdemsystems/NimbusBackupClient#13). gui/e2e_live_test.go backs up
++# the fixture with it and a key file, then reads the snapshot back through the
++# GUI's catalog, search and restore (and test 1's unencrypted snapshot with the
++# key loaded). The official client must then restore the same snapshot.
++test_gui_encrypted_roundtrip() {
++	( cd "$REPO_ROOT/gui" && E2E_LIVE=1 \
++		PBS_BASEURL="$PBS_BASEURL" PBS_FINGERPRINT="$PBS_FINGERPRINT" \
++		PBS_AUTHID="$PBS_AUTHID" PBS_TOKEN_SECRET="$PBS_TOKEN_SECRET" \
++		PBS_DATASTORE="$PBS_DATASTORE" \
++		E2E_SRC="$WORK/src" E2E_KEYFILE="$KEYFILE" E2E_OUT="$WORK/gui-live" \
++		E2E_BACKUP_ID=e2e-gui-enc E2E_PLAIN_ID=e2e-dir \
++		timeout 900 go test -count=1 -v -run '^TestE2ELiveInlineEncrypted$' . ) \
++		>"$WORK/log-gui-enc.txt" 2>&1 \
++		|| { cat "$WORK/log-gui-enc.txt"; return 1; }
++	grep -E '^\s+e2e_live_test.go:[0-9]+: ' "$WORK/log-gui-enc.txt" || true
++	ok "GUI writer: encrypted backup read back by our catalog, search and restore"
++
++	if ! pbc_available; then
++		warn "official client skipped -- GUI snapshot not restored by it"
++		return 0
++	fi
++	pbc_restore_must_fail host/e2e-gui-enc backup.pxar.didx restore-gui-enc-pbc-nokey
++	pbc_restore host/e2e-gui-enc backup.pxar.didx restore-gui-enc-pbc --keyfile key.pem
++	# The GUI adds its metadata file at the archive root; nothing else differs.
++	assert_file_exists "$WORK/restore-gui-enc-pbc/.proxmox_backup_client_meta.json"
++	rm -f "$WORK/restore-gui-enc-pbc/.proxmox_backup_client_meta.json"
++	assert_tree_identical "$WORK/src" "$WORK/restore-gui-enc-pbc" "GUI encrypted backup restored by the official client"
++}
++
+ # ===========================================================================
+ # Test 5: the official client can read our manifest and enumerate our snapshots
+ # ===========================================================================
+@@ -441,6 +475,7 @@ main() {
+ 	run_test "8. namespace round-trip (-namespace / --ns)"         test_namespace_roundtrip
+ 	run_test "9. official encrypted block backup -> our read back" test_official_encrypted_block_readback
+ 	run_test "10. parallel directories + exclusions -> official"   test_parallel_with_exclusions
++	run_test "11. GUI encrypted backup -> our readers + official"  test_gui_encrypted_roundtrip
+ 
+ 	section "Summary"
+ 	log "passed: ${#PASSED[@]}"
+-- 
+2.47.3
+

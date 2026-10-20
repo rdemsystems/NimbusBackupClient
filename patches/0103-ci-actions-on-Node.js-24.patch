@@ -1,0 +1,329 @@
+From c66d0651fa6d27e31645fe9c930ed2500a4181f6 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Tue, 20 Oct 2026 17:32:55 +0200
+Subject: [PATCH 103/108] ci: actions on Node.js 24
+
+GitHub forces the Node.js 20 actions onto Node.js 24 and warns on every
+run. Each moves to its first major that runs on Node.js 24:
+checkout v5, setup-go v6, setup-node v5, upload-artifact v6,
+download-artifact v7, cache v5, azure/login v3. The only breaking change
+on the way (download-artifact v5: the path of a single artifact
+downloaded by ID) does not apply: the release job downloads every
+artifact by path.
+---
+ .github/workflows/build-and-release.yml    | 40 +++++++++++-----------
+ .github/workflows/build-clonezilla-iso.yml |  6 ++--
+ .github/workflows/deps-bump.yml            |  6 ++--
+ .github/workflows/e2e.yml                  | 12 +++----
+ .github/workflows/release.yaml             |  4 +--
+ .github/workflows/release.yml              |  8 ++---
+ .github/workflows/update-dependencies.yml  |  4 +--
+ 7 files changed, 40 insertions(+), 40 deletions(-)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index 1f72f76..55045fe 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -22,9 +22,9 @@ jobs:
+     name: Check Dependency Updates
+     runs-on: ubuntu-latest
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+ 
+@@ -45,9 +45,9 @@ jobs:
+     name: Security Checks
+     runs-on: ubuntu-latest
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+ 
+@@ -98,9 +98,9 @@ jobs:
+     runs-on: ubuntu-latest
+     continue-on-error: true
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+ 
+@@ -181,9 +181,9 @@ jobs:
+     name: Unit Tests
+     runs-on: ubuntu-latest
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+ 
+@@ -228,9 +228,9 @@ jobs:
+       matrix:
+         os: [ubuntu-latest, windows-latest]
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+ 
+@@ -299,9 +299,9 @@ jobs:
+     runs-on: ${{ matrix.os }}
+ 
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+ 
+@@ -311,7 +311,7 @@ jobs:
+         run: make cli
+ 
+       - name: Upload CLI artifacts
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@v6
+         with:
+           name: cli-${{ runner.os }}
+           path: dist/proxmoxbackup-*
+@@ -341,13 +341,13 @@ jobs:
+       SIGNING_SUBSCRIPTION: 8d9f8b1c-7a41-46e2-a4de-d51407239a8a
+ 
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+ 
+-      - uses: actions/setup-node@v4
++      - uses: actions/setup-node@v5
+         with:
+           node-version: ${{ env.NODE_VERSION }}
+ 
+@@ -464,7 +464,7 @@ jobs:
+ 
+       - name: Azure login (code signing)
+         if: ${{ vars.AZURE_SIGNING_PROFILE != '' }}
+-        uses: azure/login@v2
++        uses: azure/login@v3
+         with:
+           client-id: ${{ vars.AZURE_CLIENT_ID }}
+           tenant-id: ${{ vars.AZURE_TENANT_ID }}
+@@ -728,7 +728,7 @@ jobs:
+           if ($bad -gt 0) { throw "Windows Defender flags this build ($bad finding(s)): the release is blocked" }
+ 
+       - name: Upload GUI artifacts
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@v6
+         with:
+           name: NimbusBackup-Windows
+           path: |
+@@ -747,7 +747,7 @@ jobs:
+       attestations: write  # store the build-provenance attestation
+ 
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+         with:
+           # Full history + tags so `git describe`/`git log PREV_TAG..HEAD` in
+           # the release-notes step can compute the previous tag and list the
+@@ -757,7 +757,7 @@ jobs:
+           fetch-tags: true
+ 
+       - name: Download all artifacts
+-        uses: actions/download-artifact@v4
++        uses: actions/download-artifact@v7
+         with:
+           path: artifacts/
+ 
+diff --git a/.github/workflows/build-clonezilla-iso.yml b/.github/workflows/build-clonezilla-iso.yml
+index 8ced0a8..b38cfb3 100644
+--- a/.github/workflows/build-clonezilla-iso.yml
++++ b/.github/workflows/build-clonezilla-iso.yml
+@@ -33,10 +33,10 @@ jobs:
+ 
+     steps:
+       - name: Checkout repository
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v5
+ 
+       - name: Set up Go
+-        uses: actions/setup-go@v5
++        uses: actions/setup-go@v6
+         with:
+           go-version: '1.25'
+ 
+@@ -98,7 +98,7 @@ jobs:
+           file "${{ github.event.inputs.output_name }}"
+ 
+       - name: Upload ISO artifact
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@v6
+         with:
+           name: clonezilla-patched-iso
+           path: ${{ github.event.inputs.output_name }}
+diff --git a/.github/workflows/deps-bump.yml b/.github/workflows/deps-bump.yml
+index bd038ab..c7931d7 100644
+--- a/.github/workflows/deps-bump.yml
++++ b/.github/workflows/deps-bump.yml
+@@ -22,9 +22,9 @@ jobs:
+     name: Bump, tidy and test
+     runs-on: ubuntu-latest
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+ 
+@@ -116,7 +116,7 @@ jobs:
+         if: always()
+         run: git diff -- '*go.mod' '*go.sum' go.work > deps-bump.patch; wc -l deps-bump.patch
+ 
+-      - uses: actions/upload-artifact@v4
++      - uses: actions/upload-artifact@v6
+         if: always()
+         with:
+           name: deps-bump-patch
+diff --git a/.github/workflows/e2e.yml b/.github/workflows/e2e.yml
+index 9bfd908..99cdc64 100644
+--- a/.github/workflows/e2e.yml
++++ b/.github/workflows/e2e.yml
+@@ -30,15 +30,15 @@ jobs:
+     name: Unit tests
+     runs-on: ubuntu-latest
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+           check-latest: true
+ 
+       - name: Cache Go modules
+-        uses: actions/cache@v4
++        uses: actions/cache@v5
+         with:
+           path: |
+             ~/.cache/go-build
+@@ -108,9 +108,9 @@ jobs:
+     runs-on: ubuntu-latest
+     timeout-minutes: 45
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+           check-latest: true
+@@ -125,7 +125,7 @@ jobs:
+       # matrix rather than an outright failure.
+ 
+       - name: Cache Go modules
+-        uses: actions/cache@v4
++        uses: actions/cache@v5
+         with:
+           path: |
+             ~/.cache/go-build
+diff --git a/.github/workflows/release.yaml b/.github/workflows/release.yaml
+index 614ca0f..9183832 100644
+--- a/.github/workflows/release.yaml
++++ b/.github/workflows/release.yaml
+@@ -28,12 +28,12 @@ jobs:
+ 
+     steps:
+       - name: Checkout
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v5
+         with:
+           fetch-depth: 0
+ 
+       - name: Set up Go
+-        uses: actions/setup-go@v5
++        uses: actions/setup-go@v6
+         with:
+           go-version-file: machinebackup/go.mod #We have two go.mod but either one gonna be sort of ok
+           check-latest: true
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index dcded67..e923147 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -18,17 +18,17 @@ jobs:
+ 
+     steps:
+       - name: Checkout code
+-        uses: actions/checkout@v4
++        uses: actions/checkout@v5
+ 
+       - name: Setup Go
+-        uses: actions/setup-go@v5
++        uses: actions/setup-go@v6
+         with:
+           go-version: '1.22'
+           cache: true
+           cache-dependency-path: gui/go.sum
+ 
+       - name: Setup Node.js
+-        uses: actions/setup-node@v4
++        uses: actions/setup-node@v5
+         with:
+           node-version: '20'
+ 
+@@ -87,7 +87,7 @@ jobs:
+         shell: pwsh
+ 
+       - name: Upload Artifact
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@v6
+         with:
+           name: proxmoxbackupclient-windows-wails
+           path: ProxmoxBackupClient.exe
+diff --git a/.github/workflows/update-dependencies.yml b/.github/workflows/update-dependencies.yml
+index 08e6cd6..af7ea88 100644
+--- a/.github/workflows/update-dependencies.yml
++++ b/.github/workflows/update-dependencies.yml
+@@ -24,11 +24,11 @@ jobs:
+       contents: write
+ 
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v5
+         with:
+           token: ${{ secrets.GITHUB_TOKEN }}
+ 
+-      - uses: actions/setup-go@v5
++      - uses: actions/setup-go@v6
+         with:
+           go-version: ${{ env.GO_VERSION }}
+ 
+-- 
+2.47.3
+

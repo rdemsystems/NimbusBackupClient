@@ -1,0 +1,80 @@
+From 893d8cfe5d7c4b7d2d2afe462c324a5c24df463f Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Tue, 20 Oct 2026 16:28:27 +0200
+Subject: [PATCH 078/108] fix(restore): restore directory modification times
+ (issue #12)
+
+Files got their archived mtime back, directories kept the restore time:
+nothing set it, and writing children bumps a directory's mtime anyway.
+ExtractWithRewriter now sets every extracted directory's mtime once the
+walk is over, deepest first (the walk is pre-order, so in reverse).
+Covered by TestPXARExtractAllPreservesDirModTime.
+---
+ pbscommon/pxar_reader.go      | 17 +++++++++++++++++
+ pbscommon/pxar_reader_test.go | 19 +++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+
+diff --git a/pbscommon/pxar_reader.go b/pbscommon/pxar_reader.go
+index 65ddec6..ecbc50b 100644
+--- a/pbscommon/pxar_reader.go
++++ b/pbscommon/pxar_reader.go
+@@ -471,9 +471,26 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
+ 		})
+ 		return nil
+ 	})
++	restoreDirTimes(extracted)
+ 	return extracted, err
+ }
+ 
++// restoreDirTimes sets each extracted directory's mtime once nothing more is
++// written into it: creating a child bumps its parent's mtime, so doing it at
++// mkdir time left every directory at the restore time
++// (rdemsystems/NimbusBackupClient#12). The walk is depth-first pre-order, so
++// going backwards handles children before their parents.
++func restoreDirTimes(extracted []PXARExtractedFile) {
++	for i := len(extracted) - 1; i >= 0; i-- {
++		f := extracted[i]
++		if !f.IsDir || f.Skipped || f.ModTime <= 0 {
++			continue
++		}
++		t := time.Unix(f.ModTime, 0)
++		_ = os.Chtimes(f.Path, t, t)
++	}
++}
++
+ // isUnsafeArchivePath reports whether a PXAR entry path could escape the restore
+ // destination (zip-slip). Archive paths are normalised forward-slash relative
+ // paths; anything absolute (unix root, UNC \\server), a Windows drive (C:/...),
+diff --git a/pbscommon/pxar_reader_test.go b/pbscommon/pxar_reader_test.go
+index 2ae9ade..ae5ea2c 100644
+--- a/pbscommon/pxar_reader_test.go
++++ b/pbscommon/pxar_reader_test.go
+@@ -372,6 +372,25 @@ func TestPXARExtractAllPreservesModTime(t *testing.T) {
+ 	}
+ }
+ 
++// Directories get their archived mtime back too, including ones that had files
++// written into them after they were created (rdemsystems/NimbusBackupClient#12).
++func TestPXARExtractAllPreservesDirModTime(t *testing.T) {
++	dest := t.TempDir()
++	if _, err := NewPXARReader(standardPXAR(t)).ExtractAll(dest); err != nil {
++		t.Fatalf("ExtractAll: %v", err)
++	}
++	want := time.Unix(1600000000, 0)
++	for _, d := range []string{"empty-dir", "sub", "sub/nested", "notes"} {
++		info, err := os.Stat(filepath.Join(dest, filepath.FromSlash(d)))
++		if err != nil {
++			t.Fatal(err)
++		}
++		if !info.ModTime().Equal(want) {
++			t.Errorf("%s mtime = %v, want %v", d, info.ModTime(), want)
++		}
++	}
++}
++
+ func TestPXARExtractFilteredSelectsSubtree(t *testing.T) {
+ 	dest := t.TempDir()
+ 	got, err := NewPXARReader(standardPXAR(t)).ExtractFiltered(dest, []string{"/sub/"}, false)
+-- 
+2.47.3
+

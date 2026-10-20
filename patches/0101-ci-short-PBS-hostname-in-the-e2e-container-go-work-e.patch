@@ -1,0 +1,54 @@
+From cf5528a143395bd0f47cda3527cde5ca2f5b65b2 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Tue, 20 Oct 2026 17:22:56 +0200
+Subject: [PATCH 101/108] ci: short PBS hostname in the e2e container; go work
+ edit outside GOWORK=off
+
+- e2e: PBS writes the node's FQDN into its self-signed certificate's CN
+  (64 characters at most). Without --hostname that FQDN is the container
+  id plus the runner's DNS search domain, too long on some GitHub
+  runners: the certificate was not generated and the run failed with
+  "PBS did not become ready within 180s". The container is now
+  pbs-e2e.test.
+- deps-bump: the tidy step runs with GOWORK=off, so go work edit found
+  no go.work; it now runs with GOWORK unset.
+---
+ .github/workflows/deps-bump.yml | 2 +-
+ testing/e2e/lib.sh              | 6 ++++++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/.github/workflows/deps-bump.yml b/.github/workflows/deps-bump.yml
+index a9f17a4..bd038ab 100644
+--- a/.github/workflows/deps-bump.yml
++++ b/.github/workflows/deps-bump.yml
+@@ -51,7 +51,7 @@ jobs:
+           # go.work must not list an older language version than its
+           # modules (x/net >= v0.59 declares go 1.26.0).
+           max=$(grep -h '^go ' $(find . -name go.mod -not -path '*/frontend/*') | awk '{print $2}' | sort -V | tail -1)
+-          go work edit -go="$max"
++          env -u GOWORK go work edit -go="$max"
+           git diff --stat
+ 
+       # Through the workspace (go.work): machinebackuplib has no replace
+diff --git a/testing/e2e/lib.sh b/testing/e2e/lib.sh
+index bea726f..6fbf7ad 100755
+--- a/testing/e2e/lib.sh
++++ b/testing/e2e/lib.sh
+@@ -187,8 +187,14 @@ start_pbs() {
+ 	# The datastore/config/log trees are *named volumes* rather than host
+ 	# bind mounts: the container runs as root and would leave root-owned files
+ 	# behind that the (possibly non-root) invoking user cannot clean up.
++	# --hostname: PBS puts the node's FQDN in its self-signed certificate's
++	# CN, limited to 64 characters. Without it the FQDN is the container id
++	# plus the runner's DNS search domain, which on some GitHub runners is
++	# longer than that: certificate generation then fails ("ASN1 string too
++	# long, maxsize=64") and the API never comes up.
+ 	docker run -d \
+ 		--name "$PBS_CONTAINER" \
++		--hostname pbs-e2e.test \
+ 		-p "127.0.0.1:${PBS_PORT}:8007" \
+ 		--tmpfs /run:rw,mode=1777 \
+ 		-v "${PBS_CONTAINER}-etc:/etc/proxmox-backup" \
+-- 
+2.47.3
+

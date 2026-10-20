@@ -1,0 +1,49 @@
+From f1dcc4dd38833e7da39fc5e86c89eb2e637f9e22 Mon Sep 17 00:00:00 2001
+From: mjb-is <mjb-is@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 20:10:10 +0100
+Subject: [PATCH 095/108] BMR wizard: refuse a target disk smaller than the
+ backed up disk
+
+The wizard runs ocs-onthefly with -icds, which turns off Clonezilla's own
+disk size check so a larger replacement disk is accepted. It also turned
+off the check for a smaller one: the confirm dialog showed a 256GB source
+and a 68.7GB target and offered Yes, and the restore would only have failed
+part way through, after the target had been partly overwritten.
+
+Compare the two sizes in bytes after the target is chosen and stop with a
+message when the target is smaller. Nothing has been written at that point.
+A target the same size or larger still goes ahead as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Upstream: tizbac/proxmoxbackupclient_go PR: #113 (mjb-is/proxmoxbackupclient_go@e1486b42de1481a96fe5e01fa7d5f0c0293e2b90)
+---
+ clonezilla-patch/ocs-pbs-bare-metal-restore | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/clonezilla-patch/ocs-pbs-bare-metal-restore b/clonezilla-patch/ocs-pbs-bare-metal-restore
+index c25f253..4859ee3 100644
+--- a/clonezilla-patch/ocs-pbs-bare-metal-restore
++++ b/clonezilla-patch/ocs-pbs-bare-metal-restore
+@@ -587,6 +587,19 @@ echo "Target disk        : $TARGET"
+ SRC_SIZE="$(disk_size "$NBDDEV")"
+ TGT_SIZE="$(disk_size "$TARGET")"
+ 
++# A target smaller than the source cannot take the source's partition table
++# (-k0 below), and -icds turns off Clonezilla's own disk size check, so the
++# restore would only fail part way through. Stop before anything is written.
++# A larger target is fine.
++SRC_BYTES="$(blockdev --getsize64 "$NBDDEV" 2>/dev/null)"
++TGT_BYTES="$(blockdev --getsize64 "$TARGET" 2>/dev/null)"
++if [ -n "$SRC_BYTES" ] && [ -n "$TGT_BYTES" ] && [ "$SRC_BYTES" -gt "$TGT_BYTES" ]; then
++  echo "Target ${TARGET} (${TGT_BYTES} bytes) is smaller than the source ${NBDDEV} (${SRC_BYTES} bytes)"
++  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
++  --msgbox "The target disk is smaller than the backed up disk.\n\nSource (PBS snapshot) : ${NBDDEV}  (${SRC_SIZE:-unknown size}, ${SRC_BYTES} bytes)\nTarget (THIS MACHINE)  : ${TARGET}  (${TGT_SIZE:-unknown size}, ${TGT_BYTES} bytes)\n\nRestore onto a disk of at least ${SRC_BYTES} bytes. Nothing has been written to ${TARGET}.\n\n$msg_program_stop" 0 0 $DIA_ESC
++  exit 1
++fi
++
+ # 9. confirmation before the destructive write: shows source+target+sizes.
+ # Deliberately just the one dialog here, not also a typed device-name
+ # step -- ocs-onthefly itself (below, no -batch) still asks its own two
+-- 
+2.47.3
+

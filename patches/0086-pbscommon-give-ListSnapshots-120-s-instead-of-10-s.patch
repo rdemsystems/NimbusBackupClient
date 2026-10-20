@@ -1,0 +1,38 @@
+From 5c5d1d0943e155550e90755a99303afe23c60fdc Mon Sep 17 00:00:00 2001
+From: mjb-is <mjb-is@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 00:09:17 +0100
+Subject: [PATCH 086/108] pbscommon: give ListSnapshots 120 s instead of 10 s
+
+PBS answers /admin/datastore/{store}/snapshots by reading the manifest of
+every snapshot in the datastore or namespace. With a cold cache over
+spinning disks that takes longer than 10 s, so the GUI's Restore page and
+proxmoxbackup-nbd's snapshot list (also on the bare-metal restore ISO)
+failed with a client timeout while PBS was still working on the answer.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JSSBMF6hRk92jsHCMKgDRx
+Upstream: tizbac/proxmoxbackupclient_go@29e18e8f625bf4dd1fcd5dec8ed9eba8a8cc88d5
+---
+ pbscommon/pbsapi.go | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/pbscommon/pbsapi.go b/pbscommon/pbsapi.go
+index 84ac897..5fdc238 100644
+--- a/pbscommon/pbsapi.go
++++ b/pbscommon/pbsapi.go
+@@ -515,8 +515,11 @@ func (pbs *PBSClient) ObtainTicket() error {
+ // NamespaceHint in missingNamespaceErr.
+ 
+ func (pbs *PBSClient) ListSnapshots() ([]BackupManifest, error) {
++	// PBS reads every snapshot's manifest in the datastore (or namespace) to
++	// answer this. With a cold cache over spinning disks that takes longer
++	// than 10 s on a datastore of a few hundred snapshots.
+ 	client := &http.Client{
+-		Timeout:   10 * time.Second,
++		Timeout:   120 * time.Second,
+ 		Transport: &http.Transport{TLSClientConfig: pbs.buildTLSConfig()},
+ 	}
+ 
+-- 
+2.47.3
+

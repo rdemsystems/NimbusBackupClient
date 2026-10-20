@@ -1,8 +1,8 @@
 From aa2e4e92fe8b8d31c371240379bd6b0bc34b7833 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Mon, 12 Oct 2026 15:00:07 +0200
-Subject: [PATCH 63/76] machinebackup: read VSS snapshot volumes to the device
- end
+Subject: [PATCH 063/108] machinebackup: read VSS snapshot volumes to the
+ device end
 
 NTFS sizes itself one sector short of its partition (the last sector
 holds the backup boot sector) and stops volume-handle reads at its own

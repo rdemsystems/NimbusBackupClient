@@ -1,0 +1,391 @@
+From fd18cdf1ad647e7bf2d23e5d0613ae9184ee3a40 Mon Sep 17 00:00:00 2001
+From: mjb-is <mjb-is@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 00:47:17 +0100
+Subject: [PATCH 084/108] directorybackup: -no-mtime leaves real times out of
+ the archive
+
+Every file's and folder's modification time is written into the PXAR,
+so a time that changes changes the archive bytes and the chunks around
+that entry are uploaded again although nothing in them changed. A store
+that files its data under hash-named folders (aa/bb/<rest of the hash>)
+keeps touching its folders and so re-uploads much of the archive every
+run.
+
+-no-mtime ("no-mtime": true in a JSON config) records 0 (1970-01-01) as
+the time of every file and folder, in the archive entries and in the
+catalog, so only content changes cost new chunks. Off by default, CLI
+only. The real times are not kept: a restore dates every item
+1970-01-01 (with the restore fix in this PR a recorded 0 is applied
+like any other time).
+
+- PXARArchive.NoMTime; entryMTime gives the time to record for an entry.
+- Config.NoMTime and the -no-mtime flag, passed through backup,
+  backup_many and backup_real like -novss.
+- README: the flag in the list and a short section on when to use it.
+
+Tests (pxar_nomtime_test.go): a tree backed up, its times all moved,
+backed up again: with NoMTime the PXAR stream and the catalog are byte
+for byte the same, without it both differ (so the check would notice a
+leaked time). What NoMTime records reads back as 0 from the archive and
+the catalog, and a restore dates files and folders 1970-01-01.
+pbscommon tests pass on Windows 10 and Linux (Mint 21.3, Go 1.25),
+directorybackup tests on Windows; vet clean and directorybackup builds
+for windows and linux.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JSSBMF6hRk92jsHCMKgDRx
+
+Fork adaptation: noMTime is threaded through the fork's exclusion and
+-parallel paths (backup, backup_many, backup_parallel, backup_one,
+backup_real) next to excludes; the fork's README is kept.
+
+Upstream: tizbac/proxmoxbackupclient_go@d7fa8280bb4bfaa362535640fa721879aa64e26c
+---
+ directorybackup/config.go      |  10 +++
+ directorybackup/main.go        |  27 ++++----
+ pbscommon/pxar.go              |  21 +++++-
+ pbscommon/pxar_nomtime_test.go | 117 +++++++++++++++++++++++++++++++++
+ 4 files changed, 159 insertions(+), 16 deletions(-)
+ create mode 100644 pbscommon/pxar_nomtime_test.go
+
+diff --git a/directorybackup/config.go b/directorybackup/config.go
+index 5680ae1..a7d9d31 100644
+--- a/directorybackup/config.go
++++ b/directorybackup/config.go
+@@ -71,6 +71,12 @@ type Config struct {
+ 	// at the same time (default 1, one after the other). No upper limit; the
+ 	// recommended value is the number of CPUs / 4 (RecommendedParallel).
+ 	Parallel int `json:"parallel"`
++
++	// NoMTime records 0 (1970-01-01) as every file's and folder's time instead
++	// of the real one, so entries whose time changes but whose content does not
++	// leave the archive bytes, and so its chunks, unchanged. Restored items get
++	// 1970-01-01.
++	NoMTime bool `json:"no-mtime"`
+ }
+ 
+ // RecommendedParallel is the suggested -parallel value: CPUs / 4, at least 1.
+@@ -164,6 +170,7 @@ func loadConfig() *Config {
+ 	noVSSFlag := flag.Bool("novss", false, "Disable VSS ( For filesystems that don't support it, for example veracrypt )")
+ 	keyFileFlag := flag.String("keyfile", "", "Path to a Proxmox Backup Server encryption key file (encrypts chunks and signs the manifest; same format as proxmox-backup-client key create)")
+ 	keyFilePassphraseFlag := flag.String("keyfile-passphrase", "", "Passphrase for a scrypt/PBKDF2 protected -keyfile (prompted for when omitted)")
++	noMTimeFlag := flag.Bool("no-mtime", false, "Record 1970-01-01 as every file and folder time instead of the real one, so time-only changes (a folder whose contents come and go) do not change the archive and re-upload its chunks; restored items get 1970-01-01 (advanced, optional)")
+ 
+ 	mailHostFlag := flag.String("mail-host", "", "mail notification system: mail server host(optional)")
+ 	mailPortFlag := flag.String("mail-port", "", "mail notification system: mail server port(optional)")
+@@ -253,6 +260,9 @@ func loadConfig() *Config {
+ 	if *keyFilePassphraseFlag != "" {
+ 		config.KeyFilePassphrase = *keyFilePassphraseFlag
+ 	}
++	if *noMTimeFlag {
++		config.NoMTime = true
++	}
+ 
+ 	initSmtpConfigIfNeeded := func() {
+ 		if config.SMTP == nil {
+diff --git a/directorybackup/main.go b/directorybackup/main.go
+index 6f218f1..2d4ad96 100644
+--- a/directorybackup/main.go
++++ b/directorybackup/main.go
+@@ -264,13 +264,13 @@ func main() {
+ 	begin := time.Now()
+ 	var readErrors []string
+ 	if len(dirs) == 1 {
+-		readErrors, err = backup(client, newchunk, reusechunk, cfg.PxarOut, dirs[0], cfg.UseVSS, excludes)
++		readErrors, err = backup(client, newchunk, reusechunk, cfg.PxarOut, dirs[0], cfg.UseVSS, excludes, cfg.NoMTime)
+ 	} else if len(dirs) > 1 {
+ 		baseID := cfg.BackupID
+ 		if baseID == "" {
+ 			baseID = hostname
+ 		}
+-		readErrors, err = backup_many(newClient, newchunk, reusechunk, cfg.PxarOut, dirs, baseID, cfg.UseVSS, excludes, cfg.Parallel)
++		readErrors, err = backup_many(newClient, newchunk, reusechunk, cfg.PxarOut, dirs, baseID, cfg.UseVSS, excludes, cfg.Parallel, cfg.NoMTime)
+ 	} else if cfg.BackupStreamName != "" {
+ 		sn := cfg.BackupStreamName
+ 		if !strings.HasSuffix(sn, ".didx") {
+@@ -365,7 +365,7 @@ func main() {
+ // directory that fails does not stop the others; the failures are joined into
+ // the returned error. Up to parallel directories (at least 1) are backed up at
+ // the same time, from one snapshot set taken for all of them (backup_parallel).
+-func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool, excludes []string, parallel int) ([]string, error) {
++func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, pxarOut string, dirs []string, baseID string, usevss bool, excludes []string, parallel int, noMTime bool) ([]string, error) {
+ 	if pxarOut != "" {
+ 		return nil, fmt.Errorf("-pxarout writes a single archive and cannot be combined with several -backupdir")
+ 	}
+@@ -379,7 +379,7 @@ func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error),
+ 		ids[id] = dir
+ 	}
+ 
+-	return backup_parallel(newClient, newchunk, reusechunk, dirs, baseID, usevss, excludes, max(parallel, 1))
++	return backup_parallel(newClient, newchunk, reusechunk, dirs, baseID, usevss, excludes, max(parallel, 1), noMTime)
+ }
+ 
+ // backup_parallel backs up dirs with up to parallel directories at a time (1:
+@@ -389,7 +389,7 @@ func backup_many(newClient func(backupID string) (*pbscommon.PBSClient, error),
+ // rather than each at its own turn. It also keeps concurrent runs safe:
+ // concurrent snapshot creations collide ("VSS busy"), and the busy-recovery
+ // path deletes every shadow copy, pulling it from under the other directories.
+-func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dirs []string, baseID string, usevss bool, excludes []string, parallel int) ([]string, error) {
++func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dirs []string, baseID string, usevss bool, excludes []string, parallel int, noMTime bool) ([]string, error) {
+ 	parallel = min(parallel, len(dirs))
+ 	fmt.Printf("Backing up %d directories, %d at a time\n", len(dirs), parallel)
+ 
+@@ -404,7 +404,7 @@ func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, erro
+ 			go func() {
+ 				defer wg.Done()
+ 				defer func() { <-sem }()
+-				readErrs[i], failures[i] = backup_one(newClient, newchunk, reusechunk, dir, readDirOf(dir), baseID, excludes)
++				readErrs[i], failures[i] = backup_one(newClient, newchunk, reusechunk, dir, readDirOf(dir), baseID, excludes, noMTime)
+ 			}()
+ 		}
+ 		wg.Wait()
+@@ -452,7 +452,7 @@ func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, erro
+ 				failures = append(failures, fmt.Errorf("%s: ticket login failed: %w", dir, cerr))
+ 				continue
+ 			}
+-			dirReadErrors, derr := backup(client, newchunk, reusechunk, "", dir, true, excludes)
++			dirReadErrors, derr := backup(client, newchunk, reusechunk, "", dir, true, excludes, noMTime)
+ 			client.Close()
+ 			readErrors = append(readErrors, dirReadErrors...)
+ 			if derr != nil {
+@@ -467,7 +467,7 @@ func backup_parallel(newClient func(backupID string) (*pbscommon.PBSClient, erro
+ // backup_one backs up one directory of a parallel run as backup group
+ // <base>_<dir>, reading readDir (its snapshot path under VSS) and committing the
+ // snapshot even on read errors, like backup().
+-func backup_one(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dir, readDir, baseID string, excludes []string) ([]string, error) {
++func backup_one(newClient func(backupID string) (*pbscommon.PBSClient, error), newchunk, reusechunk *atomic.Uint64, dir, readDir, baseID string, excludes []string, noMTime bool) ([]string, error) {
+ 	if readDir == "" {
+ 		return nil, fmt.Errorf("%s: no snapshot was taken for this directory", dir)
+ 	}
+@@ -481,7 +481,7 @@ func backup_one(newClient func(backupID string) (*pbscommon.PBSClient, error), n
+ 	// locked until the connection times out.
+ 	defer client.Close()
+ 
+-	readErrors, err := backup_real(client, newchunk, reusechunk, "", readDir, dir, excludes)
++	readErrors, err := backup_real(client, newchunk, reusechunk, "", readDir, dir, excludes, noMTime)
+ 	if readDir != dir {
+ 		err = unmapSnapshotPath(err, readDir, dir)
+ 		for i := range readErrors {
+@@ -561,7 +561,7 @@ func backup_stream(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uin
+ // backup_real archives backupdir (the VSS snapshot path when VSS is used);
+ // excludeRoot is the original directory, so absolute exclusion patterns match
+ // whatever path is actually read.
+-func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, excludeRoot string, excludes []string) ([]string, error) {
++func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, excludeRoot string, excludes []string, noMTime bool) ([]string, error) {
+ 	client.Connect(false, "host")
+ 	knownChunks := haxmap.New[string, bool]()
+ 
+@@ -569,6 +569,7 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
+ 	archive.ArchiveName = "backup.pxar.didx"
+ 	archive.ExcludeList = excludes
+ 	archive.ExcludeRoot = excludeRoot
++	archive.NoMTime = noMTime
+ 
+ 	previousDidx, err := client.DownloadPreviousToBytes(archive.ArchiveName)
+ 	if err != nil {
+@@ -665,7 +666,7 @@ func backup_real(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint6
+ 	return archive.ReadErrors, nil
+ }
+ 
+-func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, usevss bool, excludes []string) ([]string, error) {
++func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, pxarOut string, backupdir string, usevss bool, excludes []string, noMTime bool) ([]string, error) {
+ 
+ 	fmt.Printf("Starting backup of %s\n", backupdir)
+ 	var err error
+@@ -681,7 +682,7 @@ func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, px
+ 			}
+ 			//Remove VSS snapshot on windows, on linux for now NOP
+ 			var e error
+-			readErrors, e = backup_real(client, newchunk, reusechunk, pxarOut, snapshotDir, originalDir, excludes)
++			readErrors, e = backup_real(client, newchunk, reusechunk, pxarOut, snapshotDir, originalDir, excludes, noMTime)
+ 			return e
+ 
+ 		})
+@@ -690,7 +691,7 @@ func backup(client *pbscommon.PBSClient, newchunk, reusechunk *atomic.Uint64, px
+ 			readErrors[i] = unmapSnapshotPathString(readErrors[i], snapshotDir, originalDir)
+ 		}
+ 	} else {
+-		readErrors, err = backup_real(client, newchunk, reusechunk, pxarOut, backupdir, originalDir, excludes)
++		readErrors, err = backup_real(client, newchunk, reusechunk, pxarOut, backupdir, originalDir, excludes, noMTime)
+ 	}
+ 
+ 	if err != nil {
+diff --git a/pbscommon/pxar.go b/pbscommon/pxar.go
+index 14e4c48..eccf6be 100644
+--- a/pbscommon/pxar.go
++++ b/pbscommon/pxar.go
+@@ -317,6 +317,21 @@ type PXARArchive struct {
+ 	// actually backed up. Used to capture NTFS ACLs and other per-file metadata
+ 	// that PXAR cannot represent. Best-effort: errors are logged and ignored.
+ 	MetaCollector MetaCollector
++
++	// NoMTime writes 0 (1970-01-01) as every file's and folder's modification
++	// time instead of the real one. A changed time changes the archive bytes, so
++	// trees whose times move without their contents changing (a folder gains
++	// and loses temporary files) otherwise re-upload the chunks around every such
++	// entry. Restored items then get 1970-01-01.
++	NoMTime bool
++}
++
++// entryMTime is the time recorded for an entry: the real one, or 0 with NoMTime.
++func (a *PXARArchive) entryMTime(info os.FileInfo) uint64 {
++	if a.NoMTime {
++		return 0
++	}
++	return uint64(info.ModTime().Unix())
+ }
+ 
+ //This function will flush the internal buffer and update position
+@@ -490,7 +505,7 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
+ 		uid:   uid,
+ 		gid:   gid,
+ 		mtime: MTime{
+-			secs:    uint64(fileInfo.ModTime().Unix()),
++			secs:    a.entryMTime(fileInfo),
+ 			nanos:   0,
+ 			padding: 0,
+ 		},
+@@ -767,7 +782,7 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
+ 		uid:   uid,
+ 		gid:   gid,
+ 		mtime: MTime{
+-			secs:    uint64(fileInfo.ModTime().Unix()),
++			secs:    a.entryMTime(fileInfo),
+ 			nanos:   0,
+ 			padding: 0,
+ 		},
+@@ -851,7 +866,7 @@ func (a *PXARArchive) WriteFile(path string, basename string) (CatalogFile, erro
+ 
+ 	return CatalogFile{
+ 		Name:  basename,
+-		MTime: uint64(fileInfo.ModTime().Unix()),
++		MTime: a.entryMTime(fileInfo),
+ 		Size:  uint64(fileInfo.Size()),
+ 	}, nil
+ }
+diff --git a/pbscommon/pxar_nomtime_test.go b/pbscommon/pxar_nomtime_test.go
+new file mode 100644
+index 0000000..f001f5b
+--- /dev/null
++++ b/pbscommon/pxar_nomtime_test.go
+@@ -0,0 +1,117 @@
++package pbscommon
++
++import (
++	"bytes"
++	"os"
++	"path/filepath"
++	"testing"
++	"time"
++)
++
++// makeTimedTree creates top.txt, a/b/one.txt and a/c/two.txt under root.
++func makeTimedTree(t *testing.T, root string) {
++	t.Helper()
++	for name, data := range map[string]string{
++		"top.txt":     "top\n",
++		"a/b/one.txt": "one\n",
++		"a/c/two.txt": "two\n",
++	} {
++		p := filepath.Join(root, filepath.FromSlash(name))
++		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
++			t.Fatal(err)
++		}
++		if err := os.WriteFile(p, []byte(data), 0644); err != nil {
++			t.Fatal(err)
++		}
++	}
++}
++
++// setTreeTimes gives every file and folder under root (root included) the
++// time ts, as a folder whose contents came and went would end up.
++func setTreeTimes(t *testing.T, root string, ts time.Time) {
++	t.Helper()
++	for _, name := range []string{"top.txt", "a/b/one.txt", "a/c/two.txt", "a/b", "a/c", "a", "."} {
++		if err := os.Chtimes(filepath.Join(root, filepath.FromSlash(name)), ts, ts); err != nil {
++			t.Fatal(err)
++		}
++	}
++}
++
++// writeTestArchive backs root up the way the CLI does and returns the PXAR
++// stream and the catalog.
++func writeTestArchive(t *testing.T, root string, noMTime bool) (pxar, catalog []byte) {
++	t.Helper()
++	var p, c bytes.Buffer
++	archive := &PXARArchive{ArchiveName: "backup.pxar.didx", NoMTime: noMTime}
++	archive.WriteCB = func(b []byte) error { p.Write(b); return nil }
++	archive.CatalogWriteCB = func(b []byte) error { c.Write(b); return nil }
++	archive.Create()
++	if _, err := archive.WriteDir(root, "", true); err != nil {
++		t.Fatalf("WriteDir: %v", err)
++	}
++	return p.Bytes(), c.Bytes()
++}
++
++// With NoMTime, two backups of the same contents are byte for byte the same
++// however the times moved in between, so they share every chunk. Without it
++// they differ, which shows the comparison would catch a leaked time.
++func TestPXARNoMTimeArchiveIgnoresTimeChanges(t *testing.T) {
++	for _, noMTime := range []bool{true, false} {
++		root := t.TempDir()
++		makeTimedTree(t, root)
++		setTreeTimes(t, root, time.Unix(1600000000, 0))
++		pxar1, cat1 := writeTestArchive(t, root, noMTime)
++		setTreeTimes(t, root, time.Unix(1700000000, 0))
++		pxar2, cat2 := writeTestArchive(t, root, noMTime)
++
++		samePXAR, sameCatalog := bytes.Equal(pxar1, pxar2), bytes.Equal(cat1, cat2)
++		if noMTime && (!samePXAR || !sameCatalog) {
++			t.Errorf("NoMTime: archive same = %v, catalog same = %v; want both true", samePXAR, sameCatalog)
++		}
++		if !noMTime && (samePXAR || sameCatalog) {
++			t.Errorf("real times: archive same = %v, catalog same = %v; want both false", samePXAR, sameCatalog)
++		}
++	}
++}
++
++// What NoMTime records reads back as a time of 0, and a restore then dates
++// the items 1970-01-01.
++func TestPXARNoMTimeRecordsEpoch(t *testing.T) {
++	root := t.TempDir()
++	makeTimedTree(t, root)
++	setTreeTimes(t, root, time.Unix(1600000000, 0))
++	pxar, catalog := writeTestArchive(t, root, true)
++
++	entries, err := NewPXARReader(pxar).ListEntries()
++	if err != nil {
++		t.Fatalf("ListEntries: %v", err)
++	}
++	if len(entries) != 6 {
++		t.Errorf("ListEntries: %d entries, want 6", len(entries))
++	}
++	for _, e := range entries {
++		if e.ModTime != 0 || !e.ModTimeSet {
++			t.Errorf("%s: ModTime = %d (set %v), want 0 (set true)", e.Path, e.ModTime, e.ModTimeSet)
++		}
++	}
++
++	listed, err := ParseCatalog(catalog)
++	if err != nil {
++		t.Fatalf("ParseCatalog: %v", err)
++	}
++	for _, e := range listed {
++		if !e.IsDir && e.ModTime != 0 {
++			t.Errorf("catalog %s: ModTime = %d, want 0", e.Path, e.ModTime)
++		}
++	}
++
++	dest := t.TempDir()
++	if _, err := NewPXARReader(pxar).ExtractAll(dest); err != nil {
++		t.Fatalf("ExtractAll: %v", err)
++	}
++	for _, name := range []string{"top.txt", "a/b/one.txt", "a/b", "a"} {
++		if got := mtimeOf(t, filepath.Join(dest, filepath.FromSlash(name))); !got.Equal(time.Unix(0, 0)) {
++			t.Errorf("restored %s mtime = %v, want 1970-01-01", name, got)
++		}
++	}
++}
+-- 
+2.47.3
+

@@ -1,0 +1,398 @@
+From bd164c1d96132a70e0e750b2178d7362dfe01663 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Tue, 20 Oct 2026 16:28:27 +0200
+Subject: [PATCH 077/108] fix(crypto): encrypted GUI backups use the keyed
+ digest; Service Mode reads get the key (issue #13)
+
+Encrypted directory backups made by the GUI and the service could not be
+read back, neither by Nimbus nor by proxmox-backup-client.
+
+Wrong chunk digest: ChunkState (gui/backup_inline.go) hashed every chunk
+with a bare sha256, ignoring the key. The chunks were encrypted but
+indexed under sha256(plaintext) instead of sha256(plaintext || id_key):
+the official client rejects them ("detected chunk with wrong digest"),
+and the bare digest gives the server a fingerprint of the plaintext.
+Chunks now go through client.ChunkDigest, like the CLI and the machine
+backup already did. Covered by TestChunkStateEncryptedDigests.
+
+Snapshots already written that way (0.4.1, 0.4.2) stay restorable: on an
+encrypted snapshot the DIDX reader also accepts the bare sha256 of the
+decrypted chunk (still bound to the index; encrypted chunks have also
+passed AES-GCM). proxmox-backup-client cannot read them: a new full
+backup is needed for that. Covered by TestDIDXReaderAtLegacyEncrypted*.
+
+No key in Service Mode: catalog, search, browse and restore run in the
+GUI process with a ticket minted by the service, and that Config carried
+no key file, so every read failed with "is encrypted but no encryption
+key was provided". The ticket now carries the server's key file path
+(not the key; the sanitized config already exposes it), with the
+hydrated config as fallback for an older service, and the GUI unlocks it
+like standalone mode does.
+
+Token-only servers: minting the ticket needs the PBS user/password
+stored next to the token (PBS issues no ticket for an API token); the
+error now says so instead of "username and password are required to
+obtain a ticket", and the misleading doc comment is fixed.
+---
+ gui/api/types.go                 |   4 ++
+ gui/backup_inline.go             |  27 ++++-----
+ gui/backup_inline_digest_test.go | 100 +++++++++++++++++++++++++++++++
+ gui/main.go                      |  26 ++++++--
+ gui/service_api.go               |  15 +++--
+ pbscommon/didx_reader.go         |  19 +++++-
+ pbscommon/didx_reader_test.go    |  41 +++++++++++++
+ 7 files changed, 207 insertions(+), 25 deletions(-)
+ create mode 100644 gui/backup_inline_digest_test.go
+
+diff --git a/gui/api/types.go b/gui/api/types.go
+index bb07139..7fae5d7 100644
+--- a/gui/api/types.go
++++ b/gui/api/types.go
+@@ -64,6 +64,10 @@ type PBSTicket struct {
+ 	CertFingerprint string `json:"cert_fingerprint,omitempty"`
+ 	Datastore       string `json:"datastore,omitempty"`
+ 	Namespace       string `json:"namespace,omitempty"`
++	// EncryptionKeyFile is the PATH of the server's key file (not the key):
++	// the GUI unlocks it itself to decrypt encrypted snapshots, since chunks
++	// are decrypted client-side, in the process doing the restore/listing.
++	EncryptionKeyFile string `json:"encryption_key_file,omitempty"`
+ }
+ 
+ // BackupProgress represents the current state of a running backup
+diff --git a/gui/backup_inline.go b/gui/backup_inline.go
+index 7dba5c3..e3f7514 100644
+--- a/gui/backup_inline.go
++++ b/gui/backup_inline.go
+@@ -265,12 +265,14 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
+ 		for chunkpos > 0 {
+ 			c.currentChunk = append(c.currentChunk, b[:chunkpos]...)
+ 
+-			h := sha256.New()
+-			if _, err := h.Write(c.currentChunk); err != nil {
+-				return fmt.Errorf("failed to hash chunk: %w", err)
+-			}
+-			bindigest := h.Sum(nil)
+-			shahash := hex.EncodeToString(bindigest)
++			// The digest has to be the one the chunk is published under:
++			// sha256(plaintext) for a plain snapshot, but
++			// sha256(plaintext || id_key) once a key file is in play. A bare
++			// sha256 on an encrypted snapshot is rejected by
++			// proxmox-backup-client ("wrong digest") and leaks the plaintext
++			// fingerprint to the server.
++			bindigest := client.ChunkDigest(c.currentChunk)
++			shahash := hex.EncodeToString(bindigest[:])
+ 
+ 			if _, known := c.knownChunks.Get(shahash); !known {
+ 				writeBackupLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.currentChunk)))
+@@ -314,7 +316,7 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
+ 			if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.currentChunk)))); err != nil {
+ 				return fmt.Errorf("failed to write chunk offset: %w", err)
+ 			}
+-			if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
++			if _, err := c.chunkdigests.Write(bindigest[:]); err != nil {
+ 				return fmt.Errorf("failed to write chunk digest: %w", err)
+ 			}
+ 
+@@ -397,16 +399,13 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
+ 
+ func (c *ChunkState) EOF(client *pbscommon.PBSClient) error {
+ 	if len(c.currentChunk) > 0 {
+-		h := sha256.New()
+-		if _, err := h.Write(c.currentChunk); err != nil {
+-			return fmt.Errorf("failed to hash final chunk: %w", err)
+-		}
+-
+-		shahash := hex.EncodeToString(h.Sum(nil))
++		// Same digest rule as in HandleData.
++		bindigest := client.ChunkDigest(c.currentChunk)
++		shahash := hex.EncodeToString(bindigest[:])
+ 		if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.currentChunk)))); err != nil {
+ 			return fmt.Errorf("failed to write final chunk offset: %w", err)
+ 		}
+-		if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
++		if _, err := c.chunkdigests.Write(bindigest[:]); err != nil {
+ 			return fmt.Errorf("failed to write final chunk digest: %w", err)
+ 		}
+ 
+diff --git a/gui/backup_inline_digest_test.go b/gui/backup_inline_digest_test.go
+new file mode 100644
+index 0000000..b1e884f
+--- /dev/null
++++ b/gui/backup_inline_digest_test.go
+@@ -0,0 +1,100 @@
++package main
++
++import (
++	"crypto/sha256"
++	"encoding/hex"
++	"io"
++	"math/rand"
++	"net/http"
++	"net/http/httptest"
++	"sync"
++	"sync/atomic"
++	"testing"
++
++	"github.com/alphadose/haxmap"
++	"pbscommon"
++)
++
++// The GUI/service directory backup must publish an encrypted snapshot's chunks
++// under sha256(plaintext || id_key), like the CLI and proxmox-backup-client.
++// 0.4.1 and 0.4.2 used the bare sha256, which the official client rejects with
++// "wrong digest" (rdemsystems/NimbusBackupClient#13).
++func TestChunkStateEncryptedDigests(t *testing.T) {
++	encKey, err := pbscommon.GenerateEncryptionKey()
++	if err != nil {
++		t.Fatalf("GenerateEncryptionKey: %v", err)
++	}
++	crypt, err := pbscommon.NewCryptConfig(encKey)
++	if err != nil {
++		t.Fatalf("NewCryptConfig: %v", err)
++	}
++
++	type upload struct {
++		digest string
++		body   []byte
++	}
++	var mu sync.Mutex
++	var uploads []upload
++	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		body, _ := io.ReadAll(r.Body)
++		if r.URL.Path == "/dynamic_chunk" {
++			mu.Lock()
++			uploads = append(uploads, upload{digest: r.URL.Query().Get("digest"), body: body})
++			mu.Unlock()
++		}
++		w.WriteHeader(http.StatusOK)
++	}))
++	t.Cleanup(srv.Close)
++
++	client := &pbscommon.PBSClient{
++		BaseURL:   srv.URL,
++		Datastore: "teststore",
++		Client:    *http.DefaultClient,
++		Crypt:     crypt,
++	}
++
++	// Several average-size (4 MiB) chunks, so both HandleData's cut points and
++	// EOF's remainder are exercised.
++	data := make([]byte, 12*1024*1024)
++	rand.New(rand.NewSource(13)).Read(data)
++
++	var newchunk, reusechunk, failedchunk, totalSize atomic.Uint64
++	c := ChunkState{}
++	c.Init(&newchunk, &reusechunk, &failedchunk, haxmap.New[string, bool](), nil, &totalSize, nil, "test")
++	if err := c.HandleData(data, client); err != nil {
++		t.Fatalf("HandleData: %v", err)
++	}
++	if err := c.EOF(client); err != nil {
++		t.Fatalf("EOF: %v", err)
++	}
++
++	// The handler goroutines wrote uploads; take the lock so -race sees the
++	// hand-over.
++	mu.Lock()
++	defer mu.Unlock()
++	if len(uploads) < 2 {
++		t.Fatalf("got %d chunk uploads, want at least 2", len(uploads))
++	}
++	var restored []byte
++	for i, u := range uploads {
++		digest, err := hex.DecodeString(u.digest)
++		if err != nil {
++			t.Fatalf("upload %d: bad digest %q: %v", i, u.digest, err)
++		}
++		// DecodeEncryptedBlob checks the digest as sha256(plaintext || id_key).
++		plaintext, err := pbscommon.DecodeEncryptedBlob(u.body, crypt, digest)
++		if err != nil {
++			t.Fatalf("upload %d: %v", i, err)
++		}
++		if bare := sha256.Sum256(plaintext); hex.EncodeToString(bare[:]) == u.digest {
++			t.Errorf("upload %d is indexed under the bare sha256", i)
++		}
++		if c.assignments[i] != u.digest {
++			t.Errorf("assignment %d = %s, want the uploaded digest %s", i, c.assignments[i], u.digest)
++		}
++		restored = append(restored, plaintext...)
++	}
++	if string(restored) != string(data) {
++		t.Error("the uploaded chunks do not reassemble into the input")
++	}
++}
+diff --git a/gui/main.go b/gui/main.go
+index dd2f235..b6aca62 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -1762,12 +1762,26 @@ func (a *App) resolveRestorePBS(pbsID string) (*Config, error) {
+ 		}
+ 		// Build a Config with the ticket + non-secret connection params.
+ 		cfg := &Config{
+-			BaseURL:         ticket.BaseURL,
+-			CertFingerprint: ticket.CertFingerprint,
+-			Datastore:       ticket.Datastore,
+-			Namespace:       ticket.Namespace,
+-			Ticket:          ticket.Ticket,
+-			CSRFToken:       ticket.CSRFToken,
++			BaseURL:           ticket.BaseURL,
++			CertFingerprint:   ticket.CertFingerprint,
++			Datastore:         ticket.Datastore,
++			Namespace:         ticket.Namespace,
++			Ticket:            ticket.Ticket,
++			CSRFToken:         ticket.CSRFToken,
++			EncryptionKeyFile: ticket.EncryptionKeyFile,
++		}
++		// A service older than the GUI does not send the key path: fall back
++		// to the hydrated (sanitized) config, which keeps it.
++		if cfg.EncryptionKeyFile == "" {
++			if srv, err := a.config.GetPBSServer(pbsID); err == nil {
++				cfg.EncryptionKeyFile = srv.EncryptionKeyFile
++			}
++		}
++		// Chunks are decrypted here, in the GUI process: without this every
++		// read of an encrypted snapshot failed with "no encryption key was
++		// provided" (rdemsystems/NimbusBackupClient#13).
++		if err := cfg.loadCryptConfig(); err != nil {
++			return nil, err
+ 		}
+ 		return cfg, nil
+ 	}
+diff --git a/gui/service_api.go b/gui/service_api.go
+index 68b8b6f..1a77cb0 100644
+--- a/gui/service_api.go
++++ b/gui/service_api.go
+@@ -313,9 +313,9 @@ func (a *App) TestPBSServerForAPI(id string, draft map[string]interface{}) error
+ // connection parameters. The GUI uses the ticket for restore/listing
+ // operations and never sees the PBS credentials:
+ //   - user/password servers: classic username/password ticket;
+-//   - API-token servers: the token ID + secret are exchanged at
+-//     /access/ticket (the same endpoint the PBS web UI uses for token login),
+-//     yielding a cookie ticket the GUI can use without the secret.
++//   - API-token servers: PBS issues no ticket for a token, so the ticket is
++//     minted from the username/password also stored on the entry; a
++//     token-only entry can back up but not be browsed from the GUI.
+ func (a *App) MintPBSTicketForAPI(id string) (*api.PBSTicket, error) {
+ 	srv, err := a.config.GetPBSServer(id)
+ 	if err != nil {
+@@ -325,10 +325,15 @@ func (a *App) MintPBSTicketForAPI(id string) (*api.PBSTicket, error) {
+ 	cfg := srv.ToConfig()
+ 
+ 	if cfg.AuthID != "" {
+-		// Token server: mint the ticket from the token itself.
++		// Token server: PBS does not issue a ticket for an API token, so the
++		// ticket comes from the user/password stored next to the token. Say so
++		// instead of ObtainTicket's bare "username and password are required".
+ 		if cfg.Secret == "" {
+ 			return nil, fmt.Errorf("server %q: missing secret", srv.ID)
+ 		}
++		if cfg.Username == "" || cfg.Password == "" {
++			return nil, fmt.Errorf("server %q: browsing and restoring in Service Mode need the PBS username and password on this server entry (PBS cannot issue a session ticket for an API token)", srv.ID)
++		}
+ 		client := &pbscommon.PBSClient{
+ 			BaseURL:         cfg.BaseURL,
+ 			CertFingerPrint: cfg.CertFingerprint,
+@@ -360,6 +365,8 @@ func (a *App) MintPBSTicketForAPI(id string) (*api.PBSTicket, error) {
+ 		CertFingerprint: cfg.CertFingerprint,
+ 		Datastore:       cfg.Datastore,
+ 		Namespace:       cfg.Namespace,
++		// The key path, never the key: same exposure as the sanitized config.
++		EncryptionKeyFile: srv.EncryptionKeyFile,
+ 	}, nil
+ }
+ 
+diff --git a/pbscommon/didx_reader.go b/pbscommon/didx_reader.go
+index 202de4d..30a1308 100644
+--- a/pbscommon/didx_reader.go
++++ b/pbscommon/didx_reader.go
+@@ -2,6 +2,8 @@ package pbscommon
+ 
+ import (
+ 	"container/list"
++	"crypto/sha256"
++	"encoding/hex"
+ 	"errors"
+ 	"fmt"
+ 	"io"
+@@ -98,7 +100,7 @@ func (r *DIDXReaderAt) chunkAt(ci int) ([]byte, error) {
+ 	// id_key-salted digest for an encrypted snapshot (see PBSClient.ChunkDigest).
+ 	// A mismatch means a corrupted or tampered chunk — fail rather than serve
+ 	// wrong data.
+-	if r.pbs.ChunkDigestHex(chunk) != digest {
++	if r.pbs.ChunkDigestHex(chunk) != digest && !legacyEncryptedDigest(r.pbs, chunk, digest) {
+ 		return nil, fmt.Errorf("chunk %s (index %d): content hash mismatch", digest, ci)
+ 	}
+ 	r.cache.put(ci, chunk)
+@@ -198,3 +200,18 @@ func (c *chunkCache) put(idx int, data []byte) {
+ 		delete(c.items, oldest.Value.(*chunkCacheEntry).idx)
+ 	}
+ }
++
++// legacyEncryptedDigest accepts an encrypted snapshot's chunk indexed under the
++// bare sha256(plaintext) instead of sha256(plaintext || id_key). The GUI and
++// service directory backup of 0.4.1 and 0.4.2 wrote such snapshots
++// (rdemsystems/NimbusBackupClient#13); without this they could not be restored
++// at all. Accepting it keeps the check meaningful: the bare sha256 still binds
++// the chunk to the index, and an encrypted chunk has also passed AES-GCM
++// authentication under the key on its way here.
++func legacyEncryptedDigest(pbs *PBSClient, chunk []byte, digest string) bool {
++	if pbs.Crypt == nil {
++		return false
++	}
++	sum := sha256.Sum256(chunk)
++	return hex.EncodeToString(sum[:]) == digest
++}
+diff --git a/pbscommon/didx_reader_test.go b/pbscommon/didx_reader_test.go
+index a0a76b1..c47bba0 100644
+--- a/pbscommon/didx_reader_test.go
++++ b/pbscommon/didx_reader_test.go
+@@ -454,6 +454,47 @@ func TestDIDXReaderAtEncryptedArchive(t *testing.T) {
+ 	}
+ }
+ 
++// The GUI/service directory backup of 0.4.1 and 0.4.2 encrypted its chunks but
++// indexed them under the bare SHA-256 (rdemsystems/NimbusBackupClient#13). Such
++// snapshots must stay restorable with the key.
++func TestDIDXReaderAtLegacyEncryptedArchive(t *testing.T) {
++	crypt := testCryptConfig(t)
++	payloads := payloadsOf(3, 128)
++	a := makeDIDX(t, nil, payloads...) // bare SHA-256 digests...
++	want := bytes.Join(payloads, nil)
++
++	f := newFakePBSWithDIDX(t, "legacy.didx", a, crypt) // ...over encrypted blobs
++	r, _, err := f.NewDIDXReaderAt("legacy.didx", 8, nil)
++	if err != nil {
++		t.Fatalf("NewDIDXReaderAt: %v", err)
++	}
++	got := make([]byte, len(want))
++	if _, err := r.ReadAt(got, 0); err != nil && !errors.Is(err, io.EOF) {
++		t.Fatalf("ReadAt: %v", err)
++	}
++	if !bytes.Equal(got, want) {
++		t.Error("decrypted stream differs from the original chunks")
++	}
++}
++
++// The legacy fallback must not turn the integrity check off.
++func TestDIDXReaderAtLegacyEncryptedArchiveRejectsMismatch(t *testing.T) {
++	crypt := testCryptConfig(t)
++	payloads := payloadsOf(2, 64)
++	a := makeDIDX(t, nil, payloads...)
++	f := newFakePBSWithDIDX(t, "legacy.didx", a, crypt)
++	f.corrupt[a.order[0]] = bytes.Repeat([]byte{0xAB}, len(payloads[0]))
++
++	r, _, err := f.NewDIDXReaderAt("legacy.didx", 4, nil)
++	if err != nil {
++		t.Fatalf("NewDIDXReaderAt: %v", err)
++	}
++	_, err = r.ReadAt(make([]byte, 8), 0)
++	if err == nil || !strings.Contains(err.Error(), "content hash mismatch") {
++		t.Errorf("error = %v, want a content hash mismatch", err)
++	}
++}
++
+ // Without the key, an encrypted archive must fail loudly rather than serve
+ // ciphertext.
+ func TestDIDXReaderAtEncryptedArchiveWithoutKey(t *testing.T) {
+-- 
+2.47.3
+

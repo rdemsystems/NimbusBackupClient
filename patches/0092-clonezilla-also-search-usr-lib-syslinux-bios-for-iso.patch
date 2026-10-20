@@ -1,0 +1,93 @@
+From 79d995575c77c9f75f36c72de47508488b0525b7 Mon Sep 17 00:00:00 2001
+From: Tiziano Bacocco <tizbac2@gmail.com>
+Date: Sun, 18 Oct 2026 18:39:47 +0200
+Subject: [PATCH 092/108] clonezilla: also search /usr/lib/syslinux/bios for
+ isohdpfx.bin
+
+Upstream: tizbac/proxmoxbackupclient_go@8cfdab2e69122e1a6823b3b45dca0934b665eae9
+---
+ Makefile            |  2 +-
+ PATCH-CLONEZILLA.md |  3 ++-
+ patch-clonezilla.sh | 25 ++++++++++++++++++++++---
+ 3 files changed, 25 insertions(+), 5 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index ed6fb0e..da6c79f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -219,7 +219,7 @@ $(CLONEZILLA_OUT): $(CLONEZILLA_STOCK) $(CLONEZILLA_PBSNBD) $(CLONEZILLA_DEPS)
+ 	@command -v xorriso >/dev/null || { echo "error: xorriso not installed (apt install xorriso)" >&2; exit 1; }
+ 	@command -v unsquashfs >/dev/null || { echo "error: unsquashfs not installed (apt install squashfs-tools)" >&2; exit 1; }
+ 	@command -v fakeroot >/dev/null || { echo "error: fakeroot not installed (apt install fakeroot)" >&2; exit 1; }
+-	@test -f /usr/lib/ISOLINUX/isohdpfx.bin || { echo "error: isohybrid MBR not found (apt install isolinux)" >&2; exit 1; }
++	@test -f /usr/lib/ISOLINUX/isohdpfx.bin || test -f /usr/lib/syslinux/bios/isohdpfx.bin || { echo "error: isohybrid MBR not found (apt install isolinux or syslinux-common)" >&2; exit 1; }
+ 	@echo "🧩 Patching Clonezilla ISO (PBS NBD scripts + main/first-boot menus)..."
+ 	PATCH_DIR="$(abspath clonezilla-patch/patches)" ISO_SQFS=/live/filesystem.squashfs \
+ 		./patch-clonezilla.sh -o "$@" "$(CLONEZILLA_STOCK)" \
+diff --git a/PATCH-CLONEZILLA.md b/PATCH-CLONEZILLA.md
+index 249e83b..560f98c 100644
+--- a/PATCH-CLONEZILLA.md
++++ b/PATCH-CLONEZILLA.md
+@@ -58,7 +58,8 @@ removed on exit):
+   (7-zip), `isoinfo` (genisoimage) — for reading the volume id.
+ - `patch` — to apply the unified-diff menu patches.
+ - An isohybrid MBR prefix, normally
+-  `/usr/lib/ISOLINUX/isohdpfx.bin` (from the `syslinux`/`isolinux` packages).
++  `/usr/lib/ISOLINUX/isohdpfx.bin` or `/usr/lib/syslinux/bios/isohdpfx.bin`
++  (from the `syslinux`/`isolinux` packages); the script searches both paths.
+ 
+ ## Usage
+ 
+diff --git a/patch-clonezilla.sh b/patch-clonezilla.sh
+index 486c27e..4f600e0 100755
+--- a/patch-clonezilla.sh
++++ b/patch-clonezilla.sh
+@@ -40,7 +40,9 @@ Env overrides:
+   ISO_BIOS_LOAD         BIOS boot-load-size                 (default 4)
+   ISO_UEFI_IMG          UEFI El Torito image path           (default boot/grub/efi.img)
+   ISO_UEFI_LOAD         UEFI boot-load-size                 (default 6912)
+-  ISO_MBR_SRC           isohybrid MBR prefix file           (default /usr/lib/ISOLINUX/isohdpfx.bin)
++  ISO_MBR_SRC           isohybrid MBR prefix file           (default: first found of
++                                 /usr/lib/ISOLINUX/isohdpfx.bin,
++                                 /usr/lib/syslinux/bios/isohdpfx.bin)
+   ISO_PARTITION_OFFSET  partition start LBA                 (default 16)
+   ISO_PARTITION_HD_CYL  heads per cylinder                  (default 64)
+   ISO_PARTITION_SEC_HD  sectors per head                    (default 32)
+@@ -58,7 +60,17 @@ BIOS_CAT="${ISO_BIOS_CAT:-syslinux/boot.cat}"
+ BIOS_LOAD="${ISO_BIOS_LOAD:-4}"
+ UEFI_IMG="${ISO_UEFI_IMG:-boot/grub/efi.img}"
+ UEFI_LOAD="${ISO_UEFI_LOAD:-6912}"
+-MBR_SRC="${ISO_MBR_SRC:-/usr/lib/ISOLINUX/isohdpfx.bin}"
++# isohybrid MBR prefix: explicit env wins, else search common locations
++# (isolinux package vs syslinux-common/syslinux package layout).
++if [ -n "${ISO_MBR_SRC:-}" ]; then
++  MBR_SRC="$ISO_MBR_SRC"
++else
++  MBR_SRC=""
++  for candidate in /usr/lib/ISOLINUX/isohdpfx.bin /usr/lib/syslinux/bios/isohdpfx.bin; do
++    if [ -f "$candidate" ]; then MBR_SRC="$candidate"; break; fi
++  done
++  MBR_SRC="${MBR_SRC:-/usr/lib/ISOLINUX/isohdpfx.bin}"
++fi
+ PART_OFFSET="${ISO_PARTITION_OFFSET:-16}"
+ PART_HD_CYL="${ISO_PARTITION_HD_CYL:-64}"
+ PART_SEC_HD="${ISO_PARTITION_SEC_HD:-32}"
+@@ -82,7 +94,14 @@ if [ ${#POSITIONAL[@]} -ge 2 ]; then FILES=( "${POSITIONAL[@]:1}" ); else FILES=
+ [ -f "$IN" ] || { echo "error: input ISO not found: $IN" >&2; exit 1; }
+ [ ${#FILES[@]} -gt 0 ] || { echo "error: at least one FILE to inject is required" >&2; usage; }
+ for f in "${FILES[@]}"; do [ -f "$f" ] || { echo "error: not a file: $f" >&2; exit 1; }; done
+-[ -f "$MBR_SRC" ] || { echo "error: isohybrid MBR prefix not found: $MBR_SRC" >&2; exit 1; }
++[ -f "$MBR_SRC" ] || {
++  if [ -z "${ISO_MBR_SRC:-}" ]; then
++    echo "error: isohybrid MBR prefix not found (tried /usr/lib/ISOLINUX/isohdpfx.bin and /usr/lib/syslinux/bios/isohdpfx.bin; apt install isolinux or syslinux-common, or set ISO_MBR_SRC)" >&2
++  else
++    echo "error: isohybrid MBR prefix not found: $MBR_SRC" >&2
++  fi
++  exit 1
++}
+ command -v 7z >/dev/null 2>&1 || { echo "error: 7z not found (required to extract the ISO tree)" >&2; exit 1; }
+ 
+ # A patch may declare, in its header (anything before the first "---" line is
+-- 
+2.47.3
+

@@ -1,0 +1,140 @@
+From 5b71e9e6d00884c577ac6b8bbb38039bd5063516 Mon Sep 17 00:00:00 2001
+From: mjb-is <mjb-is@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 21:34:15 +0100
+Subject: [PATCH 082/108] CLIs: report errors on stderr, never in a message box
+
+proxmoxbackup-directory and proxmoxbackup-machine showed a Windows
+message box (dialog.Error) for missing options and when another backup
+job held the process lock. From Task Scheduler, a service or any other
+unattended run the box waits for a click nobody gives, so the job hangs
+instead of failing. directorybackup also carried on after the
+missing-options box with the invalid configuration, because only the
+non-Windows branch exited.
+
+Both programs now print the message to stderr and exit non-zero on every
+platform: 1 for missing or invalid options (followed by the option
+list), 2 when another job is running, as before. Exit codes are what a
+scheduler can act on.
+
+The message boxes inside machinebackuplib (disk open failures) are left
+alone here, since the GUI shares that code.
+
+Tested on Windows 10: both programs, run with no options and with the
+process lock held by another process, print to stderr and exit 1 and 2
+without opening a window. Vet and build clean for windows and linux;
+directorybackup tests pass.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JSSBMF6hRk92jsHCMKgDRx
+Upstream: tizbac/proxmoxbackupclient_go@922cba81935def0021f848288c0aecec539ead1f
+---
+ directorybackup/main.go | 23 ++++++++---------------
+ machinebackup/main.go   | 20 ++++++--------------
+ 2 files changed, 14 insertions(+), 29 deletions(-)
+
+diff --git a/directorybackup/main.go b/directorybackup/main.go
+index e87b6ad..6f218f1 100644
+--- a/directorybackup/main.go
++++ b/directorybackup/main.go
+@@ -13,7 +13,6 @@ import (
+ 	"os"
+ 	"path/filepath"
+ 	"pbscommon"
+-	"runtime"
+ 	"snapshot"
+ 	"strings"
+ 	"sync"
+@@ -21,7 +20,6 @@ import (
+ 	"time"
+ 
+ 	"github.com/alphadose/haxmap"
+-	"github.com/tawesoft/golib/v2/dialog"
+ )
+ 
+ var defaultMailSubjectTemplate = "Backup {{.Status}}"
+@@ -170,19 +168,14 @@ func main() {
+ 
+ 	cfg := loadConfig()
+ 
++	// Errors go to stderr with a non-zero exit, never a message box: a box
++	// waits for a click that an unattended scheduled run never gets (and on
++	// Windows the run used to carry on after it with the invalid options).
+ 	if ok := cfg.valid(); !ok {
+-		if runtime.GOOS == "windows" {
+-			usage := "All options are mandatory:\n"
+-			flag.VisitAll(func(f *flag.Flag) {
+-				usage += "-" + f.Name + " " + f.Usage + "\n"
+-			})
+-			_ = dialog.Error(usage)
+-		} else {
+-			fmt.Println("All options are mandatory")
+-
+-			flag.PrintDefaults()
+-			os.Exit(1)
+-		}
++		fmt.Fprintln(os.Stderr, "Missing or invalid options. Options:")
++		flag.CommandLine.SetOutput(os.Stderr)
++		flag.PrintDefaults()
++		os.Exit(1)
+ 	}
+ 
+ 	// Without -certfingerprint, fetch the fingerprint the server presents and
+@@ -208,7 +201,7 @@ func main() {
+ 	lock_ok := L.AcquireProcessLock()
+ 	if !lock_ok {
+ 
+-		_ = dialog.Error("Backup jobs need to run exclusively, please wait until the previous job has finished")
++		fmt.Fprintln(os.Stderr, "Another backup job is running; backup jobs run one at a time. Try again when it has finished.")
+ 		os.Exit(2)
+ 	}
+ 	defer L.ReleaseProcessLock()
+diff --git a/machinebackup/main.go b/machinebackup/main.go
+index 0e8d970..4a02500 100644
+--- a/machinebackup/main.go
++++ b/machinebackup/main.go
+@@ -9,9 +9,7 @@ import (
+ 
+ 	"machinebackuplib"
+ 
+-	"github.com/tawesoft/golib/v2/dialog"
+ 	"os"
+-	"runtime"
+ )
+ 
+ type arrayFlags []string
+@@ -185,18 +183,12 @@ func main() {
+ 
+ 	cfg := loadConfig()
+ 
++	// Errors go to stderr with a non-zero exit, never a message box: a box
++	// waits for a click that an unattended scheduled run never gets.
+ 	if ok := cfg.Valid(); !ok {
+-		if runtime.GOOS == "windows" {
+-			usage := "All options are mandatory:\n"
+-			flag.VisitAll(func(f *flag.Flag) {
+-				usage += "-" + f.Name + " " + f.Usage + "\n"
+-			})
+-			_ = dialog.Error(usage)
+-		} else {
+-			fmt.Println("All options are mandatory")
+-
+-			flag.PrintDefaults()
+-		}
++		fmt.Fprintln(os.Stderr, "Missing or invalid options. Options:")
++		flag.CommandLine.SetOutput(os.Stderr)
++		flag.PrintDefaults()
+ 		os.Exit(1)
+ 	}
+ 
+@@ -221,7 +213,7 @@ func main() {
+ 	lock_ok := L.AcquireProcessLock()
+ 	if !lock_ok {
+ 
+-		_ = dialog.Error("Backup jobs need to run exclusively, please wait until the previous job has finished")
++		fmt.Fprintln(os.Stderr, "Another backup job is running; backup jobs run one at a time. Try again when it has finished.")
+ 		os.Exit(2)
+ 	}
+ 	defer L.ReleaseProcessLock()
+-- 
+2.47.3
+
