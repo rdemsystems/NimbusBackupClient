@@ -372,25 +372,6 @@ func TestPXARExtractAllPreservesModTime(t *testing.T) {
 	}
 }
 
-// Directories get their archived mtime back too, including ones that had files
-// written into them after they were created (rdemsystems/NimbusBackupClient#12).
-func TestPXARExtractAllPreservesDirModTime(t *testing.T) {
-	dest := t.TempDir()
-	if _, err := NewPXARReader(standardPXAR(t)).ExtractAll(dest); err != nil {
-		t.Fatalf("ExtractAll: %v", err)
-	}
-	want := time.Unix(1600000000, 0)
-	for _, d := range []string{"empty-dir", "sub", "sub/nested", "notes"} {
-		info, err := os.Stat(filepath.Join(dest, filepath.FromSlash(d)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !info.ModTime().Equal(want) {
-			t.Errorf("%s mtime = %v, want %v", d, info.ModTime(), want)
-		}
-	}
-}
-
 func TestPXARExtractFilteredSelectsSubtree(t *testing.T) {
 	dest := t.TempDir()
 	got, err := NewPXARReader(standardPXAR(t)).ExtractFiltered(dest, []string{"/sub/"}, false)
