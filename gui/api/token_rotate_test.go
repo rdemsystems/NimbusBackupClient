@@ -275,12 +275,29 @@ func TestTokenRotatorRotatesOnInterval(t *testing.T) {
 		t.Fatal("rotator never replaced the token")
 	}
 
-	// The file must always carry the token the server is enforcing, or the
-	// next GUI to fetch it would authenticate with a dead secret.
-	if b, err := os.ReadFile(path); err != nil {
-		t.Fatalf("read token file: %v", err)
-	} else if strings.TrimSpace(string(b)) != rotated {
-		t.Errorf("file holds %q, server enforces %q", strings.TrimSpace(string(b)), rotated)
+	// The file must carry the token the server is enforcing, or the next GUI
+	// to fetch it would authenticate with a dead secret. Rotate installs the
+	// token on the server first and writes the file right after (the previous
+	// token stays accepted meanwhile), so the file may still be mid-write the
+	// instant the new token is seen: wait for it, briefly.
+	var inFile string
+	for {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read token file: %v", err)
+		}
+		inFile = strings.TrimSpace(string(b))
+		if cur := currentToken(s); inFile == cur {
+			rotated = cur // a later rotation may have run meanwhile
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if inFile != rotated {
+		t.Errorf("file holds %q, server enforces %q", inFile, rotated)
 	}
 	st, err := os.Stat(path)
 	if err != nil {
