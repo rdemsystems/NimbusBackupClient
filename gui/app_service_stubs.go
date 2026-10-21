@@ -27,6 +27,7 @@ func (a *App) GetConfigWithHostname() map[string]interface{} {
 		// Reported (path only, never the key) so the service's own status/config
 		// output shows whether scheduled backups are encrypted.
 		result["encryption_key_file"] = a.config.EncryptionKeyFile
+		result["parallel"] = a.config.Parallel
 	}
 
 	return result

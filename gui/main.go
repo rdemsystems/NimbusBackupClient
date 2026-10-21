@@ -662,7 +662,10 @@ func (a *App) GetConfigWithHostname() map[string]interface{} {
 		"backupdir":           cfg.BackupDir,
 		"backup-id":           cfg.BackupID,
 		"usevss":              cfg.UseVSS,
-		"hostname":            hostname,
+		// Folders backed up at the same time: without it the form showed 1
+		// whatever was saved.
+		"parallel": cfg.Parallel,
+		"hostname": hostname,
 	}
 
 	// Pre-fill backup-id with hostname if empty
