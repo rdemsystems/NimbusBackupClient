@@ -71,7 +71,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
 ## ✨ Fonctionnalités
 
 ### Interface graphique (recommandée)
-- **🌍 Multilingue** — interface en français, anglais, italien, allemand et polonais
+- **🌍 Multilingue** — interface en français, anglais, italien, allemand, polonais et portugais du Brésil
 - Configuration conviviale avec test de connexion (jeton API ou identifiant/mot de passe)
 - Progression de sauvegarde en temps réel avec débit et temps restant, annulation à tout moment, onglet « En cours »
 - VSS (Volume Shadow Copy) pour des sauvegardes cohérentes : un seul snapshot pour toute une sauvegarde multi-dossiers, une copie par volume
@@ -234,6 +234,14 @@ Ce dépôt ajoute par-dessus une série de patchs documentée ([`patches/`](patc
 - **La chaîne de release** — attestation de provenance, empreintes, rapports VirusTotal.
 
 Nous refusionnons régulièrement le projet d'origine ; ses propres releases sont publiées sur [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go/releases).
+
+## 🙌 Contributeurs
+
+Merci à toutes celles et ceux qui ont aidé Nimbus Backup :
+
+- [Tácio Andrade](https://github.com/Tacioandrade) ([MultiTI](https://www.multiti.com.br)) — traduction en portugais du Brésil ([#16](https://github.com/rdemsystems/NimbusBackupClient/pull/16)).
+
+Le code partagé avec le projet d'origine vient aussi de [ses contributeurs](https://github.com/tizbac/proxmoxbackupclient_go/graphs/contributors). Les contributions sont bienvenues : voir les [issues](https://github.com/rdemsystems/NimbusBackupClient/issues) ouvertes, ou proposer une pull request sur `master`.
 
 ## ⭐ Étoiles
 
