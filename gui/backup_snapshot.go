@@ -98,7 +98,7 @@ func runOneSnapshotBackup(opts BackupOptions) error {
 		run.newchunk.Store(0)
 		run.reusechunk.Store(0)
 		run.failedchunk.Store(0)
-		s, err := openSnapshotSession(client, &run.newchunk, &run.reusechunk, &run.failedchunk, opts.ExcludeList)
+		s, err := openSnapshotSession(opts.Ctx, client, &run.newchunk, &run.reusechunk, &run.failedchunk, opts.ExcludeList)
 		if err != nil {
 			return err
 		}
@@ -153,6 +153,9 @@ func runOneSnapshotBackup(opts BackupOptions) error {
 				size, err = s.writeArchive(names[i], dir, dir, false, folderProgress, folderStats)
 			}
 			if err != nil {
+				if cancelled() {
+					return machinebackuplib.ErrCancelled
+				}
 				return fmt.Errorf("%s: %w", dir, err)
 			}
 			archived = append(archived, size)
@@ -164,6 +167,9 @@ func runOneSnapshotBackup(opts BackupOptions) error {
 			return machinebackuplib.ErrCancelled
 		}
 		if err := s.close(); err != nil {
+			if cancelled() {
+				return machinebackuplib.ErrCancelled
+			}
 			return err
 		}
 		finishCfg := retry.DefaultConfig()

@@ -45,11 +45,15 @@ type snapshotSession struct {
 	catalog                           *pbscommon.SnapshotCatalog
 	catalogChunk                      ChunkState
 	excludeList                       []string
+
+	// cancelCtx is the Stop button's context (nil = never cancelled): the
+	// archive writes and upload retries stop as soon as it is done.
+	cancelCtx context.Context
 }
 
 // openSnapshotSession starts the backup session on client and creates the
-// snapshot's catalog index.
-func openSnapshotSession(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, excludeList []string) (*snapshotSession, error) {
+// snapshot's catalog index. A cancel of cancelCtx stops it mid-archive.
+func openSnapshotSession(cancelCtx context.Context, client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, excludeList []string) (*snapshotSession, error) {
 	client.Connect(false, "host")
 	s := &snapshotSession{
 		client:      client,
@@ -58,8 +62,10 @@ func openSnapshotSession(client *pbscommon.PBSClient, newchunk, reusechunk, fail
 		failedchunk: failedchunk,
 		knownChunks: haxmap.New[string, bool](),
 		excludeList: excludeList,
+		cancelCtx:   cancelCtx,
 	}
 	s.catalogChunk.Init(newchunk, reusechunk, failedchunk, s.knownChunks, nil, &atomic.Uint64{}, nil, "")
+	s.catalogChunk.cancelCtx = cancelCtx
 	var err error
 	if s.catalogChunk.wrid, err = client.CreateDynamicIndex("catalog.pcat1.didx"); err != nil {
 		return nil, err
@@ -100,6 +106,7 @@ func (s *snapshotSession) writeArchive(archiveName, backupdir, originalPath stri
 	archive.Catalog = s.catalog
 	archive.ExcludeList = s.excludeList
 	archive.ExcludeRoot = originalPath // logical root for VSS-safe absolute-pattern matching
+	archive.Cancelled = s.cancelled
 
 	// Inject backup metadata into the PXAR archive root
 	hostname, _ := os.Hostname()
@@ -137,6 +144,7 @@ func (s *snapshotSession) writeArchive(archiveName, backupdir, originalPath stri
 
 	pxarChunk := ChunkState{}
 	pxarChunk.Init(s.newchunk, s.reusechunk, s.failedchunk, s.knownChunks, progress, totalSize, onStats, backupdir)
+	pxarChunk.cancelCtx = s.cancelCtx
 
 	pxarChunk.wrid, err = client.CreateDynamicIndex(archive.ArchiveName)
 	if err != nil {
@@ -180,6 +188,11 @@ func (s *snapshotSession) writeArchive(archiveName, backupdir, originalPath stri
 		return 0, fmt.Errorf("backup produced 0 bytes for %s — directory may be empty, inaccessible, or all files were excluded", backupdir)
 	}
 
+	// A cancel that lands after the last archive write: stop before closing
+	// the index, so the session is dropped with nothing committed.
+	if s.cancelled() {
+		return 0, pbscommon.ErrWriteCancelled
+	}
 	if err = pxarChunk.EOF(client); err != nil {
 		return 0, err
 	}
@@ -230,9 +243,17 @@ func (s *snapshotSession) writeArchive(archiveName, backupdir, originalPath stri
 	return pxarChunk.pos, nil
 }
 
+// cancelled reports whether the Stop button was pressed.
+func (s *snapshotSession) cancelled() bool {
+	return s.cancelCtx != nil && s.cancelCtx.Err() != nil
+}
+
 // close ends the catalog listing every archive written and uploads the
 // manifest. The caller then finishes the session (client.Finish).
 func (s *snapshotSession) close() error {
+	if s.cancelled() {
+		return pbscommon.ErrWriteCancelled
+	}
 	if err := s.catalog.Close(); err != nil {
 		return err
 	}
