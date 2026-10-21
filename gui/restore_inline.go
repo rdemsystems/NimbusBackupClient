@@ -253,21 +253,21 @@ func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []
 		return nil, nil, false
 	}
 
-	catEntries, perr := pbscommon.ParseCatalog(buf)
+	archives, perr := pbscommon.ParseCatalogArchives(buf)
 	if perr != nil {
 		writeBackupLog(fmt.Sprintf("Catalog parse failed for %s@%d: %v, falling back", opts.BackupID, opts.SnapshotTime.Unix(), perr))
 		return nil, nil, false
 	}
 
-	entries = make([]SnapshotEntry, 0, len(catEntries))
-	metaPresent := false
-	for _, e := range catEntries {
-		entries = append(entries, SnapshotEntry{Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: e.ModTime})
-		// The catalog lists the sidecar as a root-level file (no slash in path)
-		// iff the archive actually contains it.
-		if !e.IsDir && (e.Path == BackupMetaFilename || e.Path == LegacyBackupMetaFilename) {
-			metaPresent = true
+	// The catalog lists the sidecar as a root-level file (no slash in path)
+	// iff the archive actually contains it.
+	hasMeta := func(es []pbscommon.CatalogEntry) bool {
+		for _, e := range es {
+			if !e.IsDir && (e.Path == BackupMetaFilename || e.Path == LegacyBackupMetaFilename) {
+				return true
+			}
 		}
+		return false
 	}
 
 	// Read the meta sidecar ONLY when the catalog says it is present. The sidecar
@@ -279,12 +279,49 @@ func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []
 	// metadata chunks across the whole stream — the reported search hang at ~96%.
 	// The catalog is built from the same tree (pxar.go appends the virtual file to
 	// catalog_files), so its presence here is authoritative; absence => nil meta.
-	if metaPresent {
-		meta = readSnapshotMetaCheap(opts, cancel)
+	if len(archives) == 1 && archives[0].Name == legacyArchiveName {
+		catEntries := archives[0].Entries
+		entries = make([]SnapshotEntry, 0, len(catEntries))
+		for _, e := range catEntries {
+			entries = append(entries, SnapshotEntry{Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: e.ModTime})
+		}
+		if hasMeta(catEntries) {
+			meta = readSnapshotMetaCheap(opts, legacyArchiveName, cancel)
+		}
+	} else {
+		// One archive per folder (or a snapshot of the official client): each
+		// archive's tree goes under a folder named after its label, and the
+		// metadata says which folder each came from.
+		meta = &BackupMeta{BackupID: opts.BackupID}
+		var origins []ArchiveOrigin
+		for _, a := range archives {
+			if !strings.HasSuffix(a.Name, ".pxar.didx") {
+				continue
+			}
+			label := archiveLabel(a.Name)
+			origin := ArchiveOrigin{Archive: a.Name, Label: label}
+			if hasMeta(a.Entries) {
+				if m := readSnapshotMetaCheap(opts, a.Name, cancel); m != nil {
+					origin.OriginalPath = m.OriginalPath
+					if len(origins) == 0 || meta.Hostname == "" {
+						// Host, OS and times are the same for every archive.
+						shared := *m
+						meta = &shared
+					}
+				}
+			}
+			origins = append(origins, origin)
+			entries = append(entries, SnapshotEntry{Path: label, IsDir: true})
+			for _, e := range a.Entries {
+				entries = append(entries, SnapshotEntry{Path: label + "/" + e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: e.ModTime})
+			}
+		}
+		meta.OriginalPath = ""
+		meta.Archives = origins
 	}
 
-	writeBackupLog(fmt.Sprintf("Catalog listing for %s@%d: %d entries via fast path (%d catalog bytes)",
-		opts.BackupID, opts.SnapshotTime.Unix(), len(entries), size))
+	writeBackupLog(fmt.Sprintf("Catalog listing for %s@%d: %d entries in %d archive(s) via fast path (%d catalog bytes)",
+		opts.BackupID, opts.SnapshotTime.Unix(), len(entries), len(archives), size))
 	return entries, meta, true
 }
 
@@ -292,9 +329,9 @@ func listSnapshotViaCatalog(opts RestoreOptions, cancel func() bool) (entries []
 // PXARReader.ReadVirtualFile stops walking as soon as the root-level sidecar is
 // found, and since it is written before any real file content the walk fetches
 // just the first chunk(s). Best-effort: any failure returns nil.
-func readSnapshotMetaCheap(opts RestoreOptions, cancel func() bool) *BackupMeta {
+func readSnapshotMetaCheap(opts RestoreOptions, archiveName string, cancel func() bool) *BackupMeta {
 	var meta *BackupMeta
-	err := withSnapshotReader(opts, "backup.pxar.didx", "MetaCheap", nil, cancel, func(reader *pbscommon.PXARReader) error {
+	err := withSnapshotReader(opts, archiveName, "MetaCheap", nil, cancel, func(reader *pbscommon.PXARReader) error {
 		meta = tryReadBackupMeta(reader)
 		return nil
 	})
@@ -431,7 +468,7 @@ func tryReadBackupMeta(reader *pbscommon.PXARReader) *BackupMeta {
 // snapshot, the meta is already there and no download is performed. Otherwise
 // the archive is downloaded + assembled (same cost as a listing).
 func ReadSnapshotMetaInline(opts RestoreOptions, forceRefresh bool) (*BackupMeta, error) {
-	if opts.BaseURL == "" || opts.AuthID == "" || opts.Secret == "" {
+	if opts.BaseURL == "" || ((opts.AuthID == "" || opts.Secret == "") && opts.Ticket == "") {
 		return nil, fmt.Errorf("PBS connection parameters required")
 	}
 	if opts.BackupID == "" {
@@ -494,7 +531,7 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 		if meta == nil {
 			return nil, fmt.Errorf("in-place restore not possible: this snapshot has no metadata (.proxmox_backup_client_meta.json missing), choose \"alternate location\" instead")
 		}
-		if meta.OriginalPath == "" {
+		if meta.OriginalPath == "" && len(meta.Archives) == 0 {
 			return nil, fmt.Errorf("in-place restore not possible: the original path is not set in the metadata")
 		}
 		if meta.OS != "" && meta.OS != runtime.GOOS {
@@ -508,6 +545,25 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 			if meta.Hostname != "" && !equalHostnames(meta.Hostname, localHost) {
 				return nil, fmt.Errorf("in-place restore blocked: backup from %q, current machine %q — tick \"force cross-host\" if intentional", meta.Hostname, localHost)
 			}
+		}
+		if len(meta.Archives) > 0 {
+			// One archive per folder: each goes back to its own folder.
+			for _, a := range meta.Archives {
+				if a.OriginalPath == "" {
+					return nil, fmt.Errorf("in-place restore not possible: the original folder of %s is not in its metadata", a.Label)
+				}
+			}
+			return func(snapshotPath string) string {
+				a, rest, ok := meta.archiveOf(snapshotPath)
+				if !ok {
+					return ""
+				}
+				root := filepath.Clean(a.OriginalPath)
+				if rest == "" {
+					return root
+				}
+				return filepath.Join(root, filepath.FromSlash(rest))
+			}, nil
 		}
 		// Materialize the original root once, with native separators.
 		root := filepath.Clean(meta.OriginalPath)
@@ -568,6 +624,87 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 	default:
 		return nil, fmt.Errorf("unknown restore mode: %q", string(mode))
 	}
+}
+
+// restoreMeta is the snapshot metadata a restore needs: the sidecar for an
+// in-place restore, else only which archives the snapshot holds. That comes
+// from the cache or the catalog (a few MB); a snapshot without a catalog is
+// of the original layout, so it is not walked for it.
+func restoreMeta(opts RestoreOptions, mode RestoreMode) (*BackupMeta, error) {
+	if mode == RestoreModeOriginal {
+		return ReadSnapshotMetaInline(opts, false)
+	}
+	key := buildSnapshotCacheKey(opts)
+	if cached, ok := loadSnapshotTreeCache(key); ok {
+		return cached.Meta, nil
+	}
+	entries, meta, ok := listSnapshotViaCatalog(opts, nil)
+	if !ok {
+		return nil, nil
+	}
+	if werr := saveSnapshotTreeCache(key, entries, meta); werr != nil {
+		writeBackupLog(fmt.Sprintf("Restore cache write failed: %v", werr))
+	}
+	return meta, nil
+}
+
+// archiveRestore is the restore of one archive of a snapshot: the archive,
+// the selection inside it (empty: all of it) and where its paths land.
+type archiveRestore struct {
+	archive  string
+	includes []string
+	rewriter pbscommon.PathRewriter
+}
+
+// restoreArchiveJobs splits a restore across the snapshot's archives. A
+// snapshot of the original layout is backup.pxar.didx alone. In one of
+// several archives, a selected path starts with its archive's label: the
+// label alone selects the whole archive, and no selection restores every
+// archive. rewriter maps snapshot paths (label included) to the disk.
+func restoreArchiveJobs(meta *BackupMeta, includePaths []string, rewriter pbscommon.PathRewriter) ([]archiveRestore, error) {
+	if meta == nil || len(meta.Archives) == 0 {
+		return []archiveRestore{{archive: legacyArchiveName, includes: includePaths, rewriter: rewriter}}, nil
+	}
+
+	selected := map[string][]string{}
+	whole := map[string]bool{}
+	includes := pbscommon.NormalizeIncludes(includePaths)
+	for _, inc := range includes {
+		a, rest, ok := meta.archiveOf(inc)
+		if !ok {
+			return nil, fmt.Errorf("%s is not in this snapshot", inc)
+		}
+		if rest == "" {
+			whole[a.Archive] = true
+		} else {
+			selected[a.Archive] = append(selected[a.Archive], rest)
+		}
+	}
+
+	var jobs []archiveRestore
+	for _, a := range meta.Archives {
+		var inc []string
+		switch {
+		case len(includes) == 0 || whole[a.Archive]:
+			// all of it
+		case len(selected[a.Archive]) > 0:
+			inc = selected[a.Archive]
+		default:
+			continue
+		}
+		label := a.Label
+		jobs = append(jobs, archiveRestore{
+			archive:  a.Archive,
+			includes: inc,
+			rewriter: func(archivePath string) string {
+				if archivePath == "" {
+					return rewriter(label)
+				}
+				return rewriter(label + "/" + archivePath)
+			},
+		})
+	}
+	return jobs, nil
 }
 
 // commonAncestorDir returns the longest path prefix shared by all includes,
@@ -660,15 +797,14 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		return fmt.Errorf("destination path required")
 	}
 
-	// In-place restores need the sidecar up front to validate before we burn
-	// time on the multi-GB download. Cheap if the snapshot was listed first.
-	var meta *BackupMeta
+	// The snapshot's archives: backup.pxar.didx alone, or one per folder
+	// (BackupMeta.Archives), whose paths then start with the archive's label.
+	// Cheap: the catalog, or the cache when the snapshot was listed first.
+	meta, err := restoreMeta(opts, mode)
+	if err != nil {
+		return fmt.Errorf("reading the sidecar for in-place restore: %w", err)
+	}
 	if mode == RestoreModeOriginal {
-		var err error
-		meta, err = ReadSnapshotMetaInline(opts, false)
-		if err != nil {
-			return fmt.Errorf("reading the sidecar for in-place restore: %w", err)
-		}
 		// Validate immediately so the user sees the cross-host / cross-OS
 		// refusal before any chunk is downloaded.
 		if _, err := buildPathRewriter(opts, meta); err != nil {
@@ -677,7 +813,11 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		// In-place implies overwrite. Files in OriginalPath are by definition
 		// candidates for replacement; skipping them would be confusing.
 		opts.Overwrite = true
-		writeBackupLog(fmt.Sprintf("In-place target: %s (host=%s, os=%s)", meta.OriginalPath, meta.Hostname, meta.OS))
+		target := meta.OriginalPath
+		for _, a := range meta.Archives {
+			target += " " + a.OriginalPath
+		}
+		writeBackupLog(fmt.Sprintf("In-place target: %s (host=%s, os=%s)", strings.TrimSpace(target), meta.Hostname, meta.OS))
 	}
 
 	progress(0.05, "Preparing restore...")
@@ -686,6 +826,11 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	// dest, cross-host refusal) fails fast. For alternate modes meta is unused;
 	// for in-place, meta was read above before download.
 	rewriter, err := buildPathRewriter(opts, meta)
+	if err != nil {
+		return err
+	}
+
+	jobs, err := restoreArchiveJobs(meta, opts.IncludePaths, rewriter)
 	if err != nil {
 		return err
 	}
@@ -700,8 +845,12 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	// The same blob carries each file's creation time, which a restore on
 	// Windows always puts back (like the modification time), so it is fetched
 	// there whether or not ACLs were asked for.
-	var aclMeta *BackupFileMeta
 	restoreCreated := runtime.GOOS == "windows"
+	type archiveResult struct {
+		extracted []pbscommon.PXARExtractedFile
+		aclMeta   *BackupFileMeta
+	}
+	results := make([]archiveResult, len(jobs))
 	if opts.RestoreACLs || restoreCreated {
 		aclClient := &pbscommon.PBSClient{
 			BaseURL: opts.BaseURL, CertFingerPrint: opts.CertFingerprint,
@@ -710,37 +859,42 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 			Manifest: pbscommon.BackupManifest{BackupID: opts.BackupID, BackupTime: opts.SnapshotTime.Unix()},
 		}
 		aclClient.Connect(true, "host")
-		if m, aerr := downloadBackupFileMeta(aclClient); aerr == nil {
-			aclMeta = m
+		for i, job := range jobs {
+			if m, aerr := downloadBackupFileMeta(aclClient, job.archive); aerr == nil {
+				results[i].aclMeta = m
+			}
 		}
 		aclClient.Close()
 	}
 
-	progress(0.20, "Downloading backup archive...")
 	// The .didx index is parsed lazily and its chunks are fetched on demand by
 	// pbscommon.NewDIDXReaderAt, so we walk the PXAR stream straight off the
 	// network reader and stream each file payload to its destination. Nothing is
-	// materialised on disk first.
+	// materialised on disk first. Each archive gets its share of 20-90%.
 	var extracted []pbscommon.PXARExtractedFile
-	err = withSnapshotReader(opts, "backup.pxar.didx", "Restore", func(done, total int) {
-		// Map chunk progress to the 0.20–0.80 portion of the overall bar.
-		if total == 0 {
-			return
+	for i, job := range jobs {
+		base, share := 0.20+0.70*float64(i)/float64(len(jobs)), 0.70/float64(len(jobs))
+		progress(base, fmt.Sprintf("Downloading backup archive %s...", job.archive))
+		err = withSnapshotReader(opts, job.archive, "Restore", func(done, total int) {
+			if total == 0 {
+				return
+			}
+			pct := base + share*0.85*(float64(done)/float64(total))
+			progress(pct, fmt.Sprintf("Downloading archive (%d/%d chunks)", done, total))
+		}, nil, func(reader *pbscommon.PXARReader) error {
+			progress(base+share*0.9, "Extracting files...")
+			es, eerr := reader.ExtractWithRewriter(job.rewriter, job.includes, opts.Overwrite)
+			if eerr != nil {
+				writeBackupLog(fmt.Sprintf("PXAR extraction failed: %v", eerr))
+				return fmt.Errorf("failed to extract archive: %v", eerr)
+			}
+			results[i].extracted = es
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		pct := 0.20 + 0.60*(float64(done)/float64(total))
-		progress(pct, fmt.Sprintf("Downloading archive (%d/%d chunks)", done, total))
-	}, nil, func(reader *pbscommon.PXARReader) error {
-		progress(0.85, "Extracting files...")
-		var eerr error
-		extracted, eerr = reader.ExtractWithRewriter(rewriter, opts.IncludePaths, opts.Overwrite)
-		if eerr != nil {
-			writeBackupLog(fmt.Sprintf("PXAR extraction failed: %v", eerr))
-			return fmt.Errorf("failed to extract archive: %v", eerr)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
+		extracted = append(extracted, results[i].extracted...)
 	}
 
 	successCount := 0
@@ -773,12 +927,15 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	// The extraction has already set the modification times, folders' last.
 	// Only writing a stream or EA below changes one, and it is set back.
 	restoreStreams := opts.RestoreADS && runtime.GOOS == "windows"
-	if aclMeta != nil {
-		entryIdx := buildFileMetaIndex(aclMeta)
-		applied, failed := 0, 0
-		cApplied, cFailed := 0, 0
-		sWritten, sSkipped, sFailed, eaFiles := 0, 0, 0, 0
-		for _, f := range extracted {
+	applied, failed := 0, 0
+	cApplied, cFailed := 0, 0
+	sWritten, sSkipped, sFailed, eaFiles := 0, 0, 0, 0
+	for _, r := range results {
+		if r.aclMeta == nil {
+			continue
+		}
+		entryIdx := buildFileMetaIndex(r.aclMeta)
+		for _, f := range r.extracted {
 			if f.Skipped || f.ArchivePath == "" {
 				continue
 			}
@@ -820,23 +977,23 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 			if !opts.RestoreACLs {
 				continue
 			}
-			if aerr := applyNTFSMetadata(f.Path, entry, aclMeta.SDDLs); aerr != nil {
+			if aerr := applyNTFSMetadata(f.Path, entry, r.aclMeta.SDDLs); aerr != nil {
 				failed++
 				writeBackupLog(fmt.Sprintf("NTFS metadata apply failed for %s: %v", f.Path, aerr))
 			} else {
 				applied++
 			}
 		}
-		if sWritten+sSkipped+sFailed+eaFiles > 0 {
-			writeBackupLog(fmt.Sprintf("Alternate data streams: %d restored, %d recorded by name only (not restored); extended attributes restored on %d files; %d files failed",
-				sWritten, sSkipped, eaFiles, sFailed))
-		}
-		if cApplied > 0 || cFailed > 0 {
-			writeBackupLog(fmt.Sprintf("Creation times: applied %d, failed %d", cApplied, cFailed))
-		}
-		if applied > 0 || failed > 0 {
-			writeBackupLog(fmt.Sprintf("NTFS ACLs/attributes: applied %d, failed %d", applied, failed))
-		}
+	}
+	if sWritten+sSkipped+sFailed+eaFiles > 0 {
+		writeBackupLog(fmt.Sprintf("Alternate data streams: %d restored, %d recorded by name only (not restored); extended attributes restored on %d files; %d files failed",
+			sWritten, sSkipped, eaFiles, sFailed))
+	}
+	if cApplied > 0 || cFailed > 0 {
+		writeBackupLog(fmt.Sprintf("Creation times: applied %d, failed %d", cApplied, cFailed))
+	}
+	if applied > 0 || failed > 0 {
+		writeBackupLog(fmt.Sprintf("NTFS ACLs/attributes: applied %d, failed %d", applied, failed))
 	}
 
 	progress(1.0, "Restore completed")

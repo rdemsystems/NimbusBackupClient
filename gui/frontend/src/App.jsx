@@ -181,6 +181,16 @@ function App() {
   const [restorePBSID, setRestorePBSID] = useState('')
   const [selectedSnapshot, setSelectedSnapshot] = useState(null) // { id, unix, time }
   const [snapshotMeta, setSnapshotMeta] = useState(null)         // .proxmox_backup_client_meta.json sidecar (null if legacy)
+  // Where the snapshot's files came from: original_path, or for a snapshot of
+  // one archive per folder (0.5) each archive's folder; '' when unknown.
+  const metaRoots = (m) => {
+    if (m?.original_path) return m.original_path
+    const archives = m?.archives || []
+    if (archives.length && archives.every(a => a.original_path)) {
+      return archives.map(a => a.original_path).join(', ')
+    }
+    return ''
+  }
   const [snapshotEntries, setSnapshotEntries] = useState([])     // flat list from backend
   const [expandedDirs, setExpandedDirs] = useState(new Set())     // expanded paths in tree
   const [selectedPaths, setSelectedPaths] = useState(new Set())   // selected entry paths
@@ -245,7 +255,7 @@ function App() {
   useEffect(() => {
     if (restoreMode !== 'original') return
     if (!snapshotMeta) { setRestoreMode('alternate_abs'); return }
-    if (!snapshotMeta.original_path) { setRestoreMode('alternate_abs'); return }
+    if (!metaRoots(snapshotMeta)) { setRestoreMode('alternate_abs'); return }
     if (systemInfo.os && snapshotMeta.os && systemInfo.os !== snapshotMeta.os) {
       setRestoreMode('alternate_abs')
     }
@@ -1542,7 +1552,7 @@ function App() {
   // Drives the disabled state of the in-place radio + its tooltip.
   const inPlaceBlocker = () => {
     if (!snapshotMeta) return 'inPlaceNoMeta'
-    if (!snapshotMeta.original_path) return 'inPlaceNoOriginalPath'
+    if (!metaRoots(snapshotMeta)) return 'inPlaceNoOriginalPath'
     if (systemInfo.os && snapshotMeta.os && systemInfo.os !== snapshotMeta.os) return 'inPlaceOsMismatch'
     return null
   }
@@ -1582,7 +1592,7 @@ function App() {
     // we wire a real modal — for the alpha phase it's enough and the message
     // is precise about what will happen.
     if (effectiveMode === 'original') {
-      const target = snapshotMeta?.original_path || '?'
+      const target = metaRoots(snapshotMeta) || '?'
       const msg = t('inPlaceConfirm').replace('{path}', target)
       // eslint-disable-next-line no-alert
       if (!window.confirm(msg)) {
@@ -1691,7 +1701,13 @@ function App() {
   // and the relative tree alone doesn't tell you which physical folder/drive a
   // file belonged to. Returns null when the snapshot has no meta sidecar.
   const absOriginPath = (archivePath) => {
-    const root = snapshotMeta?.original_path
+    let root = snapshotMeta?.original_path
+    if (snapshotMeta?.archives?.length) {
+      // One archive per folder: the path starts with the archive's label.
+      const [label, ...rest] = (archivePath || '').split('/')
+      root = snapshotMeta.archives.find(a => a.label === label)?.original_path
+      archivePath = rest.join('/')
+    }
     if (!root) return null
     const sep = (snapshotMeta?.os === 'windows' || root.includes('\\')) ? '\\' : '/'
     const base = root.endsWith(sep) ? root.slice(0, -1) : root
@@ -2876,7 +2892,7 @@ function App() {
               rowGap: '4px'
             }}>
               <strong>{t('metaOriginalPath') || 'Source d\'origine'}</strong>
-              <span style={{fontFamily: 'monospace'}}>{snapshotMeta.original_path || '—'}</span>
+              <span style={{fontFamily: 'monospace'}}>{metaRoots(snapshotMeta) || '—'}</span>
               <strong>{t('metaHostname') || 'Machine'}</strong>
               <span>{snapshotMeta.hostname || '—'}{snapshotMeta.os ? ` (${snapshotMeta.os})` : ''}{snapshotMeta.vss_used ? ' · VSS' : ''}</span>
               <strong>{t('metaBackupTime') || 'Sauvegardé le'}</strong>
@@ -2990,7 +3006,7 @@ function App() {
                     fontSize: '13px'
                   }}>
                     <div style={{color: '#991b1b', marginBottom: '6px'}}>
-                      ⚠️ {t('inPlaceWarning').replace('{path}', snapshotMeta?.original_path || '?')}
+                      ⚠️ {t('inPlaceWarning').replace('{path}', metaRoots(snapshotMeta) || '?')}
                     </div>
                     {crossHost && (
                       <label style={{display: 'flex', alignItems: 'center', gap: '6px', color: '#7c2d12'}}>

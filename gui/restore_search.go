@@ -178,14 +178,26 @@ func buildMatcher(mode SearchMatchMode, query string) (entryMatcher, error) {
 // came from, using the snapshot's meta sidecar. Returns "" when no usable meta
 // is available (legacy snapshot).
 func joinOriginPath(meta *BackupMeta, archivePath string) string {
-	if meta == nil || meta.OriginalPath == "" {
+	if meta == nil {
+		return ""
+	}
+	root := meta.OriginalPath
+	if len(meta.Archives) > 0 {
+		// One archive per folder: the path starts with the archive's label.
+		a, rest, ok := meta.archiveOf(archivePath)
+		if !ok {
+			return ""
+		}
+		root, archivePath = a.OriginalPath, rest
+	}
+	if root == "" {
 		return ""
 	}
 	sep := "/"
-	if meta.OS == "windows" || strings.Contains(meta.OriginalPath, "\\") {
+	if meta.OS == "windows" || strings.Contains(root, "\\") {
 		sep = "\\"
 	}
-	base := strings.TrimRight(meta.OriginalPath, sep)
+	base := strings.TrimRight(root, sep)
 	if archivePath == "" {
 		return base
 	}

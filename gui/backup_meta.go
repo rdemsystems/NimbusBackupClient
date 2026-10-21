@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"strings"
 	"time"
 
 	"pbscommon"
@@ -113,13 +114,13 @@ func SerializeFileMeta(meta *BackupFileMeta) ([]byte, error) {
 }
 
 // downloadBackupFileMeta fetches and decodes the NTFS ACL/attributes blob
-// (BackupAclsFilename) for the snapshot the given client is currently
+// of archiveName (archiveBlobName of BackupAclsFilename) for the snapshot the given client is currently
 // connected to. Returns (nil, nil) — not an error — when the blob is simply
 // absent, which is the normal case for a snapshot backed up before this
 // feature existed, or one with nothing to capture: restore must proceed
 // without ACL/attribute application either way, never fail because of it.
-func downloadBackupFileMeta(client *pbscommon.PBSClient) (*BackupFileMeta, error) {
-	raw, err := client.DownloadBlob(BackupAclsFilename)
+func downloadBackupFileMeta(client *pbscommon.PBSClient, archiveName string) (*BackupFileMeta, error) {
+	raw, err := client.DownloadBlob(archiveBlobName(archiveName, BackupAclsFilename))
 	if err != nil {
 		writeBackupLog(fmt.Sprintf("NTFS ACL/attributes blob not available for this snapshot (restoring without it): %v", err))
 		return nil, nil
@@ -165,6 +166,36 @@ type BackupMeta struct {
 	ClientVersion string `json:"client_version"`
 	OS            string `json:"os"`
 	VSSUsed       bool   `json:"vss_used"`
+
+	// Archives is set on the metadata of a snapshot holding one archive per
+	// folder (never inside the sidecar itself): the folder each archive came
+	// from. OriginalPath is then empty, and the snapshot's paths start with
+	// the archive's label.
+	Archives []ArchiveOrigin `json:"archives,omitempty"`
+}
+
+// ArchiveOrigin is one archive of a snapshot holding several: its file name,
+// the label its tree is shown under, and the folder it was backed up from
+// ("" when its sidecar is missing).
+type ArchiveOrigin struct {
+	Archive      string `json:"archive"`
+	Label        string `json:"label"`
+	OriginalPath string `json:"original_path"`
+}
+
+// archiveOf splits a path of a snapshot of several archives into its
+// archive and the path inside it ("" for the archive's root).
+func (m *BackupMeta) archiveOf(snapshotPath string) (*ArchiveOrigin, string, bool) {
+	if m == nil {
+		return nil, "", false
+	}
+	label, rest, _ := strings.Cut(snapshotPath, "/")
+	for i := range m.Archives {
+		if m.Archives[i].Label == label {
+			return &m.Archives[i], rest, true
+		}
+	}
+	return nil, "", false
 }
 
 func GenerateBackupMeta(backupID, originalPath, hostname string, vssUsed bool) ([]byte, error) {
