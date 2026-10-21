@@ -1,0 +1,37 @@
+name: Translations
+
+# Every UI language must carry every key of the English block: the GUI has
+# no fallback, so a missing key shows up as its raw name. Runs on pushes and
+# on pull requests from forks (contributed translations), with no secrets
+# and no build, so it is safe and fast there.
+on:
+  push:
+    paths:
+      - 'gui/frontend/src/i18n/**'
+      - 'gui/frontend/src/components/LanguageSwitcher.jsx'
+      - 'gui/frontend/scripts/check-translations.mjs'
+      - '.github/workflows/translations.yml'
+  pull_request:
+    paths:
+      - 'gui/frontend/src/i18n/**'
+      - 'gui/frontend/src/components/LanguageSwitcher.jsx'
+      - 'gui/frontend/scripts/check-translations.mjs'
+      - '.github/workflows/translations.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check translation keys
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+
+      - name: Compare every language with en
+        working-directory: gui/frontend
+        run: npm test

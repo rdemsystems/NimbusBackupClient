@@ -47,7 +47,8 @@ export function I18nProvider({ children }) {
       }
     }
 
-    return value || key
+    // An empty string is a deliberate blank (e.g. basedOn), not a missing key
+    return typeof value === 'string' ? value : key
   }
 
   return (
