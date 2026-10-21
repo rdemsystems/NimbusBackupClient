@@ -6,7 +6,8 @@ on:
     # patches/README.md) get the full build + tests; releases stay tag-only.
     # master is the fork's published branch: build + test every push there so
     # untagged test builds are available as workflow artifacts.
-    branches: [ master, main, develop, github-release, 'merge-upstream-*' ]
+    # release-*: the next minor's branch (release-0.5.x) before it reaches master.
+    branches: [ master, main, develop, github-release, 'merge-upstream-*', 'release-*' ]
     tags:
       - 'v*'
   pull_request:

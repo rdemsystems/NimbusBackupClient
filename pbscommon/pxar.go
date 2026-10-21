@@ -361,6 +361,10 @@ type PXARArchive struct {
 	// that PXAR cannot represent. Best-effort: errors are logged and ignored.
 	MetaCollector MetaCollector
 
+	// Catalog, when set, makes this archive one of several in a snapshot that
+	// share one catalog (see SnapshotCatalog). CatalogWriteCB is then unused.
+	Catalog *SnapshotCatalog
+
 	// NoMTime writes 0 (1970-01-01) as every file's and folder's modification
 	// time instead of the real one. A changed time changes the archive bytes, so
 	// trees whose times move without their contents changing (a folder gains
@@ -522,6 +526,14 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 
 		a.buffer.WriteString(dirname)
 		a.buffer.WriteByte(0x00)
+	} else if a.Catalog != nil {
+		a.CatalogWriteCB = a.Catalog.write
+		if a.Catalog.pos == 0 {
+			if err := a.Catalog.write(catalog_magic); err != nil {
+				return CatalogDir{}, fmt.Errorf("failed to write catalog magic: %w", err)
+			}
+		}
+		a.catalog_pos = a.Catalog.pos
 	} else {
 		if a.CatalogWriteCB != nil {
 			if err := a.CatalogWriteCB(catalog_magic); err != nil {
@@ -747,25 +759,13 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 	}
 
 	if toplevel {
-		//We write special pointer to root dir here
-
-		tabledata := make([]byte, 0)
-		tabledata = append_u64_7bit(tabledata, uint64(1))
-		tabledata = append(tabledata, 'd')
-		tabledata = append_u64_7bit(tabledata, uint64(len(a.ArchiveName)))
-		tabledata = append(tabledata, []byte(a.ArchiveName)...)
-		tabledata = append_u64_7bit(tabledata, a.catalog_pos-oldpos)
-		catalog_outdata := make([]byte, 0)
-		catalog_outdata = append_u64_7bit(catalog_outdata, uint64(len(tabledata)))
-		catalog_outdata = append(catalog_outdata, tabledata...)
-		ptr := make([]byte, 0)
-		ptr = binary.LittleEndian.AppendUint64(ptr, a.catalog_pos)
-		if a.CatalogWriteCB != nil {
-			if err := a.CatalogWriteCB(catalog_outdata); err != nil {
-				return CatalogDir{}, fmt.Errorf("failed to write catalog toplevel data: %w", err)
-			}
-			if err := a.CatalogWriteCB(ptr); err != nil {
-				return CatalogDir{}, fmt.Errorf("failed to write catalog pointer: %w", err)
+		root := CatalogDir{Name: a.ArchiveName, Pos: oldpos}
+		if a.Catalog != nil {
+			// The shared catalog lists every archive's root at Close.
+			a.Catalog.roots = append(a.Catalog.roots, root)
+		} else if a.CatalogWriteCB != nil {
+			if err := writeCatalogRoot(a.CatalogWriteCB, a.catalog_pos, []CatalogDir{root}); err != nil {
+				return CatalogDir{}, err
 			}
 		}
 	}
@@ -774,6 +774,53 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 		Name: dirname,
 		Pos:  oldpos,
 	}, nil
+}
+
+// writeCatalogRoot ends a catalog: the table at pos (where the catalog stream
+// stands) with one 'd' entry per archive root, then the 8-byte pointer to it.
+func writeCatalogRoot(cb PXAROutCB, pos uint64, roots []CatalogDir) error {
+	tabledata := append_u64_7bit(nil, uint64(len(roots)))
+	for _, r := range roots {
+		tabledata = append(tabledata, 'd')
+		tabledata = append_u64_7bit(tabledata, uint64(len(r.Name)))
+		tabledata = append(tabledata, []byte(r.Name)...)
+		tabledata = append_u64_7bit(tabledata, pos-r.Pos)
+	}
+	catalog_outdata := append_u64_7bit(nil, uint64(len(tabledata)))
+	catalog_outdata = append(catalog_outdata, tabledata...)
+	if err := cb(catalog_outdata); err != nil {
+		return fmt.Errorf("failed to write catalog toplevel data: %w", err)
+	}
+	if err := cb(binary.LittleEndian.AppendUint64(nil, pos)); err != nil {
+		return fmt.Errorf("failed to write catalog pointer: %w", err)
+	}
+	return nil
+}
+
+// SnapshotCatalog is the one catalog of a snapshot holding several archives,
+// as proxmox-backup-client writes it: each archive's directory tables follow
+// one another, and the root table names every archive (its .didx file name).
+// Set it as PXARArchive.Catalog on each archive, write them one after the
+// other, then Close it.
+type SnapshotCatalog struct {
+	WriteCB PXAROutCB
+	pos     uint64
+	roots   []CatalogDir
+}
+
+func (c *SnapshotCatalog) write(b []byte) error {
+	c.pos += uint64(len(b))
+	return c.WriteCB(b)
+}
+
+// Close writes the root table listing every archive written so far.
+func (c *SnapshotCatalog) Close() error {
+	if c.pos == 0 {
+		if err := c.write(catalog_magic); err != nil {
+			return fmt.Errorf("failed to write catalog magic: %w", err)
+		}
+	}
+	return writeCatalogRoot(c.WriteCB, c.pos, c.roots)
 }
 
 // On pxar first item and consquently entry point must always be WriteDir , because toplevel is always a directory

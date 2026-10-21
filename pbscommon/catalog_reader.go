@@ -74,15 +74,37 @@ func readVarint(data []byte, pos, end uint64) (uint64, uint64, error) {
 	return v, pos, nil
 }
 
+// CatalogArchive is one archive of a catalog: its .didx file name (e.g.
+// "backup.pxar.didx") and every file and directory it contains.
+type CatalogArchive struct {
+	Name    string
+	Entries []CatalogEntry
+}
+
 // ParseCatalog decodes a fully-buffered pcat1 catalog stream into the flat list
 // of every file and directory it contains. The buffer is the reconstructed
 // contents of catalog.pcat1.didx: an 8-byte magic, then per-directory tables
 // written leaves-first, then a trailing table whose single entry references the
 // root directory, then an 8-byte little-endian pointer to that trailing table.
+// A catalog listing several archives is refused: use ParseCatalogArchives.
 //
 // Listing a snapshot this way fetches only the few MB of the catalog instead of
 // re-reading the whole (potentially multi-hundred-GB) data archive.
 func ParseCatalog(data []byte) ([]CatalogEntry, error) {
+	archives, err := ParseCatalogArchives(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(archives) != 1 {
+		return nil, fmt.Errorf("catalog trailer malformed: %d dirs, 0 files (expected 1 dir)", len(archives))
+	}
+	return archives[0].Entries, nil
+}
+
+// ParseCatalogArchives decodes a pcat1 catalog whose trailing table lists one
+// or more archives (a snapshot holding several .pxar.didx archives shares one
+// catalog), returning each archive's entries relative to its own root.
+func ParseCatalogArchives(data []byte) ([]CatalogArchive, error) {
 	if len(data) < 16 {
 		return nil, fmt.Errorf("catalog too short: %d bytes", len(data))
 	}
@@ -94,20 +116,31 @@ func ParseCatalog(data []byte) ([]CatalogEntry, error) {
 		return nil, fmt.Errorf("catalog root pointer %d out of range (len %d)", rootPtr, len(data))
 	}
 
-	// The trailing table holds exactly one 'd' entry pointing at the root dir.
+	// The trailing table holds one 'd' entry per archive root.
 	dirs, files, err := parseCatalogTable(data, rootPtr)
 	if err != nil {
 		return nil, fmt.Errorf("trailer table: %w", err)
 	}
-	if len(files) != 0 || len(dirs) != 1 {
-		return nil, fmt.Errorf("catalog trailer malformed: %d dirs, %d files (expected 1 dir)", len(dirs), len(files))
+	if len(files) != 0 || len(dirs) == 0 {
+		return nil, fmt.Errorf("catalog trailer malformed: %d dirs, %d files (expected at least 1 dir)", len(dirs), len(files))
 	}
 
-	entries := make([]CatalogEntry, 0, 256)
-	if err := walkCatalog(data, dirs[0].start, "", 0, &entries); err != nil {
-		return nil, err
+	archives := make([]CatalogArchive, 0, len(dirs))
+	total := 0
+	for _, d := range dirs {
+		if d.start >= rootPtr {
+			return nil, fmt.Errorf("catalog archive %q at %d does not precede the trailer at %d", d.name, d.start, rootPtr)
+		}
+		entries := make([]CatalogEntry, 0, 256)
+		if err := walkCatalog(data, d.start, "", 0, &entries); err != nil {
+			return nil, fmt.Errorf("archive %q: %w", d.name, err)
+		}
+		if total += len(entries); total > catalogMaxEntries {
+			return nil, fmt.Errorf("catalog exceeds %d entries", catalogMaxEntries)
+		}
+		archives = append(archives, CatalogArchive{Name: d.name, Entries: entries})
 	}
-	return entries, nil
+	return archives, nil
 }
 
 // parseCatalogTable parses the directory table whose length prefix begins at

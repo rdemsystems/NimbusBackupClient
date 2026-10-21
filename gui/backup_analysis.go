@@ -36,6 +36,17 @@ const (
 // GenerateBackupID creates a backup-id from hostname and path
 // Format: hostname_DRIVE_PATH (e.g., SERVER01_D_DATA_Users)
 func GenerateBackupID(hostname, path string) string {
+	cleanPath := pathLabel(path)
+	if cleanPath == "" {
+		return hostname
+	}
+	return fmt.Sprintf("%s_%s", hostname, cleanPath)
+}
+
+// pathLabel turns a folder path into the characters PBS accepts in a
+// backup-id or archive name: D:\Data\Users becomes D_Data_Users. It is ""
+// for a path with nothing left, such as a bare drive root on Linux ("/").
+func pathLabel(path string) string {
 	cleanPath := filepath.Clean(path)
 	cleanPath = strings.ReplaceAll(cleanPath, "\\", "_")
 	cleanPath = strings.ReplaceAll(cleanPath, "/", "_")
@@ -54,10 +65,34 @@ func GenerateBackupID(hostname, path string) string {
 
 	cleanPath = strings.Trim(cleanPath, "_")
 
-	if cleanPath == "" {
-		return hostname
+	return cleanPath
+}
+
+// ArchiveNames gives each folder of a one-snapshot backup its archive name,
+// <label>.pxar.didx, in the order of dirs. The name only depends on the path,
+// so the same folder finds its previous archive (and its chunks) on the next
+// run. Folders whose labels collide get _2, _3...; "backup" is avoided as it
+// would read as the archive of a one-folder snapshot of the old layout.
+func ArchiveNames(dirs []string) []string {
+	names := make([]string, len(dirs))
+	used := map[string]bool{}
+	for i, dir := range dirs {
+		// PBS archive names must start with a letter, digit or _
+		label := strings.TrimLeft(pathLabel(dir), ".-")
+		switch label {
+		case "":
+			label = "root"
+		case "backup":
+			label = "backup_folder"
+		}
+		name := label
+		for n := 2; used[strings.ToLower(name)]; n++ {
+			name = fmt.Sprintf("%s_%d", label, n)
+		}
+		used[strings.ToLower(name)] = true
+		names[i] = name + ".pxar.didx"
 	}
-	return fmt.Sprintf("%s_%s", hostname, cleanPath)
+	return names
 }
 
 // generateBinID creates a stable backup-id for a bin based on its folder paths.

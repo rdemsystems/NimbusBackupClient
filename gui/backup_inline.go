@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"hash"
@@ -22,7 +21,6 @@ import (
 	"machinebackuplib"
 	"pbscommon"
 	"retry"
-	"security"
 	"snapshot"
 )
 
@@ -62,6 +60,10 @@ type BackupOptions struct {
 	// time (0 or 1: one after the other). No upper limit; the GUI recommends
 	// CPUs / 4 (RecommendedParallel).
 	Parallel int
+	// OneSnapshot writes every folder into one snapshot, one archive per
+	// folder (runOneSnapshotBackup), instead of one backup group per folder.
+	// Parallel does not apply: the folders share one session.
+	OneSnapshot bool
 
 	// Set by runFoldersParallel on each folder's options: the batch already
 	// holds the destination lock, and under VSS (batchVSS) the folder reads
@@ -585,7 +587,9 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 	// a normal (unsplit) backup — exactly the intended "split the first seed, full
 	// afterwards" behavior.
 
-	// Each selected directory is its OWN backup group (its own
+	// OneSnapshot (the default for new jobs): every folder is an archive of one
+	// snapshot, see runOneSnapshotBackup. Otherwise (jobs made before 0.5):
+	// each selected directory is its OWN backup group (its own
 	// backup-id), so PBS retention treats successive runs of the same folder as one
 	// series. Previously all selected folders shared one backup-id (derived from the
 	// first), landing as separate snapshots in a single group — which makes prune
@@ -593,6 +597,9 @@ func RunBackupInline(opts BackupOptions) (returnErr error) {
 	// backup-id (which may have been set explicitly, e.g. by a scheduled job).
 	// Machine backups are never split: all selected disks belong to ONE "vm"
 	// snapshot whose backup-id is the numeric VM ID (see machinebackuplib).
+	if opts.OneSnapshot && opts.Kind != "machine" {
+		return runOneSnapshotBackup(opts)
+	}
 	if len(opts.BackupObjects) <= 1 || opts.Kind == "machine" {
 		return runBackupInlineInternal(opts)
 	}
@@ -937,61 +944,13 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	progress(0.05, "Connecting to PBS...")
 	writeBackupLog("[DEBUG] After progress(0.05), before connection log")
 
-	// Debug: log connection parameters with sanitized credentials
-	writeBackupLog(fmt.Sprintf("PBS Connection: URL=%s, AuthID=%s, Secret=%s, Datastore=%s, BackupID=%s",
-		security.SanitizeURL(opts.BaseURL),
-		opts.AuthID,
-		security.SanitizeSecret(opts.Secret),
-		opts.Datastore,
-		opts.BackupID))
-
-	writeBackupLog("[DEBUG] Creating PBS client struct")
-
-	// Parse compression level (default to fastest if empty or invalid)
-	compressionLevel := pbscommon.ParseCompressionLevel(opts.Compression)
-	writeBackupLog(fmt.Sprintf("[DEBUG] Compression level: %s", compressionLevel))
-
-	// Create PBS client
-	client := &pbscommon.PBSClient{
-		BaseURL:          opts.BaseURL,
-		CertFingerPrint:  opts.CertFingerprint,
-		AuthID:           opts.AuthID,
-		Secret:           opts.Secret,
-		Ticket:           opts.Ticket,
-		CSRFToken:        opts.CSRFToken,
-		Datastore:        opts.Datastore,
-		Namespace:        opts.Namespace,
-		Insecure:         opts.CertFingerprint != "",
-		CompressionLevel: compressionLevel,
-		Crypt:            opts.Crypt,
-		Manifest: pbscommon.BackupManifest{
-			BackupID: opts.BackupID,
-		},
-	}
+	client := newDirBackupClient(opts)
 
 	writeBackupLog("[DEBUG] PBS client created, starting directory backup loop")
 
 	// Backup each directory
-	var newchunk atomic.Uint64
-	var reusechunk atomic.Uint64
-	var failedchunk atomic.Uint64
-	var totalSize atomic.Uint64
-	var dirErrors []string
-	var dirResults []DirResult
-	// Run-level accumulators: client.{ReadErrors,SkippedFiles,ExcludedFiles} are
-	// reset by each directory's Connect(), so we capture them per directory before
-	// the next one wipes them — otherwise a read error in an earlier folder of a
-	// multi-folder run / split bin is lost and the run can falsely report
-	// verified_success (v2-H-02 / M-01).
-	var allReadErrors, allSkipped, allExcluded []string
-	successfulDirs := 0
-
-	// Retry policy for session-lost failures: PBS keeps the BackupGroup lock until
-	// it detects the dead TCP connection server-side (observed ~16 min in prod).
-	// Any retry sooner than that hits 400 "while creating locked backup group".
-	// We wait sessionLostRetryWait between attempts so the lock has time to expire.
-	const maxDirAttempts = 2
-	const sessionLostRetryWait = 25 * time.Minute
+	run := &dirRun{}
+	newchunk, reusechunk, failedchunk, totalSize := &run.newchunk, &run.reusechunk, &run.failedchunk, &run.totalSize
 
 	for idx, dir := range opts.BackupObjects {
 		if opts.Ctx != nil && opts.Ctx.Err() != nil {
@@ -1014,9 +973,9 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 				err = fmt.Errorf("no VSS snapshot was taken for %s", dir)
 			case opts.snapshotPath != "":
 				// Folder of a multi-folder batch: read the batch's snapshot.
-				dirBytes, err = backupReal(client, &newchunk, &reusechunk, &failedchunk, opts.snapshotPath, dir, true, progress, opts.OnStats, opts.ExcludeList)
+				dirBytes, err = backupReal(client, newchunk, reusechunk, failedchunk, opts.snapshotPath, dir, true, progress, opts.OnStats, opts.ExcludeList)
 			default:
-				dirBytes, err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
+				dirBytes, err = backupDirectory(client, newchunk, reusechunk, failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
 			}
 			if err == nil {
 				break
@@ -1033,29 +992,8 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 			if attempt < maxDirAttempts {
 				writeBackupLog(fmt.Sprintf("Directory %s: session lost on attempt %d/%d: %v",
 					dir, attempt, maxDirAttempts, err))
-				writeBackupLog(fmt.Sprintf("Waiting %s for PBS to release backup group lock before retry...",
-					sessionLostRetryWait))
-
-				waitUntil := time.Now().Add(sessionLostRetryWait)
-				for {
-					if opts.Ctx != nil && opts.Ctx.Err() != nil {
-						writeBackupLog("Cancellation requested during session-lost wait — aborting")
-						if opts.OnComplete != nil {
-							opts.OnComplete(false, "Backup cancelled by user")
-						}
-						return machinebackuplib.ErrCancelled
-					}
-					remaining := time.Until(waitUntil)
-					if remaining <= 0 {
-						break
-					}
-					progress(0, fmt.Sprintf("PBS session lost, waiting %s before retrying (PBS lock being released)...",
-						remaining.Round(time.Second)))
-					sleepFor := 30 * time.Second
-					if remaining < sleepFor {
-						sleepFor = remaining
-					}
-					time.Sleep(sleepFor)
+				if !waitForGroupLock(opts, progress) {
+					return machinebackuplib.ErrCancelled
 				}
 				writeBackupLog(fmt.Sprintf("Wait complete, retrying directory %s with fresh connection", dir))
 			}
@@ -1063,15 +1001,10 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 
 		// Capture this directory's lists before the next directory's Connect() resets
 		// them on the shared client (v2-H-02 / M-01).
-		allReadErrors = append(allReadErrors, client.ReadErrors...)
-		allSkipped = append(allSkipped, client.SkippedFiles...)
-		allExcluded = append(allExcluded, client.ExcludedFiles...)
+		run.collect(client)
 
 		if err != nil {
-			errMsg := fmt.Sprintf("Backup failed for %s: %v", dir, err)
-			writeBackupLog(errMsg)
-			dirErrors = append(dirErrors, errMsg)
-			dirResults = append(dirResults, DirResult{Path: dir, OK: false, Error: err.Error()})
+			run.fail(dir, fmt.Sprintf("Backup failed for %s: %v", dir, err), err)
 			continue // Don't abort — try remaining directories
 		}
 
@@ -1085,150 +1018,17 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 		finishCancel()
 		if finishErr != nil {
 			client.Close() // release the session/group lock on a failed finalize too [B-4]
-			errMsg := fmt.Sprintf("Failed to finalize backup for %s: %v", dir, finishErr)
-			writeBackupLog(errMsg)
-			dirErrors = append(dirErrors, errMsg)
-			dirResults = append(dirResults, DirResult{Path: dir, OK: false, Error: finishErr.Error()})
+			run.fail(dir, fmt.Sprintf("Failed to finalize backup for %s: %v", dir, finishErr), finishErr)
 			continue
 		}
 		writeBackupLog(fmt.Sprintf("Directory %d/%d finalized: %s", idx+1, len(opts.BackupObjects), dir))
 		// Accumulate the real archived byte count so TotalBytes / "X MB backed up"
 		// and the [RESULT] support line are no longer always zero. [B-3]
 		totalSize.Add(dirBytes)
-		dirResults = append(dirResults, DirResult{Path: dir, OK: true})
-		successfulDirs++
+		run.succeed(dir)
 	}
 
-	// If NO directory was backed up successfully, fail the whole backup
-	if successfulDirs == 0 {
-		errMsg := fmt.Sprintf("All %d directories failed:\n%s", len(opts.BackupObjects), strings.Join(dirErrors, "\n"))
-		writeBackupLog(errMsg)
-		status := &BackupStatus{
-			Outcome:          OutcomeFailed,
-			BackupID:         opts.BackupID,
-			BackupTime:       client.Manifest.BackupTime,
-			DurationSec:      time.Since(startTime).Seconds(),
-			TotalBytes:       totalSize.Load(),
-			NewChunks:        newchunk.Load(),
-			ReusedChunks:     reusechunk.Load(),
-			FailedChunks:     failedchunk.Load(),
-			Directories:      dirResults,
-			ExcludedByPolicy: excludedToIssues(allExcluded),
-			SkippedReadError: skippedToIssues(allReadErrors),
-			Message:          errMsg,
-		}
-		if opts.OnComplete != nil {
-			opts.OnComplete(false, errMsg)
-		}
-		if opts.OnResult != nil {
-			opts.OnResult(status)
-		}
-		return fmt.Errorf("%s", errMsg)
-	}
-
-	// Calculate backup duration and size
-	duration := time.Since(startTime)
-	totalSizeMB := float64(totalSize.Load()) / (1024 * 1024)
-
-	// Build completion message with duration, size, and chunk stats
-	failed := failedchunk.Load()
-	partial := len(dirErrors) > 0
-	var completionMsg, progressMsg string
-	switch {
-	case partial:
-		completionMsg = fmt.Sprintf("⚠️  Backup partiel en %s: %d/%d dossiers OK, %.1f MB (%d new, %d reused chunks)\nErreurs:\n%s",
-			formatDuration(duration), successfulDirs, len(opts.BackupObjects), totalSizeMB, newchunk.Load(), reusechunk.Load(), strings.Join(dirErrors, "\n"))
-		progressMsg = fmt.Sprintf("Backup partiel : %d/%d dossiers OK", successfulDirs, len(opts.BackupObjects))
-	case failed > 0:
-		completionMsg = fmt.Sprintf("⚠️  Backup completed with errors in %s: %.1f MB backed up (%d new, %d reused, %d FAILED chunks)",
-			formatDuration(duration), totalSizeMB, newchunk.Load(), reusechunk.Load(), failed)
-		progressMsg = fmt.Sprintf("Backup completed with %d failed chunks", failed)
-	default:
-		completionMsg = fmt.Sprintf("Backup completed in %s: %.1f MB backed up (%d new, %d reused chunks)",
-			formatDuration(duration), totalSizeMB, newchunk.Load(), reusechunk.Load())
-		progressMsg = "Backup completed"
-	}
-
-	progress(1.0, progressMsg)
-
-	if len(allSkipped) > 0 {
-		completionMsg += fmt.Sprintf("\n⚠️  %d files/folders skipped (access denied or junction points)", len(allSkipped))
-		writeBackupLog(fmt.Sprintf("=== SKIPPED FILES/DIRECTORIES (%d) ===", len(allSkipped)))
-
-		// Log first 50 skipped files in detail
-		maxLog := 50
-		if len(allSkipped) < maxLog {
-			maxLog = len(allSkipped)
-		}
-		for i := 0; i < maxLog; i++ {
-			writeBackupLog(fmt.Sprintf("  [%d] %s", i+1, allSkipped[i]))
-		}
-		if len(allSkipped) > 50 {
-			writeBackupLog(fmt.Sprintf("  ... and %d more (see full list in GUI)", len(allSkipped)-50))
-		}
-		writeBackupLog("=== END SKIPPED FILES ===")
-	}
-
-	writeBackupLog(completionMsg)
-
-	// Determine the authoritative 4-level outcome (v2-H-02 / F-01):
-	//   failed  — a chunk upload failed (would corrupt the index) or no dir committed
-	//   partial — some directories failed, OR files were unreadable / changed during
-	//             read (genuine read errors, not expected system auto-excludes)
-	//   success_with_policy_exclusions — complete except files the user excluded
-	//   verified_success — fully complete
-	hasReadIssues := len(allReadErrors) > 0
-	var outcome BackupOutcome
-	switch {
-	case failed > 0:
-		outcome = OutcomeFailed
-	case partial:
-		outcome = OutcomePartial
-	case hasReadIssues:
-		outcome = OutcomePartial
-	case len(allExcluded) > 0:
-		outcome = OutcomeSuccessWithExclusions
-	default:
-		outcome = OutcomeVerifiedSuccess
-	}
-
-	status := &BackupStatus{
-		Outcome:          outcome,
-		BackupID:         opts.BackupID,
-		BackupTime:       client.Manifest.BackupTime,
-		DurationSec:      duration.Seconds(),
-		TotalBytes:       totalSize.Load(),
-		NewChunks:        newchunk.Load(),
-		ReusedChunks:     reusechunk.Load(),
-		FailedChunks:     failed,
-		Directories:      dirResults,
-		ExcludedByPolicy: excludedToIssues(allExcluded),
-		SkippedReadError: skippedToIssues(allReadErrors),
-		Message:          completionMsg,
-	}
-
-	// One machine-greppable result line for support (pairs with the start-of-run
-	// target log): outcome label + the structured counters behind completionMsg.
-	writeBackupLog(fmt.Sprintf("[RESULT] outcome=%s dirs_ok=%d/%d new=%d reused=%d failed=%d read_errors=%d excluded=%d bytes=%d duration=%s",
-		status.Outcome, successfulDirs, len(opts.BackupObjects), status.NewChunks, status.ReusedChunks,
-		status.FailedChunks, len(status.SkippedReadError), len(status.ExcludedByPolicy), status.TotalBytes, duration))
-
-	// Additive (choice A): OnComplete keeps its (success, message) contract for
-	// existing consumers; OnResult carries the full structured status for the
-	// sidecar (Group 1) and rich history.
-	if opts.OnComplete != nil {
-		opts.OnComplete(status.Success(), completionMsg)
-	}
-	if opts.OnResult != nil {
-		opts.OnResult(status)
-	}
-
-	// Contract (Group 0 / audit H-03): a partial or failed backup must NOT return a
-	// nil error, otherwise the API fallback and the scheduler record it as success.
-	if !status.Success() {
-		return fmt.Errorf("%s", completionMsg)
-	}
-	return nil
+	return run.report(opts, client.Manifest.BackupTime, startTime, progress)
 }
 
 // runMachineBackupInline handles machine backup using machinebackuplib
@@ -1347,183 +1147,17 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 		}
 	}()
 
-	client.Connect(false, "host")
-	knownChunks := haxmap.New[string, bool]()
-
-	// Start background scan to calculate total size (drives the progress %). This
-	// is non-blocking — the backup streams in parallel — but bound it with the same
-	// runaway guard so a whole-drive root can't leave a goroutine walking forever
-	// (junctions are already skipped); a partial size just makes the % approximate.
-	totalSize := &atomic.Uint64{}
-	go func() {
-		writeBackupLog(fmt.Sprintf("Starting background size calculation for: %s", backupdir))
-		ctx, cancel := context.WithTimeout(context.Background(), analysisSizeBudget)
-		defer cancel()
-		size, err := calculateDirSizeCtx(ctx, backupdir)
-		if err != nil {
-			writeBackupLog(fmt.Sprintf("WARNING: Size calculation had errors: %v", err))
-		}
-		totalSize.Store(size)
-		writeBackupLog(fmt.Sprintf("Total size calculated: %d MB", size/(1024*1024)))
-	}()
-
-	archive := &pbscommon.PXARArchive{}
-	archive.ArchiveName = "backup.pxar.didx"
-	archive.ExcludeList = excludeList
-	archive.ExcludeRoot = originalPath // logical root for VSS-safe absolute-pattern matching
-
-	// Inject backup metadata into the PXAR archive root
-	hostname, _ := os.Hostname()
-	metaJSON, err := GenerateBackupMeta(client.Manifest.BackupID, originalPath, hostname, vssUsed)
-	if err != nil {
-		writeBackupLog(fmt.Sprintf("WARNING: Failed to generate backup metadata: %v", err))
-	} else {
-		archive.VirtualFiles = map[string][]byte{
-			BackupMetaFilename: metaJSON,
-		}
-	}
-
-	// NTFS metadata collector: captures owner/ACLs/attrs on Windows, or every
-	// extended attribute (including POSIX ACLs, which the kernel itself
-	// stores as xattrs) on Linux, for every entry during the walk; no-op on
-	// other platforms. The collected data is serialized after the walk and
-	// uploaded as a blob in the same backup session (see below, after Eof).
-	ntfsCollector := NewNTFSMetaCollector(backupdir, hostname)
-	archive.MetaCollector = ntfsCollector
-
-	previousDidx, err := client.DownloadPreviousToBytes(archive.ArchiveName)
-	if err != nil {
-		// This is normal for first backup - no previous backup exists
-		writeBackupLog(fmt.Sprintf("No previous backup found (first backup?): %v", err))
-		previousDidx = []byte{}
-	} else {
-		writeBackupLog(fmt.Sprintf("Downloaded previous DIDX: %d bytes", len(previousDidx)))
-	}
-
-	for _, shahash := range pbscommon.ParsePreviousDIDXChunkDigests(previousDidx) {
-		knownChunks.Set(shahash, true)
-	}
-
-	writeBackupLog(fmt.Sprintf("Known chunks: %d", knownChunks.Len()))
-
-	pxarChunk := ChunkState{}
-	pxarChunk.Init(newchunk, reusechunk, failedchunk, knownChunks, progress, totalSize, onStats, backupdir)
-
-	pcat1Chunk := ChunkState{}
-	pcat1Chunk.Init(newchunk, reusechunk, failedchunk, knownChunks, nil, totalSize, nil, "")
-
-	pxarChunk.wrid, err = client.CreateDynamicIndex(archive.ArchiveName)
+	// One folder, one snapshot of the original layout: backup.pxar.didx.
+	session, err := openSnapshotSession(client, newchunk, reusechunk, failedchunk, excludeList)
 	if err != nil {
 		return 0, err
 	}
-	pcat1Chunk.wrid, err = client.CreateDynamicIndex("catalog.pcat1.didx")
+	n, err := session.writeArchive(legacyArchiveName, backupdir, originalPath, vssUsed, progress, onStats)
 	if err != nil {
 		return 0, err
 	}
-
-	archive.WriteCB = func(b []byte) error {
-		return pxarChunk.HandleData(b, client)
-	}
-
-	archive.CatalogWriteCB = func(b []byte) error {
-		return pcat1Chunk.HandleData(b, client)
-	}
-
-	if _, err = archive.WriteDir(backupdir, "", true); err != nil {
-		return 0, fmt.Errorf("failed to write directory archive: %w", err)
-	}
-
-	// Map VSS shadow-copy paths back to the original logical root so the status
-	// lists are meaningful to the user (no-op for non-VSS backups, where
-	// backupdir == originalPath). Reused for both the aggregate status and sidecar.
-	logicalSkipped := toLogicalPaths(archive.SkippedFiles, backupdir, originalPath)
-	logicalExcluded := toLogicalPaths(archive.ExcludedFiles, backupdir, originalPath)
-	logicalReadErrors := toLogicalPaths(archive.ReadErrors, backupdir, originalPath)
-
-	// Collect skipped files from archive
-	if len(logicalSkipped) > 0 {
-		writeBackupLog(fmt.Sprintf("Backup completed with %d skipped files/directories", len(logicalSkipped)))
-		client.SkippedFiles = append(client.SkippedFiles, logicalSkipped...)
-	}
-
-	// Genuine read errors / content instability drive the outcome (v2-H-02).
-	if len(logicalReadErrors) > 0 {
-		client.ReadErrors = append(client.ReadErrors, logicalReadErrors...)
-	}
-
-	// Collect files excluded by user policy (H-04), kept distinct from errors.
-	if len(logicalExcluded) > 0 {
-		writeBackupLog(fmt.Sprintf("%d files/directories excluded by user policy", len(logicalExcluded)))
-		client.ExcludedFiles = append(client.ExcludedFiles, logicalExcluded...)
-	}
-
-	// Guard: if WriteDir produced 0 data, the backup dir was effectively empty or inaccessible
-	if pxarChunk.pos == 0 && len(pxarChunk.currentChunk) == 0 {
-		return 0, fmt.Errorf("backup produced 0 bytes for %s — directory may be empty, inaccessible, or all files were excluded", backupdir)
-	}
-
-	if err = pxarChunk.EOF(client); err != nil {
+	if err := session.close(); err != nil {
 		return 0, err
 	}
-	if err = pcat1Chunk.EOF(client); err != nil {
-		return 0, err
-	}
-
-	// Serialize NTFS metadata collected during the walk and upload it as a
-	// blob in the same backup session. The blob is listed in the PBS manifest
-	// alongside backup.pxar.didx and catalog.pcat1.didx so restore tools can
-	// fetch it without extracting the whole archive. Best-effort: a failure
-	// here does NOT fail the backup — the file data is already safe.
-	if aclBytes, aclErr := ntfsCollector.Finalize(); aclErr != nil {
-		writeBackupLog(fmt.Sprintf("WARNING: failed to serialize NTFS metadata: %v", aclErr))
-	} else if len(aclBytes) > 0 {
-		entries, uniqueSDDLs, metaErrs := ntfsCollector.Stats()
-		writeBackupLog(fmt.Sprintf("NTFS metadata: %d entries, %d unique SDDLs, %d errors, %d bytes gzipped",
-			entries, uniqueSDDLs, metaErrs, len(aclBytes)))
-		streams, byName, eas, dropped := ntfsCollector.StreamStats()
-		if streams+byName+eas > 0 {
-			writeBackupLog(fmt.Sprintf("Alternate data streams: %d recorded, %d by name only (too large or unreadable); extended attributes: %d",
-				streams, byName, eas))
-		}
-		if dropped > 0 {
-			writeBackupLog(fmt.Sprintf("WARNING: NTFS metadata too large for one PBS blob: the content of %d alternate data streams was left out (permissions and attributes kept)", dropped))
-		}
-		if upErr := client.UploadBlob(BackupAclsFilename, aclBytes); upErr != nil {
-			writeBackupLog(fmt.Sprintf("WARNING: failed to upload NTFS metadata blob: %v", upErr))
-		}
-	}
-
-	// Persist a per-snapshot status sidecar (files excluded by policy + files
-	// skipped on read errors) as a manifest blob, so the GUI can list them without
-	// restoring the archive. Best-effort: a failure here does NOT fail the backup.
-	sidecar := &BackupSidecar{
-		FormatVersion:    1,
-		BackupID:         client.Manifest.BackupID,
-		Directory:        originalPath,
-		GeneratedAt:      time.Now().Unix(),
-		ExcludedByPolicy: excludedToIssues(logicalExcluded),
-		SkippedReadError: skippedToIssues(logicalReadErrors),
-	}
-	if sidecarBytes, sErr := json.Marshal(sidecar); sErr != nil {
-		writeBackupLog(fmt.Sprintf("WARNING: failed to serialize status sidecar: %v", sErr))
-	} else if upErr := client.UploadBlob(BackupStatusFilename, sidecarBytes); upErr != nil {
-		writeBackupLog(fmt.Sprintf("WARNING: failed to upload status sidecar: %v", upErr))
-	}
-
-	// Upload manifest with retry
-	retryConfig := retry.DefaultConfig()
-	retryConfig.MaxAttempts = 5
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	err = retry.DoWithJitter(ctx, retryConfig, retry.DefaultRetryable, func() error {
-		return client.UploadManifest()
-	})
-	if err != nil {
-		return 0, fmt.Errorf("failed to upload manifest after retries: %w", err)
-	}
-
-	// pxarChunk.pos is the true archived byte count for this directory (more
-	// accurate than the background size estimate, which only drives the %).
-	return pxarChunk.pos, nil
+	return n, nil
 }
