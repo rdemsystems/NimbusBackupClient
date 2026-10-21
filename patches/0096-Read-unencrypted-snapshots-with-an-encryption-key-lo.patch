@@ -1,7 +1,7 @@
 From 7e808ab6682d5e46dbc5fbaf0c891fcd24d522da Mon Sep 17 00:00:00 2001
 From: mjb-is <mjb-is@users.noreply.github.com>
 Date: Sat, 17 Oct 2026 20:57:35 +0100
-Subject: [PATCH 096/108] Read unencrypted snapshots with an encryption key
+Subject: [PATCH 096/120] Read unencrypted snapshots with an encryption key
  loaded
 
 With a key configured for a server, every chunk the readers fetched was

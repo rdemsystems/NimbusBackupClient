@@ -1,7 +1,7 @@
 From 5c6fc6654c51518ea6769f9714fc516e23c4cbba Mon Sep 17 00:00:00 2001
 From: mjb-is <mjb-is@users.noreply.github.com>
 Date: Thu, 15 Oct 2026 20:36:53 +0100
-Subject: [PATCH 094/108] BMR wizard: never offer the boot stick as the restore
+Subject: [PATCH 094/120] BMR wizard: never offer the boot stick as the restore
  target
 
 The target disk detection skipped removable, loop, optical and NBD

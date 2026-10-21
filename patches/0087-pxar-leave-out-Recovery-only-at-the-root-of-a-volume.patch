@@ -1,7 +1,7 @@
 From 287057e741f18495cc3abcf836d2161461f96544 Mon Sep 17 00:00:00 2001
 From: mjb-is <mjb-is@users.noreply.github.com>
 Date: Thu, 15 Oct 2026 00:10:03 +0100
-Subject: [PATCH 087/108] pxar: leave out "Recovery" only at the root of a
+Subject: [PATCH 087/120] pxar: leave out "Recovery" only at the root of a
  volume
 
 The automatic exclusion of system folders matched "Recovery" by name at

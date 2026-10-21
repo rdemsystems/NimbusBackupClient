@@ -1,7 +1,7 @@
 From aebb2e99219507e206e0b8ab2f3c02e5e00ac3ff Mon Sep 17 00:00:00 2001
 From: Tiziano Bacocco <tizbac2@gmail.com>
 Date: Mon, 12 Oct 2026 13:22:13 +0200
-Subject: [PATCH 081/108] installer: SERVICEAUTOSTART flag + document
+Subject: [PATCH 081/120] installer: SERVICEAUTOSTART flag + document
  silent-install switches
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

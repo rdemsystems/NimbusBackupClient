@@ -291,13 +291,43 @@ jobs:
     uses: ./.github/workflows/e2e.yml
 
   # Build CLI for all platforms
+  # Windows and Linux are the targets: a release waits for both. macOS is
+  # built by build-cli-macos below, which a release does not depend on.
   build-cli:
     name: Build CLI
     needs: [security, test, test-modules]
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build CLI
+        env:
+          GOWORK: off
+        run: make cli
+
+      - name: Upload CLI artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-${{ runner.os }}
+          path: dist/proxmoxbackup-*
+
+  # macOS CLI: built and attached to a release when GitHub has a macOS
+  # runner for it, but not a release target. Its runners are sometimes not
+  # available for hours ("not acquired by Runner"); that must not hold a
+  # Windows release back.
+  build-cli-macos:
+    name: Build CLI (macOS, not blocking)
+    needs: [security, test, test-modules]
+    runs-on: macos-latest
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v5
@@ -739,8 +769,10 @@ jobs:
   # Create release on tag
   release:
     name: Create Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-cli, build-gui, e2e]
+    # Waits for build-cli-macos to end, whatever its result: the macOS
+    # archive is attached only when that build produced it.
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.build-cli.result == 'success' && needs.build-gui.result == 'success' && needs.e2e.result == 'success' }}
+    needs: [build-cli, build-cli-macos, build-gui, e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -778,9 +810,13 @@ jobs:
           cd artifacts/cli-Linux && tar -czf ../../release/nimbus-backup-cli-${{ steps.version.outputs.VERSION }}-linux.tar.gz *
           cd ../..
 
-          # CLI macOS
-          cd artifacts/cli-macOS && tar -czf ../../release/nimbus-backup-cli-${{ steps.version.outputs.VERSION }}-macos.tar.gz *
-          cd ../..
+          # CLI macOS, when its build ran
+          if [ -d artifacts/cli-macOS ]; then
+            cd artifacts/cli-macOS && tar -czf ../../release/nimbus-backup-cli-${{ steps.version.outputs.VERSION }}-macos.tar.gz *
+            cd ../..
+          else
+            echo "::warning::No macOS CLI build: the release ships without nimbus-backup-cli-*-macos.tar.gz"
+          fi
 
           # GUI Windows - Add .exe, .msi (with and without version) and .zip
           cd artifacts/NimbusBackup-Windows

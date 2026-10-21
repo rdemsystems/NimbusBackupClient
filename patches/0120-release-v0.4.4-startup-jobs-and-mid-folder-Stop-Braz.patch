@@ -1,0 +1,61 @@
+From 8fbf82cbeb717bc7bd924841a6a5b74a3e14a248 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 21 Oct 2026 17:48:36 +0200
+Subject: [PATCH 120/120] =?UTF-8?q?release:=20v0.4.4=20=E2=80=94=20startup?=
+ =?UTF-8?q?=20jobs=20and=20mid-folder=20Stop,=20Brazilian=20Portuguese?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- gui/wails.json: 0.4.4
+- CHANGELOG: 0.4.4 section (2026-10-21)
+
+Fixes #12
+---
+ CHANGELOG.md   | 16 ++++++++++++++++
+ gui/wails.json |  2 +-
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 9137dac..174497f 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,22 @@ All notable changes to Proxmox Backup Client (GUI) will be documented in this fi
+ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
++## [0.4.4] - 2026-10-21
++
++### Added
++- **Brazilian Portuguese interface**, contributed by [Tácio Andrade](https://github.com/Tacioandrade) (MultiTI) in PR #16. Thank you!
++
++### Fixed
++- **A job set to "Also run at machine startup" ran each time the Nimbus window opened** (issue #12), at every login and every launch, instead of once when Windows starts. The run also bypassed the service's guard against running a job twice, so the same job could show up twice in Running Jobs. The service now runs these jobs when the machine boots; restarting the service or opening the window no longer starts a backup.
++- **Stop did not stop a folder backup until the folder was finished** (issue #12): the cancel was only checked between two folders. It now stops within the next 64 KiB written, the interrupted folder is not committed, and the run is reported as cancelled.
++- **Editing a scheduled job reset its compression** to the default (fastest): the edit form has no compression setting. The stored one is kept now.
++- **The "folders at the same time" field always showed 1** when the GUI opened, whatever was saved.
++- **French UI:** the Running tab showed the raw key `noRunningJobs` when nothing was running, and the About tab the raw key `basedOn`.
++
++### Changed
++- **Every UI language is now checked against English** (missing or extra keys, empty values, placeholders), on every push and on pull requests.
++- **A release no longer waits for the macOS command-line build**, whose GitHub runners can be unavailable for hours; the macOS archive is attached when it was built.
++
+ ## [0.4.3] - 2026-10-20
+ 
+ > ⚠️ **If you enabled encryption in 0.4.1 or 0.4.2, run a new backup after upgrading.**
+diff --git a/gui/wails.json b/gui/wails.json
+index 0777888..2a50d77 100644
+--- a/gui/wails.json
++++ b/gui/wails.json
+@@ -14,7 +14,7 @@
+   "info": {
+     "companyName": "Proxmox Backup Client",
+     "productName": "Proxmox Backup Client",
+-    "productVersion": "0.4.3",
++    "productVersion": "0.4.4",
+     "copyright": "© 2024-2026 Proxmox Backup Client GO Contributors and RDEM Systems.",
+     "comments": "Backup client for Proxmox Backup Server"
+   },
+-- 
+2.47.3
+

@@ -71,7 +71,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite 
 ## ✨ Features
 
 ### GUI (recommended)
-- **🌍 Multi-language** — English, French, Italian, German and Polish interface
+- **🌍 Multi-language** — English, French, Italian, German, Polish and Brazilian Portuguese interface
 - User-friendly configuration with connection testing (API token or username/password)
 - Real-time backup progress with speed and ETA, cancel at any time, a Running tab
 - VSS (Volume Shadow Copy) for consistent backups: one snapshot for a whole multi-folder backup, one shadow copy per volume
@@ -229,6 +229,14 @@ What this repository adds on top of upstream is a documented patch series ([`pat
 - **Release pipeline** — build-provenance attestation, checksums, VirusTotal reports.
 
 We re-merge upstream regularly; upstream's own releases are published at [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go/releases).
+
+## 🙌 Contributors
+
+Thanks to everyone who helped Nimbus Backup:
+
+- [Tácio Andrade](https://github.com/Tacioandrade) ([MultiTI](https://www.multiti.com.br)) — Brazilian Portuguese translation ([#16](https://github.com/rdemsystems/NimbusBackupClient/pull/16)).
+
+The code shared with upstream also comes from [its contributors](https://github.com/tizbac/proxmoxbackupclient_go/graphs/contributors). Contributions are welcome: see the open [issues](https://github.com/rdemsystems/NimbusBackupClient/issues), or open a pull request against `master`.
 
 ## ⭐ Stars
 
