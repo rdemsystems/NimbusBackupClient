@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -133,7 +134,7 @@ func TestSnapshotTreeCacheRoundTrip(t *testing.T) {
 	if got.Meta == nil {
 		t.Fatal("Meta was dropped")
 	}
-	if *got.Meta != *meta {
+	if !reflect.DeepEqual(*got.Meta, *meta) {
 		t.Errorf("Meta = %+v, want %+v", *got.Meta, *meta)
 	}
 }
