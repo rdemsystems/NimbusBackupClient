@@ -224,3 +224,184 @@ func treeOf(t *testing.T, root string) map[string][]byte {
 	}
 	return tree
 }
+
+// Live round trip of a job with two folders in one snapshot (issue #15):
+// one backup group, one archive per folder, browsed, searched and restored
+// by our readers, archive by archive and whole. run.sh (test 12) then
+// restores each archive with the official client, from E2E_OUT/archives.txt
+// ("<archive> <folder>" per line).
+//
+// Environment: as TestE2ELiveInlineEncrypted, without E2E_KEYFILE.
+func TestE2ELiveOneSnapshot(t *testing.T) {
+	if os.Getenv("E2E_LIVE") != "1" {
+		t.Skip("live end-to-end test: run through testing/e2e/run.sh")
+	}
+	env := func(name string) string {
+		v := os.Getenv(name)
+		if v == "" {
+			t.Fatalf("%s is not set", name)
+		}
+		return v
+	}
+	baseURL, fp := env("PBS_BASEURL"), env("PBS_FINGERPRINT")
+	authID, secret, store := env("PBS_AUTHID"), env("PBS_TOKEN_SECRET"), env("PBS_DATASTORE")
+	src, out, backupID := env("E2E_SRC"), env("E2E_OUT"), env("E2E_BACKUP_ID")
+
+	// A second, smaller folder next to the suite's source tree.
+	src2 := filepath.Join(out, "second")
+	for name, body := range map[string]string{"notes.txt": "second folder\n", "deeper/inside/file.bin": strings.Repeat("x", 300000)} {
+		p := filepath.Join(src2, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dirs := []string{src, src2}
+	names := ArchiveNames(dirs)
+
+	backup := func() *BackupStatus {
+		var rs *BackupStatus
+		err := RunBackupInline(BackupOptions{
+			BaseURL: baseURL, AuthID: authID, Secret: secret, Datastore: store, CertFingerprint: fp,
+			BackupObjects: dirs, BackupID: backupID, BackupType: "host", Kind: "directory",
+			Compression: "fastest", OneSnapshot: true,
+			OnResult: func(s *BackupStatus) { rs = s },
+		})
+		if err != nil || rs == nil || !rs.Success() {
+			t.Fatalf("one-snapshot backup: %v %+v", err, rs)
+		}
+		return rs
+	}
+
+	// 1. Two runs: the second reuses the first's chunks, archive by archive.
+	backup()
+	time.Sleep(time.Second) // snapshots are named by the second
+	rs := backup()
+	if rs.ReusedChunks == 0 {
+		t.Errorf("second run reused no chunk (%d new): the archives did not find their previous index", rs.NewChunks)
+	}
+	snapTime := time.Unix(rs.BackupTime, 0).UTC()
+	t.Logf("snapshot host/%s/%s, archives %v", backupID, snapTime.Format(time.RFC3339), names)
+
+	// 2. One group, holding every archive.
+	snaps, err := ListSnapshotsInline(baseURL, authID, secret, "", "", store, "", fp, backupID)
+	if err != nil {
+		t.Fatalf("listing: %v", err)
+	}
+	var latest *SnapshotInfo
+	for i := range snaps {
+		if snaps[i].BackupID != backupID {
+			t.Errorf("unexpected backup group %s: the folders were split into groups", snaps[i].BackupID)
+		}
+		if latest == nil || snaps[i].BackupTime.After(latest.BackupTime) {
+			latest = &snaps[i]
+		}
+	}
+	if latest == nil {
+		t.Fatal("no snapshot listed")
+	}
+	for _, n := range names {
+		found := false
+		for _, f := range latest.Files {
+			found = found || f == n
+		}
+		if !found {
+			t.Errorf("snapshot files %v lack %s", latest.Files, n)
+		}
+	}
+
+	opts := RestoreOptions{
+		BaseURL: baseURL, AuthID: authID, Secret: secret, Datastore: store, CertFingerprint: fp,
+		BackupID: backupID, SnapshotTime: snapTime, Mode: RestoreModeAlternateAbs, Overwrite: true,
+	}
+
+	// 3. The catalog lists each archive under its label, with its origin.
+	entries, meta, ok := listSnapshotViaCatalog(opts, nil)
+	if !ok || meta == nil || len(meta.Archives) != 2 {
+		t.Fatalf("catalog: ok=%v meta=%+v", ok, meta)
+	}
+	for i, a := range meta.Archives {
+		if a.Archive != names[i] || a.OriginalPath != dirs[i] {
+			t.Errorf("archive %d: %+v, want %s from %s", i, a, names[i], dirs[i])
+		}
+	}
+	if !hasEntrySuffix(entries, archiveLabel(names[0])+"/subdir/nested/deep.txt") ||
+		!hasEntrySuffix(entries, archiveLabel(names[1])+"/deeper/inside/file.bin") {
+		t.Errorf("catalog entries lack a folder's files (%d entries)", len(entries))
+	}
+
+	// 4. Search finds a file of the second archive, with its real origin.
+	res, err := SearchFilesInline(SearchOptions{
+		BaseURL: baseURL, AuthID: authID, Secret: secret, Datastore: store, CertFingerprint: fp,
+		HostPrefix: backupID, Query: "file.bin", Mode: SearchModeName,
+		From: snapTime.Add(-time.Hour), To: snapTime.Add(time.Hour), AssembleMissing: true,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(res.Hits) == 0 || res.Hits[0].OriginPath != filepath.Join(src2, "deeper", "inside", "file.bin") {
+		t.Errorf("search hits %+v; want file.bin from %s", res.Hits, src2)
+	}
+
+	// 5. Whole snapshot: each folder lands in <dest>/<label>.
+	opts.DestPath = filepath.Join(out, "restore-multi-all")
+	if err := os.MkdirAll(opts.DestPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreSnapshotInline(opts); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	for i, d := range dirs {
+		assertSameTree(t, d, filepath.Join(opts.DestPath, archiveLabel(names[i])), "whole snapshot, "+names[i])
+	}
+
+	// 6. One file of the second archive only.
+	one := opts
+	one.DestPath = filepath.Join(out, "restore-multi-one")
+	if err := os.MkdirAll(one.DestPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	one.IncludePaths = []string{archiveLabel(names[1]) + "/notes.txt"}
+	if err := RestoreSnapshotInline(one); err != nil {
+		t.Fatalf("selective restore: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(one.DestPath, archiveLabel(names[1]), "notes.txt")); err != nil {
+		t.Errorf("selective restore: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(one.DestPath, archiveLabel(names[0]))); err == nil {
+		t.Error("selective restore of one archive also restored the other")
+	}
+
+	var list strings.Builder
+	for i, n := range names {
+		list.WriteString(n + " " + dirs[i] + "\n")
+	}
+	if err := os.WriteFile(filepath.Join(out, "archives.txt"), []byte(list.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// assertSameTree checks that got holds exactly src's files and folders, byte
+// for byte, besides the metadata file the GUI adds at an archive's root.
+func assertSameTree(t *testing.T, src, got, label string) {
+	t.Helper()
+	want, have := treeOf(t, src), treeOf(t, got)
+	delete(have, BackupMetaFilename)
+	for p, w := range want {
+		g, ok := have[p]
+		switch {
+		case !ok:
+			t.Errorf("%s: %s missing from the restore", label, p)
+		case !bytes.Equal(g, w):
+			t.Errorf("%s: %s differs from the source", label, p)
+		}
+	}
+	for p := range have {
+		if _, ok := want[p]; !ok {
+			t.Errorf("%s: unexpected %s in the restore", label, p)
+		}
+	}
+	t.Logf("%s: %d entries identical", label, len(want))
+}

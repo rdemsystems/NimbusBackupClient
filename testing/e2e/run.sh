@@ -295,6 +295,58 @@ test_gui_encrypted_roundtrip() {
 }
 
 # ===========================================================================
+# Test 12: a job of two folders in one snapshot (issue #15)
+# ===========================================================================
+# The GUI writer puts both folders in one snapshot of one backup group, one
+# archive per folder (TestE2ELiveOneSnapshot checks our catalog, search and
+# restore). The official client must restore each archive on its own: that is
+# what PVE and proxmox-backup-client see.
+test_gui_one_snapshot() {
+	( cd "$REPO_ROOT/gui" && E2E_LIVE=1 \
+		PBS_BASEURL="$PBS_BASEURL" PBS_FINGERPRINT="$PBS_FINGERPRINT" \
+		PBS_AUTHID="$PBS_AUTHID" PBS_TOKEN_SECRET="$PBS_TOKEN_SECRET" \
+		PBS_DATASTORE="$PBS_DATASTORE" \
+		E2E_SRC="$WORK/src" E2E_OUT="$WORK/gui-multi" E2E_BACKUP_ID=e2e-gui-multi \
+		timeout 900 go test -count=1 -v -run '^TestE2ELiveOneSnapshot$' . ) \
+		>"$WORK/log-gui-multi.txt" 2>&1 \
+		|| { cat "$WORK/log-gui-multi.txt"; return 1; }
+	grep -E '^\s+e2e_live_test.go:[0-9]+: ' "$WORK/log-gui-multi.txt" || true
+	ok "GUI writer: two folders in one snapshot read back by our catalog, search and restore"
+
+	if ! pbc_available; then
+		warn "official client skipped -- one-snapshot archives not restored by it"
+		return 0
+	fi
+	local n=0 archive folder target
+	while read -r archive folder; do
+		n=$((n + 1))
+		target="restore-gui-multi-pbc-$n"
+		pbc_restore host/e2e-gui-multi "$archive" "$target"
+		# The GUI adds its metadata file at each archive root; nothing else differs.
+		assert_file_exists "$WORK/$target/.proxmox_backup_client_meta.json"
+		rm -f "$WORK/$target/.proxmox_backup_client_meta.json"
+		assert_tree_identical "$folder" "$WORK/$target" "archive $archive restored by the official client"
+	done <"$WORK/gui-multi/archives.txt"
+	[ "$n" -eq 2 ] || die "expected 2 archives in archives.txt, got $n"
+	# The shared catalog must be one the official client can read. catalog dump
+	# wants a snapshot, not a group: the group's latest.
+	local snap
+	snap="$(pbc snapshot list --output-format json | python3 -c '
+import datetime, json, sys
+s = [x for x in json.load(sys.stdin) if x["backup-id"] == "e2e-gui-multi"]
+t = max(x["backup-time"] for x in s)
+print("host/e2e-gui-multi/" + datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+')" || die "cannot find the e2e-gui-multi snapshot"
+	pbc catalog dump "$snap" >"$WORK/catalog-multi.txt" 2>&1 \
+		|| { cat "$WORK/catalog-multi.txt"; die "the official client cannot read the shared catalog"; }
+	while read -r archive folder; do
+		grep -q "$archive" "$WORK/catalog-multi.txt" \
+			|| { cat "$WORK/catalog-multi.txt"; die "catalog dump does not list $archive"; }
+	done <"$WORK/gui-multi/archives.txt"
+	ok "official client restores each archive and reads the shared catalog"
+}
+
+# ===========================================================================
 # Test 5: the official client can read our manifest and enumerate our snapshots
 # ===========================================================================
 test_manifest_interop() {
@@ -476,6 +528,7 @@ main() {
 	run_test "9. official encrypted block backup -> our read back" test_official_encrypted_block_readback
 	run_test "10. parallel directories + exclusions -> official"   test_parallel_with_exclusions
 	run_test "11. GUI encrypted backup -> our readers + official"  test_gui_encrypted_roundtrip
+	run_test "12. GUI two folders, one snapshot -> ours + official" test_gui_one_snapshot
 
 	section "Summary"
 	log "passed: ${#PASSED[@]}"

@@ -56,6 +56,7 @@ Every setting is an environment variable with a sensible default:
 | 6 | PBS server-side verify | `proxmox-backup-manager verify` reads every chunk and archive back and reports `TASK OK`. |
 | 7 | Dedup | A second identical backup reports chunk reuse. |
 | 11 | **Encrypted** backup by the **GUI/service** writer → our readers + official restore | `gui/e2e_live_test.go` backs up with `RunBackupInline` and the key, then reads the snapshot through the GUI's catalog (no fallback allowed), search and restore (byte-identical), refuses it without the key, and restores test 1's unencrypted snapshot with the key loaded. The official client then restores it identically and refuses it without the key. |
+| 12 | **Two folders, one snapshot** by the GUI/service writer (issue #15) → our readers + official restore | `gui/e2e_live_test.go` backs up two folders with `OneSnapshot` twice (the second run must reuse chunks), checks there is one backup group with one archive per folder, reads it through our catalog (each archive under its label, with its origin), search and restore (whole snapshot and one file of one archive). The official client then restores each archive identically and dumps the shared catalog. |
 
 Tests 3 and 4 use a key file created by the **official** client, which doubles
 as an assertion that our key-file parser is compatible.
