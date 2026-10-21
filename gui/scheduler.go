@@ -685,20 +685,6 @@ func isMachineStartup(uptime time.Duration, err error) bool {
 	return err != nil || uptime <= startupRunWindow
 }
 
-// runStartupJobsAtBoot runs the jobs set to run at machine startup, once per
-// boot. The service calls it when it starts, which is what "at machine
-// startup" means. The GUI used to run them each time it opened, which ran
-// the job again at every launch.
-func (a *App) runStartupJobsAtBoot() {
-	uptime, err := systemUptime()
-	if !isMachineStartup(uptime, err) {
-		writeDebugLog(fmt.Sprintf("Startup jobs not run: the machine has been up for %s, the service was restarted, not booted",
-			uptime.Round(time.Second)))
-		return
-	}
-	a.HandleStartupRun()
-}
-
 // HandleStartupRun executes scheduled jobs that have runAtStartup enabled.
 // Called through runStartupJobsAtBoot, in the service only.
 func (a *App) HandleStartupRun() {
