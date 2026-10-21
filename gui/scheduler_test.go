@@ -38,6 +38,7 @@ func sampleJob() ScheduledJob {
 		ExcludeList:  []string{"*.tmp", "cache/"},
 		Compression:  "better",
 		Enabled:      true, // a stored job is enabled (SaveScheduledJob forces it)
+		OneSnapshot:  true,
 	}
 }
 

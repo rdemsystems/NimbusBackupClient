@@ -32,6 +32,11 @@ type ScheduledJob struct {
 	LastRun      string   `json:"lastRun,omitempty"`     // ISO timestamp
 	NextRun      string   `json:"nextRun,omitempty"`     // ISO timestamp
 	Enabled      bool     `json:"enabled"`
+
+	// OneSnapshot: every folder is an archive of one snapshot (the default for
+	// jobs made from 0.5 on). False keeps one backup group per folder, the
+	// layout of jobs made before, until the user switches the job over.
+	OneSnapshot bool `json:"one_snapshot,omitempty"`
 }
 
 // JobHistory represents a completed backup job
@@ -859,6 +864,7 @@ func (a *App) runScheduledBackup(job ScheduledJob) (err error) {
 		job.UseVSS,
 		compression,
 		job.PBSID,
+		job.OneSnapshot,
 	)
 }
 
@@ -1058,6 +1064,7 @@ func apiJobsToSlice(apiJobs []map[string]interface{}) []ScheduledJob {
 			PBSID:       firstStr(m, "pbs_id", "pbsID"),
 			BackupKind:  firstStr(m, "backup_kind", "backupKind"),
 			Compression: firstStr(m, "compression"),
+			OneSnapshot: firstBool(m, "one_snapshot", "oneSnapshot"),
 			LastRun:     firstStr(m, "lastRun", "last_run"),
 			NextRun:     firstStr(m, "nextRun", "next_run"),
 			Enabled:     firstBool(m, "enabled"),

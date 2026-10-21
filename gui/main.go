@@ -1158,8 +1158,8 @@ func (a *App) emitAnalysisProgress(done, total int, scannedBytes uint64) {
 }
 
 // StartBackup starts a backup operation (routes to service or direct based on mode)
-func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string, pbsID string) error {
-	writeDebugLog(fmt.Sprintf("StartBackup() called - mode: %s, VSS: %v, compression: %s, pbsID: %s, isServiceProcess: %v", a.mode.String(), useVSS, compression, pbsID, a.isServiceProcess))
+func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string, pbsID string, oneSnapshot bool) error {
+	writeDebugLog(fmt.Sprintf("StartBackup() called - mode: %s, VSS: %v, compression: %s, pbsID: %s, oneSnapshot: %v, isServiceProcess: %v", a.mode.String(), useVSS, compression, pbsID, oneSnapshot, a.isServiceProcess))
 
 	// Default to "fastest" if compression is empty
 	if compression == "" {
@@ -1183,13 +1183,13 @@ func (a *App) StartBackup(backupType string, backupDirs []string, driveLetters [
 	switch a.mode {
 	case api.ModeService:
 		// Use HTTP API to communicate with service (service has admin rights as LocalSystem)
-		return a.startBackupViaService(backupType, backupDirs, driveLetters, excludeList, backupID, useVSS, compression, pbsID)
+		return a.startBackupViaService(backupType, backupDirs, driveLetters, excludeList, backupID, useVSS, compression, pbsID, oneSnapshot)
 	case api.ModeStandalone:
 		// Direct execution - check admin if VSS requested
 		if useVSS && !isAdmin() {
 			return fmt.Errorf("VSS (Shadow Copy) requires administrator privileges - restart the application as administrator or disable VSS")
 		}
-		return a.startBackupDirect(backupType, backupDirs, driveLetters, excludeList, backupID, useVSS, compression, pbsID)
+		return a.startBackupDirect(backupType, backupDirs, driveLetters, excludeList, backupID, useVSS, compression, pbsID, oneSnapshot)
 	default:
 		return fmt.Errorf("unknown execution mode: %v", a.mode)
 	}
@@ -1234,7 +1234,7 @@ func (a *App) StartMachineBackup(backupType string, backupDevices []string, back
 }
 
 // startBackupViaService sends backup request to the service via HTTP API
-func (a *App) startBackupViaService(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string, pbsID string) error {
+func (a *App) startBackupViaService(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string, pbsID string, oneSnapshot bool) error {
 	writeDebugLog("[Service Mode] Sending backup request to service")
 
 	req := &api.BackupRequest{
@@ -1246,6 +1246,7 @@ func (a *App) startBackupViaService(backupType string, backupDirs []string, driv
 		UseVSS:       useVSS,
 		Compression:  compression,
 		PBSID:        pbsID,
+		OneSnapshot:  oneSnapshot,
 	}
 
 	resp, err := a.apiClient.StartBackup(req)
@@ -1354,7 +1355,7 @@ func (a *App) pollBackupProgress(jobID string) {
 }
 
 // startBackupDirect performs backup directly (standalone mode)
-func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string, pbsID string) error {
+func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLetters []string, excludeList []string, backupID string, useVSS bool, compression string, pbsID string, oneSnapshot bool) error {
 	// Use hostname as fallback if backupID is empty
 	if backupID == "" {
 		backupID = a.GetHostname()
@@ -1433,6 +1434,7 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 		DisableSplit:    a.config.DisableSplit,
 		SplitSizeBytes:  a.config.SplitSizeBytes(),
 		Parallel:        a.config.Parallel,
+		OneSnapshot:     oneSnapshot,
 		Crypt:           pbsCfg.Crypt,
 		// Use the backup context that was set via SetBackupContext for this job
 		Ctx: func() context.Context {

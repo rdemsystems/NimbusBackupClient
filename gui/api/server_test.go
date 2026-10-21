@@ -33,10 +33,11 @@ type fakeHandler struct {
 	started          chan struct{}
 	startCompression string
 	startPBSID       string
+	startOneSnapshot bool
 }
 
-func (f *fakeHandler) StartBackup(_ string, _, _, _ []string, _ string, _ bool, compression, pbsID string) error {
-	f.startCompression, f.startPBSID = compression, pbsID
+func (f *fakeHandler) StartBackup(_ string, _, _, _ []string, _ string, _ bool, compression, pbsID string, oneSnapshot bool) error {
+	f.startCompression, f.startPBSID, f.startOneSnapshot = compression, pbsID, oneSnapshot
 	if f.started != nil {
 		f.started <- struct{}{}
 	}
@@ -208,12 +209,12 @@ func TestJobRunRoute(t *testing.T) {
 // The /backup route hands the compression level and the selected PBS server
 // to the backup in the right order: they were swapped, so a service-run backup
 // got the PBS id as its compression level and the level as its PBS id.
-func TestBackupRouteForwardsCompressionAndPBS(t *testing.T) {
+func TestBackupRouteForwardsCompressionPBSAndLayout(t *testing.T) {
 	h := &fakeHandler{started: make(chan struct{}, 1)}
 	_, url, _ := newTestServer(t, h)
 
 	resp := doAuthed(t, http.MethodPost, url+"/backup",
-		`{"backup_type":"directory","backup_id":"pc1","backup_dirs":["C:\\Data"],"compression":"better","pbs_id":"pbs-2"}`)
+		`{"backup_type":"directory","backup_id":"pc1","backup_dirs":["C:\\Data"],"compression":"better","pbs_id":"pbs-2","one_snapshot":true}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -224,6 +225,9 @@ func TestBackupRouteForwardsCompressionAndPBS(t *testing.T) {
 	}
 	if h.startCompression != "better" || h.startPBSID != "pbs-2" {
 		t.Errorf("StartBackup got compression %q, pbsID %q; want \"better\", \"pbs-2\"", h.startCompression, h.startPBSID)
+	}
+	if !h.startOneSnapshot {
+		t.Error("StartBackup got oneSnapshot false; want the request's true")
 	}
 }
 

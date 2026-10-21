@@ -49,8 +49,8 @@ func (a *App) ReloadConfig() {
 
 // StartBackup starts a backup job
 // Service implementation using RunBackupInline
-func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeList []string, backupID string, useVSS bool, compression string, pbsID string) error {
-	writeDebugLog(fmt.Sprintf("[Service] StartBackup called: type=%s, dirs=%v, id=%s, vss=%v, compression=%s, pbsID=%s", backupType, backupDirs, backupID, useVSS, compression, pbsID))
+func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeList []string, backupID string, useVSS bool, compression string, pbsID string, oneSnapshot bool) error {
+	writeDebugLog(fmt.Sprintf("[Service] StartBackup called: type=%s, dirs=%v, id=%s, vss=%v, compression=%s, pbsID=%s, oneSnapshot=%v", backupType, backupDirs, backupID, useVSS, compression, pbsID, oneSnapshot))
 
 	// Re-read config from disk so this run uses the current token / default PBS /
 	// pinned fingerprint rather than the snapshot loaded when the service started.
@@ -139,6 +139,7 @@ func (a *App) StartBackup(backupType string, backupDirs, driveLetters, excludeLi
 		DisableSplit:    pbsCfg.DisableSplit,
 		SplitSizeBytes:  pbsCfg.SplitSizeBytes(),
 		Parallel:        a.config.Parallel,
+		OneSnapshot:     oneSnapshot && kind != "machine",
 		OnProgress: func(percent float64, message string) {
 			writeDebugLog(fmt.Sprintf("[Backup Progress] %.1f%% - %s", percent*100, message))
 			// Feed the API server's progress map so the GUI's polling sees it.

@@ -134,7 +134,7 @@ export function SetupSystemTray():Promise<void>;
 
 export function ShowFromTray():Promise<void>;
 
-export function StartBackup(arg1:string,arg2:Array<string>,arg3:Array<string>,arg4:Array<string>,arg5:string,arg6:boolean,arg7:string,arg8:string):Promise<void>;
+export function StartBackup(arg1:string,arg2:Array<string>,arg3:Array<string>,arg4:Array<string>,arg5:string,arg6:boolean,arg7:string,arg8:string,arg9:boolean):Promise<void>;
 
 export function StartMachineBackup(arg1:string,arg2:Array<string>,arg3:string,arg4:boolean,arg5:string,arg6:string,arg7:string):Promise<void>;
 

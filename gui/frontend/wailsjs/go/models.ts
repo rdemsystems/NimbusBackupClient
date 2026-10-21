@@ -319,6 +319,7 @@ export namespace main {
 	    lastRun?: string;
 	    nextRun?: string;
 	    enabled: boolean;
+	    one_snapshot?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ScheduledJob(source);
@@ -342,6 +343,7 @@ export namespace main {
 	        this.lastRun = source["lastRun"];
 	        this.nextRun = source["nextRun"];
 	        this.enabled = source["enabled"];
+	        this.one_snapshot = source["one_snapshot"];
 	    }
 	}
 	export class SearchHit {

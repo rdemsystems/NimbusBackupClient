@@ -11,6 +11,9 @@ type BackupRequest struct {
 	Compression  string   `json:"compression,omitempty"` // "fastest", "default", "better", "best"
 	PBSID        string   `json:"pbs_id,omitempty"`       // PBS server ID to use (empty = default)
 	BackupKind   string   `json:"backup_kind,omitempty"`  // "host" or "vm" for machine backups
+	// OneSnapshot writes the folders into one snapshot, one archive per
+	// folder, instead of one backup group per folder.
+	OneSnapshot bool `json:"one_snapshot,omitempty"`
 }
 
 // BackupResponse represents the result of a backup operation

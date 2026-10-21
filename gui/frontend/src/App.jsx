@@ -144,6 +144,9 @@ function App() {
   // shared by one-shot and scheduled backups). No maximum; CPUs / 4 is advised.
   const [parallelFolders, setParallelFolders] = useState(1)
   const [recommendedParallel, setRecommendedParallel] = useState(1)
+  // One snapshot for every folder, one archive per folder (0.5). On for new
+  // backups; a job made before 0.5 loads with it off until the user switches.
+  const [oneSnapshot, setOneSnapshot] = useState(true)
 
   // Scheduling states
   const [backupMode, setBackupMode] = useState('oneshot') // 'oneshot' or 'scheduled'
@@ -1105,7 +1108,8 @@ function App() {
           config['backup-id'],
           config.usevss,
           '',
-          backupPBSID
+          backupPBSID,
+          oneSnapshot
         )
         showStatus(`⏳ ${t('statusBackupRunning')}`, 'info')
         return
@@ -1150,7 +1154,8 @@ function App() {
             job.backup_id,
             config.usevss,
             '',
-            backupPBSID
+            backupPBSID,
+            false // each part is a backup group of its own
           )
         } catch (err) {
           // The part never started (validation / dispatch error): no completion
@@ -1288,7 +1293,8 @@ function App() {
         excludeList: backupType === 'directory' ? excludeList.split('\n').filter(l => l.trim()) : [],
         driveLetters: backupType === 'machine' ? selectedDrives : [],
         pbs_id: backupPBSID,
-        backup_kind: machineBackupKind
+        backup_kind: machineBackupKind,
+        one_snapshot: backupType === 'directory' && oneSnapshot
       }
 
       // Save or update to backend
@@ -1311,6 +1317,7 @@ function App() {
         setBackupDirs('')
         setBackupPBSID('')
         setMachineBackupKind('host')
+        setOneSnapshot(true)
       } catch (err) {
         showStatus(`❌ ${t('errWithMsg', { err })}`, 'error')
       }
@@ -1337,7 +1344,8 @@ function App() {
           config['backup-id'],
           config.usevss,
           '',
-          backupPBSID
+          backupPBSID,
+          oneSnapshot
         )
       } else {
         // Filter out any empty drives to prevent empty string issues
@@ -2197,7 +2205,23 @@ function App() {
             </div>
           )}
 
-          {backupType === 'directory' && (
+          {backupType === 'directory' && !(backupMode === 'oneshot' && splitFirstBackup) && (
+            <div className="form-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={oneSnapshot}
+                  onChange={(e) => setOneSnapshot(e.target.checked)}
+                />
+                {t('oneSnapshot')}
+              </label>
+              <div className="info-box" style={{marginTop: '10px', backgroundColor: '#f8f9fa', borderColor: '#dee2e6'}}>
+                ℹ️ {oneSnapshot ? t('oneSnapshotHint') : t('oneSnapshotLegacyHint')}
+              </div>
+            </div>
+          )}
+
+          {backupType === 'directory' && !oneSnapshot && (
             <div className="form-group">
               <label htmlFor="parallel-folders">{t('parallelFolders')}</label>
               <input
@@ -2311,6 +2335,7 @@ function App() {
               setBackupType('directory')
               setBackupPBSID('')
               setMachineBackupKind('host')
+              setOneSnapshot(true)
               setActiveTab('scheduled')
               showStatus(`✖️ ${t('statusEditCancelled')}`, 'info')
             }}>
@@ -2373,6 +2398,7 @@ function App() {
                           setBackupType(job.backupType)
                           setBackupPBSID(job.pbs_id || '')
                           setMachineBackupKind(job.backup_kind || 'host')
+                          setOneSnapshot(!!job.one_snapshot)
                           setExcludeList((job.excludeList || []).join('\n'))
                           // Switch to backup tab to show the form
                           setActiveTab('backup')
