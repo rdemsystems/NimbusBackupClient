@@ -239,7 +239,7 @@ Nous refusionnons régulièrement le projet d'origine ; ses propres releases son
 
 ![Étoiles GitHub de Nimbus Backup dans le temps](https://raw.githubusercontent.com/rdemsystems/NimbusBackupClient/stats/stars.svg)
 
-Mis à jour chaque jour. Comparaison avec le projet d'origine et les autres forks : [graphe](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars-compare.svg) · [relevé quotidien (CSV)](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars.csv). Si Nimbus Backup vous est utile, une étoile aide d'autres personnes à le trouver.
+Mis à jour chaque jour · [relevé quotidien (CSV)](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars.csv). Si Nimbus Backup vous est utile, une étoile aide d'autres personnes à le trouver.
 
 ## ⚠️ Avertissement
 

@@ -1,7 +1,7 @@
 name: Stars
 
-# Logs the GitHub stars of Nimbus Backup, upstream and the starred forks every
-# day, and redraws the charts the README shows (.github/scripts/stars.py).
+# Logs the GitHub stars of Nimbus Backup every day and redraws the chart the
+# README shows (.github/scripts/stars.py).
 # Everything it writes lives on the `stats` branch, so the log never adds
 # commits to master nor starts a build.
 on:
@@ -45,7 +45,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add stars.csv stars.svg stars-compare.svg
+          git add stars.csv stars.svg
           if git diff --cached --quiet; then
             echo "Nothing changed"
             exit 0

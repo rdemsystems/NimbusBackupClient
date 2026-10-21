@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
-"""Star history of Nimbus Backup and the projects around it.
+"""Star history of Nimbus Backup.
 
 Run daily by .github/workflows/stars.yml. Standard library only.
 
     stars.py OUT_DIR
 
 In OUT_DIR (the checked-out `stats` branch):
-- stars.csv: one row per day and repository (stars, forks, watchers, open
-  issues), appended to; a second run on the same day replaces that day.
-- stars.svg: our stars over time, from the date of every star.
-- stars-compare.svg: upstream and every fork that has a star, from the
-  daily rows of stars.csv: GitHub lists who starred a repository, and
-  when, to its own maintainers only, so the other curves start with the
-  log.
-
-GITHUB_TOKEN, when set, raises the API rate limit.
+- stars.csv: one row per day (stars, forks, watchers, open issues),
+  appended to; a second run on the same day replaces that day.
+- stars.svg: our stars over time, from the date of every star (GitHub
+  lists them to the repository's maintainers, so GITHUB_TOKEN is needed;
+  without it the curve comes from stars.csv).
 """
 
 import csv
@@ -26,10 +22,6 @@ import urllib.error
 import urllib.request
 
 OURS = "rdemsystems/NimbusBackupClient"
-UPSTREAM = "tizbac/proxmoxbackupclient_go"
-# Always shown, starred or not; the forks of both with a star are added.
-ALWAYS = [OURS, UPSTREAM, "mjb-is/proxmoxbackupclient_go", "CJInvent/NimbusBackupClient"]
-
 API = "https://api.github.com"
 
 
@@ -53,15 +45,6 @@ def get(path, accept="application/vnd.github+json"):
             if 'rel="next"' in part:
                 url = part[part.index("<") + 1 : part.index(">")]
     return out or []
-
-
-def repositories():
-    repos = list(ALWAYS)
-    for parent in (UPSTREAM, OURS):
-        for fork in get(f"/repos/{parent}/forks?per_page=100"):
-            if fork["stargazers_count"] > 0 and fork["full_name"] not in repos:
-                repos.append(fork["full_name"])
-    return repos
 
 
 def star_dates(repo):
@@ -111,8 +94,8 @@ def log_csv(path, today, infos):
     return rows
 
 
-# Distinct in light and dark mode; ours is always the first, upstream the second.
-COLORS = ["#2a78d6", "#e8862a", "#3aa36b", "#c4458f", "#7d5fd0", "#c9a227", "#5b8a99", "#b0554a"]
+# Readable in light and dark mode.
+COLORS = ["#2a78d6"]
 
 
 def svg_chart(path, title, series, now):
@@ -180,21 +163,12 @@ def svg_chart(path, title, series, now):
 def main():
     outdir = sys.argv[1] if len(sys.argv) > 1 else "."
     now = dt.datetime.now(dt.timezone.utc)
-    repos = repositories()
-    infos = {r: get(f"/repos/{r}") for r in repos}
-    rows = log_csv(os.path.join(outdir, "stars.csv"), now.strftime("%Y-%m-%d"), infos)
-
-    def history(repo):
-        dates = star_dates(repo) if repo == OURS else None
-        return steps(dates) if dates is not None else logged(rows, repo)
-
-    svg_chart(os.path.join(outdir, "stars.svg"), "Nimbus Backup — GitHub stars", [("NimbusBackupClient", history(OURS))], now)
-    ranked = [OURS, UPSTREAM] + sorted((r for r in repos if r not in (OURS, UPSTREAM)),
-                                       key=lambda r: -infos[r]["stargazers_count"])
-    svg_chart(os.path.join(outdir, "stars-compare.svg"), "GitHub stars — upstream and forks",
-              [(r, history(r)) for r in ranked], now)
-    for r in ranked:
-        print(f"{r}: {infos[r]['stargazers_count']} stars")
+    info = get(f"/repos/{OURS}")
+    rows = log_csv(os.path.join(outdir, "stars.csv"), now.strftime("%Y-%m-%d"), {OURS: info})
+    dates = star_dates(OURS)
+    points = steps(dates) if dates is not None else logged(rows, OURS)
+    svg_chart(os.path.join(outdir, "stars.svg"), "Nimbus Backup — GitHub stars", [("NimbusBackupClient", points)], now)
+    print(f"{OURS}: {info['stargazers_count']} stars")
 
 
 if __name__ == "__main__":

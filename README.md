@@ -234,7 +234,7 @@ We re-merge upstream regularly; upstream's own releases are published at [tizbac
 
 ![GitHub stars of Nimbus Backup over time](https://raw.githubusercontent.com/rdemsystems/NimbusBackupClient/stats/stars.svg)
 
-Redrawn every day. Compared with upstream and the other forks: [chart](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars-compare.svg) · [daily log (CSV)](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars.csv). If Nimbus Backup is useful to you, a star helps others find it.
+Redrawn every day · [daily log (CSV)](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars.csv). If Nimbus Backup is useful to you, a star helps others find it.
 
 ## ⚠️ Disclaimer
 
