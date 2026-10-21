@@ -2,6 +2,7 @@ package main
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -12,26 +13,22 @@ func TestArchiveNames(t *testing.T) {
 	dirs := []string{
 		`C:\Users\tacio\Downloads`,
 		`C:\Users\tacio\smart`,
-		`C:\Users\tacio\smart`, // same folder twice
-		`D:\Data Files`,
-		`D:\Data-Files`, // same label as the one above
-		`C:\Users\TACIO\Downloads`, // Windows paths are case-insensitive
 		`/`,
 		`/backup`,
 		`/home/.config`,
 		`/srv/Área`,
+		`.hidden`,
+		`-dash`,
 	}
 	want := []string{
 		"C_Users_tacio_Downloads.pxar.didx",
 		"C_Users_tacio_smart.pxar.didx",
-		"C_Users_tacio_smart_2.pxar.didx",
-		"D_Data-Files.pxar.didx",
-		"D_Data-Files_2.pxar.didx",
-		"C_Users_TACIO_Downloads_2.pxar.didx",
 		"root.pxar.didx",
 		"backup_folder.pxar.didx",
 		"home_.config.pxar.didx",
 		"srv_rea.pxar.didx",
+		"hidden.pxar.didx",
+		"dash.pxar.didx",
 	}
 	got := ArchiveNames(dirs)
 	for i := range want {
@@ -44,6 +41,29 @@ func TestArchiveNames(t *testing.T) {
 	}
 }
 
+// Folders whose labels collide get distinct names that do not depend on
+// their order; the same folder listed twice still gets two names.
+func TestArchiveNamesCollisions(t *testing.T) {
+	a := ArchiveNames([]string{`D:\Data Files`, `D:\Data-Files`, `C:\x`, `C:\X`})
+	b := ArchiveNames([]string{`C:\X`, `D:\Data-Files`, `C:\x`, `D:\Data Files`})
+	seen := map[string]bool{}
+	for _, n := range a {
+		if seen[strings.ToLower(n)] {
+			t.Errorf("name %q given twice in %v", n, a)
+		}
+		seen[strings.ToLower(n)] = true
+		if !pbsArchiveName.MatchString(n) {
+			t.Errorf("%q is not a valid PBS archive name", n)
+		}
+	}
+	if !strings.HasPrefix(a[0], "D_Data-Files_") || !strings.HasPrefix(a[1], "D_Data-Files_") {
+		t.Errorf("colliding labels should keep the label and add a hash: %v", a)
+	}
+	if a[0] != b[3] || a[1] != b[1] {
+		t.Errorf("colliding names moved with the folder order: %v vs %v", a, b)
+	}
+}
+
 // A folder's archive name does not depend on the folders around it, so a
 // job that gains or loses a folder keeps the others' incremental chain.
 func TestArchiveNamesStable(t *testing.T) {
@@ -51,15 +71,5 @@ func TestArchiveNamesStable(t *testing.T) {
 	b := ArchiveNames([]string{`C:\zero`, `C:\two`, `C:\one`})
 	if a[0] != b[2] || a[1] != b[1] {
 		t.Errorf("names moved with the folder list: %v vs %v", a, b)
-	}
-}
-
-// An archive name starting with a dot or a dash is refused by PBS.
-func TestArchiveNamesLeadingCharacter(t *testing.T) {
-	for _, dir := range []string{`.hidden`, `-dash`, `..`} {
-		name := ArchiveNames([]string{dir})[0]
-		if !pbsArchiveName.MatchString(name) {
-			t.Errorf("ArchiveNames(%q) = %q, not a valid PBS archive name", dir, name)
-		}
 	}
 }

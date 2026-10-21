@@ -3,6 +3,7 @@ package pbscommon
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/bits"
@@ -806,21 +807,41 @@ type SnapshotCatalog struct {
 	WriteCB PXAROutCB
 	pos     uint64
 	roots   []CatalogDir
+	err     error // first write error, or errCatalogClosed: no write after it
 }
 
+var errCatalogClosed = errors.New("catalog already closed")
+
+// write keeps pos the offset of the next byte of the stream; after a failed
+// write the offsets no longer match what was written, so it refuses more.
 func (c *SnapshotCatalog) write(b []byte) error {
+	if c.err != nil {
+		return c.err
+	}
+	if err := c.WriteCB(b); err != nil {
+		c.err = err
+		return err
+	}
 	c.pos += uint64(len(b))
-	return c.WriteCB(b)
+	return nil
 }
 
 // Close writes the root table listing every archive written so far.
 func (c *SnapshotCatalog) Close() error {
+	if c.err != nil {
+		return c.err
+	}
+	defer func() {
+		if c.err == nil {
+			c.err = errCatalogClosed
+		}
+	}()
 	if c.pos == 0 {
 		if err := c.write(catalog_magic); err != nil {
 			return fmt.Errorf("failed to write catalog magic: %w", err)
 		}
 	}
-	return writeCatalogRoot(c.WriteCB, c.pos, c.roots)
+	return writeCatalogRoot(c.write, c.pos, c.roots)
 }
 
 // On pxar first item and consquently entry point must always be WriteDir , because toplevel is always a directory

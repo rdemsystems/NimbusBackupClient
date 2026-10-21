@@ -125,20 +125,26 @@ func ParseCatalogArchives(data []byte) ([]CatalogArchive, error) {
 		return nil, fmt.Errorf("catalog trailer malformed: %d dirs, %d files (expected at least 1 dir)", len(dirs), len(files))
 	}
 
-	archives := make([]CatalogArchive, 0, len(dirs))
-	total := 0
+	// One slice for every archive, so the entry limit holds for the catalog
+	// as a whole while it is walked; each archive gets its part.
+	all := make([]CatalogEntry, 0, 256)
+	starts := make([]int, 0, len(dirs))
 	for _, d := range dirs {
 		if d.start >= rootPtr {
 			return nil, fmt.Errorf("catalog archive %q at %d does not precede the trailer at %d", d.name, d.start, rootPtr)
 		}
-		entries := make([]CatalogEntry, 0, 256)
-		if err := walkCatalog(data, d.start, "", 0, &entries); err != nil {
+		starts = append(starts, len(all))
+		if err := walkCatalog(data, d.start, "", 0, &all); err != nil {
 			return nil, fmt.Errorf("archive %q: %w", d.name, err)
 		}
-		if total += len(entries); total > catalogMaxEntries {
-			return nil, fmt.Errorf("catalog exceeds %d entries", catalogMaxEntries)
+	}
+	archives := make([]CatalogArchive, len(dirs))
+	for i, d := range dirs {
+		end := len(all)
+		if i+1 < len(starts) {
+			end = starts[i+1]
 		}
-		archives = append(archives, CatalogArchive{Name: d.name, Entries: entries})
+		archives[i] = CatalogArchive{Name: d.name, Entries: all[starts[i]:end:end]}
 	}
 	return archives, nil
 }

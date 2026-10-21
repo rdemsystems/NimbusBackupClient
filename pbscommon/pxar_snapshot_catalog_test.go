@@ -2,6 +2,7 @@ package pbscommon
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -123,5 +124,35 @@ func TestSnapshotCatalogEmpty(t *testing.T) {
 	}
 	if _, err := ParseCatalogArchives(c.Bytes()); err == nil {
 		t.Error("an empty catalog parsed as having archives")
+	}
+}
+
+// After a failed write the catalog's offsets no longer match the stream, so
+// it refuses to go on; after Close it refuses any write.
+func TestSnapshotCatalogLatchesErrors(t *testing.T) {
+	fail := true
+	cat := &SnapshotCatalog{WriteCB: func([]byte) error {
+		if fail {
+			return errors.New("upload failed")
+		}
+		return nil
+	}}
+	if err := cat.write([]byte("x")); err == nil {
+		t.Fatal("the failing write succeeded")
+	}
+	fail = false
+	if err := cat.write([]byte("y")); err == nil {
+		t.Error("a write after a failed one was accepted")
+	}
+	if err := cat.Close(); err == nil {
+		t.Error("Close after a failed write succeeded")
+	}
+
+	ok := &SnapshotCatalog{WriteCB: func([]byte) error { return nil }}
+	if err := ok.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := ok.write([]byte("z")); err == nil {
+		t.Error("a write after Close was accepted")
 	}
 }

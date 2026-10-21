@@ -69,13 +69,16 @@ func pathLabel(path string) string {
 }
 
 // ArchiveNames gives each folder of a one-snapshot backup its archive name,
-// <label>.pxar.didx, in the order of dirs. The name only depends on the path,
-// so the same folder finds its previous archive (and its chunks) on the next
-// run. Folders whose labels collide get _2, _3...; "backup" is avoided as it
-// would read as the archive of a one-folder snapshot of the old layout.
+// <label>.pxar.didx, in the order of dirs. The name depends on the path, not
+// on the folder's place in the list, so the folder finds its previous archive
+// (and its chunks) on the next run. Folders whose labels collide (D:\Data
+// Files and D:\Data-Files, or names that differ only by case or accents) all
+// get a short hash of their path, so reordering them keeps their names; the
+// same folder listed twice gets _2. "backup" is avoided as it would read as
+// the archive of a one-folder snapshot of the old layout.
 func ArchiveNames(dirs []string) []string {
-	names := make([]string, len(dirs))
-	used := map[string]bool{}
+	labels := make([]string, len(dirs))
+	count := map[string]int{}
 	for i, dir := range dirs {
 		// PBS archive names must start with a letter, digit or _
 		label := strings.TrimLeft(pathLabel(dir), ".-")
@@ -84,6 +87,18 @@ func ArchiveNames(dirs []string) []string {
 			label = "root"
 		case "backup":
 			label = "backup_folder"
+		}
+		labels[i] = label
+		count[strings.ToLower(label)]++
+	}
+
+	names := make([]string, len(dirs))
+	used := map[string]bool{}
+	for i, dir := range dirs {
+		label := labels[i]
+		if count[strings.ToLower(label)] > 1 {
+			h := sha256.Sum256([]byte(strings.ToLower(filepath.Clean(dir))))
+			label += "_" + hex.EncodeToString(h[:4])
 		}
 		name := label
 		for n := 2; used[strings.ToLower(name)]; n++ {

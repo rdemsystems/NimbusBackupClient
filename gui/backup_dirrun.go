@@ -89,6 +89,7 @@ type dirRun struct {
 	dirErrors      []string
 	dirResults     []DirResult
 	successfulDirs int
+
 	// Run-level accumulators: client.{ReadErrors,SkippedFiles,ExcludedFiles} are
 	// reset by each Connect(), so they are captured after each session before
 	// the next one wipes them — otherwise a read error in an earlier folder of a
