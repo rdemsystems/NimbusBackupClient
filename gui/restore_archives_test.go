@@ -99,8 +99,22 @@ func TestPathRewriterOriginalWithArchives(t *testing.T) {
 		t.Errorf("rw(unknown/f) = %q, want it dropped", got)
 	}
 
+	// An archive whose folder is unknown blocks an in-place restore of it,
+	// not of the others.
 	meta.Archives[1].OriginalPath = ""
-	if _, err := buildPathRewriter(RestoreOptions{Mode: RestoreModeOriginal}, meta); err == nil {
+	rw, err = buildPathRewriter(RestoreOptions{Mode: RestoreModeOriginal}, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rw("smart/z.txt"); got != "" {
+		t.Errorf("rw(smart/z.txt) = %q, want it dropped", got)
+	}
+	jobs, _ := restoreArchiveJobs(meta, []string{"Downloads/x.iso"}, rw)
+	if err := checkArchiveOrigins(meta, jobs); err != nil {
+		t.Errorf("restoring Downloads only: %v", err)
+	}
+	jobs, _ = restoreArchiveJobs(meta, nil, rw)
+	if err := checkArchiveOrigins(meta, jobs); err == nil {
 		t.Error("in place accepted an archive whose folder is unknown")
 	}
 }

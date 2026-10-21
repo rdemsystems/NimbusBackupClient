@@ -417,8 +417,11 @@ func ListSnapshotContentsInline(opts RestoreOptions, archiveName string, forceRe
 	writeBackupLog(fmt.Sprintf("Listing contents: backupID=%s snapshot=%s archive=%s force=%v",
 		opts.BackupID, opts.SnapshotTime.Format(time.RFC3339), archiveName, forceRefresh))
 
+	// The cache holds the whole snapshot's tree: the listing of one named
+	// archive of it is neither read from nor written to it.
+	whole := archiveName == legacyArchiveName
 	cacheKey := buildSnapshotCacheKey(opts)
-	if !forceRefresh {
+	if whole && !forceRefresh {
 		if cached, ok := loadSnapshotTreeCache(cacheKey); ok {
 			writeBackupLog(fmt.Sprintf("Restore cache hit: %d entries (skipping download)", len(cached.Entries)))
 			return cached.Entries, nil
@@ -428,6 +431,9 @@ func ListSnapshotContentsInline(opts RestoreOptions, archiveName string, forceRe
 	result, meta, err := assembleSnapshotTree(opts, archiveName, "Listing", nil)
 	if err != nil {
 		return nil, err
+	}
+	if !whole {
+		return result, nil
 	}
 	writeBackupLog(fmt.Sprintf("Listed %d entries in snapshot", len(result)))
 
@@ -547,15 +553,12 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 			}
 		}
 		if len(meta.Archives) > 0 {
-			// One archive per folder: each goes back to its own folder.
-			for _, a := range meta.Archives {
-				if a.OriginalPath == "" {
-					return nil, fmt.Errorf("in-place restore not possible: the original folder of %s is not in its metadata", a.Label)
-				}
-			}
+			// One archive per folder: each goes back to its own folder. That
+			// every archive restored has one is checked once the selection is
+			// split (checkArchiveOrigins).
 			return func(snapshotPath string) string {
 				a, rest, ok := meta.archiveOf(snapshotPath)
-				if !ok {
+				if !ok || a.OriginalPath == "" {
 					return ""
 				}
 				root := filepath.Clean(a.OriginalPath)
@@ -628,8 +631,8 @@ func buildPathRewriter(opts RestoreOptions, meta *BackupMeta) (pbscommon.PathRew
 
 // restoreMeta is the snapshot metadata a restore needs: the sidecar for an
 // in-place restore, else only which archives the snapshot holds. That comes
-// from the cache or the catalog (a few MB); a snapshot without a catalog is
-// of the original layout, so it is not walked for it.
+// from the cache or the catalog (a few MB), else from the manifest's file
+// list: the data archives are not walked for it.
 func restoreMeta(opts RestoreOptions, mode RestoreMode) (*BackupMeta, error) {
 	if mode == RestoreModeOriginal {
 		return ReadSnapshotMetaInline(opts, false)
@@ -640,12 +643,43 @@ func restoreMeta(opts RestoreOptions, mode RestoreMode) (*BackupMeta, error) {
 	}
 	entries, meta, ok := listSnapshotViaCatalog(opts, nil)
 	if !ok {
-		return nil, nil
+		return archivesFromManifest(opts)
 	}
 	if werr := saveSnapshotTreeCache(key, entries, meta); werr != nil {
 		writeBackupLog(fmt.Sprintf("Restore cache write failed: %v", werr))
 	}
 	return meta, nil
+}
+
+// archivesFromManifest tells a snapshot's layout from the files its manifest
+// lists, for a snapshot whose catalog cannot be read: nil for one of the
+// original layout (backup.pxar.didx), else its archives, without origins.
+func archivesFromManifest(opts RestoreOptions) (*BackupMeta, error) {
+	snaps, err := ListSnapshotsInline(opts.BaseURL, opts.AuthID, opts.Secret, opts.Ticket, opts.CSRFToken,
+		opts.Datastore, opts.Namespace, opts.CertFingerprint, opts.BackupID)
+	if err != nil {
+		return nil, err
+	}
+	for _, sn := range snaps {
+		if sn.BackupID != opts.BackupID || sn.BackupTime.Unix() != opts.SnapshotTime.Unix() {
+			continue
+		}
+		meta := &BackupMeta{BackupID: opts.BackupID}
+		for _, f := range sn.Files {
+			if f == legacyArchiveName {
+				return nil, nil
+			}
+			if strings.HasSuffix(f, ".pxar.didx") {
+				meta.Archives = append(meta.Archives, ArchiveOrigin{Archive: f, Label: archiveLabel(f)})
+			}
+		}
+		if len(meta.Archives) == 0 {
+			return nil, fmt.Errorf("snapshot %s@%d holds no file archive", opts.BackupID, opts.SnapshotTime.Unix())
+		}
+		writeBackupLog(fmt.Sprintf("Catalog unreadable: %d archive(s) taken from the manifest", len(meta.Archives)))
+		return meta, nil
+	}
+	return nil, fmt.Errorf("snapshot %s@%d not found", opts.BackupID, opts.SnapshotTime.Unix())
 }
 
 // archiveRestore is the restore of one archive of a snapshot: the archive,
@@ -705,6 +739,22 @@ func restoreArchiveJobs(meta *BackupMeta, includePaths []string, rewriter pbscom
 		})
 	}
 	return jobs, nil
+}
+
+// checkArchiveOrigins refuses an in-place restore of an archive whose
+// original folder is unknown (its sidecar is missing or unreadable).
+func checkArchiveOrigins(meta *BackupMeta, jobs []archiveRestore) error {
+	if meta == nil {
+		return nil
+	}
+	for _, j := range jobs {
+		for _, a := range meta.Archives {
+			if a.Archive == j.archive && a.OriginalPath == "" {
+				return fmt.Errorf("in-place restore not possible: the original folder of %s is not in its metadata, choose \"alternate location\" instead", a.Label)
+			}
+		}
+	}
+	return nil
 }
 
 // commonAncestorDir returns the longest path prefix shared by all includes,
@@ -802,7 +852,10 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	// Cheap: the catalog, or the cache when the snapshot was listed first.
 	meta, err := restoreMeta(opts, mode)
 	if err != nil {
-		return fmt.Errorf("reading the sidecar for in-place restore: %w", err)
+		if mode == RestoreModeOriginal {
+			return fmt.Errorf("reading the sidecar for in-place restore: %w", err)
+		}
+		return fmt.Errorf("reading the snapshot's archives: %w", err)
 	}
 	if mode == RestoreModeOriginal {
 		// Validate immediately so the user sees the cross-host / cross-OS
@@ -833,6 +886,11 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	jobs, err := restoreArchiveJobs(meta, opts.IncludePaths, rewriter)
 	if err != nil {
 		return err
+	}
+	if mode == RestoreModeOriginal {
+		if err := checkArchiveOrigins(meta, jobs); err != nil {
+			return err
+		}
 	}
 
 	// NTFS ACLs/DOS attributes on Windows, POSIX ACLs/xattrs on Linux — a
@@ -867,62 +925,9 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		aclClient.Close()
 	}
 
-	// The .didx index is parsed lazily and its chunks are fetched on demand by
-	// pbscommon.NewDIDXReaderAt, so we walk the PXAR stream straight off the
-	// network reader and stream each file payload to its destination. Nothing is
-	// materialised on disk first. Each archive gets its share of 20-90%.
-	var extracted []pbscommon.PXARExtractedFile
-	for i, job := range jobs {
-		base, share := 0.20+0.70*float64(i)/float64(len(jobs)), 0.70/float64(len(jobs))
-		progress(base, fmt.Sprintf("Downloading backup archive %s...", job.archive))
-		err = withSnapshotReader(opts, job.archive, "Restore", func(done, total int) {
-			if total == 0 {
-				return
-			}
-			pct := base + share*0.85*(float64(done)/float64(total))
-			progress(pct, fmt.Sprintf("Downloading archive (%d/%d chunks)", done, total))
-		}, nil, func(reader *pbscommon.PXARReader) error {
-			progress(base+share*0.9, "Extracting files...")
-			es, eerr := reader.ExtractWithRewriter(job.rewriter, job.includes, opts.Overwrite)
-			if eerr != nil {
-				writeBackupLog(fmt.Sprintf("PXAR extraction failed: %v", eerr))
-				return fmt.Errorf("failed to extract archive: %v", eerr)
-			}
-			results[i].extracted = es
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-		extracted = append(extracted, results[i].extracted...)
-	}
-
-	successCount := 0
-	skipCount := 0      // deliberate skips (e.g. already exists with overwrite off)
-	errorSkipCount := 0 // genuine failures (open/write/rename/mkdir)
-	dirCount := 0
-	for _, f := range extracted {
-		if f.Skipped {
-			if f.Expected {
-				skipCount++
-				writeBackupLog(fmt.Sprintf("SKIPPED (expected): %s - %s", f.Path, f.SkipReason))
-			} else {
-				errorSkipCount++
-				writeBackupLog(fmt.Sprintf("SKIPPED (error): %s - %s", f.Path, f.SkipReason))
-			}
-		} else if f.IsDir {
-			dirCount++
-		} else {
-			successCount++
-		}
-	}
-
-	writeBackupLog(fmt.Sprintf("Extraction complete: %d files, %d dirs, %d skipped (expected), %d failed",
-		successCount, dirCount, skipCount, errorSkipCount))
-	progress(0.95, fmt.Sprintf("Extracted %d files", successCount))
-
-	// Re-apply captured ACLs/attributes now that the files are actually on
-	// disk. Best-effort per file: an apply failure is logged, never fails
+	// Re-apply captured ACLs/attributes once an archive's files are actually
+	// on disk, before the next archive: a later archive's failure must not
+	// leave the earlier ones without theirs. Best-effort per file: an apply failure is logged, never fails
 	// the restore — the file's content is already safely on disk regardless.
 	// The extraction has already set the modification times, folders' last.
 	// Only writing a stream or EA below changes one, and it is set back.
@@ -930,9 +935,9 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	applied, failed := 0, 0
 	cApplied, cFailed := 0, 0
 	sWritten, sSkipped, sFailed, eaFiles := 0, 0, 0, 0
-	for _, r := range results {
+	applyFileMeta := func(r archiveResult) {
 		if r.aclMeta == nil {
-			continue
+			return
 		}
 		entryIdx := buildFileMetaIndex(r.aclMeta)
 		for _, f := range r.extracted {
@@ -985,6 +990,61 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 			}
 		}
 	}
+	// The .didx index is parsed lazily and its chunks are fetched on demand by
+	// pbscommon.NewDIDXReaderAt, so we walk the PXAR stream straight off the
+	// network reader and stream each file payload to its destination. Nothing is
+	// materialised on disk first. Each archive gets its share of 20-90%.
+	var extracted []pbscommon.PXARExtractedFile
+	for i, job := range jobs {
+		base, share := 0.20+0.70*float64(i)/float64(len(jobs)), 0.70/float64(len(jobs))
+		progress(base, fmt.Sprintf("Downloading backup archive %s...", job.archive))
+		err = withSnapshotReader(opts, job.archive, "Restore", func(done, total int) {
+			if total == 0 {
+				return
+			}
+			pct := base + share*0.85*(float64(done)/float64(total))
+			progress(pct, fmt.Sprintf("Downloading archive (%d/%d chunks)", done, total))
+		}, nil, func(reader *pbscommon.PXARReader) error {
+			progress(base+share*0.9, "Extracting files...")
+			es, eerr := reader.ExtractWithRewriter(job.rewriter, job.includes, opts.Overwrite)
+			if eerr != nil {
+				writeBackupLog(fmt.Sprintf("PXAR extraction failed: %v", eerr))
+				return fmt.Errorf("failed to extract archive: %v", eerr)
+			}
+			results[i].extracted = es
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		extracted = append(extracted, results[i].extracted...)
+		applyFileMeta(results[i])
+	}
+
+	successCount := 0
+	skipCount := 0      // deliberate skips (e.g. already exists with overwrite off)
+	errorSkipCount := 0 // genuine failures (open/write/rename/mkdir)
+	dirCount := 0
+	for _, f := range extracted {
+		if f.Skipped {
+			if f.Expected {
+				skipCount++
+				writeBackupLog(fmt.Sprintf("SKIPPED (expected): %s - %s", f.Path, f.SkipReason))
+			} else {
+				errorSkipCount++
+				writeBackupLog(fmt.Sprintf("SKIPPED (error): %s - %s", f.Path, f.SkipReason))
+			}
+		} else if f.IsDir {
+			dirCount++
+		} else {
+			successCount++
+		}
+	}
+
+	writeBackupLog(fmt.Sprintf("Extraction complete: %d files, %d dirs, %d skipped (expected), %d failed",
+		successCount, dirCount, skipCount, errorSkipCount))
+	progress(0.95, fmt.Sprintf("Extracted %d files", successCount))
+
 	if sWritten+sSkipped+sFailed+eaFiles > 0 {
 		writeBackupLog(fmt.Sprintf("Alternate data streams: %d restored, %d recorded by name only (not restored); extended attributes restored on %d files; %d files failed",
 			sWritten, sSkipped, eaFiles, sFailed))

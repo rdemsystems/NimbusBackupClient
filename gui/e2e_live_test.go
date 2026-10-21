@@ -247,9 +247,18 @@ func TestE2ELiveOneSnapshot(t *testing.T) {
 	authID, secret, store := env("PBS_AUTHID"), env("PBS_TOKEN_SECRET"), env("PBS_DATASTORE")
 	src, out, backupID := env("E2E_SRC"), env("E2E_OUT"), env("E2E_BACKUP_ID")
 
-	// A second, smaller folder next to the suite's source tree.
+	// A second folder next to the suite's source tree, of several chunks
+	// (24 MiB that do not repeat), so that its own previous index is what
+	// lets the second run reuse them.
 	src2 := filepath.Join(out, "second")
-	for name, body := range map[string]string{"notes.txt": "second folder\n", "deeper/inside/file.bin": strings.Repeat("x", 300000)} {
+	big := make([]byte, 24<<20)
+	for i, x := 0, uint32(2463534242); i < len(big); i++ {
+		x ^= x << 13
+		x ^= x >> 17
+		x ^= x << 5
+		big[i] = byte(x)
+	}
+	for name, body := range map[string]string{"notes.txt": "second folder\n", "deeper/inside/file.bin": string(big)} {
 		p := filepath.Join(src2, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			t.Fatal(err)
@@ -276,11 +285,15 @@ func TestE2ELiveOneSnapshot(t *testing.T) {
 	}
 
 	// 1. Two runs: the second reuses the first's chunks, archive by archive.
-	backup()
+	// Only the first chunk of each archive changes (its metadata file holds
+	// the backup time), so a second archive not finding its previous index
+	// would send its ~6 chunks again.
+	first := backup()
 	time.Sleep(time.Second) // snapshots are named by the second
 	rs := backup()
-	if rs.ReusedChunks == 0 {
-		t.Errorf("second run reused no chunk (%d new): the archives did not find their previous index", rs.NewChunks)
+	t.Logf("first run %d new / %d reused chunks, second run %d new / %d reused", first.NewChunks, first.ReusedChunks, rs.NewChunks, rs.ReusedChunks)
+	if rs.NewChunks > 4 || rs.ReusedChunks < 4 {
+		t.Errorf("second run sent %d new chunks and reused %d: an archive did not find its previous index", rs.NewChunks, rs.ReusedChunks)
 	}
 	snapTime := time.Unix(rs.BackupTime, 0).UTC()
 	t.Logf("snapshot host/%s/%s, archives %v", backupID, snapTime.Format(time.RFC3339), names)
@@ -367,11 +380,17 @@ func TestE2ELiveOneSnapshot(t *testing.T) {
 	if err := RestoreSnapshotInline(one); err != nil {
 		t.Fatalf("selective restore: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(one.DestPath, archiveLabel(names[1]), "notes.txt")); err != nil {
-		t.Errorf("selective restore: %v", err)
+	// Exactly that file, under its archive's folder.
+	got := treeOf(t, one.DestPath)
+	sum := sha256.Sum256([]byte("second folder\n"))
+	want := map[string][]byte{archiveLabel(names[1]): nil, archiveLabel(names[1]) + "/notes.txt": sum[:]}
+	if len(got) != len(want) {
+		t.Errorf("selective restore wrote %d entries, want %d: %v", len(got), len(want), got)
 	}
-	if _, err := os.Stat(filepath.Join(one.DestPath, archiveLabel(names[0]))); err == nil {
-		t.Error("selective restore of one archive also restored the other")
+	for p, w := range want {
+		if g, ok := got[p]; !ok || !bytes.Equal(g, w) {
+			t.Errorf("selective restore: %s missing or different", p)
+		}
 	}
 
 	var list strings.Builder

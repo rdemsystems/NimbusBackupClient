@@ -53,6 +53,22 @@ export namespace api {
 
 export namespace main {
 	
+	export class ArchiveOrigin {
+	    archive: string;
+	    label: string;
+	    original_path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ArchiveOrigin(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.archive = source["archive"];
+	        this.label = source["label"];
+	        this.original_path = source["original_path"];
+	    }
+	}
 	export class BackupMeta {
 	    backup_id: string;
 	    original_path: string;
@@ -61,6 +77,7 @@ export namespace main {
 	    client_version: string;
 	    os: string;
 	    vss_used: boolean;
+	    archives?: ArchiveOrigin[];
 	
 	    static createFrom(source: any = {}) {
 	        return new BackupMeta(source);
@@ -75,7 +92,26 @@ export namespace main {
 	        this.client_version = source["client_version"];
 	        this.os = source["os"];
 	        this.vss_used = source["vss_used"];
+	        this.archives = this.convertValues(source["archives"], ArchiveOrigin);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Brand {
 	    name: string;

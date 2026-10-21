@@ -182,14 +182,11 @@ function App() {
   const [selectedSnapshot, setSelectedSnapshot] = useState(null) // { id, unix, time }
   const [snapshotMeta, setSnapshotMeta] = useState(null)         // .proxmox_backup_client_meta.json sidecar (null if legacy)
   // Where the snapshot's files came from: original_path, or for a snapshot of
-  // one archive per folder (0.5) each archive's folder; '' when unknown.
+  // one archive per folder (0.5) the folders known; '' when none is. The
+  // backend refuses in place only for a selected archive with no folder.
   const metaRoots = (m) => {
     if (m?.original_path) return m.original_path
-    const archives = m?.archives || []
-    if (archives.length && archives.every(a => a.original_path)) {
-      return archives.map(a => a.original_path).join(', ')
-    }
-    return ''
+    return (m?.archives || []).map(a => a.original_path).filter(Boolean).join(', ')
   }
   const [snapshotEntries, setSnapshotEntries] = useState([])     // flat list from backend
   const [expandedDirs, setExpandedDirs] = useState(new Set())     // expanded paths in tree

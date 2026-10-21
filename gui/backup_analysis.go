@@ -76,6 +76,11 @@ func pathLabel(path string) string {
 // get a short hash of their path, so reordering them keeps their names; the
 // same folder listed twice gets _2. "backup" is avoided as it would read as
 // the archive of a one-folder snapshot of the old layout.
+//
+// The one dependency on the other folders: a folder gains its hash when a
+// colliding folder joins the job, and loses it when that one leaves. Its
+// archive is then renamed once and its next run sends all its data again;
+// nothing is lost, as its earlier snapshots keep the old name.
 func ArchiveNames(dirs []string) []string {
 	labels := make([]string, len(dirs))
 	count := map[string]int{}

@@ -201,7 +201,7 @@ const translations = {
       parallelFoldersHint: "Plusieurs dossiers sélectionnés sont sauvegardés en même temps, chacun dans son groupe de sauvegarde (aussi pour les backups planifiés). Recommandé : {n} (nombre de processeurs / 4). Gagne du temps quand la relecture domine (disques rapides, peu de données nouvelles) ; à éviter sur un disque dur classique.",
       oneSnapshot: "Un seul snapshot pour tous les dossiers",
       oneSnapshotHint: "Chaque sauvegarde est un seul snapshot de l'ID de sauvegarde, avec une archive par dossier : la rétention garde ou supprime une sauvegarde entière, et Proxmox VE ou le client officiel peuvent restaurer chaque dossier. Les dossiers sont sauvegardés l'un après l'autre.",
-      oneSnapshotLegacyHint: "Décoché : chaque dossier va dans son propre groupe de sauvegarde (<ID>_<dossier>), comme les jobs créés avant la 0.5. Le cocher démarre un nouveau groupe pour ce job : sa première sauvegarde renvoie toutes les données ; les anciens groupes restent sur le serveur avec leur historique.",
+      oneSnapshotLegacyHint: "Décoché : chaque dossier va dans son propre groupe de sauvegarde (<ID>_<dossier>), comme les jobs créés avant la 0.5. Le cocher change la façon dont ce job est stocké : sa première sauvegarde renvoie toutes les données. Avec plusieurs dossiers, ils passent dans un nouveau groupe ; les anciens groupes restent sur le serveur avec leur historique.",
       splitFirstBackupHint: "Recommandé pour le 1er backup d'un gros volume (C:\\, D:\\…) : découpe le seed initial en backups plus petits et résumables. Laissez décoché pour les backups suivants (full). L'analyse de la taille peut prendre quelques minutes sur un gros volume.",
       splitAnalyzing: "Analyse de la taille…",
 
@@ -609,7 +609,7 @@ const translations = {
       parallelFoldersHint: "Several selected folders are backed up at the same time, each in its own backup group (scheduled backups too). Recommended: {n} (number of CPUs / 4). Saves time when re-reading dominates (fast disks, little new data); avoid on a spinning hard disk.",
       oneSnapshot: "One snapshot for all the folders",
       oneSnapshotHint: "Each run is one snapshot of the backup ID, with one archive per folder: retention keeps or removes a run as a whole, and Proxmox VE or the official client can restore each folder. The folders are backed up one after the other.",
-      oneSnapshotLegacyHint: "Unticked: each folder goes into its own backup group (<ID>_<folder>), like jobs made before 0.5. Ticking it starts a new group for this job: its first run sends all the data again; the old groups stay on the server with their history.",
+      oneSnapshotLegacyHint: "Unticked: each folder goes into its own backup group (<ID>_<folder>), like jobs made before 0.5. Ticking it changes how this job is stored: its first run sends all the data again. With several folders, they move into one new group; the old groups stay on the server with their history.",
       splitFirstBackupHint: "Recommended for the first backup of a large volume (C:\\, D:\\…): it splits the initial seed into smaller, resumable backups. Leave unchecked for subsequent backups (full). The size analysis can take a few minutes on a large volume.",
       splitAnalyzing: "Analyzing size…",
 
@@ -1017,7 +1017,7 @@ const translations = {
       parallelFoldersHint: "Più cartelle selezionate vengono salvate contemporaneamente, ognuna nel proprio gruppo di backup (anche per i backup pianificati). Consigliato: {n} (numero di CPU / 4). Fa risparmiare tempo quando domina la rilettura (dischi veloci, pochi dati nuovi); da evitare su un disco rigido tradizionale.",
       oneSnapshot: "Un solo snapshot per tutte le cartelle",
       oneSnapshotHint: "Ogni esecuzione è un solo snapshot dell'ID di backup, con un archivio per cartella: la retention conserva o rimuove un'esecuzione intera, e Proxmox VE o il client ufficiale possono ripristinare ogni cartella. Le cartelle vengono salvate una dopo l'altra.",
-      oneSnapshotLegacyHint: "Non selezionato: ogni cartella va nel proprio gruppo di backup (<ID>_<cartella>), come i job creati prima della 0.5. Selezionarlo avvia un nuovo gruppo per questo job: la prima esecuzione invia di nuovo tutti i dati; i vecchi gruppi restano sul server con la loro cronologia.",
+      oneSnapshotLegacyHint: "Non selezionato: ogni cartella va nel proprio gruppo di backup (<ID>_<cartella>), come i job creati prima della 0.5. Selezionarlo cambia il modo in cui questo job viene salvato: la prima esecuzione invia di nuovo tutti i dati. Con più cartelle, queste passano in un nuovo gruppo; i vecchi gruppi restano sul server con la loro cronologia.",
       splitFirstBackupHint: "Consigliato per il primo backup di un volume grande (C:\\, D:\\…): divide il seed iniziale in backup più piccoli e riprendibili. Lasciare deselezionato per i backup successivi (full). L'analisi della dimensione può richiedere alcuni minuti su un volume grande.",
       splitAnalyzing: "Analisi dimensione…",
 
@@ -1425,7 +1425,7 @@ const translations = {
       parallelFoldersHint: "Mehrere ausgewählte Ordner werden gleichzeitig gesichert, jeder in seiner eigenen Sicherungsgruppe (auch bei geplanten Sicherungen). Empfohlen: {n} (Anzahl CPUs / 4). Spart Zeit, wenn das erneute Lesen überwiegt (schnelle Datenträger, wenig neue Daten); auf einer klassischen Festplatte vermeiden.",
       oneSnapshot: "Ein Snapshot für alle Ordner",
       oneSnapshotHint: "Jeder Lauf ist ein einziger Snapshot der Backup-ID, mit einem Archiv pro Ordner: Die Aufbewahrung behält oder entfernt einen Lauf als Ganzes, und Proxmox VE oder der offizielle Client können jeden Ordner wiederherstellen. Die Ordner werden nacheinander gesichert.",
-      oneSnapshotLegacyHint: "Nicht aktiviert: Jeder Ordner kommt in seine eigene Sicherungsgruppe (<ID>_<Ordner>), wie bei Aufträgen vor 0.5. Das Aktivieren beginnt eine neue Gruppe für diesen Auftrag: Sein erster Lauf sendet alle Daten erneut; die alten Gruppen bleiben mit ihrem Verlauf auf dem Server.",
+      oneSnapshotLegacyHint: "Nicht aktiviert: Jeder Ordner kommt in seine eigene Sicherungsgruppe (<ID>_<Ordner>), wie bei Aufträgen vor 0.5. Das Aktivieren ändert, wie dieser Auftrag gespeichert wird: Sein erster Lauf sendet alle Daten erneut. Bei mehreren Ordnern kommen sie in eine neue Gruppe; die alten Gruppen bleiben mit ihrem Verlauf auf dem Server.",
       splitFirstBackupHint: "Empfohlen für die erste Sicherung eines großen Datenträgers (C:\\, D:\\…): teilt das ursprüngliche Seed in kleinere, fortsetzbare Sicherungen auf. Für nachfolgende Sicherungen (vollständig) nicht aktivieren. Die Größenanalyse kann einige Minuten dauern bei einem großen Datenträger.",
       splitAnalyzing: "Größe wird analysiert…",
 
@@ -1833,7 +1833,7 @@ const translations = {
       parallelFoldersHint: "Kilka wybranych folderów jest kopiowanych jednocześnie, każdy we własnej grupie kopii zapasowych (również dla zaplanowanych kopii). Zalecane: {n} (liczba procesorów / 4). Oszczędza czas, gdy dominuje ponowny odczyt (szybkie dyski, mało nowych danych); unikać na klasycznym dysku twardym.",
       oneSnapshot: "Jedna migawka dla wszystkich folderów",
       oneSnapshotHint: "Każde uruchomienie to jedna migawka identyfikatora kopii, z jednym archiwum na folder: retencja zachowuje lub usuwa całe uruchomienie, a Proxmox VE lub oficjalny klient mogą przywrócić każdy folder. Foldery są kopiowane jeden po drugim.",
-      oneSnapshotLegacyHint: "Odznaczone: każdy folder trafia do własnej grupy kopii (<ID>_<folder>), jak w zadaniach utworzonych przed 0.5. Zaznaczenie rozpoczyna nową grupę dla tego zadania: pierwsze uruchomienie wysyła ponownie wszystkie dane; stare grupy pozostają na serwerze wraz z historią.",
+      oneSnapshotLegacyHint: "Odznaczone: każdy folder trafia do własnej grupy kopii (<ID>_<folder>), jak w zadaniach utworzonych przed 0.5. Zaznaczenie zmienia sposób przechowywania tego zadania: pierwsze uruchomienie wysyła ponownie wszystkie dane. Przy kilku folderach trafiają one do nowej grupy; stare grupy pozostają na serwerze wraz z historią.",
       splitFirstBackupHint: "Zalecane dla pierwszej kopii zapasowej dużego woluminu (C:\\, D:\\…): dzieli początkowy seed na mniejsze, możliwe do wznowienia kopie zapasowe. Zostaw niezaznaczone dla kolejnych kopii zapasowych (pełne). Analiza rozmiaru może zająć kilka minut na dużym woluminie.",
       splitAnalyzing: "Analiza rozmiaru…",
 
