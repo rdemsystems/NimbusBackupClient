@@ -109,10 +109,11 @@ func (s *BackupService) run() {
 	}()
 
 	// Start the scheduler LAST, once the reporter above is installed: a job
-	// flagged "run at startup" fires synchronously from here, and startup is
-	// exactly when the user opens the GUI to watch it — by then its run must
-	// already be visible in the jobs list.
+	// flagged "run at startup" fires from here, and startup is exactly when
+	// the user opens the GUI to watch it — by then its run must already be
+	// visible in the jobs list.
 	s.app.StartScheduler()
+	go s.app.runStartupJobsAtBoot()
 
 	// Keep the service running (scheduler and API server run in background
 	// goroutines). systemd (Type=simple) signals SIGTERM on stop; kardianos

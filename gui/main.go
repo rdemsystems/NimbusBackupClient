@@ -341,9 +341,9 @@ func (a *App) startup(ctx context.Context) {
 		writeDebugLog("Service mode - scheduler runs in service")
 	}
 
-	// Execute startup jobs (jobs with runAtStartup=true)
-	// Note: In service mode, these will be sent via API
-	go a.HandleStartupRun()
+	// Jobs set to run at machine startup are run by the service when the
+	// machine boots (runStartupJobsAtBoot), not here: the GUI opens at every
+	// login and every launch, and ran them again each time.
 
 	// Trim stale restore listing caches in the background (best-effort).
 	go func() {

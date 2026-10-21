@@ -726,3 +726,34 @@ func TestRunScheduledBackupPublishesToJobReporter(t *testing.T) {
 		t.Errorf("currentInlineJobID() = %q after the run, want empty", id)
 	}
 }
+
+// The jobs set to run at startup run when the service starts with the
+// machine, not when it is restarted later.
+func TestIsMachineStartup(t *testing.T) {
+	cases := []struct {
+		uptime time.Duration
+		err    error
+		want   bool
+	}{
+		{2 * time.Minute, nil, true},
+		{startupRunWindow, nil, true},
+		{startupRunWindow + time.Second, nil, false},
+		{3 * 24 * time.Hour, nil, false},
+		{0, fmt.Errorf("unknown"), true},
+	}
+	for _, c := range cases {
+		if got := isMachineStartup(c.uptime, c.err); got != c.want {
+			t.Errorf("isMachineStartup(%s, %v) = %v, want %v", c.uptime, c.err, got, c.want)
+		}
+	}
+}
+
+func TestSystemUptimeIsPositive(t *testing.T) {
+	uptime, err := systemUptime()
+	if err != nil {
+		t.Skipf("uptime not available here: %v", err)
+	}
+	if uptime <= 0 {
+		t.Errorf("systemUptime() = %s, want > 0", uptime)
+	}
+}
