@@ -454,6 +454,47 @@ func TestDIDXReaderAtEncryptedArchive(t *testing.T) {
 	}
 }
 
+// The GUI/service directory backup of 0.4.1 and 0.4.2 encrypted its chunks but
+// indexed them under the bare SHA-256 (rdemsystems/NimbusBackupClient#13). Such
+// snapshots must stay restorable with the key.
+func TestDIDXReaderAtLegacyEncryptedArchive(t *testing.T) {
+	crypt := testCryptConfig(t)
+	payloads := payloadsOf(3, 128)
+	a := makeDIDX(t, nil, payloads...) // bare SHA-256 digests...
+	want := bytes.Join(payloads, nil)
+
+	f := newFakePBSWithDIDX(t, "legacy.didx", a, crypt) // ...over encrypted blobs
+	r, _, err := f.NewDIDXReaderAt("legacy.didx", 8, nil)
+	if err != nil {
+		t.Fatalf("NewDIDXReaderAt: %v", err)
+	}
+	got := make([]byte, len(want))
+	if _, err := r.ReadAt(got, 0); err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("ReadAt: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Error("decrypted stream differs from the original chunks")
+	}
+}
+
+// The legacy fallback must not turn the integrity check off.
+func TestDIDXReaderAtLegacyEncryptedArchiveRejectsMismatch(t *testing.T) {
+	crypt := testCryptConfig(t)
+	payloads := payloadsOf(2, 64)
+	a := makeDIDX(t, nil, payloads...)
+	f := newFakePBSWithDIDX(t, "legacy.didx", a, crypt)
+	f.corrupt[a.order[0]] = bytes.Repeat([]byte{0xAB}, len(payloads[0]))
+
+	r, _, err := f.NewDIDXReaderAt("legacy.didx", 4, nil)
+	if err != nil {
+		t.Fatalf("NewDIDXReaderAt: %v", err)
+	}
+	_, err = r.ReadAt(make([]byte, 8), 0)
+	if err == nil || !strings.Contains(err.Error(), "content hash mismatch") {
+		t.Errorf("error = %v, want a content hash mismatch", err)
+	}
+}
+
 // Without the key, an encrypted archive must fail loudly rather than serve
 // ciphertext.
 func TestDIDXReaderAtEncryptedArchiveWithoutKey(t *testing.T) {
@@ -469,6 +510,36 @@ func TestDIDXReaderAtEncryptedArchiveWithoutKey(t *testing.T) {
 	}
 	if _, err := r.ReadAt(make([]byte, 8), 0); err == nil {
 		t.Fatal("expected an error when reading an encrypted archive without the key")
+	}
+}
+
+// An unencrypted archive (a snapshot taken before the key was set up) must
+// still read with the key loaded: its chunks carry plain sha256 digests.
+// Found live 2026-10-17: Undelete on a machine set failed with "content hash
+// mismatch" on its older, unencrypted snapshots once a key was configured.
+func TestDIDXReaderAtPlainArchiveWithKeyLoaded(t *testing.T) {
+	payloads := payloadsOf(3, 64)
+	a := makeDIDX(t, nil, payloads...)
+	f := newFakePBSWithDIDX(t, "plain.didx", a, nil)
+	f.Crypt = testCryptConfig(t)
+
+	r, size, err := f.NewDIDXReaderAt("plain.didx", 4, nil)
+	if err != nil {
+		t.Fatalf("NewDIDXReaderAt: %v", err)
+	}
+	got := make([]byte, size)
+	if _, err := r.ReadAt(got, 0); err != nil {
+		t.Fatalf("reading a plain archive with a key loaded: %v", err)
+	}
+	if !bytes.Equal(got, bytes.Join(payloads, nil)) {
+		t.Fatal("wrong content")
+	}
+
+	// A tampered chunk is still caught.
+	f.corrupt[a.order[1]] = bytes.Repeat([]byte{0xCD}, len(payloads[1]))
+	r2, _, _ := f.NewDIDXReaderAt("plain.didx", 4, nil)
+	if _, err := r2.ReadAt(make([]byte, 8), 64); err == nil {
+		t.Fatal("a tampered chunk was accepted with a key loaded")
 	}
 }
 

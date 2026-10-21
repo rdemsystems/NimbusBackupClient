@@ -265,12 +265,14 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 		for chunkpos > 0 {
 			c.currentChunk = append(c.currentChunk, b[:chunkpos]...)
 
-			h := sha256.New()
-			if _, err := h.Write(c.currentChunk); err != nil {
-				return fmt.Errorf("failed to hash chunk: %w", err)
-			}
-			bindigest := h.Sum(nil)
-			shahash := hex.EncodeToString(bindigest)
+			// The digest has to be the one the chunk is published under:
+			// sha256(plaintext) for a plain snapshot, but
+			// sha256(plaintext || id_key) once a key file is in play. A bare
+			// sha256 on an encrypted snapshot is rejected by
+			// proxmox-backup-client ("wrong digest") and leaks the plaintext
+			// fingerprint to the server.
+			bindigest := client.ChunkDigest(c.currentChunk)
+			shahash := hex.EncodeToString(bindigest[:])
 
 			if _, known := c.knownChunks.Get(shahash); !known {
 				writeBackupLog(fmt.Sprintf("New chunk[%s] %d bytes", shahash, len(c.currentChunk)))
@@ -314,7 +316,7 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 			if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.currentChunk)))); err != nil {
 				return fmt.Errorf("failed to write chunk offset: %w", err)
 			}
-			if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
+			if _, err := c.chunkdigests.Write(bindigest[:]); err != nil {
 				return fmt.Errorf("failed to write chunk digest: %w", err)
 			}
 
@@ -397,16 +399,13 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
 
 func (c *ChunkState) EOF(client *pbscommon.PBSClient) error {
 	if len(c.currentChunk) > 0 {
-		h := sha256.New()
-		if _, err := h.Write(c.currentChunk); err != nil {
-			return fmt.Errorf("failed to hash final chunk: %w", err)
-		}
-
-		shahash := hex.EncodeToString(h.Sum(nil))
+		// Same digest rule as in HandleData.
+		bindigest := client.ChunkDigest(c.currentChunk)
+		shahash := hex.EncodeToString(bindigest[:])
 		if err := binary.Write(c.chunkdigests, binary.LittleEndian, (c.pos + uint64(len(c.currentChunk)))); err != nil {
 			return fmt.Errorf("failed to write final chunk offset: %w", err)
 		}
-		if _, err := c.chunkdigests.Write(h.Sum(nil)); err != nil {
+		if _, err := c.chunkdigests.Write(bindigest[:]); err != nil {
 			return fmt.Errorf("failed to write final chunk digest: %w", err)
 		}
 
@@ -1481,6 +1480,14 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
 		entries, uniqueSDDLs, metaErrs := ntfsCollector.Stats()
 		writeBackupLog(fmt.Sprintf("NTFS metadata: %d entries, %d unique SDDLs, %d errors, %d bytes gzipped",
 			entries, uniqueSDDLs, metaErrs, len(aclBytes)))
+		streams, byName, eas, dropped := ntfsCollector.StreamStats()
+		if streams+byName+eas > 0 {
+			writeBackupLog(fmt.Sprintf("Alternate data streams: %d recorded, %d by name only (too large or unreadable); extended attributes: %d",
+				streams, byName, eas))
+		}
+		if dropped > 0 {
+			writeBackupLog(fmt.Sprintf("WARNING: NTFS metadata too large for one PBS blob: the content of %d alternate data streams was left out (permissions and attributes kept)", dropped))
+		}
 		if upErr := client.UploadBlob(BackupAclsFilename, aclBytes); upErr != nil {
 			writeBackupLog(fmt.Sprintf("WARNING: failed to upload NTFS metadata blob: %v", upErr))
 		}

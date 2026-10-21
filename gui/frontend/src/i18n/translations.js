@@ -57,7 +57,6 @@ const translations = {
     untested: "Non testé",
     default: "Défaut",
     testServer: "Test",
-    editServer: "Modifier",
     setDefault: "Défaut",
     deleteServer: "Supprimer",
       optional: "optionnel",
@@ -342,7 +341,7 @@ const translations = {
       restoreBetaFilesDirs: "Fichiers et dossiers (arborescence complète)",
       restoreBetaSelective: "Restauration sélective (fichier par fichier)",
       restoreBetaTimestamps: "Restauration des dates de modification",
-      restoreBetaACLs: "Permissions NTFS, ADS, attributs étendus (sprint NTFS sidecar à venir)",
+      restoreBetaACLs: "Permissions NTFS, flux alternatifs (ADS) et attributs étendus (options ci-dessous)",
 
       // About
       aboutTitle: "À propos",
@@ -391,13 +390,14 @@ const translations = {
       statusSchedulingUnavailable: "Fonction de planification non disponible",
       statusBackupStarting: "Démarrage de la sauvegarde...",
       statusBackupRunning: "Sauvegarde en cours...",
-      statusCancelRequested: "Demande d'annulation envoyée...",
       statusRestoring: "Restauration du snapshot {time}...",
       statusRestoreComplete: "Restauration terminée !",
       statusJobDeleted: "Job supprimé",
       statusJobStarted: "Lancement du job « {name} »",
       statusEditCancelled: "Édition annulée",
       runningJobs: "Sauvegardes en cours",
+      runningJobsCount: "{count} sur {total} sauvegardes en cours",
+      noRunningJobs: "Aucune sauvegarde en cours",
       cancelJob: "Annuler",
       statusCancelRequested: "Demande d'annulation envoyée...",
       statusError: "Erreur:",
@@ -462,7 +462,6 @@ const translations = {
     untested: "Not tested",
     default: "Default",
     testServer: "Test",
-    editServer: "Edit",
     setDefault: "Default",
     deleteServer: "Delete",
       optional: "optional",
@@ -747,7 +746,7 @@ const translations = {
       restoreBetaFilesDirs: "Files and directories (full tree)",
       restoreBetaSelective: "Selective restore (file by file)",
       restoreBetaTimestamps: "Modification time restore",
-      restoreBetaACLs: "NTFS permissions, ADS, extended attributes (NTFS sidecar sprint pending)",
+      restoreBetaACLs: "NTFS permissions, alternate data streams (ADS) and extended attributes (options below)",
 
       // About
       aboutTitle: "About",
@@ -868,7 +867,6 @@ const translations = {
     untested: "Non testato",
     default: "Predefinito",
     testServer: "Test",
-    editServer: "Modifica",
     setDefault: "Predefinito",
     deleteServer: "Elimina",
       optional: "opzionale",
@@ -1153,7 +1151,7 @@ const translations = {
       restoreBetaFilesDirs: "File e cartelle (albero completo)",
       restoreBetaSelective: "Ripristino selettivo (file per file)",
       restoreBetaTimestamps: "Ripristino orari di modifica",
-      restoreBetaACLs: "Permessi NTFS, ADS, attributi estesi (sprint sidecar NTFS in attesa)",
+      restoreBetaACLs: "Permessi NTFS, stream dati alternativi (ADS) e attributi estesi (opzioni qui sotto)",
 
       // About
       aboutTitle: "Informazioni",
@@ -1274,7 +1272,6 @@ const translations = {
     untested: "Nicht getestet",
     default: "Standard",
     testServer: "Test",
-    editServer: "Bearbeiten",
     setDefault: "Standard",
     deleteServer: "Löschen",
       optional: "optional",
@@ -1559,7 +1556,7 @@ const translations = {
       restoreBetaFilesDirs: "Dateien und Ordner (vollständiger Baum)",
       restoreBetaSelective: "Selektive Wiederherstellung (Datei für Datei)",
       restoreBetaTimestamps: "Änderungszeiten wiederherstellen",
-      restoreBetaACLs: "NTFS-Berechtigungen, ADS, erweiterte Attribute (NTFS-Sidecar-Sprint anstehend)",
+      restoreBetaACLs: "NTFS-Berechtigungen, alternative Datenströme (ADS) und erweiterte Attribute (Optionen unten)",
 
       // About
       aboutTitle: "Über",
@@ -1680,7 +1677,6 @@ const translations = {
     untested: "Nie przetestowany",
     default: "Domyślny",
     testServer: "Test",
-    editServer: "Edytuj",
     setDefault: "Domyślny",
     deleteServer: "Usuń",
       optional: "opcjonalne",
@@ -1965,7 +1961,7 @@ const translations = {
       restoreBetaFilesDirs: "Pliki i foldery (pełne drzewo)",
       restoreBetaSelective: "Wybiórcze przywracanie (plik po pliku)",
       restoreBetaTimestamps: "Przywracanie czasów modyfikacji",
-      restoreBetaACLs: "Uprawnienia NTFS, ADS, rozszerzone atrybuty (NTFS sidecar sprint w toku)",
+      restoreBetaACLs: "Uprawnienia NTFS, alternatywne strumienie danych (ADS) i rozszerzone atrybuty (opcje poniżej)",
 
       // About
       aboutTitle: "O programie",

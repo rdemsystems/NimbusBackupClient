@@ -1,0 +1,266 @@
+From aebb2e99219507e206e0b8ab2f3c02e5e00ac3ff Mon Sep 17 00:00:00 2001
+From: Tiziano Bacocco <tizbac2@gmail.com>
+Date: Mon, 12 Oct 2026 13:22:13 +0200
+Subject: [PATCH 081/108] installer: SERVICEAUTOSTART flag + document
+ silent-install switches
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- ProductBody.wxi: new public property SERVICEAUTOSTART (default 1).
+  0 = service installed as Manual and left stopped after install, via a
+  deferred SetServiceDemandStart action (sc config start= demand + sc
+  stop, Return=ignore) scheduled After="StartServices". WiX's
+  ServiceInstall/@Start is an enum, so the flip happens post-start
+  instead of duplicating components. Silent install itself needs no new
+  machinery — msiexec /quiet already works with the existing UI-less
+  sequence.
+- Document the full switch set (quiet, AUTOSTART, SERVICEAUTOSTART,
+  KEEP_CONFIG, INSTALLFOLDER, /L*v logging, 0/3010 exit codes) in the
+  root README, all 12 translated READMEs, installer/README.md and
+  installer/DEPLOYMENT.md; DEPLOYMENT.md also corrected for the
+  nonexistent CONFIGFILE property, wrong service name and log path.
+- Validated by building all 4 brand MSIs via
+  installer/wix/build_msi_linux.sh (Docker + wine WiX).
+
+Fork adaptation: the fork's READMEs are kept (the switches are documented
+in installer/README.md and installer/DEPLOYMENT.md); SetServiceDemandStart
+and DEPLOYMENT.md target the SCM name $(var.ExeName) ("NimbusBackup", see
+ServiceInstall), not $(var.ServiceExeName): with the latter, sc config hit a
+service that does not exist and SERVICEAUTOSTART=0 did nothing.
+
+Upstream: tizbac/proxmoxbackupclient_go@af67fc956729d72e460d2b54bc7467bc88781a6d
+---
+ installer/DEPLOYMENT.md       | 62 +++++++++++++++++++++++++----------
+ installer/README.md           | 26 ++++++++++++++-
+ installer/wix/ProductBody.wxi | 44 ++++++++++++++++++++++++-
+ 3 files changed, 113 insertions(+), 19 deletions(-)
+
+diff --git a/installer/DEPLOYMENT.md b/installer/DEPLOYMENT.md
+index d69aae7..d620980 100644
+--- a/installer/DEPLOYMENT.md
++++ b/installer/DEPLOYMENT.md
+@@ -4,6 +4,36 @@
+ 
+ Ce guide explique comment déployer Proxmox Backup Client en masse via GPO, Intune, ou scripts de déploiement.
+ 
++## ⚙️ Paramètres du MSI (propriétés publiques)
++
++Toutes les commandes de ce guide sont silencieuses grâce au switch standard de Windows Installer (`/quiet` ou `/qn`) — le MSI n'a pas besoin d'une propriété dédiée pour ça. Il accepte en plus les propriétés publiques suivantes (en MAJUSCULES — obligatoire pour toute propriété MSI passée en ligne de commande) :
++
++| Propriété | Défaut | Effet |
++| --- | --- | --- |
++| `AUTOSTART` | `1` | `0` = pas d'entrée d'autodémarrage de la GUI à la connexion |
++| `SERVICEAUTOSTART` | `1` | `0` = service installé en **Manuel** et laissé **arrêté** — installé, mais jamais activé ni autodémarré |
++| `KEEP_CONFIG` | `1` | Uniquement à la désinstallation : `0` = supprime aussi le dossier `%ProgramData%\<ExeName>` |
++| `INSTALLFOLDER` | `Program Files` | Répertoire d'installation (les chemins contenant des espaces sont entre guillemets) |
++
++```powershell
++# Installation silencieuse, réglages par défaut (service : Auto + démarré)
++msiexec /i ProxmoxBackupClient.msi /quiet
++
++# Installer le service SANS l'activer ni l'autodémarrer (Manuel + arrêté),
++# sans autodémarrage de la GUI non plus
++msiexec /i ProxmoxBackupClient.msi /quiet AUTOSTART=0 SERVICEAUTOSTART=0
++
++# Répertoire personnalisé + log détaillé
++msiexec /i ProxmoxBackupClient.msi /quiet INSTALLFOLDER="D:\Apps\ProxmoxBackupClient" /L*v "C:\Temp\install.log"
++
++# Désinstallation silencieuse qui purge aussi la configuration
++msiexec /x ProxmoxBackupClient.msi /quiet KEEP_CONFIG=0
++```
++
++Codes de sortie : `0` = succès, `3010` = succès + redémarrage requis. Exécution avec droits administrateur. Les MSI de marque (`NimbusBackup.msi`, `AcmeBackup.msi`, `EtitechBackup.msi`) acceptent exactement les mêmes propriétés.
++
++> ⚠️ Le MSI ne prend **pas** de propriété `CONFIGFILE` : la configuration vit dans `%ProgramData%\<ExeName>` (dossier créé et protégé par le service). Elle se règle via la GUI, l'API locale, ou en déposant un `config.json` à cet emplacement avant le premier démarrage du service.
++
+ ## 🔧 Préparation
+ 
+ ### 1. Créer la configuration centralisée
+@@ -56,12 +86,12 @@ Copiez `config.example.json` et personnalisez-le pour votre environnement:
+    Deployment method: Assigned
+    ```
+ 
+-3. **Paramètres d'installation**:
+-   - Dans "Modifications", ajouter une transformation (.mst) OU
+-   - Utiliser la ligne de commande avancée:
++3. **Paramètres d'installation** (propriétés publiques, voir ci-dessus) :
++   - Utiliser la ligne de commande avancée :
+      ```
+-     CONFIGFILE="\\ad-server\NETLOGON\proxmoxbackupclient\config.json"
++     AUTOSTART=0 SERVICEAUTOSTART=0
+      ```
++     (ajuster selon le comportement d'autodémarrage souhaité)
+ 
+ 4. **Appliquer la GPO** au bon OU (ex: `Computers/Workstations`)
+ 
+@@ -73,7 +103,7 @@ Copiez `config.example.json` et personnalisez-le pour votre environnement:
+ 
+ 2. **Commande d'installation**:
+    ```powershell
+-   msiexec /i ProxmoxBackupClient.msi /qn CONFIGFILE="C:\Windows\Temp\proxmoxbackupclient-config.json"
++   msiexec /i ProxmoxBackupClient.msi /qn AUTOSTART=0
+    ```
+ 
+ 3. **Script de pré-requis**:
+@@ -84,23 +114,21 @@ Copiez `config.example.json` et personnalisez-le pour votre environnement:
+    ```
+ 
+ 4. **Détection**:
+-   - Fichier: `C:\Program Files\Proxmox Backup Client\bin\proxmoxbackupclient-service.exe`
+-   - Service: `ProxmoxBackupClientService` (Running)
++   - Fichier: `C:\Program Files\ProxmoxBackupClient\ProxmoxBackupClient.exe`
++   - Service: `NimbusBackup` (nom SCM = `<ExeName>` de la marque ; démarré sauf avec `SERVICEAUTOSTART=0`)
+ 
+ ### Option C - Script PowerShell
+ 
+ ```powershell
+ # deploy-proxmoxbackupclient.ps1
+ $msiPath = "\\server\deploy\ProxmoxBackupClient.msi"
+-$configPath = "\\server\deploy\proxmoxbackupclient-config.json"
+ 
+-# Installation silencieuse avec config
+-Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn CONFIGFILE=`"$configPath`"" -Wait
++# Installation silencieuse (propriétés publiques, cf. "Paramètres du MSI")
++Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn" -Wait
+ 
+-# Vérifier le service
+-if (Get-Service -Name "ProxmoxBackupClientService" -ErrorAction SilentlyContinue) {
++# Vérifier le service (nom SCM = <ExeName> de la marque, ex. NimbusBackup)
++if (Get-Service -Name "NimbusBackup" -ErrorAction SilentlyContinue) {
+     Write-Host "✅ Proxmox Backup Client installed successfully"
+-    Start-Service -Name "ProxmoxBackupClientService"
+ } else {
+     Write-Error "❌ Installation failed"
+     exit 1
+@@ -112,21 +140,21 @@ if (Get-Service -Name "ProxmoxBackupClientService" -ErrorAction SilentlyContinue
+ ### Vérifier l'installation
+ 
+ ```powershell
+-# Service installé et démarré
+-Get-Service ProxmoxBackupClientService
++# Service installé (et démarré, sauf avec SERVICEAUTOSTART=0)
++Get-Service NimbusBackup
+ 
+ # Config présente
+ Test-Path "C:\ProgramData\ProxmoxBackupClient\config.json"
+ 
+ # Premier backup dans les logs
+-Get-Content "C:\ProgramData\ProxmoxBackupClient\logs\service.log" -Tail 50
++Get-Content "C:\ProgramData\ProxmoxBackupClient\debug-service.log" -Tail 50
+ ```
+ 
+ ### Logs d'installation MSI
+ 
+ En cas d'échec, générer un log détaillé:
+ ```powershell
+-msiexec /i ProxmoxBackupClient.msi /qn CONFIGFILE="config.json" /l*v install.log
++msiexec /i ProxmoxBackupClient.msi /qn /l*v install.log
+ ```
+ 
+ Chercher les erreurs:
+diff --git a/installer/README.md b/installer/README.md
+index 462c9cd..02d8cef 100644
+--- a/installer/README.md
++++ b/installer/README.md
+@@ -64,9 +64,33 @@ Le service Windows créé par le MSI :
+ - **Nom** : ProxmoxBackupClient
+ - **Nom d'affichage** : Proxmox Backup Client Service
+ - **Compte** : LocalSystem (privilèges admin)
+-- **Démarrage** : Automatique
++- **Démarrage** : Automatique (ou Manuel + arrêté si installé avec `SERVICEAUTOSTART=0`, cf. ci-dessous)
+ - **Argument** : `--service` (mode service)
+ 
++## Installation silencieuse (paramètres MSI)
++
++Le MSI supporte le mode silencieux standard de Windows Installer (`/quiet` ou `/qn`, sans propriété dédiée) et ces propriétés publiques (en MAJUSCULES) :
++
++| Propriété | Défaut | Effet |
++| --- | --- | --- |
++| `AUTOSTART` | `1` | `0` = pas d'entrée d'autodémarrage de la GUI à la connexion |
++| `SERVICEAUTOSTART` | `1` | `0` = service installé en **Manuel** et laissé **arrêté** — installé, mais jamais activé ni autodémarré |
++| `KEEP_CONFIG` | `1` | Uniquement à la désinstallation : `0` = supprime aussi `%ProgramData%\<ExeName>` |
++| `INSTALLFOLDER` | `Program Files` | Répertoire d'installation |
++
++```powershell
++# Installation silencieuse, réglages par défaut
++msiexec /i ProxmoxBackupClient.msi /quiet
++
++# Installer le service SANS l'activer ni l'autodémarrer
++msiexec /i ProxmoxBackupClient.msi /quiet AUTOSTART=0 SERVICEAUTOSTART=0
++
++# Désinstallation silencieuse qui purge la configuration
++msiexec /x ProxmoxBackupClient.msi /quiet KEEP_CONFIG=0
++```
++
++Codes de sortie : `0` = succès, `3010` = succès + redémarrage requis. Voir aussi `DEPLOYMENT.md` (déploiement GPO/Intune/PowerShell).
++
+ ## Personnalisation
+ 
+ ### Changer la version
+diff --git a/installer/wix/ProductBody.wxi b/installer/wix/ProductBody.wxi
+index 00f9347..28791f3 100644
+--- a/installer/wix/ProductBody.wxi
++++ b/installer/wix/ProductBody.wxi
+@@ -136,8 +136,47 @@
+     <!-- License -->
+     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+ 
+-    <!-- ==================== AUTO-START CONFIGURATION ==================== -->
++    <!-- ==================== INSTALL OPTIONS (public MSI properties) ==========
++         Public (UPPERCASE) properties can be set on the msiexec command line,
++         which is what makes unattended installs possible. Silent install needs
++         no extra property — msiexec's own /quiet does it — e.g.:
++
++           msiexec /i NimbusBackup.msi /quiet
++           msiexec /i NimbusBackup.msi /quiet AUTOSTART=0 SERVICEAUTOSTART=0
++           msiexec /x NimbusBackup.msi /quiet KEEP_CONFIG=0
++
++         AUTOSTART         1 (default) | 0 — create the per-user logon entry
++                           (HKCU Run) that starts the GUI minimized. 0 = no
++                           GUI autostart.
++         SERVICEAUTOSTART  1 (default) | 0 — service startup type: 1 = Auto
++                           (starts with Windows, and is started by the
++                           installer); 0 = installed as Manual and left
++                           STOPPED after the install (SetServiceDemandStart
++                           below), i.e. the service exists but nothing
++                           enables or autostarts it.
++         KEEP_CONFIG       1 (default) | 0 — on uninstall, keep (1) or delete
++                           (0) %ProgramData%\<ExeName>.
++         INSTALLFOLDER     Absolute path — installation directory (also the
++                           dir the UI's install-dir dialog edits).
++         Silent logging:   msiexec /i <msi> /quiet /L*v "C:\Temp\install.log"
++         Exit codes:       0 = success, 3010 = success, reboot required.
++    ======================================================================== -->
+     <Property Id="AUTOSTART" Value="1" />
++    <Property Id="SERVICEAUTOSTART" Value="1" />
++
++    <!-- SERVICEAUTOSTART=0: WiX's ServiceInstall/@Start is an enum, not a
++         formatted field, so the start type cannot be a property. Instead the
++         service is always authored as auto, and this deferred action flips it
++         to Manual and stops it right after StartServices started it — final
++         state: installed, Manual, stopped. The SCM name is $(var.ExeName),
++         as in ServiceInstall above. Return=ignore: a service that is
++         not running (sc stop fails) must not fail the install. -->
++    <CustomAction Id="SetServiceDemandStart"
++                  Directory="INSTALLFOLDER"
++                  ExeCommand='cmd.exe /c "sc.exe config $(var.ExeName) start= demand &amp; sc.exe stop $(var.ExeName) &amp; exit /b 0"'
++                  Execute="deferred"
++                  Impersonate="no"
++                  Return="ignore" />
+ 
+     <!-- ==================== UNINSTALL CONFIGURATION CLEANUP ==================== -->
+     <Property Id="KEEP_CONFIG" Value="1" />
+@@ -169,6 +208,9 @@
+       <Custom Action="KillGUIProcesses" Before="StopServices">
+         UPGRADINGPRODUCTCODE
+       </Custom>
++      <Custom Action="SetServiceDemandStart" After="StartServices">
++        SERVICEAUTOSTART = "0"
++      </Custom>
+       <Custom Action="DeleteConfigFolder" Before="RemoveFiles">
+         (REMOVE="ALL") AND NOT UPGRADINGPRODUCTCODE AND (KEEP_CONFIG="0")
+       </Custom>
+-- 
+2.47.3
+

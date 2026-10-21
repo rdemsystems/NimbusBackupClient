@@ -1,0 +1,574 @@
+From 27df83cd67d9b29ce41e97f3beedd8de9b35ae31 Mon Sep 17 00:00:00 2001
+From: mjb-is <mjb-is@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 00:14:22 +0100
+Subject: [PATCH 090/108] Back up and restore Windows creation times
+
+pxar has no field for a file's creation time, so every restored file and
+folder on Windows shows the time of the restore as its creation time
+(TODO.md, "NTFS Metadata Fidelity").
+
+Backup: the NTFS metadata collector records each file's and folder's
+creation time in the side file next to the SDDL and attributes
+(FileMetaEntry.Created, a FILETIME, json "c", omitted when 0). It comes
+from the FileInfo the pxar walk already has, so there is no extra disk
+access. The field is optional: older clients ignore it, and a snapshot
+without it decodes with 0, which leaves the file alone.
+
+Restore: on Windows the side file is fetched whether or not ACLs were
+asked for, and after extraction each file and folder gets its creation
+time back, before its attributes and ACL are applied (an ACL may take
+away the right to change it). Only the creation time is written, so the
+modification times the extraction set, folders' after their contents,
+stay as restored. Linux and other systems have no settable creation time;
+applyCreationTime is a no-op there.
+
+Tests: TestCreationTimeRoundTrip (collector captures file and folder
+creation times through the gzipped side file, applyCreationTime puts them
+back to the 100 ns and leaves the modification time alone),
+TestCreationTimeAbsentIsNoOp (a side file without "c"), and an opt-in live
+test (PBS_E2E=1) that backs up a folder with old creation times and
+restores it with and without ACLs.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JSSBMF6hRk92jsHCMKgDRx
+Upstream: tizbac/proxmoxbackupclient_go@8503e039cd1a320740d903b0386d0201bb442b25
+---
+ gui/backup_meta.go                            |   6 +
+ gui/backup_meta_windows.go                    |  17 +-
+ gui/creation_time_windows_test.go             | 156 ++++++++++++++++
+ gui/restore_inline.go                         |  27 ++-
+ gui/restore_meta_linux.go                     |   4 +
+ gui/restore_meta_other.go                     |   3 +
+ gui/restore_meta_windows.go                   |  27 +++
+ gui/zz_e2e_ntfs_meta_livetest_windows_test.go | 167 ++++++++++++++++++
+ 8 files changed, 403 insertions(+), 4 deletions(-)
+ create mode 100644 gui/creation_time_windows_test.go
+ create mode 100644 gui/zz_e2e_ntfs_meta_livetest_windows_test.go
+
+diff --git a/gui/backup_meta.go b/gui/backup_meta.go
+index b900a36..3bcb371 100644
+--- a/gui/backup_meta.go
++++ b/gui/backup_meta.go
+@@ -38,6 +38,12 @@ type FileMetaEntry struct {
+ 	SDDLIdx int    `json:"s"`           // Windows: index into BackupFileMeta.SDDLs (dedup)
+ 	Attrs   uint32 `json:"a"`           // Windows file attributes bitmask
+ 	Reparse uint32 `json:"r,omitempty"` // reparse tag (0 if not a reparse point)
++	// Created is the Windows creation time as a FILETIME (100 ns ticks since
++	// 1601-01-01 UTC), 0 when not captured. pxar has no field for it (Linux
++	// has no settable creation time), so it travels here. Optional: older
++	// readers ignore the key, and an older snapshot without it restores as
++	// before.
++	Created int64 `json:"c,omitempty"`
+ 	// Xattrs is Linux-only: every extended attribute captured on this file,
+ 	// name -> raw value (encoding/json base64-encodes []byte automatically).
+ 	// POSIX ACLs are included here under their real kernel xattr names
+diff --git a/gui/backup_meta_windows.go b/gui/backup_meta_windows.go
+index 732f726..8be9661 100644
+--- a/gui/backup_meta_windows.go
++++ b/gui/backup_meta_windows.go
+@@ -7,15 +7,16 @@ import (
+ 	"os"
+ 	"path/filepath"
+ 	"sync"
++	"syscall"
+ 	"time"
+ 
+ 	"golang.org/x/sys/windows"
+ )
+ 
+ // NTFSMetaCollector implements pbscommon.MetaCollector for Windows. It captures
+-// owner/group/DACL (as an SDDL string) plus NTFS file attributes during the
+-// pxar walk and serializes everything into a single gzipped JSON file that
+-// lives as a virtual file inside the archive root.
++// owner/group/DACL (as an SDDL string) plus NTFS file attributes and the
++// creation time during the pxar walk and serializes everything into a single
++// gzipped JSON file that lives as a virtual file inside the archive root.
+ //
+ // SDDLs are deduplicated via an index: in practice most files in a tree share
+ // a handful of unique descriptors (inherited from parent), so the dedup cuts
+@@ -87,6 +88,15 @@ func (c *NTFSMetaCollector) Collect(absPath string, info os.FileInfo, isDir bool
+ 		}
+ 	}
+ 
++	// Creation time: already in the directory listing the walk read, so this
++	// costs no extra disk access.
++	var created int64
++	if info != nil {
++		if d, ok := info.Sys().(*syscall.Win32FileAttributeData); ok && d != nil {
++			created = int64(d.CreationTime.HighDateTime)<<32 | int64(d.CreationTime.LowDateTime)
++		}
++	}
++
+ 	c.mu.Lock()
+ 	defer c.mu.Unlock()
+ 
+@@ -102,6 +112,7 @@ func (c *NTFSMetaCollector) Collect(absPath string, info os.FileInfo, isDir bool
+ 		IsDir:   isDir,
+ 		SDDLIdx: idx,
+ 		Attrs:   attrs,
++		Created: created,
+ 	})
+ 	return nil
+ }
+diff --git a/gui/creation_time_windows_test.go b/gui/creation_time_windows_test.go
+new file mode 100644
+index 0000000..e216c43
+--- /dev/null
++++ b/gui/creation_time_windows_test.go
+@@ -0,0 +1,156 @@
++//go:build windows
++
++package main
++
++import (
++	"bytes"
++	"compress/gzip"
++	"encoding/json"
++	"os"
++	"path/filepath"
++	"syscall"
++	"testing"
++	"time"
++
++	"golang.org/x/sys/windows"
++)
++
++// setCreatedForTest sets only the creation time of path (file or folder).
++func setCreatedForTest(t *testing.T, path string, when time.Time) {
++	t.Helper()
++	p, err := windows.UTF16PtrFromString(path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	h, err := windows.CreateFile(p, windows.FILE_WRITE_ATTRIBUTES,
++		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
++		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
++	if err != nil {
++		t.Fatalf("open %s: %v", path, err)
++	}
++	defer windows.CloseHandle(h)
++	ft := windows.NsecToFiletime(when.UnixNano())
++	if err := windows.SetFileTime(h, &ft, nil, nil); err != nil {
++		t.Fatalf("set creation time on %s: %v", path, err)
++	}
++}
++
++func readCreatedForTest(t *testing.T, path string) time.Time {
++	t.Helper()
++	fi, err := os.Lstat(path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	d := fi.Sys().(*syscall.Win32FileAttributeData)
++	return time.Unix(0, d.CreationTime.Nanoseconds())
++}
++
++// collectForTest runs the collector over the given paths and returns the
++// side file as a restore reads it (gzip, then JSON).
++func collectForTest(t *testing.T, root string, paths map[string]bool) *BackupFileMeta {
++	t.Helper()
++	c := NewNTFSMetaCollector(root, "h")
++	for p, isDir := range paths {
++		fi, err := os.Lstat(p)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if err := c.Collect(p, fi, isDir); err != nil {
++			t.Fatal(err)
++		}
++	}
++	blob, err := c.Finalize()
++	if err != nil || len(blob) == 0 {
++		t.Fatalf("Finalize: %d bytes, %v", len(blob), err)
++	}
++	gz, err := gzip.NewReader(bytes.NewReader(blob))
++	if err != nil {
++		t.Fatal(err)
++	}
++	var meta BackupFileMeta
++	if err := json.NewDecoder(gz).Decode(&meta); err != nil {
++		t.Fatal(err)
++	}
++	return &meta
++}
++
++// The collector records the creation time of files and folders, and
++// applyCreationTime puts it back exactly, leaving the modification time alone.
++func TestCreationTimeRoundTrip(t *testing.T) {
++	src := t.TempDir()
++	file := filepath.Join(src, "doc.txt")
++	dir := filepath.Join(src, "sub")
++	if err := os.WriteFile(file, []byte("hello"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Mkdir(dir, 0o755); err != nil {
++		t.Fatal(err)
++	}
++	created := time.Date(2003, 4, 5, 6, 7, 8, 123456700, time.UTC)
++	setCreatedForTest(t, file, created)
++	setCreatedForTest(t, dir, created.Add(time.Hour))
++
++	byPath := buildFileMetaIndex(collectForTest(t, src, map[string]bool{file: false, dir: true}))
++	if byPath["doc.txt"].Created == 0 || byPath["sub"].Created == 0 {
++		t.Fatalf("creation time not captured: %+v", byPath)
++	}
++
++	// "Restore": a fresh file and folder, then the captured times put back.
++	dst := t.TempDir()
++	rf := filepath.Join(dst, "doc.txt")
++	rd := filepath.Join(dst, "sub")
++	if err := os.WriteFile(rf, []byte("hello"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Mkdir(rd, 0o755); err != nil {
++		t.Fatal(err)
++	}
++	mtime := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
++	if err := os.Chtimes(rf, mtime, mtime); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Chtimes(rd, mtime, mtime); err != nil {
++		t.Fatal(err)
++	}
++	if err := applyCreationTime(rf, byPath["doc.txt"].Created); err != nil {
++		t.Fatal(err)
++	}
++	if err := applyCreationTime(rd, byPath["sub"].Created); err != nil {
++		t.Fatal(err)
++	}
++	if got := readCreatedForTest(t, rf); !got.Equal(created) {
++		t.Errorf("file creation time = %v, want %v", got.UTC(), created)
++	}
++	if got := readCreatedForTest(t, rd); !got.Equal(created.Add(time.Hour)) {
++		t.Errorf("folder creation time = %v, want %v", got.UTC(), created.Add(time.Hour))
++	}
++	for _, p := range []string{rf, rd} {
++		if fi, _ := os.Lstat(p); !fi.ModTime().Equal(mtime) {
++			t.Errorf("%s: modification time changed to %v, want %v", p, fi.ModTime().UTC(), mtime)
++		}
++	}
++}
++
++// A side file written before the field existed has no "c": it decodes with
++// Created 0, and applyCreationTime then leaves the file alone.
++func TestCreationTimeAbsentIsNoOp(t *testing.T) {
++	var meta BackupFileMeta
++	old := `{"version":1,"sddl":[""],"entries":[{"p":"doc.txt","s":0,"a":32}]}`
++	if err := json.Unmarshal([]byte(old), &meta); err != nil {
++		t.Fatal(err)
++	}
++	if meta.Entries[0].Created != 0 {
++		t.Fatalf("Created = %d, want 0", meta.Entries[0].Created)
++	}
++	f := filepath.Join(t.TempDir(), "doc.txt")
++	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	before := readCreatedForTest(t, f)
++	if err := applyCreationTime(f, meta.Entries[0].Created); err != nil {
++		t.Fatalf("0 (not captured) should be a no-op, got %v", err)
++	}
++	if got := readCreatedForTest(t, f); !got.Equal(before) {
++		t.Errorf("creation time changed from %v to %v", before, got)
++	}
++}
+diff --git a/gui/restore_inline.go b/gui/restore_inline.go
+index 08af1bd..b4b7885 100644
+--- a/gui/restore_inline.go
++++ b/gui/restore_inline.go
+@@ -696,8 +696,12 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
+ 	// backup_meta_linux.go). Best-effort: nil on any failure (missing blob on
+ 	// a legacy snapshot, network error) just means files restore without
+ 	// their ACLs/attributes re-applied, never fails the restore.
++	// The same blob carries each file's creation time, which a restore on
++	// Windows always puts back (like the modification time), so it is fetched
++	// there whether or not ACLs were asked for.
+ 	var aclMeta *BackupFileMeta
+-	if opts.RestoreACLs {
++	restoreCreated := runtime.GOOS == "windows"
++	if opts.RestoreACLs || restoreCreated {
+ 		aclClient := &pbscommon.PBSClient{
+ 			BaseURL: opts.BaseURL, CertFingerPrint: opts.CertFingerprint,
+ 			AuthID: opts.AuthID, Secret: opts.Secret, Ticket: opts.Ticket, CSRFToken: opts.CSRFToken,
+@@ -765,9 +769,12 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
+ 	// Re-apply captured ACLs/attributes now that the files are actually on
+ 	// disk. Best-effort per file: an apply failure is logged, never fails
+ 	// the restore — the file's content is already safely on disk regardless.
++	// The extraction has already set the modification times, folders' last,
++	// and nothing below writes file data, so they stay as restored.
+ 	if aclMeta != nil {
+ 		entryIdx := buildFileMetaIndex(aclMeta)
+ 		applied, failed := 0, 0
++		cApplied, cFailed := 0, 0
+ 		for _, f := range extracted {
+ 			if f.Skipped || f.ArchivePath == "" {
+ 				continue
+@@ -776,6 +783,21 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
+ 			if !ok {
+ 				continue
+ 			}
++			// Creation time first: the ACL applied next may take away the
++			// right to change it.
++			if restoreCreated && entry.Created > 0 {
++				if cerr := applyCreationTime(f.Path, entry.Created); cerr != nil {
++					cFailed++
++					if cFailed <= 50 {
++						writeBackupLog(fmt.Sprintf("Creation time not set on %s: %v", f.Path, cerr))
++					}
++				} else {
++					cApplied++
++				}
++			}
++			if !opts.RestoreACLs {
++				continue
++			}
+ 			if aerr := applyNTFSMetadata(f.Path, entry, aclMeta.SDDLs); aerr != nil {
+ 				failed++
+ 				writeBackupLog(fmt.Sprintf("NTFS metadata apply failed for %s: %v", f.Path, aerr))
+@@ -783,6 +805,9 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
+ 				applied++
+ 			}
+ 		}
++		if cApplied > 0 || cFailed > 0 {
++			writeBackupLog(fmt.Sprintf("Creation times: applied %d, failed %d", cApplied, cFailed))
++		}
+ 		if applied > 0 || failed > 0 {
+ 			writeBackupLog(fmt.Sprintf("NTFS ACLs/attributes: applied %d, failed %d", applied, failed))
+ 		}
+diff --git a/gui/restore_meta_linux.go b/gui/restore_meta_linux.go
+index 130f935..91a1570 100644
+--- a/gui/restore_meta_linux.go
++++ b/gui/restore_meta_linux.go
+@@ -39,3 +39,7 @@ func applyNTFSMetadata(destPath string, entry FileMetaEntry, sddls []string) err
+ 	}
+ 	return nil
+ }
++
++// applyCreationTime: Linux has no settable creation (birth) time, so a
++// Windows snapshot restored here keeps the time the file was written.
++func applyCreationTime(destPath string, created int64) error { return nil }
+diff --git a/gui/restore_meta_other.go b/gui/restore_meta_other.go
+index a7b2d2a..77cf162 100644
+--- a/gui/restore_meta_other.go
++++ b/gui/restore_meta_other.go
+@@ -9,3 +9,6 @@ package main
+ func applyNTFSMetadata(destPath string, entry FileMetaEntry, sddls []string) error {
+ 	return nil
+ }
++
++// applyCreationTime: only Windows has a settable creation time.
++func applyCreationTime(destPath string, created int64) error { return nil }
+diff --git a/gui/restore_meta_windows.go b/gui/restore_meta_windows.go
+index 021f5da..6643779 100644
+--- a/gui/restore_meta_windows.go
++++ b/gui/restore_meta_windows.go
+@@ -9,6 +9,33 @@ import (
+ 	"golang.org/x/sys/windows"
+ )
+ 
++// applyCreationTime sets a restored file's or folder's creation time to the
++// captured FILETIME (0 = not captured, left alone). Only the creation time is
++// written; the modification time the extraction set stays as it is.
++func applyCreationTime(destPath string, created int64) error {
++	if created <= 0 {
++		return nil
++	}
++	p, err := windows.UTF16PtrFromString(destPath)
++	if err != nil {
++		return err
++	}
++	// BACKUP_SEMANTICS opens folders too; OPEN_REPARSE_POINT sets the link's
++	// own time, not its target's.
++	h, err := windows.CreateFile(p, windows.FILE_WRITE_ATTRIBUTES,
++		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
++		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
++	if err != nil {
++		return fmt.Errorf("open for creation time: %w", err)
++	}
++	defer windows.CloseHandle(h)
++	ft := windows.Filetime{LowDateTime: uint32(created), HighDateTime: uint32(created >> 32)}
++	if err := windows.SetFileTime(h, &ft, nil, nil); err != nil {
++		return fmt.Errorf("SetFileTime: %w", err)
++	}
++	return nil
++}
++
+ // applyNTFSMetadata restores a single file/dir's captured Security
+ // Descriptor (owner/group/DACL) and DOS attributes, the counterpart to
+ // NTFSMetaCollector.Collect on the backup side. Best-effort by design,
+diff --git a/gui/zz_e2e_ntfs_meta_livetest_windows_test.go b/gui/zz_e2e_ntfs_meta_livetest_windows_test.go
+new file mode 100644
+index 0000000..9260574
+--- /dev/null
++++ b/gui/zz_e2e_ntfs_meta_livetest_windows_test.go
+@@ -0,0 +1,167 @@
++//go:build windows
++
++package main
++
++import (
++	"fmt"
++	"os"
++	"path/filepath"
++	"testing"
++	"time"
++)
++
++// Opt-in end-to-end test of the NTFS metadata side file against a real PBS:
++// a folder is backed up (with VSS when PBS_E2E_VSS is set, which needs an
++// elevated shell) and restored elsewhere, with and without ACLs, and the
++// restored tree is compared with the source.
++//
++//	PBS_E2E=1 PBS_E2E_URL=https://pbs:8007 PBS_E2E_AUTHID=user@pbs!token
++//	PBS_E2E_SECRET=... PBS_E2E_STORE=store [PBS_E2E_FP=AA:BB:...]
++//	[PBS_E2E_ID_PREFIX=e2e-] [PBS_E2E_VSS=1] go test -run TestE2ENTFSMeta
++//
++// The snapshots are left on the server; the log names them.
++type e2eNTFSServer struct {
++	url, authID, secret, store, fp string
++}
++
++func e2eNTFSServerFromEnv(t *testing.T) e2eNTFSServer {
++	t.Helper()
++	if os.Getenv("PBS_E2E") == "" {
++		t.Skip("set PBS_E2E=1 and the PBS_E2E_* connection variables")
++	}
++	s := e2eNTFSServer{
++		url: os.Getenv("PBS_E2E_URL"), authID: os.Getenv("PBS_E2E_AUTHID"),
++		secret: os.Getenv("PBS_E2E_SECRET"), store: os.Getenv("PBS_E2E_STORE"), fp: os.Getenv("PBS_E2E_FP"),
++	}
++	if s.url == "" || s.authID == "" || s.secret == "" || s.store == "" {
++		t.Fatal("PBS_E2E_URL, PBS_E2E_AUTHID, PBS_E2E_SECRET and PBS_E2E_STORE are required")
++	}
++	return s
++}
++
++// e2eNTFSBackupRestore backs up src once and restores the snapshot into a new
++// folder per variant of restore options, calling check on the restored copy
++// of src.
++func e2eNTFSBackupRestore(t *testing.T, name, src string, variants map[string]RestoreOptions, check func(label, root string)) {
++	t.Helper()
++	srv := e2eNTFSServerFromEnv(t)
++	prefix := os.Getenv("PBS_E2E_ID_PREFIX")
++	if prefix == "" {
++		prefix = "e2e-"
++	}
++	useVSS := os.Getenv("PBS_E2E_VSS") != ""
++	backupID := fmt.Sprintf("%s%s-%d", prefix, name, time.Now().Unix())
++	var rs *BackupStatus
++	err := RunBackupInline(BackupOptions{
++		BaseURL: srv.url, AuthID: srv.authID, Secret: srv.secret, Datastore: srv.store, CertFingerprint: srv.fp,
++		BackupObjects: []string{src}, BackupID: backupID, BackupType: "host", Kind: "directory",
++		Compression: "fastest", UseVSS: useVSS,
++		OnResult: func(s *BackupStatus) { rs = s },
++	})
++	if err != nil || rs == nil || !rs.Success() {
++		t.Fatalf("backup: %v %+v", err, rs)
++	}
++	t.Logf("snapshot host/%s/%d (vss=%v) left on PBS", backupID, rs.BackupTime, useVSS)
++
++	for label, opts := range variants {
++		dest := filepath.Join(t.TempDir(), "restore")
++		if err := os.MkdirAll(dest, 0o755); err != nil {
++			t.Fatal(err)
++		}
++		opts.BaseURL, opts.AuthID, opts.Secret, opts.Datastore, opts.CertFingerprint = srv.url, srv.authID, srv.secret, srv.store, srv.fp
++		opts.BackupID, opts.SnapshotTime, opts.DestPath = backupID, time.Unix(rs.BackupTime, 0).UTC(), dest
++		opts.Mode, opts.Overwrite = RestoreModeAlternateAbs, true
++		if err := RestoreSnapshotInline(opts); err != nil {
++			t.Errorf("%s: restore: %v", label, err)
++			continue
++		}
++		check(label, e2eNTFSFindRoot(t, dest))
++		e2eNTFSMakeWritable(dest)
++	}
++}
++
++// e2eNTFSFindRoot returns the restored copy of the source folder, the one
++// holding e2e-marker.txt.
++func e2eNTFSFindRoot(t *testing.T, dest string) string {
++	t.Helper()
++	var found string
++	filepath.Walk(dest, func(p string, info os.FileInfo, err error) error {
++		if err == nil && !info.IsDir() && info.Name() == "e2e-marker.txt" && found == "" {
++			found = filepath.Dir(p)
++		}
++		return nil
++	})
++	if found == "" {
++		t.Fatalf("e2e-marker.txt not found in %s", dest)
++	}
++	return found
++}
++
++// e2eNTFSMakeWritable clears read-only attributes so t.TempDir can clean up.
++func e2eNTFSMakeWritable(root string) {
++	filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
++		if err == nil && !info.IsDir() && info.Mode().Perm()&0o200 == 0 {
++			os.Chmod(p, 0o644)
++		}
++		return nil
++	})
++}
++
++// Creation times of files and folders come back, with and without ACLs, and
++// the modification times stay as backed up.
++func TestE2ENTFSMetaCreationTimes(t *testing.T) {
++	e2eNTFSServerFromEnv(t)
++	src := filepath.Join(t.TempDir(), "ntfs-meta-src")
++	mk := func(rel, data string) string {
++		t.Helper()
++		p := filepath.Join(src, filepath.FromSlash(rel))
++		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
++			t.Fatal(err)
++		}
++		if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
++			t.Fatal(err)
++		}
++		return p
++	}
++	mk("e2e-marker.txt", "marker")
++	mk("docs/report.txt", "a report")
++	mk("docs/old/letter.txt", "a letter")
++	ro := mk("read only.txt", "read only")
++	if err := os.Chmod(ro, 0o444); err != nil {
++		t.Fatal(err)
++	}
++	created := map[string]time.Time{
++		"docs/report.txt":     time.Date(2004, 5, 6, 7, 8, 9, 0, time.UTC),
++		"docs/old/letter.txt": time.Date(1999, 12, 31, 23, 59, 58, 0, time.UTC),
++		"read only.txt":       time.Date(2010, 1, 2, 3, 4, 5, 0, time.UTC),
++		"docs/old":            time.Date(1998, 2, 3, 4, 5, 6, 0, time.UTC),
++		"docs":                time.Date(2001, 7, 8, 9, 10, 11, 0, time.UTC),
++	}
++	mtime := time.Date(2015, 3, 4, 5, 6, 7, 0, time.UTC)
++	// Deepest first, so writing a time on an entry never touches one set before.
++	for _, rel := range []string{"docs/report.txt", "docs/old/letter.txt", "read only.txt", "docs/old", "docs"} {
++		p := filepath.Join(src, filepath.FromSlash(rel))
++		setCreatedForTest(t, p, created[rel])
++		if err := os.Chtimes(p, mtime, mtime); err != nil {
++			t.Fatal(err)
++		}
++	}
++
++	e2eNTFSBackupRestore(t, "ctime", src, map[string]RestoreOptions{
++		"no ACLs":   {},
++		"with ACLs": {RestoreACLs: true},
++	}, func(label, root string) {
++		for rel, want := range created {
++			p := filepath.Join(root, filepath.FromSlash(rel))
++			if got := readCreatedForTest(t, p); !got.Equal(want) {
++				t.Errorf("%s: %s creation time %v, want %v", label, rel, got.UTC(), want)
++			}
++			if fi, err := os.Stat(p); err != nil {
++				t.Errorf("%s: %s: %v", label, rel, err)
++			} else if fi.ModTime().Unix() != mtime.Unix() {
++				t.Errorf("%s: %s modification time %v, want %v", label, rel, fi.ModTime().UTC(), mtime)
++			}
++		}
++		t.Logf("%s: %d creation times checked", label, len(created))
++	})
++}
+-- 
+2.47.3
+

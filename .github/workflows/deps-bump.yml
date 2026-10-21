@@ -1,0 +1,123 @@
+name: Go toolchain and dependency bump
+
+# Push a branch named deps/<anything> to run it. The job moves every module
+# to the Go version and x/net version below and runs go mod tidy, then, with
+# that toolchain and through the workspace (go.work): builds every module for
+# linux and windows (gating), and runs go vet and go test (informational:
+# some findings predate the bump, compare with a Go 1.25 run). The resulting
+# go.mod/go.sum/go.work changes are uploaded as a patch artifact instead of
+# being pushed: a GITHUB_TOKEN push would not trigger Build and Release, and
+# the patch gets applied and committed on the working branch like any change.
+
+on:
+  push:
+    branches: [ 'deps/**' ]
+
+env:
+  GO_VERSION: '1.26.9'
+  XNET_VERSION: 'v0.61.0'
+
+jobs:
+  bump:
+    name: Bump, tidy and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev
+
+      - name: Bump x/net and tidy every module
+        env:
+          GOWORK: off
+          GOTOOLCHAIN: local
+        run: |
+          go version
+          for mod in $(find . -name go.mod -not -path '*/frontend/*' | sort); do
+            m=$(dirname "$mod")
+            echo "::group::$m"
+            if grep -q 'golang.org/x/net ' "$mod"; then
+              ( cd "$m" && go get "golang.org/x/net@${XNET_VERSION}" )
+            fi
+            ( cd "$m" && go mod tidy )
+            echo "::endgroup::"
+          done
+          # go.work must not list an older language version than its
+          # modules (x/net >= v0.59 declares go 1.26.0).
+          max=$(grep -h '^go ' $(find . -name go.mod -not -path '*/frontend/*') | awk '{print $2}' | sort -V | tail -1)
+          env -u GOWORK go work edit -go="$max"
+          git diff --stat
+
+      # Through the workspace (go.work): machinebackuplib has no replace
+      # directives of its own. nbd (go-nbd ioctls) builds on Linux only.
+      - name: Build (linux, windows)
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          fail=0
+          for mod in $(find . -name go.mod -not -path '*/frontend/*' | sort); do
+            m=$(dirname "$mod")
+            for os in linux windows; do
+              [ "$m/$os" = "./nbd/windows" ] && continue
+              echo "::group::build $m ($os)"
+              if ! ( cd "$m" && GOOS=$os go build ./... ); then
+                echo "::error::go build failed in $m for $os"
+                fail=1
+              fi
+              echo "::endgroup::"
+            done
+          done
+          exit $fail
+
+      - name: Vet (linux, windows; informational)
+        continue-on-error: true
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          fail=0
+          for mod in $(find . -name go.mod -not -path '*/frontend/*' | sort); do
+            m=$(dirname "$mod")
+            for os in linux windows; do
+              [ "$m/$os" = "./nbd/windows" ] && continue
+              echo "::group::vet $m ($os)"
+              if ! ( cd "$m" && GOOS=$os go vet ./... ); then
+                echo "::warning::go vet failed in $m for $os"
+                fail=1
+              fi
+              echo "::endgroup::"
+            done
+          done
+          exit $fail
+
+      - name: Test every module (informational)
+        continue-on-error: true
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          fail=0
+          for mod in $(find . -name go.mod -not -path '*/frontend/*' | sort); do
+            m=$(dirname "$mod")
+            echo "::group::$m"
+            if ! ( cd "$m" && go test -race ./... ); then
+              echo "::warning::go test failed in $m"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $fail
+
+      - name: Patch of the go.mod/go.sum changes
+        if: always()
+        run: git diff -- '*go.mod' '*go.sum' go.work > deps-bump.patch; wc -l deps-bump.patch
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: deps-bump-patch
+          path: deps-bump.patch

@@ -1,0 +1,199 @@
+From 7e808ab6682d5e46dbc5fbaf0c891fcd24d522da Mon Sep 17 00:00:00 2001
+From: mjb-is <mjb-is@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 20:57:35 +0100
+Subject: [PATCH 096/108] Read unencrypted snapshots with an encryption key
+ loaded
+
+With a key configured for a server, every chunk the readers fetched was
+checked against the keyed digest (sha256 of the plaintext and id_key), so
+the server's older unencrypted snapshots, whose index holds plain sha256
+digests, failed with "content hash mismatch": Restore, Undelete and Roll
+back could not read anything taken before the key was set up. Found live on
+winclient: an Undelete scan of a machine set over encrypted and unencrypted
+snapshots.
+
+DIDXReaderAt (which also reads fixed indexes) uses ChunkMatchesDigest, and
+DecodeBlob's unencrypted cases verifyUnencryptedDigest: with a key loaded a
+plain sha256 match is accepted as well as the keyed one. A chunk matching
+the other kind of digest would need a sha256 preimage, so nothing is
+weakened; encrypted blobs keep the strict keyed check.
+
+Fork adaptation: ChunkMatchesDigest replaces the fork's narrower
+legacyEncryptedDigest (bd164c1): the same plain-sha256 acceptance with a
+key loaded, which also covers the encrypted snapshots the 0.4.1/0.4.2 GUI
+indexed under the plain digest (issue #13). The fork's reader has no
+hash timing, and its CHANGELOG is kept.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JSSBMF6hRk92jsHCMKgDRx
+Upstream: mjb-is/proxmoxbackupclient_go@6d1b3036365805c98c6a3487921d02a5f2707df1
+---
+ pbscommon/crypt.go            | 18 ++++++++++++++++--
+ pbscommon/didx_reader.go      | 27 ++++++---------------------
+ pbscommon/didx_reader_test.go | 30 ++++++++++++++++++++++++++++++
+ pbscommon/pbsapi.go           | 16 ++++++++++++++++
+ 4 files changed, 68 insertions(+), 23 deletions(-)
+
+diff --git a/pbscommon/crypt.go b/pbscommon/crypt.go
+index e7a7423..25b4be4 100644
+--- a/pbscommon/crypt.go
++++ b/pbscommon/crypt.go
+@@ -271,7 +271,7 @@ func DecodeEncryptedBlob(raw []byte, crypt *CryptConfig, digest []byte) ([]byte,
+ 		if err := verifyBlobCRC(raw, DataBlobHeaderSize); err != nil {
+ 			return nil, err
+ 		}
+-		if err := verifyPlaintextDigest(plaintext, crypt, digest); err != nil {
++		if err := verifyUnencryptedDigest(plaintext, crypt, digest); err != nil {
+ 			return nil, err
+ 		}
+ 		return plaintext, nil
+@@ -283,7 +283,7 @@ func DecodeEncryptedBlob(raw []byte, crypt *CryptConfig, digest []byte) ([]byte,
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		if err := verifyPlaintextDigest(plaintext, crypt, digest); err != nil {
++		if err := verifyUnencryptedDigest(plaintext, crypt, digest); err != nil {
+ 			return nil, err
+ 		}
+ 		return plaintext, nil
+@@ -342,6 +342,20 @@ func verifyBlobCRC(raw []byte, headerSize int) error {
+ 	return nil
+ }
+ 
++// verifyUnencryptedDigest checks an unencrypted chunk against its digest. With
++// a key configured that digest is either keyed (a sign-only snapshot) or a
++// plain sha256 (a snapshot taken before the key was set up, or without it),
++// so both are accepted: a chunk that matches the other kind would need a
++// sha256 preimage. Encrypted chunks keep the strict check.
++func verifyUnencryptedDigest(plaintext []byte, crypt *CryptConfig, digest []byte) error {
++	if crypt != nil && len(digest) > 0 {
++		if plain := sha256.Sum256(plaintext); bytes.Equal(plain[:], digest) {
++			return nil
++		}
++	}
++	return verifyPlaintextDigest(plaintext, crypt, digest)
++}
++
+ func verifyPlaintextDigest(plaintext []byte, crypt *CryptConfig, digest []byte) error {
+ 	if len(digest) == 0 {
+ 		return nil
+diff --git a/pbscommon/didx_reader.go b/pbscommon/didx_reader.go
+index 30a1308..dfd9f30 100644
+--- a/pbscommon/didx_reader.go
++++ b/pbscommon/didx_reader.go
+@@ -2,8 +2,6 @@ package pbscommon
+ 
+ import (
+ 	"container/list"
+-	"crypto/sha256"
+-	"encoding/hex"
+ 	"errors"
+ 	"fmt"
+ 	"io"
+@@ -97,10 +95,12 @@ func (r *DIDXReaderAt) chunkAt(ci int) ([]byte, error) {
+ 		return nil, fmt.Errorf("chunk %s (index %d): decompressed size %d != expected %d", digest, ci, len(chunk), end-start)
+ 	}
+ 	// PBS dynamic-index digests are the SHA-256 of the chunk plaintext, or the
+-	// id_key-salted digest for an encrypted snapshot (see PBSClient.ChunkDigest).
+-	// A mismatch means a corrupted or tampered chunk — fail rather than serve
+-	// wrong data.
+-	if r.pbs.ChunkDigestHex(chunk) != digest && !legacyEncryptedDigest(r.pbs, chunk, digest) {
++	// id_key-salted digest for an encrypted snapshot (see PBSClient.ChunkDigest;
++	// with a key loaded both are accepted, for snapshots taken without it and
++	// for the encrypted ones the 0.4.1/0.4.2 GUI indexed under the plain
++	// digest, rdemsystems/NimbusBackupClient#13). A mismatch means a corrupted
++	// or tampered chunk, so fail rather than serve wrong data.
++	if !r.pbs.ChunkMatchesDigest(chunk, digest) {
+ 		return nil, fmt.Errorf("chunk %s (index %d): content hash mismatch", digest, ci)
+ 	}
+ 	r.cache.put(ci, chunk)
+@@ -200,18 +200,3 @@ func (c *chunkCache) put(idx int, data []byte) {
+ 		delete(c.items, oldest.Value.(*chunkCacheEntry).idx)
+ 	}
+ }
+-
+-// legacyEncryptedDigest accepts an encrypted snapshot's chunk indexed under the
+-// bare sha256(plaintext) instead of sha256(plaintext || id_key). The GUI and
+-// service directory backup of 0.4.1 and 0.4.2 wrote such snapshots
+-// (rdemsystems/NimbusBackupClient#13); without this they could not be restored
+-// at all. Accepting it keeps the check meaningful: the bare sha256 still binds
+-// the chunk to the index, and an encrypted chunk has also passed AES-GCM
+-// authentication under the key on its way here.
+-func legacyEncryptedDigest(pbs *PBSClient, chunk []byte, digest string) bool {
+-	if pbs.Crypt == nil {
+-		return false
+-	}
+-	sum := sha256.Sum256(chunk)
+-	return hex.EncodeToString(sum[:]) == digest
+-}
+diff --git a/pbscommon/didx_reader_test.go b/pbscommon/didx_reader_test.go
+index c47bba0..b5bd805 100644
+--- a/pbscommon/didx_reader_test.go
++++ b/pbscommon/didx_reader_test.go
+@@ -513,6 +513,36 @@ func TestDIDXReaderAtEncryptedArchiveWithoutKey(t *testing.T) {
+ 	}
+ }
+ 
++// An unencrypted archive (a snapshot taken before the key was set up) must
++// still read with the key loaded: its chunks carry plain sha256 digests.
++// Found live 2026-10-17: Undelete on a machine set failed with "content hash
++// mismatch" on its older, unencrypted snapshots once a key was configured.
++func TestDIDXReaderAtPlainArchiveWithKeyLoaded(t *testing.T) {
++	payloads := payloadsOf(3, 64)
++	a := makeDIDX(t, nil, payloads...)
++	f := newFakePBSWithDIDX(t, "plain.didx", a, nil)
++	f.Crypt = testCryptConfig(t)
++
++	r, size, err := f.NewDIDXReaderAt("plain.didx", 4, nil)
++	if err != nil {
++		t.Fatalf("NewDIDXReaderAt: %v", err)
++	}
++	got := make([]byte, size)
++	if _, err := r.ReadAt(got, 0); err != nil {
++		t.Fatalf("reading a plain archive with a key loaded: %v", err)
++	}
++	if !bytes.Equal(got, bytes.Join(payloads, nil)) {
++		t.Fatal("wrong content")
++	}
++
++	// A tampered chunk is still caught.
++	f.corrupt[a.order[1]] = bytes.Repeat([]byte{0xCD}, len(payloads[1]))
++	r2, _, _ := f.NewDIDXReaderAt("plain.didx", 4, nil)
++	if _, err := r2.ReadAt(make([]byte, 8), 64); err == nil {
++		t.Fatal("a tampered chunk was accepted with a key loaded")
++	}
++}
++
+ // The wrong key must fail the integrity check, not silently return garbage.
+ func TestDIDXReaderAtEncryptedArchiveWrongKey(t *testing.T) {
+ 	crypt := testCryptConfig(t)
+diff --git a/pbscommon/pbsapi.go b/pbscommon/pbsapi.go
+index 5fdc238..f4aaf1b 100644
+--- a/pbscommon/pbsapi.go
++++ b/pbscommon/pbsapi.go
+@@ -818,6 +818,22 @@ func (pbs *PBSClient) ChunkDigestHex(chunkdata []byte) string {
+ 	return hex.EncodeToString(sum[:])
+ }
+ 
++// ChunkMatchesDigest reports whether a fetched chunk's plaintext is the one
++// digestHex names. With a key configured, a plain sha256 also matches: an
++// unencrypted snapshot (taken before the key was set up) read with the key
++// loaded. Choosing the right one per snapshot would need its manifest at
++// every reader; a match of the other kind would need a sha256 preimage.
++func (pbs *PBSClient) ChunkMatchesDigest(chunkdata []byte, digestHex string) bool {
++	if pbs.ChunkDigestHex(chunkdata) == digestHex {
++		return true
++	}
++	if pbs.Crypt == nil {
++		return false
++	}
++	sum := sha256.Sum256(chunkdata)
++	return hex.EncodeToString(sum[:]) == digestHex
++}
++
+ // defaultCryptMode is the crypt-mode a freshly created index archive entry
+ // gets. UploadManifest re-derives it for every archive before signing, so
+ // this is only about keeping the in-memory manifest honest between creation
+-- 
+2.47.3
+

@@ -97,6 +97,38 @@ carry the Nimbus identity, docs and CI.
 | 0074 | docs: CHANGELOG for the upstream fixes taken into the next release | fork-only | |
 | 0075 | docs: official builds are published and signed by RDEM Systems only | fork-only | Notice in every README (EN, FR and the 11 AI translations). |
 | 0076 | release: v0.4.2 | fork-only | |
+| 0077 | fix(crypto): encrypted GUI backups use the keyed digest; Service Mode reads get the key (issue #13) | upstream candidate (tizbac/proxmoxbackupclient_go PR #115) | `ChunkState` hashed with a bare sha256; the restore ticket carried no key file; token-only error message. |
+| 0078 | fix(restore): restore directory modification times (issue #12) | fork-only | Reverted by 0080, superseded by 0083. |
+| 0079 | fix(pbs): send the BaseURL host in the upgrade request's Host header | upstream candidate (tizbac/proxmoxbackupclient_go PR #116) | `host:443` defeated Host-routing reverse proxies (upstream issue #89). |
+| 0080 | Revert 0078 | fork-only | Drop together with 0078 at the next rebuild. |
+| 0081 | installer: SERVICEAUTOSTART flag + document silent-install switches | upstream (tizbac/proxmoxbackupclient_go@af67fc9) | Fork: READMEs kept; the action and DEPLOYMENT.md use the SCM name `$(var.ExeName)` (0006). Keep that part at the next rebuild. |
+| 0082 | CLIs: report errors on stderr, never in a message box | upstream (tizbac/proxmoxbackupclient_go@922cba8) | Drop at the next rebuild. |
+| 0083 | Restore: put back every file time, also 1970 and earlier, and folder times | upstream (tizbac/proxmoxbackupclient_go@fa06835) | Drop at the next rebuild. |
+| 0084 | directorybackup: -no-mtime leaves real times out of the archive | upstream (tizbac/proxmoxbackupclient_go@d7fa828) | Fork: threaded through the exclusion and `-parallel` paths (0040, 0042). |
+| 0085 | machinebackup: close the PBS session when a backup fails or is stopped | upstream (tizbac/proxmoxbackupclient_go@9148294) | Drop at the next rebuild. |
+| 0086 | pbscommon: give ListSnapshots 120 s instead of 10 s | upstream (tizbac/proxmoxbackupclient_go@29e18e8) | Drop at the next rebuild. |
+| 0087 | pxar: leave out "Recovery" only at the root of a volume | upstream (tizbac/proxmoxbackupclient_go@9781273) | Fork: the CLI already set `ExcludeRoot` (0040). |
+| 0088 | BMR wizard: remove the backup's snapshot store from restored partitions | upstream (tizbac/proxmoxbackupclient_go@78a0bab) | Drop at the next rebuild. |
+| 0089 | machinebackup: send the notification e-mail | upstream (tizbac/proxmoxbackupclient_go@024b55b) | Fork: machinebackuplib var block kept (`errUploadAborted` lives in windows.go). |
+| 0090 | Back up and restore Windows creation times | upstream (tizbac/proxmoxbackupclient_go@8503e03) | Drop at the next rebuild. |
+| 0091 | Back up and restore alternate data streams and NTFS extended attributes | upstream (tizbac/proxmoxbackupclient_go@d33477b) | Fork: `dist/index.js` kept (rebuilt by wails). |
+| 0092 | clonezilla: also search /usr/lib/syslinux/bios for isohdpfx.bin | upstream (tizbac/proxmoxbackupclient_go@8cfdab2) | Drop at the next rebuild. |
+| 0093 | clonezilla: read volume id with xorriso, not isoinfo | upstream (tizbac/proxmoxbackupclient_go@cee965c) | Drop at the next rebuild. |
+| 0094 | BMR wizard: never offer the boot stick as the restore target | upstream PR (tizbac/proxmoxbackupclient_go #113, mjb-is) | Drop once #113 is merged. |
+| 0095 | BMR wizard: refuse a target disk smaller than the backed up disk | upstream PR (tizbac/proxmoxbackupclient_go #113, mjb-is) | Drop once #113 is merged. |
+| 0096 | Read unencrypted snapshots with an encryption key loaded | mjb-is (mjb-is/proxmoxbackupclient_go@6d1b303) | Replaces 0077's `legacyEncryptedDigest` with `ChunkMatchesDigest`. Upstream candidate. |
+| 0097 | ci: deps/** branches bump Go and x/net, tidy and test every module | fork-only | `deps-bump.yml`: bump with the target toolchain, patch as artifact. |
+| 0098 | fix: CI findings on the imported upstream commits and the issue #13 test | upstream candidate (lint and test parts) | Windows-only stream helpers moved out of the linux build; fork wording of the VM ID error in the mail test. |
+| 0099 | ci(deps-bump): build through the workspace; vet and tests informational | fork-only |  |
+| 0100 | test(e2e): encrypted backup by the GUI/service writer, read back by our readers and the official client | upstream candidate | e2e test 11, `gui/e2e_live_test.go`. |
+| 0101 | ci: short PBS hostname in the e2e container; go work edit outside GOWORK=off | upstream candidate (e2e part) | PBS's certificate CN (64 chars max) took the runner's long FQDN. |
+| 0102 | test(api): wait for the token file to catch up with the rotated token | upstream candidate | Race in `TestTokenRotatorRotatesOnInterval`. |
+| 0103 | ci: actions on Node.js 24 | fork-only (upstream candidate for its workflows) |  |
+| 0104 | build: Go 1.26.9 and golang.org/x/net v0.61.0 | upstream candidate | Idea from CJInvent 2cea7a2 / a3fcbed. |
+| 0105 | build: remove the unused Dockerfile.gui | upstream candidate | Could not build (copied `gui/` alone). |
+| 0106 | pbscommon: keep x/net's http2.Transport for the PBS session, said why | upstream candidate | SA1019 nolint; the move to `http.ClientConn` is its own change. |
+| 0107 | gui: the Restore notice lists NTFS permissions, ADS and EAs as supported | upstream candidate |  |
+| 0108 | release: v0.4.3 | fork-only |  |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

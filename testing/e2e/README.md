@@ -55,6 +55,7 @@ Every setting is an environment variable with a sensible default:
 | 5 | Manifest interop | The official client lists our snapshots, restores our `index.json.blob`, and the manifest has a valid signature, a `key-fingerprint`, `crypt-mode: encrypt` on every archive, and exactly the key set that proxmox-backup declares. |
 | 6 | PBS server-side verify | `proxmox-backup-manager verify` reads every chunk and archive back and reports `TASK OK`. |
 | 7 | Dedup | A second identical backup reports chunk reuse. |
+| 11 | **Encrypted** backup by the **GUI/service** writer → our readers + official restore | `gui/e2e_live_test.go` backs up with `RunBackupInline` and the key, then reads the snapshot through the GUI's catalog (no fallback allowed), search and restore (byte-identical), refuses it without the key, and restores test 1's unencrypted snapshot with the key loaded. The official client then restores it identically and refuses it without the key. |
 
 Tests 3 and 4 use a key file created by the **official** client, which doubles
 as an assertion that our key-file parser is compatible.

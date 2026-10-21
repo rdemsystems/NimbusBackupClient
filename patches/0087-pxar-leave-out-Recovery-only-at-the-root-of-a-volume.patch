@@ -1,0 +1,263 @@
+From 287057e741f18495cc3abcf836d2161461f96544 Mon Sep 17 00:00:00 2001
+From: mjb-is <mjb-is@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 00:10:03 +0100
+Subject: [PATCH 087/108] pxar: leave out "Recovery" only at the root of a
+ volume
+
+The automatic exclusion of system folders matched "Recovery" by name at
+any depth, so a user's own folder of that name (D:\Data\Recovery, a
+photo recovery folder, a project's Recovery folder) was silently left
+out of every file backup, with only a "System folder (auto-excluded)"
+line in the skipped list.
+
+Windows keeps its recovery data in a Recovery folder at the root of the
+system volume, so "Recovery" is now excluded only there: when the backed
+up folder is itself a volume root ("C:\", "/", "\\server\share" or a
+shadow copy's root) and Recovery is directly inside it. A backup of a
+subfolder such as D:\Projects keeps D:\Projects\Recovery, as Windows'
+folder can never be under it. System Volume Information and $RECYCLE.BIN
+stay excluded wherever they are.
+
+Under VSS the walked path is a link to the shadow copy, not "C:\", so
+the check uses the folder as the user named it (PXARArchive.ExcludeRoot,
+which the GUI already sets), falling back to the walked path when it is
+empty. The CLI now sets ExcludeRoot as well; it has no exclusion list,
+so this only affects the volume root check.
+
+- rootOnlySystemFolders, isVolumeRoot; shouldSkipSystemFolder takes
+  atVolumeRoot, true only for the children of a toplevel WriteDir whose
+  logical root is a volume root.
+- directorybackup: backup_real takes the original folder and sets
+  ExcludeRoot to it.
+
+Tests (pxar_recovery_test.go): a tree with Recovery/WindowsRE/winre.wim,
+Data/Recovery/photo.jpg, System Volume Information and a nested
+$RECYCLE.BIN is written to a PXAR and read back with ListEntries. As
+"C:\", "/" or "\\server\share" the root Recovery is left out and
+Data/Recovery kept; as "D:\Projects" or with no ExcludeRoot both are
+kept; the other system folders are left out in every case. On the
+unchanged code Data/Recovery is left out in every case. TestIsVolumeRoot
+covers the path forms.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JSSBMF6hRk92jsHCMKgDRx
+
+Fork adaptation: the fork's CLI already sets ExcludeRoot to the folder as
+named (excludeRoot, added with its exclusion support), so its side of the
+directorybackup change is kept.
+
+Upstream: tizbac/proxmoxbackupclient_go@97812739085ab42f673725d93904fac67e2dfe8a
+---
+ pbscommon/pxar.go               | 61 +++++++++++++++++++--
+ pbscommon/pxar_recovery_test.go | 94 +++++++++++++++++++++++++++++++++
+ 2 files changed, 151 insertions(+), 4 deletions(-)
+ create mode 100644 pbscommon/pxar_recovery_test.go
+
+diff --git a/pbscommon/pxar.go b/pbscommon/pxar.go
+index eccf6be..b65b31c 100644
+--- a/pbscommon/pxar.go
++++ b/pbscommon/pxar.go
+@@ -45,8 +45,40 @@ var catalog_magic = []byte{145, 253, 96, 249, 196, 103, 88, 213}
+ // that should not be included in file-mode backups
+ var excludedSystemFolders = []string{
+ 	"System Volume Information", // VSS snapshots storage
+-	"$RECYCLE.BIN",               // Windows recycle bin
+-	"Recovery",                   // Windows recovery partition data
++	"$RECYCLE.BIN",              // Windows recycle bin
++}
++
++// Windows system folders excluded only at the root of a volume: Windows keeps
++// its recovery data in C:\Recovery, but a folder called Recovery anywhere else
++// (D:\Data\Recovery, a photo recovery folder...) is the user's own.
++var rootOnlySystemFolders = []string{
++	"Recovery", // Windows recovery environment data
++}
++
++// isVolumeRoot reports whether path is the root of a volume: "C:\", a shadow
++// copy's root (\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN), a share's
++// root (\\server\share) or "/".
++func isVolumeRoot(path string) bool {
++	if path == "" {
++		return false
++	}
++	if strings.Trim(path, "/") == "" {
++		return true
++	}
++	s := strings.TrimRight(strings.ReplaceAll(path, "/", `\`), `\`)
++	if len(s) == 2 && s[1] == ':' {
++		return true
++	}
++	low := strings.ToLower(s)
++	const shadow = `\\?\globalroot\device\harddiskvolumeshadowcopy`
++	if strings.HasPrefix(low, shadow) {
++		rest := low[len(shadow):]
++		return rest != "" && strings.Trim(rest, "0123456789") == ""
++	}
++	if strings.HasPrefix(s, `\\`) && !strings.HasPrefix(s, `\\?\`) {
++		return len(strings.Split(s[2:], `\`)) == 2
++	}
++	return false
+ }
+ 
+ // Windows system files to exclude automatically from backups
+@@ -60,12 +92,21 @@ var excludedSystemFiles = []string{
+ 
+ // shouldSkipSystemFolder checks if a folder should be automatically excluded
+ // Uses case-insensitive comparison for Windows compatibility
+-func shouldSkipSystemFolder(name string) bool {
++// atVolumeRoot is true for a folder directly at the root of a volume, where
++// the root-only system folders are excluded too
++func shouldSkipSystemFolder(name string, atVolumeRoot bool) bool {
+ 	for _, excluded := range excludedSystemFolders {
+ 		if strings.EqualFold(name, excluded) {
+ 			return true
+ 		}
+ 	}
++	if atVolumeRoot {
++		for _, excluded := range rootOnlySystemFolders {
++			if strings.EqualFold(name, excluded) {
++				return true
++			}
++		}
++	}
+ 	return false
+ }
+ 
+@@ -304,6 +345,8 @@ type PXARArchive struct {
+ 	// "C:\\Users\\Alice\\Temp" matches when backing up "C:\\Users\\Alice". Under VSS
+ 	// the walked path differs from this, which is why pattern and entry are both
+ 	// reduced to paths relative to their respective roots before comparison.
++	// It also tells whether the backup is of a whole volume ("C:\\"), where
++	// Recovery at the root is left out; when empty the walked path is used.
+ 	ExcludeRoot string
+ 	// root is the toplevel WALKED path, captured on the first WriteDir call, used to
+ 	// compute each entry's path relative to the (possibly VSS shadow-copy) root.
+@@ -553,6 +596,16 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
+ 		}
+ 	}
+ 
++	// The root-only system folders (Recovery) are skipped only among the
++	// children of a backup root that is itself a volume root. That is decided
++	// on the folder as the user named it (ExcludeRoot): under VSS the walked
++	// path is a link to the shadow copy, not "C:\".
++	logicalRoot := a.ExcludeRoot
++	if logicalRoot == "" {
++		logicalRoot = a.root
++	}
++	atVolumeRoot := toplevel && isVolumeRoot(logicalRoot)
++
+ 	for _, file := range files {
+ 		startpos := a.pos
+ 
+@@ -568,7 +621,7 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
+ 
+ 		if file.IsDir() {
+ 			// Skip Windows system folders (VSS snapshots, recycle bin, etc.)
+-			if shouldSkipSystemFolder(file.Name()) {
++			if shouldSkipSystemFolder(file.Name(), atVolumeRoot) {
+ 				skipMsg := fmt.Sprintf("System folder (auto-excluded): %s", filepath.Join(path, file.Name()))
+ 				a.SkippedFiles = append(a.SkippedFiles, skipMsg)
+ 				continue
+diff --git a/pbscommon/pxar_recovery_test.go b/pbscommon/pxar_recovery_test.go
+new file mode 100644
+index 0000000..597627f
+--- /dev/null
++++ b/pbscommon/pxar_recovery_test.go
+@@ -0,0 +1,94 @@
++package pbscommon
++
++import (
++	"bytes"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func TestIsVolumeRoot(t *testing.T) {
++	for path, want := range map[string]bool{
++		`C:\`: true, `C:`: true, `c:/`: true, `/`: true,
++		`\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy12\`: true,
++		`\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy12`:  true,
++		`\\server\share`: true, `\\server\share\`: true,
++		`C:\Data`: false, `/home`: false, `\\server\share\dir`: false,
++		`\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy12\Users`: false,
++		``: false,
++	} {
++		if got := isVolumeRoot(path); got != want {
++			t.Errorf("isVolumeRoot(%q) = %v, want %v", path, got, want)
++		}
++	}
++}
++
++// backedUpPaths writes root to an archive with ExcludeRoot set to logical (the
++// folder as the user named it) and returns the paths read back from it.
++func backedUpPaths(t *testing.T, root, logical string) map[string]bool {
++	t.Helper()
++	var p bytes.Buffer
++	archive := &PXARArchive{ArchiveName: "backup.pxar.didx", ExcludeRoot: logical}
++	archive.WriteCB = func(b []byte) error { p.Write(b); return nil }
++	archive.Create()
++	if _, err := archive.WriteDir(root, "", true); err != nil {
++		t.Fatalf("WriteDir: %v", err)
++	}
++	entries, err := NewPXARReader(p.Bytes()).ListEntries()
++	if err != nil {
++		t.Fatalf("ListEntries: %v", err)
++	}
++	paths := make(map[string]bool, len(entries))
++	for _, e := range entries {
++		paths[e.Path] = true
++	}
++	return paths
++}
++
++// Windows keeps its recovery data in a Recovery folder at the root of the
++// system volume. A folder called Recovery anywhere else is the user's own and
++// must be backed up; the other system folders stay excluded wherever they are.
++func TestRecoveryExcludedOnlyAtVolumeRoot(t *testing.T) {
++	root := t.TempDir()
++	for _, name := range []string{
++		"Recovery/WindowsRE/winre.wim",
++		"Data/Recovery/photo.jpg",
++		"Data/keep.txt",
++		"System Volume Information/tracking.log",
++		"Data/$RECYCLE.BIN/deleted.txt",
++	} {
++		p := filepath.Join(root, filepath.FromSlash(name))
++		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
++			t.Fatal(err)
++		}
++		if err := os.WriteFile(p, []byte(name), 0644); err != nil {
++			t.Fatal(err)
++		}
++	}
++
++	for _, c := range []struct {
++		logical      string
++		rootRecovery bool // Recovery/WindowsRE/winre.wim backed up
++	}{
++		{`C:\`, false},            // a whole drive
++		{`/`, false},              // a whole Linux system
++		{`\\server\share`, false}, // a whole share
++		{`D:\Projects`, true},     // a folder: its Recovery is the user's
++		{"", true},                // no logical root: the walked temp folder is not a volume
++	} {
++		got := backedUpPaths(t, root, c.logical)
++		if !got["Data/keep.txt"] {
++			t.Fatalf("ExcludeRoot %q: archive is missing Data/keep.txt; read back %v", c.logical, got)
++		}
++		if !got["Data/Recovery/photo.jpg"] {
++			t.Errorf("ExcludeRoot %q: Data/Recovery (not at the root) was left out", c.logical)
++		}
++		if got["Recovery/WindowsRE/winre.wim"] != c.rootRecovery {
++			t.Errorf("ExcludeRoot %q: Recovery at the root backed up = %v, want %v",
++				c.logical, got["Recovery/WindowsRE/winre.wim"], c.rootRecovery)
++		}
++		if got["System Volume Information/tracking.log"] || got["Data/$RECYCLE.BIN/deleted.txt"] {
++			t.Errorf("ExcludeRoot %q: a system folder was backed up", c.logical)
++		}
++	}
++}
+-- 
+2.47.3
+

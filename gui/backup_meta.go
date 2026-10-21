@@ -38,6 +38,12 @@ type FileMetaEntry struct {
 	SDDLIdx int    `json:"s"`           // Windows: index into BackupFileMeta.SDDLs (dedup)
 	Attrs   uint32 `json:"a"`           // Windows file attributes bitmask
 	Reparse uint32 `json:"r,omitempty"` // reparse tag (0 if not a reparse point)
+	// Created is the Windows creation time as a FILETIME (100 ns ticks since
+	// 1601-01-01 UTC), 0 when not captured. pxar has no field for it (Linux
+	// has no settable creation time), so it travels here. Optional: older
+	// readers ignore the key, and an older snapshot without it restores as
+	// before.
+	Created int64 `json:"c,omitempty"`
 	// Xattrs is Linux-only: every extended attribute captured on this file,
 	// name -> raw value (encoding/json base64-encodes []byte automatically).
 	// POSIX ACLs are included here under their real kernel xattr names
@@ -49,6 +55,30 @@ type FileMetaEntry struct {
 	// for a dictionary to earn its complexity, and the blob is already
 	// gzip-compressed, which absorbs most of the repetition anyway.
 	Xattrs map[string][]byte `json:"x,omitempty"`
+	// Streams are the file's (or folder's) alternate data streams on NTFS,
+	// such as Zone.Identifier; EAs its NTFS extended attributes. Windows
+	// only and optional: older readers ignore them.
+	Streams []StreamEntry `json:"t,omitempty"`
+	EAs     []EAEntry     `json:"e,omitempty"`
+}
+
+// StreamEntry is one alternate data stream. Skipped is empty when its content
+// is in Data (an empty stream has no Data); otherwise it says why the content
+// was not recorded (larger than maxStreamBytes, over the archive's
+// maxStreamBytesTotal, unreadable, or dropped to keep the side file under the
+// PBS blob limit) and the restore leaves the stream out.
+type StreamEntry struct {
+	Name    string `json:"n"`
+	Size    int64  `json:"z"`
+	Data    []byte `json:"d,omitempty"`
+	Skipped string `json:"k,omitempty"`
+}
+
+// EAEntry is one NTFS extended attribute (FILE_FULL_EA_INFORMATION).
+type EAEntry struct {
+	Name  string `json:"n"`
+	Flags uint8  `json:"f,omitempty"`
+	Value []byte `json:"v,omitempty"`
 }
 
 // BackupFileMeta is the root of the ACL side-car. SDDLs are deduplicated into

@@ -662,7 +662,10 @@ func (a *App) GetConfigWithHostname() map[string]interface{} {
 		"backupdir":           cfg.BackupDir,
 		"backup-id":           cfg.BackupID,
 		"usevss":              cfg.UseVSS,
-		"hostname":            hostname,
+		// Folders backed up at the same time: without it the form showed 1
+		// whatever was saved.
+		"parallel": cfg.Parallel,
+		"hostname": hostname,
 	}
 
 	// Pre-fill backup-id with hostname if empty
@@ -1762,12 +1765,26 @@ func (a *App) resolveRestorePBS(pbsID string) (*Config, error) {
 		}
 		// Build a Config with the ticket + non-secret connection params.
 		cfg := &Config{
-			BaseURL:         ticket.BaseURL,
-			CertFingerprint: ticket.CertFingerprint,
-			Datastore:       ticket.Datastore,
-			Namespace:       ticket.Namespace,
-			Ticket:          ticket.Ticket,
-			CSRFToken:       ticket.CSRFToken,
+			BaseURL:           ticket.BaseURL,
+			CertFingerprint:   ticket.CertFingerprint,
+			Datastore:         ticket.Datastore,
+			Namespace:         ticket.Namespace,
+			Ticket:            ticket.Ticket,
+			CSRFToken:         ticket.CSRFToken,
+			EncryptionKeyFile: ticket.EncryptionKeyFile,
+		}
+		// A service older than the GUI does not send the key path: fall back
+		// to the hydrated (sanitized) config, which keeps it.
+		if cfg.EncryptionKeyFile == "" {
+			if srv, err := a.config.GetPBSServer(pbsID); err == nil {
+				cfg.EncryptionKeyFile = srv.EncryptionKeyFile
+			}
+		}
+		// Chunks are decrypted here, in the GUI process: without this every
+		// read of an encrypted snapshot failed with "no encryption key was
+		// provided" (rdemsystems/NimbusBackupClient#13).
+		if err := cfg.loadCryptConfig(); err != nil {
+			return nil, err
 		}
 		return cfg, nil
 	}
@@ -1958,9 +1975,9 @@ func (a *App) GetSnapshotMeta(pbsID, backupID string, snapshotUnix int64) (*Back
 //     destPath/<basename>.
 //
 // includePaths uses archive-style paths (forward slash). When empty the entire
-// snapshot is restored. The ACL/ADS/timestamps flags are accepted today but
-// only timestamps is effective — the per-file NTFS sidecar required for the
-// other two is still on the roadmap.
+// snapshot is restored. restoreACLs (NTFS ACLs/attributes on Windows, POSIX
+// ACLs/xattrs on Linux) and restoreADS (alternate data streams and NTFS
+// extended attributes, Windows) take effect; timestamps are always restored.
 //
 // Progress is streamed to the frontend via the "restore:progress" event;
 // completion via "restore:complete".

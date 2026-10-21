@@ -216,6 +216,12 @@ func (a *App) UpdateScheduledJob(job ScheduledJob) error {
 			// overwriting it with an empty value (an update must not erase when
 			// the job last ran).
 			job.LastRun = j.LastRun
+			// The GUI's edit form has no compression setting and sends none:
+			// an empty value keeps the stored one instead of resetting the
+			// job to the default.
+			if job.Compression == "" {
+				job.Compression = j.Compression
+			}
 			// Recalculate next run with new schedule time
 			job.NextRun = calculateNextRun(job.ScheduleTime)
 			jobs[i] = job

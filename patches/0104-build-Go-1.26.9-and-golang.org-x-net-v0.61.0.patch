@@ -1,0 +1,636 @@
+From 9162246409d816a26749e66567be6fbcd9e1a09b Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Tue, 20 Oct 2026 17:32:55 +0200
+Subject: [PATCH 104/108] build: Go 1.26.9 and golang.org/x/net v0.61.0
+
+x/net v0.61.0 fixes the http2 issues govulncheck reports on the PBS
+session transport (HPACK encoder race, window-change work, trailer header
+limits, double refund on stream close); Go 1.26.9 fixes the reachable
+net/http, crypto/tls, mime/multipart, net/textproto and html/template
+vulnerabilities of earlier 1.26 releases. x/net >= v0.59 declares go
+1.26.0, so the modules that require it, and go.work, move to it.
+
+The go.mod/go.sum changes come from the deps/go-1.26.9 run (go get + go
+mod tidy with Go 1.26.9; every module built for linux and windows, vet
+clean, tests passing but the token rotator race fixed in the previous
+commit). CI, the e2e suite, the ISO build and build_msi_linux.sh pin
+1.26.9.
+
+Idea from CJInvent/NimbusBackupClient 2cea7a2 and a3fcbed.
+---
+ .github/workflows/build-and-release.yml    |  2 +-
+ .github/workflows/build-clonezilla-iso.yml |  2 +-
+ .github/workflows/e2e.yml                  |  2 +-
+ .github/workflows/release.yml              |  2 +-
+ .github/workflows/update-dependencies.yml  |  2 +-
+ clientcommon/go.mod                        | 12 ++++----
+ clientcommon/go.sum                        | 16 +++++++----
+ directorybackup/go.mod                     | 14 ++++------
+ directorybackup/go.sum                     | 32 +++++++---------------
+ go.work                                    |  2 +-
+ gui/api/go.mod                             |  4 ++-
+ gui/go.mod                                 | 10 +++----
+ gui/go.sum                                 | 16 +++++------
+ installer/wix/build_msi_linux.sh           | 10 +++----
+ machinebackup/go.mod                       | 16 +++++------
+ machinebackup/go.sum                       | 20 +++++++-------
+ machinebackuplib/go.sum                    |  4 +++
+ nbd/go.mod                                 | 12 ++++----
+ nbd/go.sum                                 | 16 +++++++----
+ pbscommon/go.mod                           |  8 +++---
+ pbscommon/go.sum                           | 10 +++++--
+ 21 files changed, 110 insertions(+), 102 deletions(-)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index 55045fe..6a4caa1 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -13,7 +13,7 @@ on:
+     branches: [ main ]
+ 
+ env:
+-  GO_VERSION: '1.25'
++  GO_VERSION: '1.26.9'
+   NODE_VERSION: '20'
+ 
+ jobs:
+diff --git a/.github/workflows/build-clonezilla-iso.yml b/.github/workflows/build-clonezilla-iso.yml
+index b38cfb3..fe1ee22 100644
+--- a/.github/workflows/build-clonezilla-iso.yml
++++ b/.github/workflows/build-clonezilla-iso.yml
+@@ -38,7 +38,7 @@ jobs:
+       - name: Set up Go
+         uses: actions/setup-go@v6
+         with:
+-          go-version: '1.25'
++          go-version: '1.26.9'
+ 
+       - name: Build pbsnbd binary (linux/amd64 static)
+         run: |
+diff --git a/.github/workflows/e2e.yml b/.github/workflows/e2e.yml
+index 99cdc64..a64a9e2 100644
+--- a/.github/workflows/e2e.yml
++++ b/.github/workflows/e2e.yml
+@@ -23,7 +23,7 @@ on:
+         default: false
+ 
+ env:
+-  GO_VERSION: '1.25'
++  GO_VERSION: '1.26.9'
+ 
+ jobs:
+   unit:
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index e923147..8693fea 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -23,7 +23,7 @@ jobs:
+       - name: Setup Go
+         uses: actions/setup-go@v6
+         with:
+-          go-version: '1.22'
++          go-version: '1.26.9'
+           cache: true
+           cache-dependency-path: gui/go.sum
+ 
+diff --git a/.github/workflows/update-dependencies.yml b/.github/workflows/update-dependencies.yml
+index af7ea88..d62c395 100644
+--- a/.github/workflows/update-dependencies.yml
++++ b/.github/workflows/update-dependencies.yml
+@@ -14,7 +14,7 @@ on:
+           - specific
+ 
+ env:
+-  GO_VERSION: '1.25'
++  GO_VERSION: '1.26.9'
+ 
+ jobs:
+   update-deps:
+diff --git a/clientcommon/go.mod b/clientcommon/go.mod
+index c3beb9e..fcd769e 100644
+--- a/clientcommon/go.mod
++++ b/clientcommon/go.mod
+@@ -1,11 +1,11 @@
+ module clientcommon
+ 
+-go 1.25.0
++go 1.26.0
+ 
+ require github.com/rodolfoag/gow32 v0.0.0-20230512144032-1e896a3c51aa
+ 
+ require (
+-	golang.org/x/term v0.43.0
++	golang.org/x/term v0.47.0
+ 	pbscommon v0.0.0
+ )
+ 
+@@ -13,11 +13,11 @@ require (
+ 	github.com/alphadose/haxmap v1.4.1 // indirect
+ 	github.com/dchest/siphash v1.2.3 // indirect
+ 	github.com/klauspost/compress v1.17.9 // indirect
+-	golang.org/x/crypto v0.51.0 // indirect
++	golang.org/x/crypto v0.58.0 // indirect
+ 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+-	golang.org/x/net v0.54.0 // indirect
+-	golang.org/x/sys v0.44.0 // indirect
+-	golang.org/x/text v0.37.0 // indirect
++	golang.org/x/net v0.61.0 // indirect
++	golang.org/x/sys v0.49.0 // indirect
++	golang.org/x/text v0.43.0 // indirect
+ 	rsc.io/qr v0.2.0 // indirect
+ )
+ 
+diff --git a/clientcommon/go.sum b/clientcommon/go.sum
+index cef2c65..7bb4372 100644
+--- a/clientcommon/go.sum
++++ b/clientcommon/go.sum
+@@ -6,11 +6,17 @@ github.com/klauspost/compress v1.17.9 h1:6KIumPrER1LHsvBVuDa0r5xaG0Es51mhhB9BQB2
+ github.com/klauspost/compress v1.17.9/go.mod h1:Di0epgTjJY877eYKx5yC51cX2A2Vl2ibi7bDH9ttBbw=
+ github.com/rodolfoag/gow32 v0.0.0-20230512144032-1e896a3c51aa h1:cd9mmDEXO4YxGYTbrhbfEt7btgUlcXFedTMoZ9fA4Ns=
+ github.com/rodolfoag/gow32 v0.0.0-20230512144032-1e896a3c51aa/go.mod h1:w/ebPUfAcyZMYjstwPIWTEGSahChHx5R3Y+xElrvxDc=
+-golang.org/x/crypto v0.51.0 h1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=
++golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
++golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f h1:W3F4c+6OLc6H2lb//N1q4WpJkhzJCK5J6kUi1NTVXfM=
+-golang.org/x/net v0.54.0 h1:2zJIZAxAHV/OHCDTCOHAYehQzLfSXuf/5SoL/Dv6w/w=
+-golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
+-golang.org/x/term v0.43.0 h1:S4RLU2sB31O/NCl+zFN9Aru9A/Cq2aqKpTZJ6B+DwT4=
+-golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
++golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f/go.mod h1:J1xhfL/vlindoeF/aINzNzt2Bket5bjo9sdOYzOsU80=
++golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
++golang.org/x/net v0.61.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
++golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
++golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
++golang.org/x/term v0.47.0 h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM=
++golang.org/x/term v0.47.0/go.mod h1:efAfAuG6RKABvg1ArGebRkvX6LXul14SM67o2e4mUCY=
++golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
++golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
+ rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
+ rsc.io/qr v0.2.0/go.mod h1:IF+uZjkb9fqyeF/4tlBoynqmQxUoPfWEKh921coOuXs=
+diff --git a/directorybackup/go.mod b/directorybackup/go.mod
+index 4fab7af..d9d51f7 100644
+--- a/directorybackup/go.mod
++++ b/directorybackup/go.mod
+@@ -1,6 +1,6 @@
+ module directorybackup
+ 
+-go 1.25.0
++go 1.26.0
+ 
+ require (
+ 	clientcommon v0.0.0
+@@ -10,23 +10,21 @@ require (
+ )
+ 
+ require (
+-	github.com/alessio/shellescape v1.4.2 // indirect
+ 	github.com/dchest/siphash v1.2.3 // indirect
+ 	github.com/klauspost/compress v1.17.9 // indirect
+ 	github.com/rodolfoag/gow32 v0.0.0-20230512144032-1e896a3c51aa // indirect
+ 	github.com/st-matskevich/go-vss v0.3.3 // indirect
+-	golang.org/x/crypto v0.51.0 // indirect
++	golang.org/x/crypto v0.58.0 // indirect
+ 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+-	golang.org/x/net v0.54.0 // indirect
+-	golang.org/x/term v0.43.0 // indirect
+-	golang.org/x/text v0.37.0 // indirect
++	golang.org/x/net v0.61.0 // indirect
++	golang.org/x/term v0.47.0 // indirect
++	golang.org/x/text v0.43.0 // indirect
+ 	rsc.io/qr v0.2.0 // indirect
+ )
+ 
+ require (
+ 	github.com/go-ole/go-ole v1.3.0 // indirect
+-	github.com/tawesoft/golib/v2 v2.16.0
+-	golang.org/x/sys v0.44.0 // indirect
++	golang.org/x/sys v0.49.0 // indirect
+ )
+ 
+ // Local package replacements
+diff --git a/directorybackup/go.sum b/directorybackup/go.sum
+index 813d045..fd12d1a 100644
+--- a/directorybackup/go.sum
++++ b/directorybackup/go.sum
+@@ -1,39 +1,27 @@
+-github.com/alessio/shellescape v1.4.2 h1:MHPfaU+ddJ0/bYWpgIeUnQUqKrlJ1S7BfEYPM4uEoM0=
+-github.com/alessio/shellescape v1.4.2/go.mod h1:PZAiSCk0LJaZkiCSkPv8qIobYglO3FPpyFjDCtHLS30=
+ github.com/alphadose/haxmap v1.4.1 h1:VtD6VCxUkjNIfJk/aWdYFfOzrRddDFjmvmRmILg7x8Q=
+ github.com/alphadose/haxmap v1.4.1/go.mod h1:rjHw1IAqbxm0S3U5tD16GoKsiAd8FWx5BJ2IYqXwgmM=
+-github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
+-github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+ github.com/dchest/siphash v1.2.3 h1:QXwFc8cFOR2dSa/gE6o/HokBMWtLUaNDVd+22aKHeEA=
+ github.com/dchest/siphash v1.2.3/go.mod h1:0NvQU092bT0ipiFN++/rXm69QG9tVxLAlQHIXMPAkHc=
+ github.com/go-ole/go-ole v1.3.0 h1:Dt6ye7+vXGIKZ7Xtk4s6/xVdGDQynvom7xCFEdWr6uE=
+ github.com/go-ole/go-ole v1.3.0/go.mod h1:5LS6F96DhAwUc7C+1HLexzMXY1xGRSryjyPPKW6zv78=
+ github.com/klauspost/compress v1.17.9 h1:6KIumPrER1LHsvBVuDa0r5xaG0Es51mhhB9BQB2qeMA=
+ github.com/klauspost/compress v1.17.9/go.mod h1:Di0epgTjJY877eYKx5yC51cX2A2Vl2ibi7bDH9ttBbw=
+-github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
+-github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+ github.com/rodolfoag/gow32 v0.0.0-20230512144032-1e896a3c51aa h1:cd9mmDEXO4YxGYTbrhbfEt7btgUlcXFedTMoZ9fA4Ns=
+ github.com/rodolfoag/gow32 v0.0.0-20230512144032-1e896a3c51aa/go.mod h1:w/ebPUfAcyZMYjstwPIWTEGSahChHx5R3Y+xElrvxDc=
+ github.com/st-matskevich/go-vss v0.3.3 h1:EW9Mgx94QptfGLWX5Wc8UM04ZYIevHCX9fcGC8iXLXA=
+ github.com/st-matskevich/go-vss v0.3.3/go.mod h1:9nvSSU+TrCfktDTgzrdYk+V3WdqR8Cc2dzi6v3X0XPc=
+-github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
+-github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
+-github.com/tawesoft/golib/v2 v2.16.0 h1:QJPqTFPVz++45fTVyP66o8IfCfz8MYgTrn6nypVLv2o=
+-github.com/tawesoft/golib/v2 v2.16.0/go.mod h1:S+cpYdLd1NwKQmWnycfIJqJegOek/Zz+JY9FH7EJTWs=
+-golang.org/x/crypto v0.51.0 h1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=
+-golang.org/x/crypto v0.51.0/go.mod h1:8AdwkbraGNABw2kOX6YFPs3WM22XqI4EXEd8g+x7Oc8=
++golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
++golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f h1:W3F4c+6OLc6H2lb//N1q4WpJkhzJCK5J6kUi1NTVXfM=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f/go.mod h1:J1xhfL/vlindoeF/aINzNzt2Bket5bjo9sdOYzOsU80=
+-golang.org/x/net v0.54.0 h1:2zJIZAxAHV/OHCDTCOHAYehQzLfSXuf/5SoL/Dv6w/w=
+-golang.org/x/net v0.54.0/go.mod h1:Sj4oj8jK6XmHpBZU/zWHw3BV3abl4Kvi+Ut7cQcY+cQ=
++golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
++golang.org/x/net v0.61.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
+ golang.org/x/sys v0.1.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+-golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
+-golang.org/x/sys v0.44.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+-golang.org/x/term v0.43.0 h1:S4RLU2sB31O/NCl+zFN9Aru9A/Cq2aqKpTZJ6B+DwT4=
+-golang.org/x/term v0.43.0/go.mod h1:lrhlHNdQJHO+1qVYiHfFKVuVioJIheAc3fBSMFYEIsk=
+-golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
+-golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=
+-gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+-gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
++golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
++golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
++golang.org/x/term v0.47.0 h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM=
++golang.org/x/term v0.47.0/go.mod h1:efAfAuG6RKABvg1ArGebRkvX6LXul14SM67o2e4mUCY=
++golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
++golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
+ rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
+ rsc.io/qr v0.2.0/go.mod h1:IF+uZjkb9fqyeF/4tlBoynqmQxUoPfWEKh921coOuXs=
+diff --git a/go.work b/go.work
+index 1360eb9..81638a6 100644
+--- a/go.work
++++ b/go.work
+@@ -1,4 +1,4 @@
+-go 1.25.0
++go 1.26.0
+ 
+ use ./machinebackuplib
+ 
+diff --git a/gui/api/go.mod b/gui/api/go.mod
+index 12f94c1..73f44e9 100644
+--- a/gui/api/go.mod
++++ b/gui/api/go.mod
+@@ -1,3 +1,5 @@
+ module github.com/tizbac/proxmoxbackupclient_go/gui/api
+ 
+-go 1.25
++go 1.26.0
++
++require golang.org/x/sys v0.49.0
+diff --git a/gui/go.mod b/gui/go.mod
+index 8113f42..33438c8 100644
+--- a/gui/go.mod
++++ b/gui/go.mod
+@@ -1,6 +1,6 @@
+ module github.com/tizbac/proxmoxbackupclient_go/gui
+ 
+-go 1.25.0
++go 1.26.0
+ 
+ require (
+ 	github.com/alphadose/haxmap v1.4.1
+@@ -8,8 +8,8 @@ require (
+ 	github.com/kardianos/service v1.3.0
+ 	github.com/tizbac/proxmoxbackupclient_go/gui/api v0.0.0
+ 	github.com/wailsapp/wails/v2 v2.13.0
+-	golang.org/x/crypto v0.51.0
+-	golang.org/x/sys v0.44.0
++	golang.org/x/crypto v0.58.0
++	golang.org/x/sys v0.49.0
+ 	machinebackuplib v0.0.0-00010101000000-000000000000
+ 	pbscommon v0.0.0
+ 	retry v0.0.0
+@@ -56,8 +56,8 @@ require (
+ 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
+ 	github.com/wailsapp/mimetype v1.4.1 // indirect
+ 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+-	golang.org/x/net v0.54.0 // indirect
+-	golang.org/x/text v0.37.0 // indirect
++	golang.org/x/net v0.61.0 // indirect
++	golang.org/x/text v0.43.0 // indirect
+ 	rsc.io/qr v0.2.0 // indirect
+ )
+ 
+diff --git a/gui/go.sum b/gui/go.sum
+index ab752c9..31de2e2 100644
+--- a/gui/go.sum
++++ b/gui/go.sum
+@@ -99,13 +99,13 @@ github.com/wailsapp/mimetype v1.4.1 h1:pQN9ycO7uo4vsUUuPeHEYoUkLVkaRntMnHJxVwYhw
+ github.com/wailsapp/mimetype v1.4.1/go.mod h1:9aV5k31bBOv5z6u+QP8TltzvNGJPmNJD4XlAL3U+j3o=
+ github.com/wailsapp/wails/v2 v2.13.0 h1:S7OgXWpj72V91unF8iDWJKbcS9ZpwCT3R0QVru4v2Mg=
+ github.com/wailsapp/wails/v2 v2.13.0/go.mod h1:nVr/wSIEZ7xxKPkzK65mjpKpaOPQI2k4pvLwGR/i4kc=
+-golang.org/x/crypto v0.51.0 h1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=
+-golang.org/x/crypto v0.51.0/go.mod h1:8AdwkbraGNABw2kOX6YFPs3WM22XqI4EXEd8g+x7Oc8=
++golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
++golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f h1:W3F4c+6OLc6H2lb//N1q4WpJkhzJCK5J6kUi1NTVXfM=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f/go.mod h1:J1xhfL/vlindoeF/aINzNzt2Bket5bjo9sdOYzOsU80=
+ golang.org/x/net v0.0.0-20210505024714-0287a6fb4125/go.mod h1:9nx3DQGgdP8bBQD5qxJ1jj9UTztislL4KSBs9R2vV5Y=
+-golang.org/x/net v0.54.0 h1:2zJIZAxAHV/OHCDTCOHAYehQzLfSXuf/5SoL/Dv6w/w=
+-golang.org/x/net v0.54.0/go.mod h1:Sj4oj8jK6XmHpBZU/zWHw3BV3abl4Kvi+Ut7cQcY+cQ=
++golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
++golang.org/x/net v0.61.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
+ golang.org/x/sys v0.0.0-20200810151505-1b9f1253b3ed/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+ golang.org/x/sys v0.0.0-20201018230417-eeed37f84f13/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+ golang.org/x/sys v0.0.0-20201119102817-f84b799fce68/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+@@ -113,12 +113,12 @@ golang.org/x/sys v0.0.0-20210423082822-04245dca01da/go.mod h1:h1NjWce9XRLGQEsW7w
+ golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.1.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+-golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
+-golang.org/x/sys v0.44.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
++golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
++golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
+ golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
+ golang.org/x/text v0.3.6/go.mod h1:5Zoc/QRtKVWzQhOtBMvqHzDpF6irO9z98xDceosuGiQ=
+-golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
+-golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=
++golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
++golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
+ golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGmLbDWY5pfWTLqBcC2KZ6jyYvM4mQ=
+ gopkg.in/Knetic/govaluate.v3 v3.0.0/go.mod h1:csKLBORsPbafmSCGTEh3U7Ozmsuq8ZSIlKk1bcqph0E=
+ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+diff --git a/installer/wix/build_msi_linux.sh b/installer/wix/build_msi_linux.sh
+index 447b6bc..e3e5ef9 100644
+--- a/installer/wix/build_msi_linux.sh
++++ b/installer/wix/build_msi_linux.sh
+@@ -78,7 +78,7 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
+ 
+ echo "==> Preparing build artifacts in $WORK"
+ 
+-# ---- 1. Build GUI (once) and SVC via Docker (golang:1.25) ----
++# ---- 1. Build GUI (once) and SVC via Docker (golang:1.26.9) ----
+ # The docker build must mount the WHOLE repo because gui/go.mod has
+ # replace directives pointing to sibling directories (machinebackuplib, pbscommon, etc.)
+ GUI_EXE="$ROOT/gui/build/bin/ProxmoxBackupClient.exe"
+@@ -139,19 +139,19 @@ else
+     echo "==> Building missing/stale binaries via Docker (GUI=$NEED_GUI, SVC=$NEED_SVC)..."
+     # Each artifact is rebuilt when it is missing, is not a Windows PE, or is
+     # older than the sources that go into it. A wails rebuild needs npm (not
+-    # shipped by golang:1.25), so only an actually-stale GUI pays for it.
++    # shipped by golang:1.26.9), so only an actually-stale GUI pays for it.
+     docker run --rm \
+     -e NEED_GUI="$NEED_GUI" \
+     -e NEED_SVC="$NEED_SVC" \
+     -e VERSION="$VERSION" \
+     -v "$ROOT:/src" \
+     -w /src \
+-    golang:1.25 \
++    golang:1.26.9 \
+     bash -c '
+         set -euo pipefail
+         cd /src/gui
+         if [ "${NEED_GUI:-0}" = "1" ]; then
+-            # wails compiles the React frontend: golang:1.25 has no node/npm
++            # wails compiles the React frontend: golang:1.26.9 has no node/npm
+             if ! command -v npm >/dev/null 2>&1; then
+                 echo "==> installing nodejs/npm in build container"
+                 apt-get update -qq
+@@ -184,7 +184,7 @@ else
+     # out root-owned: the next local build or npm install then fails until
+     # somebody remembers a sudo chown. Hand the outputs back to the invoking
+     # user. Reuses the image already pulled above, so this needs no download.
+-    docker run --rm -v "$ROOT:/src" -w /src golang:1.25 \
++    docker run --rm -v "$ROOT:/src" -w /src golang:1.26.9 \
+         chown -R "$(id -u):$(id -g)" \
+         /src/gui/build /src/gui/frontend/dist /src/gui/frontend/wailsjs \
+         /src/gui/frontend/node_modules || true
+diff --git a/machinebackup/go.mod b/machinebackup/go.mod
+index afca0aa..e20d52d 100644
+--- a/machinebackup/go.mod
++++ b/machinebackup/go.mod
+@@ -1,11 +1,11 @@
+ module machinebackup
+ 
+-go 1.25.0
++go 1.26.0
+ 
+ require (
+ 	clientcommon v0.0.0
+-	github.com/tawesoft/golib/v2 v2.16.0
+ 	machinebackuplib v0.0.0
++	pbscommon v0.0.0
+ )
+ 
+ require (
+@@ -17,13 +17,13 @@ require (
+ 	github.com/klauspost/compress v1.17.9 // indirect
+ 	github.com/rodolfoag/gow32 v0.0.0-20230512144032-1e896a3c51aa // indirect
+ 	github.com/st-matskevich/go-vss v0.3.3 // indirect
+-	golang.org/x/crypto v0.51.0 // indirect
++	github.com/tawesoft/golib/v2 v2.16.0 // indirect
++	golang.org/x/crypto v0.58.0 // indirect
+ 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+-	golang.org/x/net v0.54.0 // indirect
+-	golang.org/x/sys v0.44.0 // indirect
+-	golang.org/x/term v0.43.0 // indirect
+-	golang.org/x/text v0.37.0 // indirect
+-	pbscommon v0.0.0 // indirect
++	golang.org/x/net v0.61.0 // indirect
++	golang.org/x/sys v0.49.0 // indirect
++	golang.org/x/term v0.47.0 // indirect
++	golang.org/x/text v0.43.0 // indirect
+ 	rsc.io/qr v0.2.0 // indirect
+ 	snapshot v0.0.0 // indirect
+ )
+diff --git a/machinebackup/go.sum b/machinebackup/go.sum
+index dc6fdce..bdea19b 100644
+--- a/machinebackup/go.sum
++++ b/machinebackup/go.sum
+@@ -22,19 +22,19 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
+ github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
+ github.com/tawesoft/golib/v2 v2.16.0 h1:QJPqTFPVz++45fTVyP66o8IfCfz8MYgTrn6nypVLv2o=
+ github.com/tawesoft/golib/v2 v2.16.0/go.mod h1:S+cpYdLd1NwKQmWnycfIJqJegOek/Zz+JY9FH7EJTWs=
+-golang.org/x/crypto v0.51.0 h1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=
+-golang.org/x/crypto v0.51.0/go.mod h1:8AdwkbraGNABw2kOX6YFPs3WM22XqI4EXEd8g+x7Oc8=
++golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
++golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f h1:W3F4c+6OLc6H2lb//N1q4WpJkhzJCK5J6kUi1NTVXfM=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f/go.mod h1:J1xhfL/vlindoeF/aINzNzt2Bket5bjo9sdOYzOsU80=
+-golang.org/x/net v0.54.0 h1:2zJIZAxAHV/OHCDTCOHAYehQzLfSXuf/5SoL/Dv6w/w=
+-golang.org/x/net v0.54.0/go.mod h1:Sj4oj8jK6XmHpBZU/zWHw3BV3abl4Kvi+Ut7cQcY+cQ=
++golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
++golang.org/x/net v0.61.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
+ golang.org/x/sys v0.1.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+-golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
+-golang.org/x/sys v0.44.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+-golang.org/x/term v0.43.0 h1:S4RLU2sB31O/NCl+zFN9Aru9A/Cq2aqKpTZJ6B+DwT4=
+-golang.org/x/term v0.43.0/go.mod h1:lrhlHNdQJHO+1qVYiHfFKVuVioJIheAc3fBSMFYEIsk=
+-golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
+-golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=
++golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
++golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
++golang.org/x/term v0.47.0 h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM=
++golang.org/x/term v0.47.0/go.mod h1:efAfAuG6RKABvg1ArGebRkvX6LXul14SM67o2e4mUCY=
++golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
++golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
+ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+ gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+ rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
+diff --git a/machinebackuplib/go.sum b/machinebackuplib/go.sum
+index 7ae130e..ce19ee6 100644
+--- a/machinebackuplib/go.sum
++++ b/machinebackuplib/go.sum
+@@ -9,10 +9,14 @@ github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+
+ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
+ github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
++github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
+ github.com/tawesoft/golib/v2 v2.16.0 h1:QJPqTFPVz++45fTVyP66o8IfCfz8MYgTrn6nypVLv2o=
+ github.com/tawesoft/golib/v2 v2.16.0/go.mod h1:S+cpYdLd1NwKQmWnycfIJqJegOek/Zz+JY9FH7EJTWs=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f h1:W3F4c+6OLc6H2lb//N1q4WpJkhzJCK5J6kUi1NTVXfM=
++golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f/go.mod h1:J1xhfL/vlindoeF/aINzNzt2Bket5bjo9sdOYzOsU80=
+ golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
++golang.org/x/sys v0.44.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+ golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
++golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=
+ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+ gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+diff --git a/nbd/go.mod b/nbd/go.mod
+index 9545a76..8d09560 100644
+--- a/nbd/go.mod
++++ b/nbd/go.mod
+@@ -1,12 +1,12 @@
+ module pbsnbd
+ 
+-go 1.25.0
++go 1.26.0
+ 
+ require (
+ 	github.com/gdamore/tcell/v2 v2.8.1
+ 	github.com/pojntfx/go-nbd v0.3.2
+ 	github.com/rivo/tview v0.42.0
+-	golang.org/x/term v0.43.0
++	golang.org/x/term v0.47.0
+ 	pbscommon v0.0.0
+ )
+ 
+@@ -19,11 +19,11 @@ require (
+ 	github.com/mattn/go-runewidth v0.0.16 // indirect
+ 	github.com/pilebones/go-udev v0.9.0 // indirect
+ 	github.com/rivo/uniseg v0.4.7 // indirect
+-	golang.org/x/crypto v0.51.0 // indirect
++	golang.org/x/crypto v0.58.0 // indirect
+ 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+-	golang.org/x/net v0.54.0 // indirect
+-	golang.org/x/sys v0.44.0 // indirect
+-	golang.org/x/text v0.37.0 // indirect
++	golang.org/x/net v0.61.0 // indirect
++	golang.org/x/sys v0.49.0 // indirect
++	golang.org/x/text v0.43.0 // indirect
+ 	rsc.io/qr v0.2.0 // indirect
+ )
+ 
+diff --git a/nbd/go.sum b/nbd/go.sum
+index cf7968a..04e968d 100644
+--- a/nbd/go.sum
++++ b/nbd/go.sum
+@@ -32,8 +32,10 @@ golang.org/x/crypto v0.0.0-20210921155107-089bfa567519/go.mod h1:GvvjBRRGRdwPK5y
+ golang.org/x/crypto v0.13.0/go.mod h1:y6Z2r+Rw4iayiXXAIxJIDAJ1zMW4yaTpebo8fPOliYc=
+ golang.org/x/crypto v0.19.0/go.mod h1:Iy9bg/ha4yyC70EfRS8jz+B6ybOBKMaSxLj6P6oBDfU=
+ golang.org/x/crypto v0.23.0/go.mod h1:CKFgDieR+mRhux2Lsu27y0fO304Db0wZe70UKqHu0v8=
+-golang.org/x/crypto v0.51.0 h1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=
++golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
++golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f h1:W3F4c+6OLc6H2lb//N1q4WpJkhzJCK5J6kUi1NTVXfM=
++golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f/go.mod h1:J1xhfL/vlindoeF/aINzNzt2Bket5bjo9sdOYzOsU80=
+ golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4/go.mod h1:jJ57K6gSWd91VN4djpZkiMVwK6gcyfeH4XE8wZrZaV4=
+ golang.org/x/mod v0.8.0/go.mod h1:iBbtSCu2XBx23ZKBPSOrRkjjQPZFPuis4dIYUhu/chs=
+ golang.org/x/mod v0.12.0/go.mod h1:iBbtSCu2XBx23ZKBPSOrRkjjQPZFPuis4dIYUhu/chs=
+@@ -47,7 +49,8 @@ golang.org/x/net v0.10.0/go.mod h1:0qNGK6F8kojg2nk9dLZ2mShWaEBan6FAoqfSigmmuDg=
+ golang.org/x/net v0.15.0/go.mod h1:idbUs1IY1+zTqbi8yxTbhexhEEk5ur9LInksu6HrEpk=
+ golang.org/x/net v0.21.0/go.mod h1:bIjVDfnllIU7BJ2DNgfnXvpSvtn8VRwhlsaeUTyUS44=
+ golang.org/x/net v0.25.0/go.mod h1:JkAGAh7GEvH74S6FOH42FLoXpXbE/aqXSrIQjXgsiwM=
+-golang.org/x/net v0.54.0 h1:2zJIZAxAHV/OHCDTCOHAYehQzLfSXuf/5SoL/Dv6w/w=
++golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
++golang.org/x/net v0.61.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
+ golang.org/x/sync v0.0.0-20190423024810-112230192c58/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+ golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+ golang.org/x/sync v0.1.0/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+@@ -66,7 +69,8 @@ golang.org/x/sys v0.12.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+ golang.org/x/sys v0.17.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
+ golang.org/x/sys v0.20.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
+ golang.org/x/sys v0.29.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
+-golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
++golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
++golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
+ golang.org/x/telemetry v0.0.0-20240228155512-f48c80bd79b2/go.mod h1:TeRTkGYfJXctD9OcfyVLyj2J3IxLnKwHJR8f4D8a3YE=
+ golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
+ golang.org/x/term v0.0.0-20210927222741-03fcf44c2211/go.mod h1:jbD1KX2456YbFQfuXm/mYQcufACuNUgVhRMnK/tPxf8=
+@@ -76,7 +80,8 @@ golang.org/x/term v0.12.0/go.mod h1:owVbMEjm3cBLCHdkQu9b1opXd4ETQWc3BhuQGKgXgvU=
+ golang.org/x/term v0.17.0/go.mod h1:lLRBjIVuehSbZlaOtGMbcMncT+aqLLLmKrsjNrUguwk=
+ golang.org/x/term v0.20.0/go.mod h1:8UkIAJTvZgivsXaD6/pH6U9ecQzZ45awqEOzuCvwpFY=
+ golang.org/x/term v0.28.0/go.mod h1:Sw/lC2IAUZ92udQNf3WodGtn4k/XoLyZoh8v/8uiwek=
+-golang.org/x/term v0.43.0 h1:S4RLU2sB31O/NCl+zFN9Aru9A/Cq2aqKpTZJ6B+DwT4=
++golang.org/x/term v0.47.0 h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM=
++golang.org/x/term v0.47.0/go.mod h1:efAfAuG6RKABvg1ArGebRkvX6LXul14SM67o2e4mUCY=
+ golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
+ golang.org/x/text v0.3.3/go.mod h1:5Zoc/QRtKVWzQhOtBMvqHzDpF6irO9z98xDceosuGiQ=
+ golang.org/x/text v0.3.7/go.mod h1:u+2+/6zg+i71rQMx5EYifcz6MCKuco9NR6JIITiCfzQ=
+@@ -86,7 +91,8 @@ golang.org/x/text v0.13.0/go.mod h1:TvPlkZtksWOMsz7fbANvkp4WM8x/WCo/om8BMLbz+aE=
+ golang.org/x/text v0.14.0/go.mod h1:18ZOQIKpY8NJVqYksKHtTdi31H5itFRjB5/qKTNYzSU=
+ golang.org/x/text v0.15.0/go.mod h1:18ZOQIKpY8NJVqYksKHtTdi31H5itFRjB5/qKTNYzSU=
+ golang.org/x/text v0.21.0/go.mod h1:4IBbMaMmOPCJ8SecivzSH54+73PCFmPWxNTLm+vZkEQ=
+-golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
++golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
++golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
+ golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGmLbDWY5pfWTLqBcC2KZ6jyYvM4mQ=
+ golang.org/x/tools v0.0.0-20191119224855-298f0cb1881e/go.mod h1:b+2E5dAYhXwXZwtnZ6UAqBI28+e2cm9otk0dWdXHAEo=
+ golang.org/x/tools v0.1.12/go.mod h1:hNGJHUnrk76NpqgfD5Aqm5Crs+Hm0VOH/i9J2+nxYbc=
+diff --git a/pbscommon/go.mod b/pbscommon/go.mod
+index 3a62495..839c2a0 100644
+--- a/pbscommon/go.mod
++++ b/pbscommon/go.mod
+@@ -1,12 +1,12 @@
+ module pbscommon
+ 
+-go 1.25.0
++go 1.26.0
+ 
+ require (
+ 	github.com/alphadose/haxmap v1.4.1
+ 	github.com/klauspost/compress v1.17.9
+-	golang.org/x/crypto v0.51.0
+-	golang.org/x/net v0.54.0
++	golang.org/x/crypto v0.58.0
++	golang.org/x/net v0.61.0
+ 	rsc.io/qr v0.2.0
+ )
+ 
+@@ -14,5 +14,5 @@ require golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+ 
+ require (
+ 	github.com/dchest/siphash v1.2.3
+-	golang.org/x/text v0.37.0 // indirect
++	golang.org/x/text v0.43.0 // indirect
+ )
+diff --git a/pbscommon/go.sum b/pbscommon/go.sum
+index 1420ee1..d9bfdb0 100644
+--- a/pbscommon/go.sum
++++ b/pbscommon/go.sum
+@@ -4,9 +4,13 @@ github.com/dchest/siphash v1.2.3 h1:QXwFc8cFOR2dSa/gE6o/HokBMWtLUaNDVd+22aKHeEA=
+ github.com/dchest/siphash v1.2.3/go.mod h1:0NvQU092bT0ipiFN++/rXm69QG9tVxLAlQHIXMPAkHc=
+ github.com/klauspost/compress v1.17.9 h1:6KIumPrER1LHsvBVuDa0r5xaG0Es51mhhB9BQB2qeMA=
+ github.com/klauspost/compress v1.17.9/go.mod h1:Di0epgTjJY877eYKx5yC51cX2A2Vl2ibi7bDH9ttBbw=
+-golang.org/x/crypto v0.51.0 h1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=
++golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
++golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+ golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f h1:W3F4c+6OLc6H2lb//N1q4WpJkhzJCK5J6kUi1NTVXfM=
+-golang.org/x/net v0.54.0 h1:2zJIZAxAHV/OHCDTCOHAYehQzLfSXuf/5SoL/Dv6w/w=
+-golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
++golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f/go.mod h1:J1xhfL/vlindoeF/aINzNzt2Bket5bjo9sdOYzOsU80=
++golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
++golang.org/x/net v0.61.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
++golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
++golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
+ rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
+ rsc.io/qr v0.2.0/go.mod h1:IF+uZjkb9fqyeF/4tlBoynqmQxUoPfWEKh921coOuXs=
+-- 
+2.47.3
+

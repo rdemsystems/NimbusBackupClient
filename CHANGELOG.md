@@ -5,6 +5,40 @@ All notable changes to Proxmox Backup Client (GUI) will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-10-20
+
+> ⚠️ **If you enabled encryption in 0.4.1 or 0.4.2, run a new backup after upgrading.**
+> Encrypted folder backups made by the GUI or the service (one-shot or scheduled)
+> were indexed under the wrong chunk digest. Nimbus Backup 0.4.3 restores them,
+> but `proxmox-backup-client` cannot, and the digest let the server fingerprint
+> the content of their chunks. The first backup after the upgrade uploads every
+> chunk again; once it is done you can prune the older encrypted snapshots.
+> Command-line (`proxmoxbackup-directory`) and disk backups were not affected.
+
+### Fixed
+- **Encrypted folder backups could not be read back** (issue #13): the GUI and the service indexed encrypted chunks under the plain SHA-256 instead of the keyed digest, so `proxmox-backup-client` refused them ("detected chunk with wrong digest"). They now use the same keyed digest as the command line and the official client. Snapshots already written that way stay restorable by Nimbus Backup.
+- **Browse, search and restore failed on encrypted backups in Service Mode** (issue #13) with "is encrypted but no encryption key was provided": the key configured on the PBS server was not used for reading. It is now, for older unencrypted snapshots too (from mjb-is/proxmoxbackupclient_go@6d1b303).
+- **Restoring in Service Mode from a server set up with an API token only** now says what is missing (the PBS username and password, since PBS cannot issue a session ticket for a token) instead of "username and password are required to obtain a ticket".
+- **Restored folders kept the restore time** instead of their own modification time (issue #12), and files dated 1970-01-01 or earlier got the restore time too (from upstream, tizbac/proxmoxbackupclient_go@fa06835).
+- **A user folder named `Recovery` was silently left out of file backups**: only the `Recovery` folder at the root of a volume (Windows' own) is excluded now (from upstream, tizbac/proxmoxbackupclient_go@9781273).
+- **Backups behind a reverse proxy failed with HTTP 503** when the proxy routes on the `Host` header: the PBS session request sent `pbs.example.com:443` for `https://pbs.example.com`; it now sends the host as written in the server URL (tizbac/proxmoxbackupclient_go issue: #89).
+- **Command-line backups could hang in the Task Scheduler**: missing options and "another backup is running" opened a message box nobody could click; `proxmoxbackup-directory` and `proxmoxbackup-machine` now print to stderr and exit 1 or 2 (from upstream, tizbac/proxmoxbackupclient_go@922cba8).
+- **A failed or stopped disk backup left its PBS session open**, keeping the backup group locked until the connection timed out (from upstream, tizbac/proxmoxbackupclient_go@9148294).
+- **Listing snapshots timed out after 10 s** on large datastores; the limit is now 120 s (from upstream, tizbac/proxmoxbackupclient_go@29e18e8).
+- **`proxmoxbackup-machine` never sent its notification e-mail**, although it accepted the `-mail-*` options; it now does, for failed runs too (from upstream, tizbac/proxmoxbackupclient_go@024b55b).
+
+### Added
+- **Alternate data streams and NTFS extended attributes** are backed up with folder backups and restored when "Restore Alternate Data Streams (ADS)" is ticked (the option was a placeholder until now), and **Windows creation times** are restored (from upstream, tizbac/proxmoxbackupclient_go@d33477b and @8503e03).
+- **Silent install without starting the service**: `msiexec /i NimbusBackup.msi /quiet SERVICEAUTOSTART=0` installs the `NimbusBackup` service as Manual and leaves it stopped; the switches are documented in `installer/README.md` and `installer/DEPLOYMENT.md` (from upstream, tizbac/proxmoxbackupclient_go@af67fc9).
+- **`-no-mtime`** in `proxmoxbackup-directory`: records 1970-01-01 as every time, so time-only changes do not re-upload chunks (from upstream, tizbac/proxmoxbackupclient_go@d7fa828).
+- **Bare-metal restore wizard**: the boot stick (Ventoy included) is never offered as the restore target, a target disk smaller than the backed-up disk is refused before anything is written, and the backup's snapshot store is removed from restored partitions (from mjb-is, tizbac/proxmoxbackupclient_go PR #113, and upstream @78a0bab); the ISO build also works with newer syslinux and xorriso (upstream @8cfdab2, @cee965c).
+
+### Changed
+- **Go 1.26.9 and golang.org/x/net v0.61.0**: fixes for known vulnerabilities in the HTTP/2 transport used for PBS sessions and in the Go standard library (net/http, crypto/tls).
+- **The end-to-end suite now covers encrypted backups made by the GUI/service code**, read back by Nimbus Backup's browse, search and restore and by the official client; it would have caught issue #13.
+
+Several of these changes come from upstream (tizbac/proxmoxbackupclient_go) and from mjb-is/proxmoxbackupclient_go; each commit names its source.
+
 ## [0.4.2] - 2026-10-12
 
 ### Fixed

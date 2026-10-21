@@ -95,10 +95,12 @@ func (r *DIDXReaderAt) chunkAt(ci int) ([]byte, error) {
 		return nil, fmt.Errorf("chunk %s (index %d): decompressed size %d != expected %d", digest, ci, len(chunk), end-start)
 	}
 	// PBS dynamic-index digests are the SHA-256 of the chunk plaintext, or the
-	// id_key-salted digest for an encrypted snapshot (see PBSClient.ChunkDigest).
-	// A mismatch means a corrupted or tampered chunk — fail rather than serve
-	// wrong data.
-	if r.pbs.ChunkDigestHex(chunk) != digest {
+	// id_key-salted digest for an encrypted snapshot (see PBSClient.ChunkDigest;
+	// with a key loaded both are accepted, for snapshots taken without it and
+	// for the encrypted ones the 0.4.1/0.4.2 GUI indexed under the plain
+	// digest, rdemsystems/NimbusBackupClient#13). A mismatch means a corrupted
+	// or tampered chunk, so fail rather than serve wrong data.
+	if !r.pbs.ChunkMatchesDigest(chunk, digest) {
 		return nil, fmt.Errorf("chunk %s (index %d): content hash mismatch", digest, ci)
 	}
 	r.cache.put(ci, chunk)

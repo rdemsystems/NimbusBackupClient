@@ -1,0 +1,66 @@
+From 29e914b77b0fe470581f9a91b31be4804f133d87 Mon Sep 17 00:00:00 2001
+From: mjb-is <mjb-is@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 00:13:26 +0100
+Subject: [PATCH 088/108] BMR wizard: remove the backup's snapshot store from
+ restored partitions
+
+A Linux machine backup snapshots each mounted file system with
+elastio-snap/dattobd, whose copy-on-write store is a file on that same
+file system (/.pbs_snapshot_N.cow, about a tenth of its size). The store
+is part of the image, so a bare-metal restore brings it back: a large
+file in the root of the restored system that nothing uses or removes.
+
+After a successful restore the wizard now mounts each ext2/3/4 and XFS
+partition of the target in turn, deletes .pbs_snapshot_*.cow from its
+root, and unmounts it. Other file systems are not touched.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JSSBMF6hRk92jsHCMKgDRx
+Upstream: tizbac/proxmoxbackupclient_go@78a0bab7c41e1013e9c57833fefe5c9deb2e0962
+---
+ clonezilla-patch/ocs-pbs-bare-metal-restore | 26 +++++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/clonezilla-patch/ocs-pbs-bare-metal-restore b/clonezilla-patch/ocs-pbs-bare-metal-restore
+index 066d477..0a78640 100644
+--- a/clonezilla-patch/ocs-pbs-bare-metal-restore
++++ b/clonezilla-patch/ocs-pbs-bare-metal-restore
+@@ -562,9 +562,35 @@ fi
+ # instead of ocs-onthefly's own generic "-p choose" prompt (which is right
+ # for the manual ocs-pbs-nbd path, where an operator is already driving
+ # Clonezilla's menus, but wrong here).
++# A Linux machine backup takes its block snapshot with a copy-on-write store
++# (/.pbs_snapshot_N.cow) on each snapshotted file system, so the store is in
++# the image and comes back with the restore: a file of about a tenth of the
++# file system's size that nothing uses any more. Remove it from the restored
++# partitions.
++remove_snapshot_stores() {
++  local part mnt
++  mnt="$(mktemp -d)"
++  partprobe "$TARGET" >/dev/null 2>&1
++  udevadm settle --timeout=10 >/dev/null 2>&1
++  for part in $(lsblk -lnpo NAME,TYPE "$TARGET" 2>/dev/null | awk '$2=="part"{print $1}'); do
++    case "$(blkid -o value -s TYPE "$part" 2>/dev/null)" in
++      ext2|ext3|ext4|xfs) ;;
++      *) continue ;;
++    esac
++    if mount "$part" "$mnt" >/dev/null 2>&1; then
++      for f in "$mnt"/.pbs_snapshot_*.cow; do
++        [ -f "$f" ] && rm -f "$f" && echo "  removed the backup's snapshot store $(basename "$f") from $part"
++      done
++      umount "$mnt" >/dev/null 2>&1
++    fi
++  done
++  rmdir "$mnt" 2>/dev/null
++}
++
+ echo "> Starting restore: ${NBDDEV} -> ${TARGET} ..."
+ ocs-onthefly -icds -k0 -sfsck -j2 -f "$NBDDEV" -d "$TARGET"
+ RC=$?
++[ "$RC" = "0" ] && remove_snapshot_stores
+ if [ "$RC" != "0" ]; then
+   $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
+   --msgbox "Restore finished with a non-zero exit code ($RC).\nCheck ${ocs_log_dir} for details.\n\n$msg_press_enter_to_continue" 0 0 $DIA_ESC
+-- 
+2.47.3
+

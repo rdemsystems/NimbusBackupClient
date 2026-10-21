@@ -288,7 +288,7 @@ func readJobsFile(t *testing.T) string {
 
 // An update must not erase the run record: the edit form never carries
 // lastRun (nor the enabled flag), so a save would otherwise wipe them.
-func TestUpdateScheduledJobKeepsLastRunAndEnabled(t *testing.T) {
+func TestUpdateScheduledJobKeepsLastRunEnabledAndCompression(t *testing.T) {
 	a := newSchedulerTestApp(t)
 	if err := a.SaveScheduledJob(sampleJob()); err != nil {
 		t.Fatalf("SaveScheduledJob() error = %v", err)
@@ -301,11 +301,15 @@ func TestUpdateScheduledJobKeepsLastRunAndEnabled(t *testing.T) {
 
 	updated := jobs[0]
 	updated.ScheduleTime = "04:45"
+	updated.Compression = "" // the edit form sends none
 	if err := a.UpdateScheduledJob(updated); err != nil {
 		t.Fatalf("UpdateScheduledJob() error = %v", err)
 	}
 
 	got := list0(t, a)
+	if got.Compression != jobs[0].Compression {
+		t.Errorf("Compression = %q, want the stored %q kept", got.Compression, jobs[0].Compression)
+	}
 	if got.LastRun != "2026-01-02T03:04:05Z" {
 		t.Errorf("LastRun = %q, want it preserved", got.LastRun)
 	}

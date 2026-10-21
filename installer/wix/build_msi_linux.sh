@@ -78,7 +78,7 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 
 echo "==> Preparing build artifacts in $WORK"
 
-# ---- 1. Build GUI (once) and SVC via Docker (golang:1.25) ----
+# ---- 1. Build GUI (once) and SVC via Docker (golang:1.26.9) ----
 # The docker build must mount the WHOLE repo because gui/go.mod has
 # replace directives pointing to sibling directories (machinebackuplib, pbscommon, etc.)
 GUI_EXE="$ROOT/gui/build/bin/ProxmoxBackupClient.exe"
@@ -139,19 +139,19 @@ else
     echo "==> Building missing/stale binaries via Docker (GUI=$NEED_GUI, SVC=$NEED_SVC)..."
     # Each artifact is rebuilt when it is missing, is not a Windows PE, or is
     # older than the sources that go into it. A wails rebuild needs npm (not
-    # shipped by golang:1.25), so only an actually-stale GUI pays for it.
+    # shipped by golang:1.26.9), so only an actually-stale GUI pays for it.
     docker run --rm \
     -e NEED_GUI="$NEED_GUI" \
     -e NEED_SVC="$NEED_SVC" \
     -e VERSION="$VERSION" \
     -v "$ROOT:/src" \
     -w /src \
-    golang:1.25 \
+    golang:1.26.9 \
     bash -c '
         set -euo pipefail
         cd /src/gui
         if [ "${NEED_GUI:-0}" = "1" ]; then
-            # wails compiles the React frontend: golang:1.25 has no node/npm
+            # wails compiles the React frontend: golang:1.26.9 has no node/npm
             if ! command -v npm >/dev/null 2>&1; then
                 echo "==> installing nodejs/npm in build container"
                 apt-get update -qq
@@ -184,7 +184,7 @@ else
     # out root-owned: the next local build or npm install then fails until
     # somebody remembers a sudo chown. Hand the outputs back to the invoking
     # user. Reuses the image already pulled above, so this needs no download.
-    docker run --rm -v "$ROOT:/src" -w /src golang:1.25 \
+    docker run --rm -v "$ROOT:/src" -w /src golang:1.26.9 \
         chown -R "$(id -u):$(id -g)" \
         /src/gui/build /src/gui/frontend/dist /src/gui/frontend/wailsjs \
         /src/gui/frontend/node_modules || true

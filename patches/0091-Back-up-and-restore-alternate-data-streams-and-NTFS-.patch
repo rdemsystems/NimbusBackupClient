@@ -1,0 +1,1268 @@
+From 579cd0bc89550856dfaa9e7c00c972d5c957162b Mon Sep 17 00:00:00 2001
+From: mjb-is <mjb-is@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 00:27:08 +0100
+Subject: [PATCH 091/108] Back up and restore alternate data streams and NTFS
+ extended attributes
+
+pxar carries a file's main data only, so folder backups on Windows lose
+every alternate data stream (Zone.Identifier, which drives the "this file
+came from the Internet" warning, and streams other programs keep) and every
+NTFS extended attribute (WSL keeps Linux owners and modes in them). TODO.md
+lists streams under "NTFS Metadata Fidelity"; the Restore page has had a
+disabled "Restore Alternate Data Streams (ADS)" option and
+RestoreOptions.RestoreADS has been a logged no-op.
+
+Backup (Windows)
+- The NTFS metadata collector opens each file and folder once, without
+  data access (READ_CONTROL | FILE_READ_EA | FILE_READ_ATTRIBUTES), and
+  reads the security descriptor, attributes, named $DATA streams
+  (FileStreamInfo) and extended attributes (NtQueryEaFile) on that one
+  handle. Reading the streams and EAs on a second handle took the cost per
+  entry from about 90 to 185 us; one handle costs about 128 us. Reparse
+  points keep the lookups by name, as before, and record no streams.
+- New optional side file fields FileMetaEntry.Streams ("t") and EAs ("e");
+  older clients ignore them. Stream content is recorded up to 1 MiB per
+  stream and 8 MiB per archive; a larger stream, one over the budget or one
+  that cannot be read is recorded by name and size with the reason, and is
+  not recreated on restore. $KERNEL.* EAs, which only Windows may set, are
+  left out.
+- Finalize serializes with serializeFileMetaCapped: over 15 MiB (PBS
+  refuses blobs over 16 MiB) the stream contents are dropped and logged, so
+  permissions and attributes are never lost to a large stream.
+- Buffers for FileStreamInfo and the EA calls are 8-byte aligned: with a
+  misaligned buffer the call fails with ERROR_NOACCESS, and a []byte from
+  make is aligned only some of the time, so it failed at random.
+- The backup log counts the streams recorded, those recorded by name only,
+  and the EAs.
+
+Restore
+- With RestoreADS set (the Restore page option, now enabled and ticked by
+  default), the metadata pass writes each file's and folder's streams and
+  EAs back first, while the file is still writable, then sets its
+  modification time back to what the extraction gave it (writing a stream
+  changes it), then the creation time, then the attributes and ACL.
+  Writing a stream on a file does not change its folder's time.
+- RestoreADS off writes no streams and no EAs. Elsewhere than Windows it is
+  a no-op.
+
+Tests: unit tests on NTFS for the round trip through the gzipped side
+file (file and folder streams, an empty stream, a stream over 1 MiB
+recorded by name only, EAs, the same SDDL and attributes as the lookups by
+name, the parent folder's time untouched), the budget, the blob cap, the
+aligned buffer and the EA buffer layout; an opt-in live test (PBS_E2E=1)
+that backs up a folder with streams, EAs, a read-only file and old times
+and restores it with streams and ACLs, streams without ACLs, and streams
+off.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JSSBMF6hRk92jsHCMKgDRx
+
+Fork adaptation: gui/frontend/dist/assets/index.js keeps the fork's
+build; wails build regenerates it from App.jsx in CI.
+
+Upstream: tizbac/proxmoxbackupclient_go@d33477bd43f5bc33821880b68384f0767c16bf9a
+---
+ gui/backup_inline.go                          |   8 +
+ gui/backup_meta.go                            |  61 ++++
+ gui/backup_meta_linux.go                      |   4 +
+ gui/backup_meta_other.go                      |   2 +
+ gui/backup_meta_windows.go                    | 143 +++++++--
+ gui/backup_streams_other.go                   |  11 +
+ gui/backup_streams_windows.go                 | 281 ++++++++++++++++++
+ gui/backup_streams_windows_test.go            | 228 ++++++++++++++
+ gui/frontend/src/App.jsx                      |  12 +-
+ gui/main.go                                   |   6 +-
+ gui/restore_inline.go                         |  50 +++-
+ gui/zz_e2e_ntfs_meta_livetest_windows_test.go | 159 ++++++++++
+ 12 files changed, 910 insertions(+), 55 deletions(-)
+ create mode 100644 gui/backup_streams_other.go
+ create mode 100644 gui/backup_streams_windows.go
+ create mode 100644 gui/backup_streams_windows_test.go
+
+diff --git a/gui/backup_inline.go b/gui/backup_inline.go
+index e3f7514..335f386 100644
+--- a/gui/backup_inline.go
++++ b/gui/backup_inline.go
+@@ -1480,6 +1480,14 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
+ 		entries, uniqueSDDLs, metaErrs := ntfsCollector.Stats()
+ 		writeBackupLog(fmt.Sprintf("NTFS metadata: %d entries, %d unique SDDLs, %d errors, %d bytes gzipped",
+ 			entries, uniqueSDDLs, metaErrs, len(aclBytes)))
++		streams, byName, eas, dropped := ntfsCollector.StreamStats()
++		if streams+byName+eas > 0 {
++			writeBackupLog(fmt.Sprintf("Alternate data streams: %d recorded, %d by name only (too large or unreadable); extended attributes: %d",
++				streams, byName, eas))
++		}
++		if dropped > 0 {
++			writeBackupLog(fmt.Sprintf("WARNING: NTFS metadata too large for one PBS blob: the content of %d alternate data streams was left out (permissions and attributes kept)", dropped))
++		}
+ 		if upErr := client.UploadBlob(BackupAclsFilename, aclBytes); upErr != nil {
+ 			writeBackupLog(fmt.Sprintf("WARNING: failed to upload NTFS metadata blob: %v", upErr))
+ 		}
+diff --git a/gui/backup_meta.go b/gui/backup_meta.go
+index 3bcb371..1c52673 100644
+--- a/gui/backup_meta.go
++++ b/gui/backup_meta.go
+@@ -55,8 +55,44 @@ type FileMetaEntry struct {
+ 	// for a dictionary to earn its complexity, and the blob is already
+ 	// gzip-compressed, which absorbs most of the repetition anyway.
+ 	Xattrs map[string][]byte `json:"x,omitempty"`
++	// Streams are the file's (or folder's) alternate data streams on NTFS,
++	// such as Zone.Identifier; EAs its NTFS extended attributes. Windows
++	// only and optional: older readers ignore them.
++	Streams []StreamEntry `json:"t,omitempty"`
++	EAs     []EAEntry     `json:"e,omitempty"`
+ }
+ 
++// StreamEntry is one alternate data stream. Skipped is empty when its content
++// is in Data (an empty stream has no Data); otherwise it says why the content
++// was not recorded (larger than maxStreamBytes, over the archive's
++// maxStreamBytesTotal, unreadable, or dropped to keep the side file under the
++// PBS blob limit) and the restore leaves the stream out.
++type StreamEntry struct {
++	Name    string `json:"n"`
++	Size    int64  `json:"z"`
++	Data    []byte `json:"d,omitempty"`
++	Skipped string `json:"k,omitempty"`
++}
++
++// EAEntry is one NTFS extended attribute (FILE_FULL_EA_INFORMATION).
++type EAEntry struct {
++	Name  string `json:"n"`
++	Flags uint8  `json:"f,omitempty"`
++	Value []byte `json:"v,omitempty"`
++}
++
++const (
++	// maxStreamBytes is the largest alternate data stream recorded with its
++	// content. Nearly all are a few hundred bytes (Zone.Identifier).
++	maxStreamBytes = 1 << 20
++	// maxStreamBytesTotal bounds the stream content one archive records, so
++	// the side file stays well inside the PBS blob size limit.
++	maxStreamBytesTotal = 8 << 20
++	// maxFileMetaBlobBytes is the size the serialized side file must stay
++	// under (PBS refuses blobs over 16 MiB).
++	maxFileMetaBlobBytes = 15 << 20
++)
++
+ // BackupFileMeta is the root of the ACL side-car. SDDLs are deduplicated into
+ // a string array and each entry references by index.
+ type BackupFileMeta struct {
+@@ -88,6 +124,31 @@ func SerializeFileMeta(meta *BackupFileMeta) ([]byte, error) {
+ 	return buf.Bytes(), nil
+ }
+ 
++// serializeFileMetaCapped is SerializeFileMeta, but if the result would be
++// larger than limit the recorded stream contents are dropped (each marked
++// Skipped) and it is serialized again, so permissions and attributes are never
++// lost to a large stream. dropped counts the streams whose content was dropped.
++func serializeFileMetaCapped(meta *BackupFileMeta, limit int) (blob []byte, dropped int, err error) {
++	blob, err = SerializeFileMeta(meta)
++	if err != nil || len(blob) <= limit {
++		return blob, 0, err
++	}
++	for i := range meta.Entries {
++		for j := range meta.Entries[i].Streams {
++			s := &meta.Entries[i].Streams[j]
++			if s.Skipped == "" {
++				s.Data, s.Skipped = nil, "metadata record too large"
++				dropped++
++			}
++		}
++	}
++	if dropped == 0 {
++		return blob, 0, nil
++	}
++	blob, err = SerializeFileMeta(meta)
++	return blob, dropped, err
++}
++
+ // downloadBackupFileMeta fetches and decodes the NTFS ACL/attributes blob
+ // (BackupAclsFilename) for the snapshot the given client is currently
+ // connected to. Returns (nil, nil) — not an error — when the blob is simply
+diff --git a/gui/backup_meta_linux.go b/gui/backup_meta_linux.go
+index 72cd4d7..5f0a6ab 100644
+--- a/gui/backup_meta_linux.go
++++ b/gui/backup_meta_linux.go
+@@ -163,3 +163,7 @@ func (c *NTFSMetaCollector) Stats() (entries, uniqueSDDLs, errors int) {
+ 	defer c.mu.Unlock()
+ 	return len(c.meta.Entries), 0, c.errors
+ }
++
++// StreamStats: Linux has no alternate data streams or NTFS extended
++// attributes (its xattrs travel in Xattrs).
++func (c *NTFSMetaCollector) StreamStats() (streams, skipped, eas, dropped int) { return 0, 0, 0, 0 }
+diff --git a/gui/backup_meta_other.go b/gui/backup_meta_other.go
+index ba96dcc..8c8bb95 100644
+--- a/gui/backup_meta_other.go
++++ b/gui/backup_meta_other.go
+@@ -21,3 +21,5 @@ func (c *NTFSMetaCollector) Collect(absPath string, info os.FileInfo, isDir bool
+ func (c *NTFSMetaCollector) Finalize() ([]byte, error) { return nil, nil }
+ 
+ func (c *NTFSMetaCollector) Stats() (entries, uniqueSDDLs, errors int) { return 0, 0, 0 }
++
++func (c *NTFSMetaCollector) StreamStats() (streams, skipped, eas, dropped int) { return 0, 0, 0, 0 }
+diff --git a/gui/backup_meta_windows.go b/gui/backup_meta_windows.go
+index 8be9661..940fa68 100644
+--- a/gui/backup_meta_windows.go
++++ b/gui/backup_meta_windows.go
+@@ -14,9 +14,10 @@ import (
+ )
+ 
+ // NTFSMetaCollector implements pbscommon.MetaCollector for Windows. It captures
+-// owner/group/DACL (as an SDDL string) plus NTFS file attributes and the
+-// creation time during the pxar walk and serializes everything into a single
+-// gzipped JSON file that lives as a virtual file inside the archive root.
++// owner/group/DACL (as an SDDL string) plus NTFS file attributes, the creation
++// time, alternate data streams and extended attributes during the pxar walk
++// and serializes everything into a single gzipped JSON file that lives as a
++// virtual file inside the archive root.
+ //
+ // SDDLs are deduplicated via an index: in practice most files in a tree share
+ // a handful of unique descriptors (inherited from parent), so the dedup cuts
+@@ -28,6 +29,14 @@ type NTFSMetaCollector struct {
+ 	sddlIdx map[string]int
+ 	meta    *BackupFileMeta
+ 	errors  int
++
++	// streamBudget is how much alternate data stream content this archive
++	// may still record (maxStreamBytesTotal); the counters feed the log.
++	streamBudget   int64
++	streams        int
++	streamsSkipped int
++	eas            int
++	dropped        int
+ }
+ 
+ // NewNTFSMetaCollector creates a collector rooted at the given filesystem path.
+@@ -39,8 +48,9 @@ func NewNTFSMetaCollector(root, hostname string) *NTFSMetaCollector {
+ 		absRoot = root
+ 	}
+ 	return &NTFSMetaCollector{
+-		root:    absRoot,
+-		sddlIdx: make(map[string]int),
++		root:         absRoot,
++		sddlIdx:      make(map[string]int),
++		streamBudget: maxStreamBytesTotal,
+ 		meta: &BackupFileMeta{
+ 			Version:  FileMetaFormatVers,
+ 			Root:     absRoot,
+@@ -62,43 +72,77 @@ func (c *NTFSMetaCollector) Collect(absPath string, info os.FileInfo, isDir bool
+ 	}
+ 	rel = filepath.ToSlash(rel)
+ 
+-	// Get security descriptor (owner + group + DACL).
+-	// SACL is excluded — reading it requires SE_SECURITY_NAME privilege which
+-	// not every service account has, and SACLs describe audit policy which
+-	// generally should not be restored mechanically anyway.
+-	var sddl string
+-	sd, err := windows.GetNamedSecurityInfo(
+-		absPath,
+-		windows.SE_FILE_OBJECT,
+-		windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION,
+-	)
+-	if err == nil && sd != nil {
+-		sddl = sd.String() // returns empty string on internal conversion failure
+-	}
+-	if err != nil || sddl == "" {
+-		c.incErr()
+-		// Continue with empty SDDL so we at least record the file attributes
++	// Creation time and the entry's own attributes: already in the directory
++	// listing the walk read, so this costs no extra disk access.
++	var created int64
++	var listedAttrs uint32
++	if info != nil {
++		if d, ok := info.Sys().(*syscall.Win32FileAttributeData); ok && d != nil {
++			created = int64(d.CreationTime.HighDateTime)<<32 | int64(d.CreationTime.LowDateTime)
++			listedAttrs = d.FileAttributes
++		}
+ 	}
+ 
+-	// Get file attributes (hidden, system, readonly, archive, ...)
++	// The stream budget is shared by the whole archive, so it is read and
++	// updated under the lock; the streams themselves are read outside it.
++	c.mu.Lock()
++	budget := c.streamBudget
++	c.mu.Unlock()
++	start := budget
++
++	// One handle, opened without data access, for the security descriptor
++	// (owner + group + DACL), attributes (hidden, system, readonly, archive,
++	// ...), alternate data streams and extended attributes. A second handle
++	// for the streams and EAs nearly doubled the cost per file. The SACL is
++	// excluded: reading it requires SE_SECURITY_NAME privilege which not every
++	// service account has, and SACLs describe audit policy which generally
++	// should not be restored mechanically anyway.
++	var sddl string
+ 	var attrs uint32
+-	if pathW, pErr := windows.UTF16PtrFromString(absPath); pErr == nil {
+-		if a, aErr := windows.GetFileAttributes(pathW); aErr == nil {
+-			attrs = a
++	var streams []StreamEntry
++	var eas []EAEntry
++	opened := false
++	if listedAttrs&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0 {
++		if h, herr := openMetaHandle(absPath); herr == nil {
++			opened = true
++			sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT,
++				windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
++			if err == nil && sd != nil {
++				sddl = sd.String() // returns empty string on internal conversion failure
++			}
++			var bi windows.ByHandleFileInformation
++			if windows.GetFileInformationByHandle(h, &bi) == nil {
++				attrs = bi.FileAttributes
++			}
++			streams, eas = streamsAndEAsOf(h, absPath, &budget)
++			windows.CloseHandle(h)
+ 		}
+ 	}
+-
+-	// Creation time: already in the directory listing the walk read, so this
+-	// costs no extra disk access.
+-	var created int64
+-	if info != nil {
+-		if d, ok := info.Sys().(*syscall.Win32FileAttributeData); ok && d != nil {
+-			created = int64(d.CreationTime.HighDateTime)<<32 | int64(d.CreationTime.LowDateTime)
++	if !opened {
++		// A reparse point (link, junction): the lookups by name follow it, as
++		// they always did, and its streams are not recorded. Or a file that
++		// would not open this way.
++		sddl, attrs = securityByPath(absPath)
++		if listedAttrs&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0 {
++			streams, eas, _ = readStreamsAndEAs(absPath, &budget)
+ 		}
+ 	}
++	if sddl == "" {
++		c.incErr()
++		// Continue with empty SDDL so we at least record the file attributes
++	}
+ 
+ 	c.mu.Lock()
+ 	defer c.mu.Unlock()
++	c.streamBudget -= start - budget
++	for _, s := range streams {
++		if s.Skipped == "" {
++			c.streams++
++		} else {
++			c.streamsSkipped++
++		}
++	}
++	c.eas += len(eas)
+ 
+ 	idx, ok := c.sddlIdx[sddl]
+ 	if !ok {
+@@ -113,10 +157,39 @@ func (c *NTFSMetaCollector) Collect(absPath string, info os.FileInfo, isDir bool
+ 		SDDLIdx: idx,
+ 		Attrs:   attrs,
+ 		Created: created,
++		Streams: streams,
++		EAs:     eas,
+ 	})
+ 	return nil
+ }
+ 
++// securityByPath reads a path's SDDL and attributes by name; the security
++// lookup follows a link to its target.
++func securityByPath(absPath string) (sddl string, attrs uint32) {
++	sd, err := windows.GetNamedSecurityInfo(absPath, windows.SE_FILE_OBJECT,
++		windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
++	if err == nil && sd != nil {
++		sddl = sd.String()
++	}
++	if pathW, pErr := windows.UTF16PtrFromString(absPath); pErr == nil {
++		if a, aErr := windows.GetFileAttributes(pathW); aErr == nil {
++			attrs = a
++		}
++	}
++	return sddl, attrs
++}
++
++// StreamStats returns how many alternate data streams were recorded with
++// their content, how many only by name (too large, over the budget, or
++// unreadable), how many extended attributes were recorded, and how many
++// stream contents Finalize dropped to keep the side file under the PBS blob
++// limit.
++func (c *NTFSMetaCollector) StreamStats() (streams, skipped, eas, dropped int) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	return c.streams, c.streamsSkipped, c.eas, c.dropped
++}
++
+ func (c *NTFSMetaCollector) incErr() {
+ 	c.mu.Lock()
+ 	c.errors++
+@@ -132,7 +205,11 @@ func (c *NTFSMetaCollector) Finalize() ([]byte, error) {
+ 	c.meta.Errors = c.errors
+ 	c.mu.Unlock()
+ 
+-	return SerializeFileMeta(c.meta)
++	blob, dropped, err := serializeFileMetaCapped(c.meta, maxFileMetaBlobBytes)
++	c.mu.Lock()
++	c.dropped = dropped
++	c.mu.Unlock()
++	return blob, err
+ }
+ 
+ // Stats returns entry count, unique SDDL count, and error count.
+diff --git a/gui/backup_streams_other.go b/gui/backup_streams_other.go
+new file mode 100644
+index 0000000..113c44d
+--- /dev/null
++++ b/gui/backup_streams_other.go
+@@ -0,0 +1,11 @@
++//go:build !windows
++// +build !windows
++
++package main
++
++// writeStreamsAndEAs: alternate data streams and NTFS extended attributes
++// exist only on Windows, so a restore elsewhere writes none and counts the
++// streams as skipped.
++func writeStreamsAndEAs(path string, streams []StreamEntry, eas []EAEntry) (written, skipped int, err error) {
++	return 0, len(streams), nil
++}
+diff --git a/gui/backup_streams_windows.go b/gui/backup_streams_windows.go
+new file mode 100644
+index 0000000..3421b5f
+--- /dev/null
++++ b/gui/backup_streams_windows.go
+@@ -0,0 +1,281 @@
++//go:build windows
++// +build windows
++
++package main
++
++import (
++	"encoding/binary"
++	"errors"
++	"fmt"
++	"io"
++	"os"
++	"strings"
++	"unicode/utf16"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++)
++
++var (
++	modntdll          = windows.NewLazySystemDLL("ntdll.dll")
++	procNtQueryEaFile = modntdll.NewProc("NtQueryEaFile")
++	procNtSetEaFile   = modntdll.NewProc("NtSetEaFile")
++)
++
++// eaBufferSize holds the largest EA set NTFS allows on a file (64 KiB) with
++// room for the entry headers.
++const eaBufferSize = 72 * 1024
++
++// openMetaHandle opens path for its security descriptor, attributes, stream
++// list and extended attributes, without access to its data (so files open in
++// other programs open too). OPEN_REPARSE_POINT opens a link itself, not its
++// target. The caller closes the handle.
++func openMetaHandle(path string) (windows.Handle, error) {
++	p, err := windows.UTF16PtrFromString(path)
++	if err != nil {
++		return 0, err
++	}
++	return windows.CreateFile(p, windows.READ_CONTROL|windows.FILE_READ_EA|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE,
++		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING,
++		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
++}
++
++// readStreamsAndEAs lists the alternate data streams and extended attributes
++// of path (a file or a folder) on a handle of its own, with the streams'
++// content as far as budget allows. The collector uses it only when its own
++// handle would not open; tests use it to read a restored file.
++func readStreamsAndEAs(path string, budget *int64) ([]StreamEntry, []EAEntry, error) {
++	p, err := windows.UTF16PtrFromString(path)
++	if err != nil {
++		return nil, nil, err
++	}
++	h, err := windows.CreateFile(p, windows.FILE_READ_EA|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE,
++		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING,
++		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
++	if err != nil {
++		return nil, nil, err
++	}
++	defer windows.CloseHandle(h)
++	streams, eas := streamsAndEAsOf(h, path, budget)
++	return streams, eas, nil
++}
++
++// streamsAndEAsOf lists the streams (reading their content from path as far
++// as budget allows, which is decreased by what is recorded) and the extended
++// attributes of an open file. A stream that cannot be read is recorded by
++// name, with the reason.
++func streamsAndEAsOf(h windows.Handle, path string, budget *int64) ([]StreamEntry, []EAEntry) {
++	var streams []StreamEntry
++	for _, s := range streamNames(h) {
++		e := StreamEntry{Name: s.name, Size: s.size}
++		switch {
++		case s.size > maxStreamBytes:
++			e.Skipped = fmt.Sprintf("larger than %d MiB", maxStreamBytes>>20)
++		case s.size > *budget:
++			e.Skipped = "too much stream data in this backup"
++		default:
++			data, rerr := readStream(path + ":" + s.name)
++			if rerr != nil {
++				e.Skipped = rerr.Error()
++			} else {
++				e.Data = data
++				*budget -= int64(len(data))
++			}
++		}
++		streams = append(streams, e)
++	}
++	return streams, queryEAs(h)
++}
++
++type streamName struct {
++	name string
++	size int64
++}
++
++// streamNames returns the named $DATA streams of an open file (not the
++// unnamed main stream), from FILE_STREAM_INFO.
++func streamNames(h windows.Handle) []streamName {
++	buf := alignedBuffer(4096)
++	for {
++		err := windows.GetFileInformationByHandleEx(h, windows.FileStreamInfo, &buf[0], uint32(len(buf)))
++		if err == nil {
++			break
++		}
++		if errors.Is(err, windows.ERROR_MORE_DATA) && len(buf) < 1<<20 {
++			buf = alignedBuffer(len(buf) * 4)
++			continue
++		}
++		return nil // ERROR_HANDLE_EOF: no streams at all (a folder), or a file system without them
++	}
++	var out []streamName
++	for off := 0; off+24 <= len(buf); {
++		next := binary.LittleEndian.Uint32(buf[off:])
++		nameLen := int(binary.LittleEndian.Uint32(buf[off+4:]))
++		size := int64(binary.LittleEndian.Uint64(buf[off+8:]))
++		if off+24+nameLen > len(buf) {
++			break
++		}
++		u := make([]uint16, nameLen/2)
++		for i := range u {
++			u[i] = binary.LittleEndian.Uint16(buf[off+24+2*i:])
++		}
++		full := string(utf16.Decode(u)) // ":Zone.Identifier:$DATA"; "::$DATA" is the main stream
++		if name, ok := strings.CutSuffix(strings.TrimPrefix(full, ":"), ":$DATA"); ok && name != "" {
++			out = append(out, streamName{name, size})
++		}
++		if next == 0 {
++			break
++		}
++		off += int(next)
++	}
++	return out
++}
++
++// alignedBuffer returns a zeroed n-byte buffer aligned to 8 bytes. The stream
++// and EA information structures hold 64-bit fields, and Windows fails the call
++// with ERROR_NOACCESS ("Invalid access to memory location") when the buffer is
++// not aligned; a []byte from make has no such guarantee.
++func alignedBuffer(n int) []byte {
++	words := make([]uint64, (n+7)/8)
++	return unsafe.Slice((*byte)(unsafe.Pointer(&words[0])), n)
++}
++
++// readStream reads one alternate data stream ("path:name").
++func readStream(streamPath string) ([]byte, error) {
++	f, err := os.Open(streamPath)
++	if err != nil {
++		return nil, err
++	}
++	defer f.Close()
++	return io.ReadAll(io.LimitReader(f, maxStreamBytes+1))
++}
++
++// queryEAs returns the extended attributes of an open file, leaving out the
++// $KERNEL.* ones that only Windows itself may set.
++func queryEAs(h windows.Handle) []EAEntry {
++	if procNtQueryEaFile.Find() != nil {
++		return nil
++	}
++	buf := alignedBuffer(eaBufferSize)
++	var iosb windows.IO_STATUS_BLOCK
++	// NtQueryEaFile(handle, iosb, buffer, length, ReturnSingleEntry=false,
++	// EaList=nil, EaListLength=0, EaIndex=nil, RestartScan=true)
++	r, _, _ := procNtQueryEaFile.Call(uintptr(h), uintptr(unsafe.Pointer(&iosb)), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
++		0, 0, 0, 0, 1)
++	if r != 0 { // STATUS_NO_EAS_ON_FILE, or a file system without EAs
++		return nil
++	}
++	var out []EAEntry
++	for off := 0; off+8 <= len(buf); {
++		next := binary.LittleEndian.Uint32(buf[off:])
++		flags := buf[off+4]
++		nameLen := int(buf[off+5])
++		valLen := int(binary.LittleEndian.Uint16(buf[off+6:]))
++		if off+8+nameLen+1+valLen > len(buf) {
++			break
++		}
++		name := string(buf[off+8 : off+8+nameLen])
++		val := append([]byte(nil), buf[off+8+nameLen+1:off+8+nameLen+1+valLen]...)
++		if !strings.HasPrefix(strings.ToUpper(name), "$KERNEL.") {
++			out = append(out, EAEntry{Name: name, Flags: flags, Value: val})
++		}
++		if next == 0 {
++			break
++		}
++		off += int(next)
++	}
++	return out
++}
++
++// writeStreamsAndEAs puts recorded alternate data streams and extended
++// attributes back on path (a restored file or folder). Streams recorded
++// without content (Skipped set) are not written and are counted in skipped.
++// Writing a stream changes the file's modification time; the caller sets it
++// again.
++func writeStreamsAndEAs(path string, streams []StreamEntry, eas []EAEntry) (written, skipped int, err error) {
++	for _, s := range streams {
++		if s.Skipped != "" {
++			skipped++
++			continue
++		}
++		f, oerr := os.OpenFile(path+":"+s.Name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
++		if oerr != nil {
++			err = errors.Join(err, fmt.Errorf("stream %s: %w", s.Name, oerr))
++			continue
++		}
++		_, werr := f.Write(s.Data)
++		if cerr := f.Close(); werr == nil {
++			werr = cerr
++		}
++		if werr != nil {
++			err = errors.Join(err, fmt.Errorf("stream %s: %w", s.Name, werr))
++			continue
++		}
++		written++
++	}
++	if len(eas) > 0 {
++		if eerr := setEAs(path, eas); eerr != nil {
++			err = errors.Join(err, fmt.Errorf("extended attributes: %w", eerr))
++		}
++	}
++	return written, skipped, err
++}
++
++// setEAs writes extended attributes with NtSetEaFile.
++func setEAs(path string, eas []EAEntry) error {
++	if err := procNtSetEaFile.Find(); err != nil {
++		return err
++	}
++	built := buildEABuffer(eas)
++	if len(built) == 0 {
++		return nil
++	}
++	buf := alignedBuffer(len(built))
++	copy(buf, built)
++	p, err := windows.UTF16PtrFromString(path)
++	if err != nil {
++		return err
++	}
++	h, err := windows.CreateFile(p, windows.FILE_WRITE_EA|windows.SYNCHRONIZE,
++		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING,
++		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
++	if err != nil {
++		return err
++	}
++	defer windows.CloseHandle(h)
++	var iosb windows.IO_STATUS_BLOCK
++	r, _, _ := procNtSetEaFile.Call(uintptr(h), uintptr(unsafe.Pointer(&iosb)), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
++	if r != 0 {
++		return windows.NTStatus(r)
++	}
++	return nil
++}
++
++// buildEABuffer lays out FILE_FULL_EA_INFORMATION entries, each aligned to
++// 4 bytes, the last with NextEntryOffset 0. Names over 255 bytes and values
++// over 65535 bytes cannot be expressed and are left out.
++func buildEABuffer(eas []EAEntry) []byte {
++	var out []byte
++	last := -1
++	for _, e := range eas {
++		if len(e.Name) == 0 || len(e.Name) > 255 || len(e.Value) > 0xFFFF {
++			continue
++		}
++		if last >= 0 {
++			for len(out)%4 != 0 {
++				out = append(out, 0)
++			}
++			binary.LittleEndian.PutUint32(out[last:], uint32(len(out)-last))
++		}
++		last = len(out)
++		hdr := make([]byte, 8)
++		hdr[4] = e.Flags
++		hdr[5] = byte(len(e.Name))
++		binary.LittleEndian.PutUint16(hdr[6:], uint16(len(e.Value)))
++		out = append(out, hdr...)
++		out = append(out, e.Name...)
++		out = append(out, 0)
++		out = append(out, e.Value...)
++	}
++	return out
++}
+diff --git a/gui/backup_streams_windows_test.go b/gui/backup_streams_windows_test.go
+new file mode 100644
+index 0000000..e336c81
+--- /dev/null
++++ b/gui/backup_streams_windows_test.go
+@@ -0,0 +1,228 @@
++//go:build windows
++
++package main
++
++import (
++	"bytes"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++)
++
++// Alternate data streams and extended attributes on a file and a folder are
++// recorded by the collector (on the same handle as the ACL and attributes),
++// survive the side file's gzip and JSON round trip, and are written back onto
++// fresh copies without touching the main content or the parent folder's time.
++func TestStreamsAndEAsRoundTrip(t *testing.T) {
++	src := t.TempDir()
++	file := filepath.Join(src, "download.exe")
++	dir := filepath.Join(src, "folder")
++	must := func(err error) {
++		t.Helper()
++		if err != nil {
++			t.Fatal(err)
++		}
++	}
++	must(os.WriteFile(file, []byte("main content"), 0o644))
++	must(os.Mkdir(dir, 0o755))
++	zone := []byte("[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.com/download.exe\r\n")
++	must(os.WriteFile(file+":Zone.Identifier", zone, 0o644))
++	must(os.WriteFile(file+":empty", nil, 0o644))
++	must(os.WriteFile(dir+":folderstream", []byte("on a folder"), 0o644))
++	big := bytes.Repeat([]byte("x"), maxStreamBytes+1)
++	must(os.WriteFile(file+":big", big, 0o644))
++	if err := setEAs(file, []EAEntry{{Name: "TESTEA", Value: []byte("hello")}, {Name: "SECOND", Value: []byte{0, 1, 2}}}); err != nil {
++		t.Skipf("cannot set extended attributes here: %v", err)
++	}
++	pathW, _ := windows.UTF16PtrFromString(file)
++	must(windows.SetFileAttributes(pathW, windows.FILE_ATTRIBUTE_HIDDEN|windows.FILE_ATTRIBUTE_ARCHIVE))
++
++	meta := collectForTest(t, src, map[string]bool{file: false, dir: true})
++	byPath := buildFileMetaIndex(meta)
++
++	// The one handle still gives the same ACL and attributes as the lookups
++	// by name.
++	wantSDDL, wantAttrs := securityByPath(file)
++	fe := byPath["download.exe"]
++	if got := meta.SDDLs[fe.SDDLIdx]; got != wantSDDL || fe.Attrs != wantAttrs {
++		t.Errorf("security: %q %#x, want %q %#x", got, fe.Attrs, wantSDDL, wantAttrs)
++	}
++	if fe.Attrs&windows.FILE_ATTRIBUTE_HIDDEN == 0 {
++		t.Errorf("hidden attribute not recorded: %#x", fe.Attrs)
++	}
++
++	names := map[string]StreamEntry{}
++	for _, s := range fe.Streams {
++		names[s.Name] = s
++	}
++	if !bytes.Equal(names["Zone.Identifier"].Data, zone) {
++		t.Errorf("Zone.Identifier recorded as %q", names["Zone.Identifier"].Data)
++	}
++	if s, ok := names["empty"]; !ok || s.Skipped != "" || len(s.Data) != 0 {
++		t.Errorf("empty stream: %+v (want recorded, zero bytes)", s)
++	}
++	if s := names["big"]; s.Data != nil || !strings.Contains(s.Skipped, "larger") || s.Size != int64(len(big)) {
++		t.Errorf("big stream: size %d, skipped %q, data %d bytes", s.Size, s.Skipped, len(s.Data))
++	}
++	if len(fe.EAs) != 2 {
++		t.Fatalf("EAs: %+v", fe.EAs)
++	}
++	if len(byPath["folder"].Streams) != 1 {
++		t.Fatalf("folder streams: %+v", byPath["folder"].Streams)
++	}
++
++	// Onto fresh copies.
++	dst := t.TempDir()
++	dfile := filepath.Join(dst, "download.exe")
++	ddir := filepath.Join(dst, "folder")
++	must(os.WriteFile(dfile, []byte("main content"), 0o644))
++	must(os.Mkdir(ddir, 0o755))
++	old := time.Date(2015, 3, 4, 5, 6, 7, 0, time.UTC)
++	must(os.Chtimes(dst, old, old))
++	w, sk, err := writeStreamsAndEAs(dfile, fe.Streams, fe.EAs)
++	if err != nil || w != 2 || sk != 1 {
++		t.Errorf("file: wrote %d, skipped %d, err %v; want 2, 1, nil", w, sk, err)
++	}
++	if w, _, err := writeStreamsAndEAs(ddir, byPath["folder"].Streams, nil); err != nil || w != 1 {
++		t.Errorf("folder: wrote %d, err %v", w, err)
++	}
++	if fi, _ := os.Stat(dst); !fi.ModTime().Equal(old) {
++		t.Errorf("parent folder time changed to %v by writing streams on its contents", fi.ModTime())
++	}
++	got, err := os.ReadFile(dfile + ":Zone.Identifier")
++	if err != nil || !bytes.Equal(got, zone) {
++		t.Errorf("restored Zone.Identifier: %q, %v", got, err)
++	}
++	if fi, err := os.Stat(dfile + ":empty"); err != nil || fi.Size() != 0 {
++		t.Errorf("restored empty stream: %v", err)
++	}
++	if _, err := os.Stat(dfile + ":big"); err == nil {
++		t.Errorf("a stream recorded by name only was created")
++	}
++	if got, err := os.ReadFile(ddir + ":folderstream"); err != nil || string(got) != "on a folder" {
++		t.Errorf("restored folder stream: %q, %v", got, err)
++	}
++	if main, _ := os.ReadFile(dfile); string(main) != "main content" {
++		t.Errorf("main content changed: %q", main)
++	}
++	budget := int64(maxStreamBytesTotal)
++	_, readEAs, err := readStreamsAndEAs(dfile, &budget)
++	must(err)
++	vals := map[string]string{}
++	for _, e := range readEAs {
++		vals[e.Name] = string(e.Value)
++	}
++	if vals["TESTEA"] != "hello" || vals["SECOND"] != "\x00\x01\x02" {
++		t.Errorf("restored EAs: %q", vals)
++	}
++}
++
++// The collector counts what it recorded, and the archive's budget limits how
++// much stream content it records.
++func TestStreamBudget(t *testing.T) {
++	dir := t.TempDir()
++	f := filepath.Join(dir, "f")
++	if err := os.WriteFile(f, nil, 0o644); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(f+":s", []byte("12345"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	budget := int64(4)
++	streams, _, err := readStreamsAndEAs(f, &budget)
++	if err != nil || len(streams) != 1 || streams[0].Data != nil || streams[0].Skipped == "" || budget != 4 {
++		t.Errorf("over budget: %+v, budget %d, err %v", streams, budget, err)
++	}
++	budget = 10
++	streams, _, _ = readStreamsAndEAs(f, &budget)
++	if len(streams) != 1 || string(streams[0].Data) != "12345" || budget != 5 {
++		t.Errorf("within budget: %+v, budget %d", streams, budget)
++	}
++
++	c := NewNTFSMetaCollector(dir, "h")
++	c.streamBudget = 4
++	fi, _ := os.Lstat(f)
++	if err := c.Collect(f, fi, false); err != nil {
++		t.Fatal(err)
++	}
++	if s, sk, _, _ := c.StreamStats(); s != 0 || sk != 1 || c.streamBudget != 4 {
++		t.Errorf("collector over budget: %d recorded, %d by name, budget %d", s, sk, c.streamBudget)
++	}
++}
++
++// Over the blob limit, stream contents are dropped and everything else kept.
++func TestSerializeFileMetaCappedDropsStreams(t *testing.T) {
++	m := &BackupFileMeta{SDDLs: []string{"O:BA"}, Entries: []FileMetaEntry{
++		{Path: "x", Attrs: 32, Created: 5, Streams: []StreamEntry{{Name: "s", Size: 3, Data: []byte("abc")}, {Name: "t", Size: 9, Skipped: "larger"}}},
++	}}
++	_, dropped, err := serializeFileMetaCapped(m, 1<<20)
++	if err != nil || dropped != 0 || m.Entries[0].Streams[0].Data == nil {
++		t.Fatalf("under the limit: dropped %d, err %v", dropped, err)
++	}
++	blob, dropped, err := serializeFileMetaCapped(m, 10)
++	if err != nil || dropped != 1 || len(blob) == 0 {
++		t.Fatalf("dropped %d, err %v", dropped, err)
++	}
++	e := m.Entries[0]
++	if e.Streams[0].Data != nil || e.Streams[0].Skipped == "" || e.Streams[1].Skipped != "larger" || e.Attrs != 32 || e.Created != 5 {
++		t.Errorf("after drop: %+v", e)
++	}
++}
++
++// Buffers for FileStreamInfo and the EA calls are 8-byte aligned whatever
++// their size: an unaligned one makes the call fail with ERROR_NOACCESS, and a
++// []byte from make is aligned only some of the time.
++func TestAlignedBuffer(t *testing.T) {
++	f := filepath.Join(t.TempDir(), "f")
++	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(f+":s", []byte("12345"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	h, err := openMetaHandle(f)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer windows.CloseHandle(h)
++	base := alignedBuffer(4096 + 1)
++	if err := windows.GetFileInformationByHandleEx(h, windows.FileStreamInfo, &base[1], 4096); err != windows.ERROR_NOACCESS {
++		t.Logf("unaligned buffer: %v (expected ERROR_NOACCESS)", err)
++	}
++	if s := streamNames(h); len(s) != 1 || s[0].name != "s" || s[0].size != 5 {
++		t.Errorf("streamNames = %+v", s)
++	}
++
++	var keep [][]byte
++	for n := 1; n < 4096; n += 7 {
++		b := alignedBuffer(n)
++		if len(b) != n {
++			t.Fatalf("len %d, want %d", len(b), n)
++		}
++		if p := uintptr(unsafe.Pointer(&b[0])); p%8 != 0 {
++			t.Fatalf("buffer of %d bytes at %#x is not 8-byte aligned", n, p)
++		}
++		keep = append(keep, b, make([]byte, n%5+1)) // odd allocations in between
++	}
++	_ = keep
++}
++
++// The EA buffer aligns every entry on 4 bytes and ends with offset 0.
++func TestBuildEABuffer(t *testing.T) {
++	b := buildEABuffer([]EAEntry{{Name: "A", Value: []byte("1")}, {Name: "BB", Value: []byte("22")}, {Name: ""}})
++	first := int(b[0]) | int(b[1])<<8
++	if first%4 != 0 || first == 0 {
++		t.Fatalf("first NextEntryOffset %d", first)
++	}
++	if b[first+5] != 2 || string(b[first+8:first+10]) != "BB" {
++		t.Errorf("second entry: % x", b[first:])
++	}
++	if b[first] != 0 || b[first+1] != 0 {
++		t.Errorf("last entry's offset is not 0")
++	}
++}
+diff --git a/gui/frontend/src/App.jsx b/gui/frontend/src/App.jsx
+index 6ca196b..14d4fde 100644
+--- a/gui/frontend/src/App.jsx
++++ b/gui/frontend/src/App.jsx
+@@ -191,7 +191,7 @@ function App() {
+     overwrite: false,
+     timestamps: true,
+     acls: false, // opt-in — off by default even though the ACL/attributes sidecar now exists
+-    ads: false   // disabled in UI until an ADS sidecar lands
++    ads: true    // alternate data streams and NTFS extended attributes (Windows)
+   })
+   const [restoreLoading, setRestoreLoading] = useState(false)
+   const [restoreProgress, setRestoreProgress] = useState(0)
+@@ -3042,9 +3042,13 @@ function App() {
+                     />
+                     {t('optionACLs')}
+                   </label>
+-                  <label style={{display: 'flex', alignItems: 'center', gap: '6px', opacity: 0.5}} title={t('optionComingSoon')}>
+-                    <input type="checkbox" disabled checked={false} />
+-                    {t('optionADS')} <span style={{fontSize: '11px'}}>({t('comingSoon')})</span>
++                  <label style={{display: 'flex', alignItems: 'center', gap: '6px'}}>
++                    <input
++                      type="checkbox"
++                      checked={restoreOptions.ads}
++                      onChange={(e) => setRestoreOptions(o => ({...o, ads: e.target.checked}))}
++                    />
++                    {t('optionADS')}
+                   </label>
+                 </div>
+ 
+diff --git a/gui/main.go b/gui/main.go
+index b6aca62..093aa98 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -1972,9 +1972,9 @@ func (a *App) GetSnapshotMeta(pbsID, backupID string, snapshotUnix int64) (*Back
+ //     destPath/<basename>.
+ //
+ // includePaths uses archive-style paths (forward slash). When empty the entire
+-// snapshot is restored. The ACL/ADS/timestamps flags are accepted today but
+-// only timestamps is effective — the per-file NTFS sidecar required for the
+-// other two is still on the roadmap.
++// snapshot is restored. restoreACLs (NTFS ACLs/attributes on Windows, POSIX
++// ACLs/xattrs on Linux) and restoreADS (alternate data streams and NTFS
++// extended attributes, Windows) take effect; timestamps are always restored.
+ //
+ // Progress is streamed to the frontend via the "restore:progress" event;
+ // completion via "restore:complete".
+diff --git a/gui/restore_inline.go b/gui/restore_inline.go
+index b4b7885..6354b58 100644
+--- a/gui/restore_inline.go
++++ b/gui/restore_inline.go
+@@ -35,10 +35,11 @@ const (
+ // descendants. Paths use forward slashes (archive style); backslashes are
+ // accepted and normalized.
+ //
+-// RestoreACLs / RestoreADS / RestoreTimestamps are reserved for the upcoming
+-// NTFS sidecar work — accepted today so the API surface is stable, but only
+-// RestoreTimestamps has any effect (always-on: mtime is restored). The other
+-// two are no-ops until the per-file .proxmox_meta sidecar lands.
++// RestoreACLs re-applies the captured NTFS ACLs/attributes (Windows) or POSIX
++// ACLs/xattrs (Linux) from the snapshot's metadata blob. RestoreADS writes back
++// the alternate data streams and NTFS extended attributes recorded there
++// (Windows). Modification times are always restored, and on Windows creation
++// times too; RestoreTimestamps is kept for symmetry.
+ type RestoreOptions struct {
+ 	BaseURL         string
+ 	AuthID          string
+@@ -68,8 +69,8 @@ type RestoreOptions struct {
+ 
+ 	IncludePaths      []string
+ 	Overwrite         bool
+-	RestoreACLs       bool // reserved — requires NTFS sidecar
+-	RestoreADS        bool // reserved — requires NTFS sidecar
++	RestoreACLs       bool // NTFS ACLs/attributes (Windows) or POSIX ACLs/xattrs (Linux)
++	RestoreADS        bool // alternate data streams and NTFS extended attributes (Windows)
+ 	RestoreTimestamps bool // mtime is always restored; flag kept for symmetry
+ 
+ 	OnProgress func(percent float64, message string)
+@@ -769,12 +770,14 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
+ 	// Re-apply captured ACLs/attributes now that the files are actually on
+ 	// disk. Best-effort per file: an apply failure is logged, never fails
+ 	// the restore — the file's content is already safely on disk regardless.
+-	// The extraction has already set the modification times, folders' last,
+-	// and nothing below writes file data, so they stay as restored.
++	// The extraction has already set the modification times, folders' last.
++	// Only writing a stream or EA below changes one, and it is set back.
++	restoreStreams := opts.RestoreADS && runtime.GOOS == "windows"
+ 	if aclMeta != nil {
+ 		entryIdx := buildFileMetaIndex(aclMeta)
+ 		applied, failed := 0, 0
+ 		cApplied, cFailed := 0, 0
++		sWritten, sSkipped, sFailed, eaFiles := 0, 0, 0, 0
+ 		for _, f := range extracted {
+ 			if f.Skipped || f.ArchivePath == "" {
+ 				continue
+@@ -783,7 +786,26 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
+ 			if !ok {
+ 				continue
+ 			}
+-			// Creation time first: the ACL applied next may take away the
++			// Alternate data streams and extended attributes first, while the
++			// file is still writable (the attributes and ACL come last).
++			if restoreStreams && (len(entry.Streams) > 0 || len(entry.EAs) > 0) {
++				before, statErr := os.Lstat(f.Path)
++				w, sk, serr := writeStreamsAndEAs(f.Path, entry.Streams, entry.EAs)
++				sWritten += w
++				sSkipped += sk
++				if serr != nil {
++					sFailed++
++					if sFailed <= 50 {
++						writeBackupLog(fmt.Sprintf("Alternate data streams or extended attributes not all restored on %s: %v", f.Path, serr))
++					}
++				} else if len(entry.EAs) > 0 {
++					eaFiles++
++				}
++				if statErr == nil && (w > 0 || len(entry.EAs) > 0) {
++					_ = os.Chtimes(f.Path, before.ModTime(), before.ModTime())
++				}
++			}
++			// Creation time next: the ACL applied after may take away the
+ 			// right to change it.
+ 			if restoreCreated && entry.Created > 0 {
+ 				if cerr := applyCreationTime(f.Path, entry.Created); cerr != nil {
+@@ -805,6 +827,10 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
+ 				applied++
+ 			}
+ 		}
++		if sWritten+sSkipped+sFailed+eaFiles > 0 {
++			writeBackupLog(fmt.Sprintf("Alternate data streams: %d restored, %d recorded by name only (not restored); extended attributes restored on %d files; %d files failed",
++				sWritten, sSkipped, eaFiles, sFailed))
++		}
+ 		if cApplied > 0 || cFailed > 0 {
+ 			writeBackupLog(fmt.Sprintf("Creation times: applied %d, failed %d", cApplied, cFailed))
+ 		}
+@@ -813,12 +839,6 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
+ 		}
+ 	}
+ 
+-	if opts.RestoreADS {
+-		// Reserved option — no ADS sidecar exists. Log the request so it
+-		// shows up in support transcripts.
+-		writeBackupLog("NOTE: ADS restore requested but not yet implemented (no ADS sidecar exists)")
+-	}
+-
+ 	progress(1.0, "Restore completed")
+ 
+ 	// v2-H-09: a selective restore is a success only if at least one REQUESTED path
+diff --git a/gui/zz_e2e_ntfs_meta_livetest_windows_test.go b/gui/zz_e2e_ntfs_meta_livetest_windows_test.go
+index 9260574..6722887 100644
+--- a/gui/zz_e2e_ntfs_meta_livetest_windows_test.go
++++ b/gui/zz_e2e_ntfs_meta_livetest_windows_test.go
+@@ -3,6 +3,7 @@
+ package main
+ 
+ import (
++	"bytes"
+ 	"fmt"
+ 	"os"
+ 	"path/filepath"
+@@ -165,3 +166,161 @@ func TestE2ENTFSMetaCreationTimes(t *testing.T) {
+ 		t.Logf("%s: %d creation times checked", label, len(created))
+ 	})
+ }
++
++// Alternate data streams (on files and a folder, an empty one, one too large
++// to record) and extended attributes come back when RestoreADS is set and not
++// otherwise; the modification and creation times stay as backed up although
++// writing a stream changes them, and the read-only attribute is applied after
++// the streams.
++func TestE2ENTFSMetaStreams(t *testing.T) {
++	e2eNTFSServerFromEnv(t)
++	src := filepath.Join(t.TempDir(), "ntfs-streams-src")
++	must := func(err error) {
++		t.Helper()
++		if err != nil {
++			t.Fatal(err)
++		}
++	}
++	mk := func(rel, data string) string {
++		t.Helper()
++		p := filepath.Join(src, filepath.FromSlash(rel))
++		must(os.MkdirAll(filepath.Dir(p), 0o755))
++		must(os.WriteFile(p, []byte(data), 0o644))
++		return p
++	}
++	zone := "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://example.com/\r\nHostUrl=https://example.com/setup.exe\r\n"
++	mk("e2e-marker.txt", "marker")
++	setup := mk("downloads/setup.exe", "an installer")
++	mk("downloads/setup.exe:Zone.Identifier", zone)
++	two := mk("downloads/two streams.docx", "a document")
++	mk("downloads/two streams.docx:Zone.Identifier", zone)
++	mk("downloads/two streams.docx:com.dropbox.attrs", "\x00\x01dropbox")
++	mk("downloads/two streams.docx:empty", "")
++	bigFile := mk("big stream.bin", "x")
++	must(os.WriteFile(bigFile+":huge", bytes.Repeat([]byte("h"), maxStreamBytes+10), 0o644))
++	folder := filepath.Join(src, "folder with stream")
++	must(os.MkdirAll(folder, 0o755))
++	must(os.WriteFile(folder+":folderinfo", []byte("on the folder"), 0o644))
++	wsl := mk("wsl/linux file", "from WSL")
++	must(setEAs(wsl, []EAEntry{{Name: "$LXUID", Value: []byte{0xe8, 0x03, 0, 0}}, {Name: "$LXMOD", Value: []byte{0xa4, 0x81, 0, 0}}, {Name: "USER.NOTE", Value: []byte("hello")}}))
++	ro := mk("readonly with stream.txt", "read only")
++	mk("readonly with stream.txt:note", "stream on a read-only file")
++
++	old := time.Date(2015, 3, 4, 5, 6, 7, 0, time.UTC)
++	created := time.Date(2004, 5, 6, 7, 8, 9, 0, time.UTC)
++	for _, p := range []string{setup, two, bigFile, wsl, ro, folder} {
++		setCreatedForTest(t, p, created)
++		must(os.Chtimes(p, old, old))
++	}
++	must(os.Chmod(ro, 0o444))
++
++	// What a restore with streams must bring back, read from the source.
++	type want struct {
++		streams        map[string]string
++		eas            map[string]string
++		mtime, created time.Time
++	}
++	expect := map[string]want{}
++	filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
++		must(err)
++		rel, _ := filepath.Rel(src, p)
++		if rel == "." {
++			return nil
++		}
++		budget := int64(maxStreamBytesTotal)
++		ss, eas, rerr := readStreamsAndEAs(p, &budget)
++		must(rerr)
++		w := want{streams: map[string]string{}, eas: map[string]string{}, mtime: info.ModTime(), created: readCreatedForTest(t, p)}
++		for _, s := range ss {
++			if s.Skipped == "" {
++				w.streams[s.Name] = string(s.Data)
++			} else {
++				w.streams[s.Name] = "(not recorded)"
++			}
++		}
++		for _, e := range eas {
++			w.eas[e.Name] = string(e.Value)
++		}
++		expect[filepath.ToSlash(rel)] = w
++		return nil
++	})
++	if len(expect["wsl/linux file"].eas) != 3 || len(expect["downloads/two streams.docx"].streams) != 3 ||
++		expect["big stream.bin"].streams["huge"] != "(not recorded)" {
++		t.Fatalf("source not set up: %+v", expect)
++	}
++
++	e2eNTFSBackupRestore(t, "streams", src, map[string]RestoreOptions{
++		"streams and ACLs": {RestoreACLs: true, RestoreADS: true},
++		"streams, no ACLs": {RestoreADS: true},
++		"streams unticked": {RestoreACLs: true},
++	}, func(label, root string) {
++		skip := label == "streams unticked"
++		bad, nStreams, nEAs := 0, 0, 0
++		for rel, w := range expect {
++			p := filepath.Join(root, filepath.FromSlash(rel))
++			info, err := os.Stat(p)
++			if err != nil {
++				t.Errorf("%s: %s missing: %v", label, rel, err)
++				bad++
++				continue
++			}
++			budget := int64(maxStreamBytesTotal)
++			ss, eas, _ := readStreamsAndEAs(p, &budget)
++			got := map[string]string{}
++			for _, s := range ss {
++				got[s.Name] = string(s.Data)
++			}
++			for name, data := range w.streams {
++				g, ok := got[name]
++				switch {
++				case skip && ok:
++					t.Errorf("%s: %s:%s restored although RestoreADS is off", label, rel, name)
++					bad++
++				case skip:
++				case data == "(not recorded)" && ok:
++					t.Errorf("%s: %s:%s (too large to record) exists after restore", label, rel, name)
++					bad++
++				case data != "(not recorded)" && (!ok || g != data):
++					t.Errorf("%s: %s:%s = %q, %v; want %q", label, rel, name, g, ok, data)
++					bad++
++				case ok:
++					nStreams++
++				}
++			}
++			gotEA := map[string]string{}
++			for _, e := range eas {
++				gotEA[e.Name] = string(e.Value)
++			}
++			for name, v := range w.eas {
++				if skip {
++					if _, ok := gotEA[name]; ok {
++						t.Errorf("%s: %s EA %s restored although RestoreADS is off", label, rel, name)
++						bad++
++					}
++				} else if gotEA[name] != v {
++					t.Errorf("%s: %s EA %s = %q; want %q", label, rel, name, gotEA[name], v)
++					bad++
++				} else {
++					nEAs++
++				}
++			}
++			// Whole seconds: the archive stores seconds. A stream write
++			// changing the time would show as the time of the restore.
++			if info.ModTime().Unix() != w.mtime.Unix() {
++				t.Errorf("%s: %s modification time %v; want %v", label, rel, info.ModTime().UTC(), w.mtime.UTC())
++				bad++
++			}
++			if c := readCreatedForTest(t, p); !c.Equal(w.created) {
++				t.Errorf("%s: %s creation time %v; want %v", label, rel, c.UTC(), w.created.UTC())
++				bad++
++			}
++		}
++		if label != "streams, no ACLs" {
++			if info, err := os.Stat(filepath.Join(root, "readonly with stream.txt")); err == nil && info.Mode().Perm()&0o200 != 0 {
++				t.Errorf("%s: read-only attribute not restored", label)
++				bad++
++			}
++		}
++		t.Logf("%s: %d paths checked, %d streams and %d EAs restored, %d problems", label, len(expect), nStreams, nEAs, bad)
++	})
++}
+-- 
+2.47.3
+

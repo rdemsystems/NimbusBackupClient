@@ -71,6 +71,12 @@ type Config struct {
 	// at the same time (default 1, one after the other). No upper limit; the
 	// recommended value is the number of CPUs / 4 (RecommendedParallel).
 	Parallel int `json:"parallel"`
+
+	// NoMTime records 0 (1970-01-01) as every file's and folder's time instead
+	// of the real one, so entries whose time changes but whose content does not
+	// leave the archive bytes, and so its chunks, unchanged. Restored items get
+	// 1970-01-01.
+	NoMTime bool `json:"no-mtime"`
 }
 
 // RecommendedParallel is the suggested -parallel value: CPUs / 4, at least 1.
@@ -164,6 +170,7 @@ func loadConfig() *Config {
 	noVSSFlag := flag.Bool("novss", false, "Disable VSS ( For filesystems that don't support it, for example veracrypt )")
 	keyFileFlag := flag.String("keyfile", "", "Path to a Proxmox Backup Server encryption key file (encrypts chunks and signs the manifest; same format as proxmox-backup-client key create)")
 	keyFilePassphraseFlag := flag.String("keyfile-passphrase", "", "Passphrase for a scrypt/PBKDF2 protected -keyfile (prompted for when omitted)")
+	noMTimeFlag := flag.Bool("no-mtime", false, "Record 1970-01-01 as every file and folder time instead of the real one, so time-only changes (a folder whose contents come and go) do not change the archive and re-upload its chunks; restored items get 1970-01-01 (advanced, optional)")
 
 	mailHostFlag := flag.String("mail-host", "", "mail notification system: mail server host(optional)")
 	mailPortFlag := flag.String("mail-port", "", "mail notification system: mail server port(optional)")
@@ -252,6 +259,9 @@ func loadConfig() *Config {
 	}
 	if *keyFilePassphraseFlag != "" {
 		config.KeyFilePassphrase = *keyFilePassphraseFlag
+	}
+	if *noMTimeFlag {
+		config.NoMTime = true
 	}
 
 	initSmtpConfigIfNeeded := func() {
