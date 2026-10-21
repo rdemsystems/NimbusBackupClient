@@ -1,7 +1,7 @@
 From 5966d1a3d2c3424727f830ec63d7c8e45dd0dff8 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 17:40:14 +0200
-Subject: [PATCH 106/108] pbscommon: keep x/net's http2.Transport for the PBS
+Subject: [PATCH 106/120] pbscommon: keep x/net's http2.Transport for the PBS
  session, said why
 
 x/net v0.61.0 deprecates http2.Transport for net/http's http.ClientConn

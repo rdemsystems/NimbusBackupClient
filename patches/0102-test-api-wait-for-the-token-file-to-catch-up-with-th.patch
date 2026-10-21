@@ -1,7 +1,7 @@
 From 4beb4be667f429b0d2764b4314f6994ed394bd1d Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 17:32:42 +0200
-Subject: [PATCH 102/108] test(api): wait for the token file to catch up with
+Subject: [PATCH 102/120] test(api): wait for the token file to catch up with
  the rotated token
 
 Rotate installs the new token on the server first and rewrites the file

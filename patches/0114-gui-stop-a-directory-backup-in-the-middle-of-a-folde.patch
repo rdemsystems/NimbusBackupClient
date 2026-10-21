@@ -1,0 +1,322 @@
+From c2b465a9a53441e02be90438302ce98e0ba1e75c Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 21 Oct 2026 12:06:48 +0200
+Subject: [PATCH 114/120] gui: stop a directory backup in the middle of a
+ folder on cancel
+
+The Stop button was only honoured between two folders: the PXAR walk
+ignored the cancel, so a backup of one large folder ran to its end.
+
+PXARArchive gets a Cancelled hook, checked before every 64 KiB block it
+writes; once it fires the walk returns ErrWriteCancelled. backupReal sets
+it from the run's context, checks again before closing the indexes, and
+the chunk upload retries now derive from that context. The directory
+loop then drops the session instead of finishing it, so nothing of the
+interrupted folder is committed, and reports the run as cancelled.
+
+Reported in rdemsystems/NimbusBackupClient#12.
+---
+ gui/backup_inline.go          | 59 +++++++++++++++++++-----
+ pbscommon/pxar.go             | 16 ++++++-
+ pbscommon/pxar_cancel_test.go | 84 +++++++++++++++++++++++++++++++++++
+ 3 files changed, 147 insertions(+), 12 deletions(-)
+ create mode 100644 pbscommon/pxar_cancel_test.go
+
+diff --git a/gui/backup_inline.go b/gui/backup_inline.go
+index 335f386..031b606 100644
+--- a/gui/backup_inline.go
++++ b/gui/backup_inline.go
+@@ -99,9 +99,9 @@ var (
+ )
+ 
+ // Current in-flight backup cancellation. The GUI's Stop button calls
+-// CancelBackup() which cancels this context at a safe point (between
+-// directories / between retries), so the running backup aborts gracefully
+-// without committing a partial snapshot.
++// CancelBackup() which cancels this context. The archive writer checks it at
++// every write, so the folder being backed up stops at once and its session is
++// dropped without committing a partial snapshot.
+ var (
+ 	currentBackupCancelMutex sync.Mutex
+ 	currentBackupCancel      context.CancelFunc
+@@ -229,6 +229,10 @@ type ChunkState struct {
+ 	totalSize           *atomic.Uint64 // Total size, updated by background scan
+ 	uploadErrors        []string       // Collect upload errors to report at the end
+ 	errorsMutex         sync.Mutex     // Protect uploadErrors slice
++
++	// cancelCtx is the Stop button's context: it ends the upload retries.
++	// nil = never cancelled.
++	cancelCtx context.Context
+ }
+ 
+ func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, failedchunk *atomic.Uint64, knownChunks *haxmap.Map[string, bool], onProgress func(float64, string), totalSize *atomic.Uint64, onStats func(*BackupProgressStats), currentDir string) {
+@@ -256,6 +260,15 @@ func (c *ChunkState) Init(newchunk *atomic.Uint64, reusechunk *atomic.Uint64, fa
+ 	c.uploadErrors = make([]string, 0)
+ }
+ 
++// retryParent is the context the chunk upload retries derive from: the Stop
++// button's one when set, so a cancel ends the retries and their waits.
++func (c *ChunkState) retryParent() context.Context {
++	if c.cancelCtx != nil {
++		return c.cancelCtx
++	}
++	return context.Background()
++}
++
+ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
+ 	chunkpos := c.C.Scan(b)
+ 
+@@ -281,7 +294,7 @@ func (c *ChunkState) HandleData(b []byte, client *pbscommon.PBSClient) error {
+ 				chunkData := c.currentChunk // Capture for closure
+ 				retryConfig := retry.DefaultConfig()
+ 				retryConfig.MaxAttempts = 5 // More retries for chunk uploads
+-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
++				ctx, cancel := context.WithTimeout(c.retryParent(), 5*time.Minute)
+ 				defer cancel()
+ 
+ 				err := retry.DoWithJitter(ctx, retryConfig, retry.DefaultRetryable, func() error {
+@@ -416,7 +429,7 @@ func (c *ChunkState) EOF(client *pbscommon.PBSClient) error {
+ 			chunkData := c.currentChunk
+ 			retryConfig := retry.DefaultConfig()
+ 			retryConfig.MaxAttempts = 5
+-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
++			ctx, cancel := context.WithTimeout(c.retryParent(), 5*time.Minute)
+ 			defer cancel()
+ 
+ 			err := retry.DoWithJitter(ctx, retryConfig, retry.DefaultRetryable, func() error {
+@@ -1014,9 +1027,9 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
+ 				err = fmt.Errorf("no VSS snapshot was taken for %s", dir)
+ 			case opts.snapshotPath != "":
+ 				// Folder of a multi-folder batch: read the batch's snapshot.
+-				dirBytes, err = backupReal(client, &newchunk, &reusechunk, &failedchunk, opts.snapshotPath, dir, true, progress, opts.OnStats, opts.ExcludeList)
++				dirBytes, err = backupReal(opts.Ctx, client, &newchunk, &reusechunk, &failedchunk, opts.snapshotPath, dir, true, progress, opts.OnStats, opts.ExcludeList)
+ 			default:
+-				dirBytes, err = backupDirectory(client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
++				dirBytes, err = backupDirectory(opts.Ctx, client, &newchunk, &reusechunk, &failedchunk, dir, opts.UseVSS, progress, opts.OnStats, opts.ExcludeList)
+ 			}
+ 			if err == nil {
+ 				break
+@@ -1061,6 +1074,20 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
+ 			}
+ 		}
+ 
++		// Cancelled in the middle of this directory: drop its session (already
++		// done above on an error) instead of finishing it, so nothing of it is
++		// committed. Stop here like a cancel between two directories does.
++		if opts.Ctx != nil && opts.Ctx.Err() != nil {
++			if err == nil {
++				client.Close()
++			}
++			writeBackupLog(fmt.Sprintf("Cancellation requested during backup of %s — stopped, not committed", dir))
++			if opts.OnComplete != nil {
++				opts.OnComplete(false, "Backup cancelled by user")
++			}
++			return machinebackuplib.ErrCancelled
++		}
++
+ 		// Capture this directory's lists before the next directory's Connect() resets
+ 		// them on the shared client (v2-H-02 / M-01).
+ 		allReadErrors = append(allReadErrors, client.ReadErrors...)
+@@ -1312,7 +1339,7 @@ func runMachineBackupInline(opts BackupOptions) error {
+ 	return nil
+ }
+ 
+-func backupDirectory(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, usevss bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) (uint64, error) {
++func backupDirectory(ctx context.Context, client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, usevss bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) (uint64, error) {
+ 	writeBackupLog(fmt.Sprintf("Starting backup of %s", backupdir))
+ 	originalPath := backupdir
+ 
+@@ -1324,16 +1351,16 @@ func backupDirectory(client *pbscommon.PBSClient, newchunk, reusechunk, failedch
+ 				break
+ 			}
+ 			var e error
+-			bytesArchived, e = backupReal(client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress, onStats, excludeList)
++			bytesArchived, e = backupReal(ctx, client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress, onStats, excludeList)
+ 			return e
+ 		})
+ 		return bytesArchived, err
+ 	}
+ 
+-	return backupReal(client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress, onStats, excludeList)
++	return backupReal(ctx, client, newchunk, reusechunk, failedchunk, backupdir, originalPath, usevss, progress, onStats, excludeList)
+ }
+ 
+-func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, originalPath string, vssUsed bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) (returnBytes uint64, returnErr error) {
++func backupReal(cancelCtx context.Context, client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *atomic.Uint64, backupdir string, originalPath string, vssUsed bool, progress func(float64, string), onStats func(*BackupProgressStats), excludeList []string) (returnBytes uint64, returnErr error) {
+ 	// Panic recovery - critical to prevent silent crashes during backup
+ 	defer func() {
+ 		if r := recover(); r != nil {
+@@ -1371,6 +1398,9 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
+ 	archive.ArchiveName = "backup.pxar.didx"
+ 	archive.ExcludeList = excludeList
+ 	archive.ExcludeRoot = originalPath // logical root for VSS-safe absolute-pattern matching
++	if cancelCtx != nil {
++		archive.Cancelled = func() bool { return cancelCtx.Err() != nil }
++	}
+ 
+ 	// Inject backup metadata into the PXAR archive root
+ 	hostname, _ := os.Hostname()
+@@ -1411,6 +1441,8 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
+ 
+ 	pcat1Chunk := ChunkState{}
+ 	pcat1Chunk.Init(newchunk, reusechunk, failedchunk, knownChunks, nil, totalSize, nil, "")
++	pxarChunk.cancelCtx = cancelCtx
++	pcat1Chunk.cancelCtx = cancelCtx
+ 
+ 	pxarChunk.wrid, err = client.CreateDynamicIndex(archive.ArchiveName)
+ 	if err != nil {
+@@ -1462,6 +1494,11 @@ func backupReal(client *pbscommon.PBSClient, newchunk, reusechunk, failedchunk *
+ 		return 0, fmt.Errorf("backup produced 0 bytes for %s — directory may be empty, inaccessible, or all files were excluded", backupdir)
+ 	}
+ 
++	// A cancel that lands after the last archive write: stop before closing
++	// the indexes, so the session is dropped with nothing committed.
++	if cancelCtx != nil && cancelCtx.Err() != nil {
++		return 0, pbscommon.ErrWriteCancelled
++	}
+ 	if err = pxarChunk.EOF(client); err != nil {
+ 		return 0, err
+ 	}
+diff --git a/pbscommon/pxar.go b/pbscommon/pxar.go
+index b65b31c..78581c2 100644
+--- a/pbscommon/pxar.go
++++ b/pbscommon/pxar.go
+@@ -3,6 +3,7 @@ package pbscommon
+ import (
+ 	"bytes"
+ 	"encoding/binary"
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"math/bits"
+@@ -302,6 +303,11 @@ func ca_make_bst(input []GoodByeItem, output *[]GoodByeItem) {
+ 
+ type PXAROutCB func([]byte) error
+ 
++// ErrWriteCancelled is returned by WriteDir and WriteFile once
++// PXARArchive.Cancelled reports true. The archive is then incomplete: the
++// caller must drop the backup session instead of finishing it.
++var ErrWriteCancelled = errors.New("archive write cancelled")
++
+ // MetaCollector is an optional hook invoked during the PXAR walk for every
+ // directory and regular file that is actually being backed up (after skip
+ // checks). Implementations capture per-entry metadata that PXAR itself cannot
+@@ -367,6 +373,12 @@ type PXARArchive struct {
+ 	// and loses temporary files) otherwise re-upload the chunks around every such
+ 	// entry. Restored items then get 1970-01-01.
+ 	NoMTime bool
++
++	// Cancelled, if set, is checked before every write of the archive (at
++	// least every 64 KiB). Once it returns true the walk stops
++	// with ErrWriteCancelled, so a cancel no longer waits for the end of a
++	// large folder or file.
++	Cancelled func() bool
+ }
+ 
+ // entryMTime is the time recorded for an entry: the real one, or 0 with NoMTime.
+@@ -382,9 +394,11 @@ func (a *PXARArchive) entryMTime(info os.FileInfo) uint64 {
+ //It is useful when we building a data structure and we need to keep a specific offset and output it only at the end
+ 
+ func (a *PXARArchive) Flush() error {
+-
+ 	b := make([]byte, 64*1024)
+ 	for {
++		if a.Cancelled != nil && a.Cancelled() {
++			return ErrWriteCancelled
++		}
+ 		count, _ := a.buffer.Read(b)
+ 		if count <= 0 {
+ 			break
+diff --git a/pbscommon/pxar_cancel_test.go b/pbscommon/pxar_cancel_test.go
+new file mode 100644
+index 0000000..f20a239
+--- /dev/null
++++ b/pbscommon/pxar_cancel_test.go
+@@ -0,0 +1,84 @@
++package pbscommon
++
++import (
++	"bytes"
++	"errors"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++// A cancel stops the walk inside a file, not at the end of the folder: the
++// write fails with ErrWriteCancelled long before the whole file is written.
++func TestPXARCancelStopsInsideAFile(t *testing.T) {
++	root := t.TempDir()
++	big := bytes.Repeat([]byte("x"), 4<<20)
++	if err := os.WriteFile(filepath.Join(root, "big.bin"), big, 0644); err != nil {
++		t.Fatal(err)
++	}
++	makeTimedTree(t, root)
++
++	var written int
++	cancelled := false
++	archive := &PXARArchive{ArchiveName: "backup.pxar.didx"}
++	archive.WriteCB = func(b []byte) error {
++		written += len(b)
++		// Cancel once 1 MiB of big.bin is out.
++		if written > 1<<20 {
++			cancelled = true
++		}
++		return nil
++	}
++	archive.CatalogWriteCB = func(b []byte) error { return nil }
++	archive.Cancelled = func() bool { return cancelled }
++	archive.Create()
++
++	_, err := archive.WriteDir(root, "", true)
++	if !errors.Is(err, ErrWriteCancelled) {
++		t.Fatalf("WriteDir error = %v, want ErrWriteCancelled", err)
++	}
++	if written >= len(big) {
++		t.Errorf("%d bytes written after the cancel, the file was not interrupted", written)
++	}
++}
++
++// A write buffered in one go (a virtual file here) is cut at the next 64 KiB
++// block too, not drained to the end.
++func TestPXARCancelStopsInsideABufferedWrite(t *testing.T) {
++	payload := bytes.Repeat([]byte("m"), 1<<20)
++
++	var written int
++	archive := &PXARArchive{ArchiveName: "backup.pxar.didx"}
++	archive.WriteCB = func(b []byte) error { written += len(b); return nil }
++	// The first block goes out, the cancel lands during it.
++	archive.Cancelled = func() bool { return written > 0 }
++	archive.Create()
++
++	_, err := archive.WriteVirtualFile("meta.json", payload, 0)
++	if !errors.Is(err, ErrWriteCancelled) {
++		t.Fatalf("WriteVirtualFile error = %v, want ErrWriteCancelled", err)
++	}
++	if written != 64*1024 {
++		t.Errorf("%d bytes written, want exactly one 64 KiB block before the cancel", written)
++	}
++}
++
++// Without a cancel the hook changes nothing.
++func TestPXARCancelHookUnsetOrFalse(t *testing.T) {
++	root := t.TempDir()
++	makeTimedTree(t, root)
++	want, _ := writeTestArchive(t, root, false)
++
++	var p bytes.Buffer
++	archive := &PXARArchive{ArchiveName: "backup.pxar.didx"}
++	archive.WriteCB = func(b []byte) error { p.Write(b); return nil }
++	archive.CatalogWriteCB = func(b []byte) error { return nil }
++	archive.Cancelled = func() bool { return false }
++	archive.Create()
++	if _, err := archive.WriteDir(root, "", true); err != nil {
++		t.Fatalf("WriteDir: %v", err)
++	}
++	if !bytes.Equal(p.Bytes(), want) {
++		t.Error("an archive with a Cancelled hook that never fires differs from one without")
++	}
++}
+-- 
+2.47.3
+

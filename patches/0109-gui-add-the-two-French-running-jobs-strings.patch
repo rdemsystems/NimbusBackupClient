@@ -1,0 +1,36 @@
+From 0b4256690e7bdf5db2ec5cd4d349f9a0e18ebeb1 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 21 Oct 2026 07:28:29 +0200
+Subject: [PATCH 109/120] gui: add the two French running-jobs strings
+
+The fr block lacked runningJobsCount and noRunningJobs, so the French
+Running tab showed the raw key "noRunningJobs" when nothing was running
+(there is no fallback to English). Also drop a duplicate
+statusCancelRequested entry in the same block.
+---
+ gui/frontend/src/i18n/translations.js | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/gui/frontend/src/i18n/translations.js b/gui/frontend/src/i18n/translations.js
+index 8e3c26f..9025573 100644
+--- a/gui/frontend/src/i18n/translations.js
++++ b/gui/frontend/src/i18n/translations.js
+@@ -391,13 +391,14 @@ const translations = {
+       statusSchedulingUnavailable: "Fonction de planification non disponible",
+       statusBackupStarting: "Démarrage de la sauvegarde...",
+       statusBackupRunning: "Sauvegarde en cours...",
+-      statusCancelRequested: "Demande d'annulation envoyée...",
+       statusRestoring: "Restauration du snapshot {time}...",
+       statusRestoreComplete: "Restauration terminée !",
+       statusJobDeleted: "Job supprimé",
+       statusJobStarted: "Lancement du job « {name} »",
+       statusEditCancelled: "Édition annulée",
+       runningJobs: "Sauvegardes en cours",
++      runningJobsCount: "{count} sur {total} sauvegardes en cours",
++      noRunningJobs: "Aucune sauvegarde en cours",
+       cancelJob: "Annuler",
+       statusCancelRequested: "Demande d'annulation envoyée...",
+       statusError: "Erreur:",
+-- 
+2.47.3
+

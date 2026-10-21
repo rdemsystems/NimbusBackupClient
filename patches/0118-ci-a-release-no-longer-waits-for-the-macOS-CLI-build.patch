@@ -1,0 +1,103 @@
+From 6a619ac7b4e26eb460ad856d325303d42a3c43fd Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 21 Oct 2026 17:48:14 +0200
+Subject: [PATCH 118/120] ci: a release no longer waits for the macOS CLI build
+
+GitHub's macOS runners were not available for hours ("The job was not
+acquired by Runner of type hosted even after multiple attempts"), and
+the release job needed every CLI build, so a Windows release could not
+go out. Windows and Linux are the targets: the macOS CLI is now its own
+job, build-cli-macos. The release waits for it to end but not for it to
+succeed, and attaches the macOS archive only when the build produced it.
+---
+ .github/workflows/build-and-release.yml | 48 +++++++++++++++++++++----
+ 1 file changed, 42 insertions(+), 6 deletions(-)
+
+diff --git a/.github/workflows/build-and-release.yml b/.github/workflows/build-and-release.yml
+index 6a4caa1..dfd4585 100644
+--- a/.github/workflows/build-and-release.yml
++++ b/.github/workflows/build-and-release.yml
+@@ -290,12 +290,14 @@ jobs:
+     uses: ./.github/workflows/e2e.yml
+ 
+   # Build CLI for all platforms
++  # Windows and Linux are the targets: a release waits for both. macOS is
++  # built by build-cli-macos below, which a release does not depend on.
+   build-cli:
+     name: Build CLI
+     needs: [security, test, test-modules]
+     strategy:
+       matrix:
+-        os: [ubuntu-latest, windows-latest, macos-latest]
++        os: [ubuntu-latest, windows-latest]
+     runs-on: ${{ matrix.os }}
+ 
+     steps:
+@@ -316,6 +318,34 @@ jobs:
+           name: cli-${{ runner.os }}
+           path: dist/proxmoxbackup-*
+ 
++  # macOS CLI: built and attached to a release when GitHub has a macOS
++  # runner for it, but not a release target. Its runners are sometimes not
++  # available for hours ("not acquired by Runner"); that must not hold a
++  # Windows release back.
++  build-cli-macos:
++    name: Build CLI (macOS, not blocking)
++    needs: [security, test, test-modules]
++    runs-on: macos-latest
++    timeout-minutes: 30
++
++    steps:
++      - uses: actions/checkout@v5
++
++      - uses: actions/setup-go@v6
++        with:
++          go-version: ${{ env.GO_VERSION }}
++
++      - name: Build CLI
++        env:
++          GOWORK: off
++        run: make cli
++
++      - name: Upload CLI artifacts
++        uses: actions/upload-artifact@v6
++        with:
++          name: cli-${{ runner.os }}
++          path: dist/proxmoxbackup-*
++
+   # Build GUI (Windows only for now)
+   build-gui:
+     name: Build GUI
+@@ -738,8 +768,10 @@ jobs:
+   # Create release on tag
+   release:
+     name: Create Release
+-    if: startsWith(github.ref, 'refs/tags/v')
+-    needs: [build-cli, build-gui, e2e]
++    # Waits for build-cli-macos to end, whatever its result: the macOS
++    # archive is attached only when that build produced it.
++    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.build-cli.result == 'success' && needs.build-gui.result == 'success' && needs.e2e.result == 'success' }}
++    needs: [build-cli, build-cli-macos, build-gui, e2e]
+     runs-on: ubuntu-latest
+     permissions:
+       contents: write
+@@ -777,9 +809,13 @@ jobs:
+           cd artifacts/cli-Linux && tar -czf ../../release/nimbus-backup-cli-${{ steps.version.outputs.VERSION }}-linux.tar.gz *
+           cd ../..
+ 
+-          # CLI macOS
+-          cd artifacts/cli-macOS && tar -czf ../../release/nimbus-backup-cli-${{ steps.version.outputs.VERSION }}-macos.tar.gz *
+-          cd ../..
++          # CLI macOS, when its build ran
++          if [ -d artifacts/cli-macOS ]; then
++            cd artifacts/cli-macOS && tar -czf ../../release/nimbus-backup-cli-${{ steps.version.outputs.VERSION }}-macos.tar.gz *
++            cd ../..
++          else
++            echo "::warning::No macOS CLI build: the release ships without nimbus-backup-cli-*-macos.tar.gz"
++          fi
+ 
+           # GUI Windows - Add .exe, .msi (with and without version) and .zip
+           cd artifacts/NimbusBackup-Windows
+-- 
+2.47.3
+

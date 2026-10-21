@@ -1,7 +1,7 @@
 From 7ea085b92879d489bd96906ff5b14d73da0ccbd8 Mon Sep 17 00:00:00 2001
 From: mjb-is <mjb-is@users.noreply.github.com>
 Date: Thu, 15 Oct 2026 00:08:07 +0100
-Subject: [PATCH 085/108] machinebackup: close the PBS session when a backup
+Subject: [PATCH 085/120] machinebackup: close the PBS session when a backup
  fails or is stopped
 
 Backup only ended its PBS session through Finish, on success. A machine

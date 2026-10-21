@@ -1,0 +1,96 @@
+From ec2f1162a4382b516ba1e4979bb25ffe84b519e8 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 21 Oct 2026 07:54:44 +0200
+Subject: [PATCH 111/120] gui: keep a scheduled job's compression on edit, show
+ the saved parallel count
+
+- Editing a scheduled job replaced it whole with the form's values, and
+  the form has no compression setting: the job silently went back to the
+  default (fastest). An empty compression now keeps the stored one.
+- GetConfigWithHostname did not return the parallel setting, so the
+  "folders at the same time" field always showed 1 on load, whatever was
+  saved.
+---
+ gui/app_service_stubs.go | 1 +
+ gui/main.go              | 5 ++++-
+ gui/scheduler.go         | 6 ++++++
+ gui/scheduler_test.go    | 6 +++++-
+ 4 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/gui/app_service_stubs.go b/gui/app_service_stubs.go
+index 2b9b61c..b961267 100644
+--- a/gui/app_service_stubs.go
++++ b/gui/app_service_stubs.go
+@@ -27,6 +27,7 @@ func (a *App) GetConfigWithHostname() map[string]interface{} {
+ 		// Reported (path only, never the key) so the service's own status/config
+ 		// output shows whether scheduled backups are encrypted.
+ 		result["encryption_key_file"] = a.config.EncryptionKeyFile
++		result["parallel"] = a.config.Parallel
+ 	}
+ 
+ 	return result
+diff --git a/gui/main.go b/gui/main.go
+index 093aa98..55bfbe3 100644
+--- a/gui/main.go
++++ b/gui/main.go
+@@ -662,7 +662,10 @@ func (a *App) GetConfigWithHostname() map[string]interface{} {
+ 		"backupdir":           cfg.BackupDir,
+ 		"backup-id":           cfg.BackupID,
+ 		"usevss":              cfg.UseVSS,
+-		"hostname":            hostname,
++		// Folders backed up at the same time: without it the form showed 1
++		// whatever was saved.
++		"parallel": cfg.Parallel,
++		"hostname": hostname,
+ 	}
+ 
+ 	// Pre-fill backup-id with hostname if empty
+diff --git a/gui/scheduler.go b/gui/scheduler.go
+index 0802cc2..c02d749 100644
+--- a/gui/scheduler.go
++++ b/gui/scheduler.go
+@@ -216,6 +216,12 @@ func (a *App) UpdateScheduledJob(job ScheduledJob) error {
+ 			// overwriting it with an empty value (an update must not erase when
+ 			// the job last ran).
+ 			job.LastRun = j.LastRun
++			// The GUI's edit form has no compression setting and sends none:
++			// an empty value keeps the stored one instead of resetting the
++			// job to the default.
++			if job.Compression == "" {
++				job.Compression = j.Compression
++			}
+ 			// Recalculate next run with new schedule time
+ 			job.NextRun = calculateNextRun(job.ScheduleTime)
+ 			jobs[i] = job
+diff --git a/gui/scheduler_test.go b/gui/scheduler_test.go
+index 0597169..0e8e461 100644
+--- a/gui/scheduler_test.go
++++ b/gui/scheduler_test.go
+@@ -288,7 +288,7 @@ func readJobsFile(t *testing.T) string {
+ 
+ // An update must not erase the run record: the edit form never carries
+ // lastRun (nor the enabled flag), so a save would otherwise wipe them.
+-func TestUpdateScheduledJobKeepsLastRunAndEnabled(t *testing.T) {
++func TestUpdateScheduledJobKeepsLastRunEnabledAndCompression(t *testing.T) {
+ 	a := newSchedulerTestApp(t)
+ 	if err := a.SaveScheduledJob(sampleJob()); err != nil {
+ 		t.Fatalf("SaveScheduledJob() error = %v", err)
+@@ -301,11 +301,15 @@ func TestUpdateScheduledJobKeepsLastRunAndEnabled(t *testing.T) {
+ 
+ 	updated := jobs[0]
+ 	updated.ScheduleTime = "04:45"
++	updated.Compression = "" // the edit form sends none
+ 	if err := a.UpdateScheduledJob(updated); err != nil {
+ 		t.Fatalf("UpdateScheduledJob() error = %v", err)
+ 	}
+ 
+ 	got := list0(t, a)
++	if got.Compression != jobs[0].Compression {
++		t.Errorf("Compression = %q, want the stored %q kept", got.Compression, jobs[0].Compression)
++	}
+ 	if got.LastRun != "2026-01-02T03:04:05Z" {
+ 		t.Errorf("LastRun = %q, want it preserved", got.LastRun)
+ 	}
+-- 
+2.47.3
+

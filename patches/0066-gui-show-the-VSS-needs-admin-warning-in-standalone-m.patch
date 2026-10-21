@@ -1,7 +1,7 @@
 From 6c37ad6fbddbbcc62df5ccf6fd587792cf988766 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Mon, 12 Oct 2026 15:01:34 +0200
-Subject: [PATCH 066/108] gui: show the VSS-needs-admin warning in standalone
+Subject: [PATCH 066/120] gui: show the VSS-needs-admin warning in standalone
  mode
 
 The Backup tab compared systemInfo.mode with 'Standalone', but the

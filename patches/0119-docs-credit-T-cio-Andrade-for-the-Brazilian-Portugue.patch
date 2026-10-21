@@ -1,0 +1,75 @@
+From f6e729e3c062d2e3d8f88ca6f985e727f6205b0f Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 21 Oct 2026 17:48:27 +0200
+Subject: [PATCH 119/120] =?UTF-8?q?docs:=20credit=20T=C3=A1cio=20Andrade?=
+ =?UTF-8?q?=20for=20the=20Brazilian=20Portuguese=20translation?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A Contributors section in both READMEs, and Brazilian Portuguese in the
+list of UI languages.
+---
+ README.fr.md | 10 +++++++++-
+ README.md    | 10 +++++++++-
+ 2 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/README.fr.md b/README.fr.md
+index 8141e64..bfa1f65 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -71,7 +71,7 @@ Vous ne voulez pas auto-héberger Proxmox Backup Server ? Utilisez nos datastore
+ ## ✨ Fonctionnalités
+ 
+ ### Interface graphique (recommandée)
+-- **🌍 Multilingue** — interface en français, anglais, italien, allemand et polonais
++- **🌍 Multilingue** — interface en français, anglais, italien, allemand, polonais et portugais du Brésil
+ - Configuration conviviale avec test de connexion (jeton API ou identifiant/mot de passe)
+ - Progression de sauvegarde en temps réel avec débit et temps restant, annulation à tout moment, onglet « En cours »
+ - VSS (Volume Shadow Copy) pour des sauvegardes cohérentes : un seul snapshot pour toute une sauvegarde multi-dossiers, une copie par volume
+@@ -235,6 +235,14 @@ Ce dépôt ajoute par-dessus une série de patchs documentée ([`patches/`](patc
+ 
+ Nous refusionnons régulièrement le projet d'origine ; ses propres releases sont publiées sur [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go/releases).
+ 
++## 🙌 Contributeurs
++
++Merci à toutes celles et ceux qui ont aidé Nimbus Backup :
++
++- [Tácio Andrade](https://github.com/Tacioandrade) ([MultiTI](https://www.multiti.com.br)) — traduction en portugais du Brésil ([#16](https://github.com/rdemsystems/NimbusBackupClient/pull/16)).
++
++Le code partagé avec le projet d'origine vient aussi de [ses contributeurs](https://github.com/tizbac/proxmoxbackupclient_go/graphs/contributors). Les contributions sont bienvenues : voir les [issues](https://github.com/rdemsystems/NimbusBackupClient/issues) ouvertes, ou proposer une pull request sur `master`.
++
+ ## ⭐ Étoiles
+ 
+ ![Étoiles GitHub de Nimbus Backup dans le temps](https://raw.githubusercontent.com/rdemsystems/NimbusBackupClient/stats/stars.svg)
+diff --git a/README.md b/README.md
+index db20285..859def2 100644
+--- a/README.md
++++ b/README.md
+@@ -71,7 +71,7 @@ Don't want to self-host Proxmox Backup Server? Use our fully managed, **offsite
+ ## ✨ Features
+ 
+ ### GUI (recommended)
+-- **🌍 Multi-language** — English, French, Italian, German and Polish interface
++- **🌍 Multi-language** — English, French, Italian, German, Polish and Brazilian Portuguese interface
+ - User-friendly configuration with connection testing (API token or username/password)
+ - Real-time backup progress with speed and ETA, cancel at any time, a Running tab
+ - VSS (Volume Shadow Copy) for consistent backups: one snapshot for a whole multi-folder backup, one shadow copy per volume
+@@ -230,6 +230,14 @@ What this repository adds on top of upstream is a documented patch series ([`pat
+ 
+ We re-merge upstream regularly; upstream's own releases are published at [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go/releases).
+ 
++## 🙌 Contributors
++
++Thanks to everyone who helped Nimbus Backup:
++
++- [Tácio Andrade](https://github.com/Tacioandrade) ([MultiTI](https://www.multiti.com.br)) — Brazilian Portuguese translation ([#16](https://github.com/rdemsystems/NimbusBackupClient/pull/16)).
++
++The code shared with upstream also comes from [its contributors](https://github.com/tizbac/proxmoxbackupclient_go/graphs/contributors). Contributions are welcome: see the open [issues](https://github.com/rdemsystems/NimbusBackupClient/issues), or open a pull request against `master`.
++
+ ## ⭐ Stars
+ 
+ ![GitHub stars of Nimbus Backup over time](https://raw.githubusercontent.com/rdemsystems/NimbusBackupClient/stats/stars.svg)
+-- 
+2.47.3
+

@@ -1,0 +1,220 @@
+From cb42d5123dca8b0c48d53e928e56aa4f774bce28 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 21 Oct 2026 07:31:49 +0200
+Subject: [PATCH 110/120] gui: check that every UI language carries every key
+
+The GUI has no fallback to English, so a key missing from a language
+shows up as its raw name. scripts/check-translations.mjs (npm test, no
+dependencies) compares each language with en: missing or extra keys,
+empty values, placeholder mismatches, keys defined twice in a block,
+and languages missing from LanguageSwitcher. A light Translations
+workflow runs it on pushes and on pull requests, forks included, ahead
+of the pt-BR contribution offered in issue #14.
+
+What it found on the way:
+- editServer was defined twice in every language; the later "Edit
+  server" silently won, so the server list's button also read "Edit
+  server". The dead first entry is removed, which keeps today's text.
+- t() returned the key for an empty string, so the About tab showed
+  the raw "basedOn". An empty string is now returned as is.
+---
+ .github/workflows/translations.yml          | 37 ++++++++++++
+ gui/frontend/package.json                   |  3 +-
+ gui/frontend/scripts/check-translations.mjs | 67 +++++++++++++++++++++
+ gui/frontend/src/i18n/i18nContext.jsx       |  3 +-
+ gui/frontend/src/i18n/translations.js       |  5 --
+ 5 files changed, 108 insertions(+), 7 deletions(-)
+ create mode 100644 .github/workflows/translations.yml
+ create mode 100644 gui/frontend/scripts/check-translations.mjs
+
+diff --git a/.github/workflows/translations.yml b/.github/workflows/translations.yml
+new file mode 100644
+index 0000000..bbbeb75
+--- /dev/null
++++ b/.github/workflows/translations.yml
+@@ -0,0 +1,37 @@
++name: Translations
++
++# Every UI language must carry every key of the English block: the GUI has
++# no fallback, so a missing key shows up as its raw name. Runs on pushes and
++# on pull requests from forks (contributed translations), with no secrets
++# and no build, so it is safe and fast there.
++on:
++  push:
++    paths:
++      - 'gui/frontend/src/i18n/**'
++      - 'gui/frontend/src/components/LanguageSwitcher.jsx'
++      - 'gui/frontend/scripts/check-translations.mjs'
++      - '.github/workflows/translations.yml'
++  pull_request:
++    paths:
++      - 'gui/frontend/src/i18n/**'
++      - 'gui/frontend/src/components/LanguageSwitcher.jsx'
++      - 'gui/frontend/scripts/check-translations.mjs'
++      - '.github/workflows/translations.yml'
++
++permissions:
++  contents: read
++
++jobs:
++  check:
++    name: Check translation keys
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v5
++
++      - uses: actions/setup-node@v5
++        with:
++          node-version: '20'
++
++      - name: Compare every language with en
++        working-directory: gui/frontend
++        run: npm test
+diff --git a/gui/frontend/package.json b/gui/frontend/package.json
+index c198907..a47912b 100644
+--- a/gui/frontend/package.json
++++ b/gui/frontend/package.json
+@@ -5,7 +5,8 @@
+   "scripts": {
+     "dev": "vite",
+     "build": "vite build",
+-    "preview": "vite preview"
++    "preview": "vite preview",
++    "test": "node scripts/check-translations.mjs"
+   },
+   "dependencies": {
+     "react": "^18.2.0",
+diff --git a/gui/frontend/scripts/check-translations.mjs b/gui/frontend/scripts/check-translations.mjs
+new file mode 100644
+index 0000000..543509c
+--- /dev/null
++++ b/gui/frontend/scripts/check-translations.mjs
+@@ -0,0 +1,67 @@
++// Checks src/i18n/translations.js against the English block, which is the
++// reference. The UI has no fallback to English: a key missing from a language
++// shows up as its raw name, so every language must carry every key.
++//
++// Run with `npm test` (no dependencies needed). Exits 1 on any problem.
++
++import { readFileSync } from 'node:fs'
++import { fileURLToPath } from 'node:url'
++import translations from '../src/i18n/translations.js'
++
++const src = (rel) => fileURLToPath(new URL(`../src/${rel}`, import.meta.url))
++const errors = []
++const placeholders = (s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',')
++
++// Nested blocks (featuresList.vss, ...) become dotted keys, as t() reads them.
++const flatten = (obj, prefix = '') =>
++  Object.entries(obj).flatMap(([k, v]) =>
++    v !== null && typeof v === 'object' ? flatten(v, `${prefix}${k}.`) : [[`${prefix}${k}`, v]])
++
++const ref = Object.fromEntries(flatten(translations.en))
++
++for (const [lang, nested] of Object.entries(translations)) {
++  const block = Object.fromEntries(flatten(nested))
++  for (const key of Object.keys(ref)) {
++    if (!(key in block)) errors.push(`${lang}: missing key "${key}"`)
++  }
++  for (const [key, value] of Object.entries(block)) {
++    if (!(key in ref)) {
++      errors.push(`${lang}: key "${key}" is not in en`)
++    } else if (typeof value !== 'string') {
++      errors.push(`${lang}: key "${key}" is not a string`)
++    } else if (value.trim() === '' && ref[key] !== '') {
++      // en leaves a few keys blank on purpose (basedOn); others must be filled
++      errors.push(`${lang}: key "${key}" is empty`)
++    } else if (placeholders(value) !== placeholders(ref[key])) {
++      errors.push(`${lang}: key "${key}" placeholders {${placeholders(value)}} differ from en {${placeholders(ref[key])}}`)
++    }
++  }
++}
++
++// A key written twice in the same block is silently overwritten by the
++// later one, so look for duplicates in the source text.
++const text = readFileSync(src('i18n/translations.js'), 'utf8')
++for (const [, lang, body] of text.matchAll(/^ {2}(\w+): \{\n([\s\S]*?)^ {2}\}/gm)) {
++  const seen = new Set()
++  for (const [, key] of body.matchAll(/^ {4,6}(\w+):/gm)) {
++    if (seen.has(key)) errors.push(`${lang}: key "${key}" is defined twice`)
++    seen.add(key)
++  }
++}
++
++// Every language must be selectable in the switcher, and vice versa.
++const switcher = readFileSync(src('components/LanguageSwitcher.jsx'), 'utf8')
++const listed = new Set([...switcher.matchAll(/code: '(\w+)'/g)].map((m) => m[1]))
++for (const lang of Object.keys(translations)) {
++  if (!listed.has(lang)) errors.push(`${lang}: not listed in LanguageSwitcher.jsx`)
++}
++for (const lang of listed) {
++  if (!(lang in translations)) errors.push(`${lang}: listed in LanguageSwitcher.jsx but has no translations`)
++}
++
++if (errors.length) {
++  console.error(errors.join('\n'))
++  console.error(`\n${errors.length} translation problem(s)`)
++  process.exit(1)
++}
++console.log(`translations OK: ${Object.keys(translations).join(', ')} (${Object.keys(ref).length} keys each)`)
+diff --git a/gui/frontend/src/i18n/i18nContext.jsx b/gui/frontend/src/i18n/i18nContext.jsx
+index 25a79ee..ad98234 100644
+--- a/gui/frontend/src/i18n/i18nContext.jsx
++++ b/gui/frontend/src/i18n/i18nContext.jsx
+@@ -47,7 +47,8 @@ export function I18nProvider({ children }) {
+       }
+     }
+ 
+-    return value || key
++    // An empty string is a deliberate blank (e.g. basedOn), not a missing key
++    return typeof value === 'string' ? value : key
+   }
+ 
+   return (
+diff --git a/gui/frontend/src/i18n/translations.js b/gui/frontend/src/i18n/translations.js
+index 9025573..206ecdd 100644
+--- a/gui/frontend/src/i18n/translations.js
++++ b/gui/frontend/src/i18n/translations.js
+@@ -57,7 +57,6 @@ const translations = {
+     untested: "Non testé",
+     default: "Défaut",
+     testServer: "Test",
+-    editServer: "Modifier",
+     setDefault: "Défaut",
+     deleteServer: "Supprimer",
+       optional: "optionnel",
+@@ -463,7 +462,6 @@ const translations = {
+     untested: "Not tested",
+     default: "Default",
+     testServer: "Test",
+-    editServer: "Edit",
+     setDefault: "Default",
+     deleteServer: "Delete",
+       optional: "optional",
+@@ -869,7 +867,6 @@ const translations = {
+     untested: "Non testato",
+     default: "Predefinito",
+     testServer: "Test",
+-    editServer: "Modifica",
+     setDefault: "Predefinito",
+     deleteServer: "Elimina",
+       optional: "opzionale",
+@@ -1275,7 +1272,6 @@ const translations = {
+     untested: "Nicht getestet",
+     default: "Standard",
+     testServer: "Test",
+-    editServer: "Bearbeiten",
+     setDefault: "Standard",
+     deleteServer: "Löschen",
+       optional: "optional",
+@@ -1681,7 +1677,6 @@ const translations = {
+     untested: "Nie przetestowany",
+     default: "Domyślny",
+     testServer: "Test",
+-    editServer: "Edytuj",
+     setDefault: "Domyślny",
+     deleteServer: "Usuń",
+       optional: "opcjonalne",
+-- 
+2.47.3
+
