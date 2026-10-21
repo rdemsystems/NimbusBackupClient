@@ -1,7 +1,7 @@
 From bd164c1d96132a70e0e750b2178d7362dfe01663 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 16:28:27 +0200
-Subject: [PATCH 077/108] fix(crypto): encrypted GUI backups use the keyed
+Subject: [PATCH 077/120] fix(crypto): encrypted GUI backups use the keyed
  digest; Service Mode reads get the key (issue #13)
 
 Encrypted directory backups made by the GUI and the service could not be

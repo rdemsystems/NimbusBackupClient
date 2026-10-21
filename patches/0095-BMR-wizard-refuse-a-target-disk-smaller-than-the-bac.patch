@@ -1,7 +1,7 @@
 From f1dcc4dd38833e7da39fc5e86c89eb2e637f9e22 Mon Sep 17 00:00:00 2001
 From: mjb-is <mjb-is@users.noreply.github.com>
 Date: Thu, 15 Oct 2026 20:10:10 +0100
-Subject: [PATCH 095/108] BMR wizard: refuse a target disk smaller than the
+Subject: [PATCH 095/120] BMR wizard: refuse a target disk smaller than the
  backed up disk
 
 The wizard runs ocs-onthefly with -icds, which turns off Clonezilla's own

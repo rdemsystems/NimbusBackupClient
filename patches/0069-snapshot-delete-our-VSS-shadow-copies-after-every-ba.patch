@@ -1,7 +1,7 @@
 From 056e752f1897f2650aa43ed7d756400386d7b933 Mon Sep 17 00:00:00 2001
 From: mjb-is <mjb-is@users.noreply.github.com>
 Date: Mon, 12 Oct 2026 01:24:30 +0100
-Subject: [PATCH 069/108] snapshot: delete our VSS shadow copies after every
+Subject: [PATCH 069/120] snapshot: delete our VSS shadow copies after every
  backup, through the VSS API
 
 Releasing the go-vss Snapshotter does not remove the shadow copy: it is

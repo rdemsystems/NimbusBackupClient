@@ -129,6 +129,18 @@ carry the Nimbus identity, docs and CI.
 | 0106 | pbscommon: keep x/net's http2.Transport for the PBS session, said why | upstream candidate | SA1019 nolint; the move to `http.ClientConn` is its own change. |
 | 0107 | gui: the Restore notice lists NTFS permissions, ADS and EAs as supported | upstream candidate |  |
 | 0108 | release: v0.4.3 | fork-only |  |
+| 0109 | gui: add the two French running-jobs strings | upstream candidate | The French Running tab showed the raw key `noRunningJobs`. |
+| 0110 | gui: check that every UI language carries every key | upstream candidate | `scripts/check-translations.mjs` (`npm test`) and a Translations workflow; also fixes `editServer` defined twice and `t()` on empty strings. |
+| 0111 | gui: keep a scheduled job's compression on edit, show the saved parallel count | upstream candidate | Editing a job reset its compression; the parallel field always showed 1. |
+| 0112 | stats: log the GitHub stars daily and chart them in the README | fork-only | Workflow writing to the `stats` branch. |
+| 0113 | stats: chart and log our own stars only | fork-only |  |
+| 0114 | gui: stop a directory backup in the middle of a folder on cancel | upstream candidate | Sent as tizbac/proxmoxbackupclient_go PR #117 (pxar hook + GUI). |
+| 0115 | gui: run "at machine startup" jobs once per boot, in the service | upstream candidate | The GUI ran them at every launch, past the service's duplicate guard (issue #12). |
+| 0116 | gui: build runStartupJobsAtBoot only where the service is built | upstream candidate | Folds into 0115. |
+| 0117 | Add Brazilian Portuguese GUI translation | upstream candidate | By Tácio Andrade, PR #16. |
+| 0118 | ci: a release no longer waits for the macOS CLI build | fork-only | GitHub's macOS runners can be unavailable for hours. |
+| 0119 | docs: credit Tácio Andrade for the Brazilian Portuguese translation | fork-only | README Contributors section. |
+| 0120 | release: v0.4.4 | fork-only |  |
 
 Dropped when rebuilding on `3c1b989` because upstream fixed them: the old 0003
 (service build, `/backup/machine`), 0006 (CLI exit code), the build-break parts

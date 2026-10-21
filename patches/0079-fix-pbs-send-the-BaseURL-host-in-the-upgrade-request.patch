@@ -1,7 +1,7 @@
 From b3c66ba5f2d3b902a1c4fd7060861f96fe65ee5b Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 16:28:27 +0200
-Subject: [PATCH 079/108] fix(pbs): send the BaseURL host in the upgrade
+Subject: [PATCH 079/120] fix(pbs): send the BaseURL host in the upgrade
  request's Host header
 
 The hand-written HTTP/1.1 upgrade request sent the dial address as Host,

@@ -1,7 +1,7 @@
 From 8e8fbf7ab29ac3772574e8fec1637bc18e720b67 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 16:54:51 +0200
-Subject: [PATCH 098/108] fix: CI findings on the imported upstream commits and
+Subject: [PATCH 098/120] fix: CI findings on the imported upstream commits and
  the issue #13 test
 
 - gui: the stream size limits and serializeFileMetaCapped (d33477b) are

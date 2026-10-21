@@ -1,0 +1,163 @@
+From b4689eec55a83a10a82d79158f38cb8d9087b860 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Wed, 21 Oct 2026 08:31:12 +0200
+Subject: [PATCH 113/120] stats: chart and log our own stars only
+
+The public stats branch and README now hold Nimbus Backup's stars alone;
+the comparison with other projects is not published.
+---
+ .github/scripts/stars.py    | 54 ++++++++++---------------------------
+ .github/workflows/stars.yml |  6 ++---
+ README.fr.md                |  2 +-
+ README.md                   |  2 +-
+ 4 files changed, 19 insertions(+), 45 deletions(-)
+
+diff --git a/.github/scripts/stars.py b/.github/scripts/stars.py
+index 2cc257c..4521081 100644
+--- a/.github/scripts/stars.py
++++ b/.github/scripts/stars.py
+@@ -1,20 +1,16 @@
+ #!/usr/bin/env python3
+-"""Star history of Nimbus Backup and the projects around it.
++"""Star history of Nimbus Backup.
+ 
+ Run daily by .github/workflows/stars.yml. Standard library only.
+ 
+     stars.py OUT_DIR
+ 
+ In OUT_DIR (the checked-out `stats` branch):
+-- stars.csv: one row per day and repository (stars, forks, watchers, open
+-  issues), appended to; a second run on the same day replaces that day.
+-- stars.svg: our stars over time, from the date of every star.
+-- stars-compare.svg: upstream and every fork that has a star, from the
+-  daily rows of stars.csv: GitHub lists who starred a repository, and
+-  when, to its own maintainers only, so the other curves start with the
+-  log.
+-
+-GITHUB_TOKEN, when set, raises the API rate limit.
++- stars.csv: one row per day (stars, forks, watchers, open issues),
++  appended to; a second run on the same day replaces that day.
++- stars.svg: our stars over time, from the date of every star (GitHub
++  lists them to the repository's maintainers, so GITHUB_TOKEN is needed;
++  without it the curve comes from stars.csv).
+ """
+ 
+ import csv
+@@ -26,10 +22,6 @@ import urllib.error
+ import urllib.request
+ 
+ OURS = "rdemsystems/NimbusBackupClient"
+-UPSTREAM = "tizbac/proxmoxbackupclient_go"
+-# Always shown, starred or not; the forks of both with a star are added.
+-ALWAYS = [OURS, UPSTREAM, "mjb-is/proxmoxbackupclient_go", "CJInvent/NimbusBackupClient"]
+-
+ API = "https://api.github.com"
+ 
+ 
+@@ -55,15 +47,6 @@ def get(path, accept="application/vnd.github+json"):
+     return out or []
+ 
+ 
+-def repositories():
+-    repos = list(ALWAYS)
+-    for parent in (UPSTREAM, OURS):
+-        for fork in get(f"/repos/{parent}/forks?per_page=100"):
+-            if fork["stargazers_count"] > 0 and fork["full_name"] not in repos:
+-                repos.append(fork["full_name"])
+-    return repos
+-
+-
+ def star_dates(repo):
+     """The date of every star, or None when GitHub does not list them to us."""
+     try:
+@@ -111,8 +94,8 @@ def log_csv(path, today, infos):
+     return rows
+ 
+ 
+-# Distinct in light and dark mode; ours is always the first, upstream the second.
+-COLORS = ["#2a78d6", "#e8862a", "#3aa36b", "#c4458f", "#7d5fd0", "#c9a227", "#5b8a99", "#b0554a"]
++# Readable in light and dark mode.
++COLORS = ["#2a78d6"]
+ 
+ 
+ def svg_chart(path, title, series, now):
+@@ -180,21 +163,12 @@ def svg_chart(path, title, series, now):
+ def main():
+     outdir = sys.argv[1] if len(sys.argv) > 1 else "."
+     now = dt.datetime.now(dt.timezone.utc)
+-    repos = repositories()
+-    infos = {r: get(f"/repos/{r}") for r in repos}
+-    rows = log_csv(os.path.join(outdir, "stars.csv"), now.strftime("%Y-%m-%d"), infos)
+-
+-    def history(repo):
+-        dates = star_dates(repo) if repo == OURS else None
+-        return steps(dates) if dates is not None else logged(rows, repo)
+-
+-    svg_chart(os.path.join(outdir, "stars.svg"), "Nimbus Backup — GitHub stars", [("NimbusBackupClient", history(OURS))], now)
+-    ranked = [OURS, UPSTREAM] + sorted((r for r in repos if r not in (OURS, UPSTREAM)),
+-                                       key=lambda r: -infos[r]["stargazers_count"])
+-    svg_chart(os.path.join(outdir, "stars-compare.svg"), "GitHub stars — upstream and forks",
+-              [(r, history(r)) for r in ranked], now)
+-    for r in ranked:
+-        print(f"{r}: {infos[r]['stargazers_count']} stars")
++    info = get(f"/repos/{OURS}")
++    rows = log_csv(os.path.join(outdir, "stars.csv"), now.strftime("%Y-%m-%d"), {OURS: info})
++    dates = star_dates(OURS)
++    points = steps(dates) if dates is not None else logged(rows, OURS)
++    svg_chart(os.path.join(outdir, "stars.svg"), "Nimbus Backup — GitHub stars", [("NimbusBackupClient", points)], now)
++    print(f"{OURS}: {info['stargazers_count']} stars")
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/.github/workflows/stars.yml b/.github/workflows/stars.yml
+index f668231..f5b0dec 100644
+--- a/.github/workflows/stars.yml
++++ b/.github/workflows/stars.yml
+@@ -1,7 +1,7 @@
+ name: Stars
+ 
+-# Logs the GitHub stars of Nimbus Backup, upstream and the starred forks every
+-# day, and redraws the charts the README shows (.github/scripts/stars.py).
++# Logs the GitHub stars of Nimbus Backup every day and redraws the chart the
++# README shows (.github/scripts/stars.py).
+ # Everything it writes lives on the `stats` branch, so the log never adds
+ # commits to master nor starts a build.
+ on:
+@@ -45,7 +45,7 @@ jobs:
+         run: |
+           git config user.name "github-actions[bot]"
+           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+-          git add stars.csv stars.svg stars-compare.svg
++          git add stars.csv stars.svg
+           if git diff --cached --quiet; then
+             echo "Nothing changed"
+             exit 0
+diff --git a/README.fr.md b/README.fr.md
+index 4fde138..8141e64 100644
+--- a/README.fr.md
++++ b/README.fr.md
+@@ -239,7 +239,7 @@ Nous refusionnons régulièrement le projet d'origine ; ses propres releases son
+ 
+ ![Étoiles GitHub de Nimbus Backup dans le temps](https://raw.githubusercontent.com/rdemsystems/NimbusBackupClient/stats/stars.svg)
+ 
+-Mis à jour chaque jour. Comparaison avec le projet d'origine et les autres forks : [graphe](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars-compare.svg) · [relevé quotidien (CSV)](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars.csv). Si Nimbus Backup vous est utile, une étoile aide d'autres personnes à le trouver.
++Mis à jour chaque jour · [relevé quotidien (CSV)](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars.csv). Si Nimbus Backup vous est utile, une étoile aide d'autres personnes à le trouver.
+ 
+ ## ⚠️ Avertissement
+ 
+diff --git a/README.md b/README.md
+index d212d7f..db20285 100644
+--- a/README.md
++++ b/README.md
+@@ -234,7 +234,7 @@ We re-merge upstream regularly; upstream's own releases are published at [tizbac
+ 
+ ![GitHub stars of Nimbus Backup over time](https://raw.githubusercontent.com/rdemsystems/NimbusBackupClient/stats/stars.svg)
+ 
+-Redrawn every day. Compared with upstream and the other forks: [chart](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars-compare.svg) · [daily log (CSV)](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars.csv). If Nimbus Backup is useful to you, a star helps others find it.
++Redrawn every day · [daily log (CSV)](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars.csv). If Nimbus Backup is useful to you, a star helps others find it.
+ 
+ ## ⚠️ Disclaimer
+ 
+-- 
+2.47.3
+

@@ -1,7 +1,7 @@
 From 88400a28008a10979aeb1b80289c0ea394efa0f0 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Mon, 12 Oct 2026 15:31:41 +0200
-Subject: [PATCH 075/108] docs: official builds are published and signed by
+Subject: [PATCH 075/120] docs: official builds are published and signed by
  RDEM Systems only
 
 Every README now says where official Nimbus Backup releases are

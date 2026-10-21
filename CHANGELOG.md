@@ -5,6 +5,22 @@ All notable changes to Proxmox Backup Client (GUI) will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-10-21
+
+### Added
+- **Brazilian Portuguese interface**, contributed by [Tácio Andrade](https://github.com/Tacioandrade) (MultiTI) in PR #16. Thank you!
+
+### Fixed
+- **A job set to "Also run at machine startup" ran each time the Nimbus window opened** (issue #12), at every login and every launch, instead of once when Windows starts. The run also bypassed the service's guard against running a job twice, so the same job could show up twice in Running Jobs. The service now runs these jobs when the machine boots; restarting the service or opening the window no longer starts a backup.
+- **Stop did not stop a folder backup until the folder was finished** (issue #12): the cancel was only checked between two folders. It now stops within the next 64 KiB written, the interrupted folder is not committed, and the run is reported as cancelled.
+- **Editing a scheduled job reset its compression** to the default (fastest): the edit form has no compression setting. The stored one is kept now.
+- **The "folders at the same time" field always showed 1** when the GUI opened, whatever was saved.
+- **French UI:** the Running tab showed the raw key `noRunningJobs` when nothing was running, and the About tab the raw key `basedOn`.
+
+### Changed
+- **Every UI language is now checked against English** (missing or extra keys, empty values, placeholders), on every push and on pull requests.
+- **A release no longer waits for the macOS command-line build**, whose GitHub runners can be unavailable for hours; the macOS archive is attached when it was built.
+
 ## [0.4.3] - 2026-10-20
 
 > ⚠️ **If you enabled encryption in 0.4.1 or 0.4.2, run a new backup after upgrading.**

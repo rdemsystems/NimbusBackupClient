@@ -1,7 +1,7 @@
 From 996af7215a88d84d718e1183566a22ca19616d2d Mon Sep 17 00:00:00 2001
 From: Tiziano Bacocco <tizbac2@gmail.com>
 Date: Sun, 18 Oct 2026 18:44:06 +0200
-Subject: [PATCH 093/108] clonezilla: read volume id with xorriso, not isoinfo
+Subject: [PATCH 093/120] clonezilla: read volume id with xorriso, not isoinfo
 
 Upstream: tizbac/proxmoxbackupclient_go@cee965ca4e26da4183d6f85d879abf338f213d4f
 ---
