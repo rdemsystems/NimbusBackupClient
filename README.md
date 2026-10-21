@@ -230,6 +230,12 @@ What this repository adds on top of upstream is a documented patch series ([`pat
 
 We re-merge upstream regularly; upstream's own releases are published at [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go/releases).
 
+## ⭐ Stars
+
+![GitHub stars of Nimbus Backup over time](https://raw.githubusercontent.com/rdemsystems/NimbusBackupClient/stats/stars.svg)
+
+Redrawn every day. Compared with upstream and the other forks: [chart](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars-compare.svg) · [daily log (CSV)](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars.csv). If Nimbus Backup is useful to you, a star helps others find it.
+
 ## ⚠️ Disclaimer
 
 This software is provided as-is. While we strive for reliability, we take no responsibility for any data loss or damage. Always test your backups and verify restoration before relying on them in production.

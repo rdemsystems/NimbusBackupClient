@@ -235,6 +235,12 @@ Ce dépôt ajoute par-dessus une série de patchs documentée ([`patches/`](patc
 
 Nous refusionnons régulièrement le projet d'origine ; ses propres releases sont publiées sur [tizbac/proxmoxbackupclient_go](https://github.com/tizbac/proxmoxbackupclient_go/releases).
 
+## ⭐ Étoiles
+
+![Étoiles GitHub de Nimbus Backup dans le temps](https://raw.githubusercontent.com/rdemsystems/NimbusBackupClient/stats/stars.svg)
+
+Mis à jour chaque jour. Comparaison avec le projet d'origine et les autres forks : [graphe](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars-compare.svg) · [relevé quotidien (CSV)](https://github.com/rdemsystems/NimbusBackupClient/blob/stats/stars.csv). Si Nimbus Backup vous est utile, une étoile aide d'autres personnes à le trouver.
+
 ## ⚠️ Avertissement
 
 Ce logiciel est fourni « tel quel ». Bien que nous visions la fiabilité, nous déclinons toute responsabilité en cas de perte ou de dommage de données. Testez toujours vos sauvegardes et vérifiez la restauration avant de vous y fier en production.
