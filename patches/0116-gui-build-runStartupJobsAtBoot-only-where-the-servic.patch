@@ -1,7 +1,7 @@
 From d2a519d1f4729f34e152c327e12fae263d4f618f Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 21 Oct 2026 17:02:59 +0200
-Subject: [PATCH 116/120] gui: build runStartupJobsAtBoot only where the
+Subject: [PATCH 116/123] gui: build runStartupJobsAtBoot only where the
  service is built
 
 The GUI-only Linux build never calls it, and the linter rejected it there

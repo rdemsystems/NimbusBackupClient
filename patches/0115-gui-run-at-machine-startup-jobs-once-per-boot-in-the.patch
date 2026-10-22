@@ -1,7 +1,7 @@
 From 450735aa468eff1936344324537d39aaf717efab Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 21 Oct 2026 16:57:28 +0200
-Subject: [PATCH 115/120] gui: run "at machine startup" jobs once per boot, in
+Subject: [PATCH 115/123] gui: run "at machine startup" jobs once per boot, in
  the service
 
 Jobs set to "Also run at machine startup" were run by the GUI process,

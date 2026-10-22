@@ -1,7 +1,7 @@
 From f094ec6eaefadd62b358c6f1044e68353698d768 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 17:49:30 +0200
-Subject: [PATCH 107/120] gui: the Restore notice lists NTFS permissions, ADS
+Subject: [PATCH 107/123] gui: the Restore notice lists NTFS permissions, ADS
  and EAs as supported
 
 The notice still crossed out "NTFS permissions, ADS, extended attributes

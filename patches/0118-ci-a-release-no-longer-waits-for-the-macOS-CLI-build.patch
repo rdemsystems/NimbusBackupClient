@@ -1,7 +1,7 @@
 From 6a619ac7b4e26eb460ad856d325303d42a3c43fd Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 21 Oct 2026 17:48:14 +0200
-Subject: [PATCH 118/120] ci: a release no longer waits for the macOS CLI build
+Subject: [PATCH 118/123] ci: a release no longer waits for the macOS CLI build
 
 GitHub's macOS runners were not available for hours ("The job was not
 acquired by Runner of type hosted even after multiple attempts"), and

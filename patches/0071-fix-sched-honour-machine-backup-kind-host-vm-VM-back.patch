@@ -1,7 +1,7 @@
 From 6ba5deb523337ab82a1d52cf4d1325618ca89345 Mon Sep 17 00:00:00 2001
 From: Tiziano Bacocco <tizbac2@gmail.com>
 Date: Mon, 12 Oct 2026 10:38:42 +0200
-Subject: [PATCH 071/120] fix(sched): honour machine backup kind (host/vm); VM
+Subject: [PATCH 071/123] fix(sched): honour machine backup kind (host/vm); VM
  backup ID must be numeric
 
 Scheduled machine backups ignored the job's backup type:
