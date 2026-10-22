@@ -5,6 +5,11 @@ All notable changes to Proxmox Backup Client (GUI) will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Enable or disable a scheduled job** (issue #17, suggested by [Tácio Andrade](https://github.com/Tacioandrade)): a "Job enabled" checkbox in the schedule form, between the daily time and "Also run at machine startup". A disabled job is kept but does not run, neither at its time nor at startup, until it is enabled again; it is shown greyed out with a "Disabled" badge in the job list. "Run now" still runs it on demand. A job created through the local HTTP API without an `enabled` key is still enabled, and an update without the key keeps the stored state.
+
 ## [0.4.4] - 2026-10-21
 
 ### Added
