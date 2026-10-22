@@ -1,7 +1,7 @@
 From 4a6aa03d87cf3f935c54a9087fb6638a6b68546e Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 17:04:14 +0200
-Subject: [PATCH 100/120] test(e2e): encrypted backup by the GUI/service
+Subject: [PATCH 100/123] test(e2e): encrypted backup by the GUI/service
  writer, read back by our readers and the official client
 
 The suite only ran the CLIs: the writer the GUI and the service use

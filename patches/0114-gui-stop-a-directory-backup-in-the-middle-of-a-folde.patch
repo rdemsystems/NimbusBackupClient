@@ -1,7 +1,7 @@
 From c2b465a9a53441e02be90438302ce98e0ba1e75c Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 21 Oct 2026 12:06:48 +0200
-Subject: [PATCH 114/120] gui: stop a directory backup in the middle of a
+Subject: [PATCH 114/123] gui: stop a directory backup in the middle of a
  folder on cancel
 
 The Stop button was only honoured between two folders: the PXAR walk

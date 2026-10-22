@@ -1,7 +1,7 @@
 From 9162246409d816a26749e66567be6fbcd9e1a09b Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 17:32:55 +0200
-Subject: [PATCH 104/120] build: Go 1.26.9 and golang.org/x/net v0.61.0
+Subject: [PATCH 104/123] build: Go 1.26.9 and golang.org/x/net v0.61.0
 
 x/net v0.61.0 fixes the http2 issues govulncheck reports on the PBS
 session transport (HPACK encoder race, window-change work, trailer header

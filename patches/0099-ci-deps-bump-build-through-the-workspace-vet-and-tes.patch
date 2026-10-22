@@ -1,7 +1,7 @@
 From 50cd339ab685b9d8881826fc847a8b336e5ea0dd Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 16:55:43 +0200
-Subject: [PATCH 099/120] ci(deps-bump): build through the workspace; vet and
+Subject: [PATCH 099/123] ci(deps-bump): build through the workspace; vet and
  tests informational
 
 machinebackuplib has no replace directives and builds only through

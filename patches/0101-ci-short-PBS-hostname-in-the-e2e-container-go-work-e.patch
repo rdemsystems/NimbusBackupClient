@@ -1,7 +1,7 @@
 From cf5528a143395bd0f47cda3527cde5ca2f5b65b2 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 17:22:56 +0200
-Subject: [PATCH 101/120] ci: short PBS hostname in the e2e container; go work
+Subject: [PATCH 101/123] ci: short PBS hostname in the e2e container; go work
  edit outside GOWORK=off
 
 - e2e: PBS writes the node's FQDN into its self-signed certificate's CN

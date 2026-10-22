@@ -1,7 +1,7 @@
 From 9ba51369dd37fc64e1c7a16186838d31e4b4729d Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 17:33:55 +0200
-Subject: [PATCH 105/120] build: remove the unused Dockerfile.gui
+Subject: [PATCH 105/123] build: remove the unused Dockerfile.gui
 
 Nothing referenced it (CI, Makefile, scripts, docs), it pinned Go 1.21,
 and it could not build anyway: it copied gui/ alone, while gui/go.mod

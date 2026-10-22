@@ -1,7 +1,7 @@
 From 893d8cfe5d7c4b7d2d2afe462c324a5c24df463f Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 16:28:27 +0200
-Subject: [PATCH 078/120] fix(restore): restore directory modification times
+Subject: [PATCH 078/123] fix(restore): restore directory modification times
  (issue #12)
 
 Files got their archived mtime back, directories kept the restore time:

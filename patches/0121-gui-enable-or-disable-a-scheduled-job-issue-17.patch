@@ -1,0 +1,438 @@
+From be7d27285630a97457a02c2b4aab4fcbbd218cd8 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Thu, 22 Oct 2026 07:46:02 +0200
+Subject: [PATCH 121/123] gui: enable or disable a scheduled job (issue #17)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A "Job enabled" checkbox in the schedule form, between the daily time and
+"Also run at machine startup". The scheduler already skipped jobs with
+enabled=false, but SaveScheduledJob forced it to true and
+UpdateScheduledJob kept the stored value, so the flag could only be
+changed by editing scheduled_jobs.json. Both now store it as sent.
+
+Disabled jobs are greyed out with a "Disabled" badge in the job list.
+"Run now" still runs them on demand.
+
+HTTP API callers that send no "enabled" key keep the old behaviour: a
+created job is enabled, an updated job keeps its stored state.
+
+Suggested by Tácio Andrade (@Tacioandrade).
+---
+ CHANGELOG.md                          |  5 ++
+ gui/api_wrappers.go                   | 19 ++++++++
+ gui/frontend/src/App.jsx              | 42 +++++++++++++---
+ gui/frontend/src/i18n/translations.js | 18 +++++++
+ gui/scheduler.go                      | 10 ++--
+ gui/scheduler_test.go                 | 69 ++++++++++++++++++++++++++-
+ 6 files changed, 150 insertions(+), 13 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 174497f..68e3df5 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,11 @@ All notable changes to Proxmox Backup Client (GUI) will be documented in this fi
+ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
++## [Unreleased]
++
++### Added
++- **Enable or disable a scheduled job** (issue #17, suggested by [Tácio Andrade](https://github.com/Tacioandrade)): a "Job enabled" checkbox in the schedule form, between the daily time and "Also run at machine startup". A disabled job is kept but does not run, neither at its time nor at startup, until it is enabled again; it is shown greyed out with a "Disabled" badge in the job list. "Run now" still runs it on demand. A job created through the local HTTP API without an `enabled` key is still enabled, and an update without the key keeps the stored state.
++
+ ## [0.4.4] - 2026-10-21
+ 
+ ### Added
+diff --git a/gui/api_wrappers.go b/gui/api_wrappers.go
+index 6d3390b..9050449 100644
+--- a/gui/api_wrappers.go
++++ b/gui/api_wrappers.go
+@@ -23,6 +23,11 @@ func (a *App) SaveScheduledJobFromMap(jobData map[string]interface{}) error {
+ 	if err := json.Unmarshal(jsonData, &job); err != nil {
+ 		return fmt.Errorf("failed to unmarshal job data: %w", err)
+ 	}
++	// A caller that predates the enable/disable option sends no "enabled"
++	// key: its new job must run, as it always did.
++	if _, ok := jobData["enabled"]; !ok {
++		job.Enabled = true
++	}
+ 
+ 	return a.SaveScheduledJob(job)
+ }
+@@ -38,6 +43,20 @@ func (a *App) UpdateScheduledJobFromMap(jobData map[string]interface{}) error {
+ 	if err := json.Unmarshal(jsonData, &job); err != nil {
+ 		return fmt.Errorf("failed to unmarshal job data: %w", err)
+ 	}
++	// A caller that sends no "enabled" key keeps the stored state instead of
++	// silently disabling the job.
++	if _, ok := jobData["enabled"]; !ok {
++		jobs, err := a.GetScheduledJobs()
++		if err != nil {
++			return fmt.Errorf("failed to load jobs: %w", err)
++		}
++		for _, j := range jobs {
++			if j.ID == job.ID {
++				job.Enabled = j.Enabled
++				break
++			}
++		}
++	}
+ 
+ 	return a.UpdateScheduledJob(job)
+ }
+diff --git a/gui/frontend/src/App.jsx b/gui/frontend/src/App.jsx
+index a65ba84..e711248 100644
+--- a/gui/frontend/src/App.jsx
++++ b/gui/frontend/src/App.jsx
+@@ -149,6 +149,7 @@ function App() {
+   const [backupMode, setBackupMode] = useState('oneshot') // 'oneshot' or 'scheduled'
+   const [scheduleTime, setScheduleTime] = useState('02:00')
+   const [runAtStartup, setRunAtStartup] = useState(false)
++  const [jobEnabled, setJobEnabled] = useState(true)
+   const [scheduledJobs, setScheduledJobs] = useState([])
+   const [runningJobs, setRunningJobs] = useState([])
+   const [jobHistory, setJobHistory] = useState([])
+@@ -1281,6 +1282,7 @@ function App() {
+         name: `Backup ${effectiveBackupID || hostname}`,
+         scheduleTime: scheduleTime,
+         runAtStartup: runAtStartup,
++        enabled: jobEnabled,
+         backupDirs: backupType === 'directory' ? dirList : [],
+         backupId: effectiveBackupID,
+         useVSS: config.usevss,
+@@ -1308,6 +1310,7 @@ function App() {
+         // Reset form after save
+         setScheduleTime('02:00')
+         setRunAtStartup(false)
++        setJobEnabled(true)
+         setBackupDirs('')
+         setBackupPBSID('')
+         setMachineBackupKind('host')
+@@ -2042,6 +2045,18 @@ function App() {
+                 />
+               </div>
+ 
++              <div className="form-group">
++                <label style={{display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer'}}>
++                  <input
++                    type="checkbox"
++                    checked={jobEnabled}
++                    onChange={(e) => setJobEnabled(e.target.checked)}
++                    style={{width: '20px', height: '20px', cursor: 'pointer'}}
++                  />
++                  <span>✅ {t('jobEnabled')}</span>
++                </label>
++              </div>
++
+               <div className="form-group">
+                 <label style={{display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer'}}>
+                   <input
+@@ -2054,10 +2069,16 @@ function App() {
+                 </label>
+               </div>
+ 
+-              <div className="info-box" style={{backgroundColor: '#eef2ff'}}>
+-                💡 {t('schedulingInfo')} <strong>{scheduleTime}</strong>
+-                {runAtStartup && <><br/>{t('andAtStartup')}</>}
+-              </div>
++              {jobEnabled ? (
++                <div className="info-box" style={{backgroundColor: '#eef2ff'}}>
++                  💡 {t('schedulingInfo')} <strong>{scheduleTime}</strong>
++                  {runAtStartup && <><br/>{t('andAtStartup')}</>}
++                </div>
++              ) : (
++                <div className="info-box" style={{backgroundColor: '#f1f3f5'}}>
++                  ⏸️ {t('jobDisabledInfo')}
++                </div>
++              )}
+             </div>
+           )}
+ 
+@@ -2306,6 +2327,7 @@ function App() {
+               setEditingJobId(null)
+               setScheduleTime('02:00')
+               setRunAtStartup(false)
++              setJobEnabled(true)
+               setBackupDirs('')
+               setExcludeList('')
+               setBackupType('directory')
+@@ -2326,13 +2348,18 @@ function App() {
+                 <div key={job.id} style={{
+                   padding: '15px',
+                   marginBottom: '10px',
+-                  backgroundColor: '#f8f9fa',
++                  backgroundColor: job.enabled === false ? '#e9ecef' : '#f8f9fa',
+                   borderRadius: '8px',
+-                  border: '1px solid #dee2e6'
++                  border: job.enabled === false ? '1px dashed #adb5bd' : '1px solid #dee2e6'
+                 }}>
+                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+-                    <div>
++                    <div style={job.enabled === false ? {opacity: 0.6} : undefined}>
+                       <strong>{job.name}</strong>
++                      {job.enabled === false && (
++                        <span style={{marginLeft: '8px', padding: '2px 8px', fontSize: '12px', borderRadius: '10px', backgroundColor: '#adb5bd', color: '#fff'}}>
++                          ⏸️ {t('jobDisabled')}
++                        </span>
++                      )}
+                       <div style={{fontSize: '14px', color: '#6c757d', marginTop: '5px'}}>
+                         ⏰ {job.scheduleTime} {job.runAtStartup && `• 🚀 ${t('atStartup')}`}
+                       </div>
+@@ -2359,6 +2386,7 @@ function App() {
+                           setBackupMode('scheduled')
+                           setScheduleTime(job.scheduleTime)
+                           setRunAtStartup(job.runAtStartup)
++                          setJobEnabled(job.enabled !== false)
+                           setBackupDirs((job.backupDirs || []).join('\n'))
+                           if (job.backupType === 'machine' && job.backup_kind === 'vm') {
+                             // The job's backup ID is the VM ID; keep the Backup ID intact.
+diff --git a/gui/frontend/src/i18n/translations.js b/gui/frontend/src/i18n/translations.js
+index 1795bab..bd59adf 100644
+--- a/gui/frontend/src/i18n/translations.js
++++ b/gui/frontend/src/i18n/translations.js
+@@ -144,9 +144,11 @@ const translations = {
+       editMode: "Mode édition",
+       editModeText: "Modifiez les paramètres et cliquez sur \"Mettre à jour\"",
+       dailyExecutionTime: "Heure d'exécution quotidienne",
++      jobEnabled: "Tâche activée",
+       runAtStartup: "Exécuter aussi au démarrage de la machine",
+       schedulingInfo: "Le backup sera exécuté automatiquement chaque jour à",
+       andAtStartup: "Et également à chaque démarrage du système.",
++      jobDisabledInfo: "Tâche désactivée : elle ne s'exécutera pas tant qu'elle n'est pas réactivée.",
+ 
+       // Backup Form
+       directoriesToBackup: "Répertoires à sauvegarder (un par ligne)",
+@@ -235,6 +237,7 @@ const translations = {
+       backupIdRequired: "Backup ID requis",
+       snapshotsFound: "{n} snapshot(s) trouvé(s)",
+       atStartup: "Au démarrage",
++      jobDisabled: "Désactivée",
+       completionNoData: "fin de backup signalée sans données",
+       backupInProgress: "Sauvegarde en cours...",
+       startBackup: "Démarrer la sauvegarde",
+@@ -549,9 +552,11 @@ const translations = {
+       editMode: "Edit mode",
+       editModeText: "Modify settings and click \"Update\"",
+       dailyExecutionTime: "Daily execution time",
++      jobEnabled: "Job enabled",
+       runAtStartup: "Also run at machine startup",
+       schedulingInfo: "Backup will run automatically every day at",
+       andAtStartup: "And also at every system startup.",
++      jobDisabledInfo: "Job disabled: it will not run until it is enabled again.",
+ 
+       // Backup Form
+       directoriesToBackup: "Directories to backup (one per line)",
+@@ -640,6 +645,7 @@ const translations = {
+       backupIdRequired: "Backup ID is required",
+       snapshotsFound: "{n} snapshot(s) found",
+       atStartup: "At startup",
++      jobDisabled: "Disabled",
+       completionNoData: "completion reported without data",
+       backupInProgress: "Backup in progress...",
+       startBackup: "Start backup",
+@@ -954,9 +960,11 @@ const translations = {
+       editMode: "Modalità modifica",
+       editModeText: "Modifica le impostazioni e clicca su \"Aggiorna\"",
+       dailyExecutionTime: "Ora di esecuzione giornaliera",
++      jobEnabled: "Attività abilitata",
+       runAtStartup: "Esegui anche all'avvio del computer",
+       schedulingInfo: "Il backup verrà eseguito automaticamente ogni giorno alle",
+       andAtStartup: "E anche all'avvio del sistema.",
++      jobDisabledInfo: "Attività disabilitata: non verrà eseguita finché non sarà riabilitata.",
+ 
+       // Backup Form
+       directoriesToBackup: "Directory da backup (una per riga)",
+@@ -1045,6 +1053,7 @@ const translations = {
+       backupIdRequired: "Backup ID obbligatorio",
+       snapshotsFound: "{n} snapshot trovati",
+       atStartup: "All'avvio",
++      jobDisabled: "Disabilitata",
+       completionNoData: "completamento segnalato senza dati",
+       backupInProgress: "Backup in corso...",
+       startBackup: "Avvia backup",
+@@ -1359,9 +1368,11 @@ const translations = {
+       editMode: "Bearbeitungsmodus",
+       editModeText: "Einstellungen ändern und auf \"Aktualisieren\" klicken",
+       dailyExecutionTime: "Tägliche Ausführungszeit",
++      jobEnabled: "Auftrag aktiviert",
+       runAtStartup: "Auch beim Maschinenstart ausführen",
+       schedulingInfo: "Sicherung wird automatisch jeden Tag um",
+       andAtStartup: "Und auch bei jedem Systemstart.",
++      jobDisabledInfo: "Auftrag deaktiviert: er wird erst wieder ausgeführt, wenn er aktiviert wird.",
+ 
+       // Backup Form
+       directoriesToBackup: "Zu sichernde Verzeichnisse (eins pro Zeile)",
+@@ -1450,6 +1461,7 @@ const translations = {
+       backupIdRequired: "Backup-ID erforderlich",
+       snapshotsFound: "{n} Snapshot(s) gefunden",
+       atStartup: "Beim Start",
++      jobDisabled: "Deaktiviert",
+       completionNoData: "Abschluss ohne Daten gemeldet",
+       backupInProgress: "Sicherung läuft...",
+       startBackup: "Sicherung starten",
+@@ -1764,9 +1776,11 @@ const translations = {
+       editMode: "Tryb edycji",
+       editModeText: "Zmodyfikuj ustawienia i kliknij \"Aktualizuj\"",
+       dailyExecutionTime: "Czas wykonywania dziennego",
++      jobEnabled: "Zadanie włączone",
+       runAtStartup: "Uruchamiaj również przy starcie komputera",
+       schedulingInfo: "Kopia zapasowa zostanie automatycznie uruchomiona każdego dnia o",
+       andAtStartup: "I również przy każdym uruchomieniu systemu.",
++      jobDisabledInfo: "Zadanie wyłączone: nie zostanie uruchomione, dopóki nie zostanie ponownie włączone.",
+ 
+       // Backup Form
+       directoriesToBackup: "Katalogi do kopii zapasowej (jeden na linię)",
+@@ -1855,6 +1869,7 @@ const translations = {
+       backupIdRequired: "Wymagany jest Backup ID",
+       snapshotsFound: "Znaleziono snapshotów: {n}",
+       atStartup: "Przy uruchomieniu",
++      jobDisabled: "Wyłączone",
+       completionNoData: "zakończenie zgłoszone bez danych",
+       backupInProgress: "Kopia zapasowa w toku...",
+       startBackup: "Rozpocznij kopię zapasową",
+@@ -2149,9 +2164,11 @@ const translations = {
+     "editMode": "Modo de edição",
+     "editModeText": "Altere as configurações e clique em \"Atualizar\"",
+     "dailyExecutionTime": "Horário diário de execução",
++    "jobEnabled": "Tarefa ativada",
+     "runAtStartup": "Executar também ao iniciar a máquina",
+     "schedulingInfo": "O backup será executado automaticamente todos os dias às",
+     "andAtStartup": "E também a cada inicialização do sistema.",
++    "jobDisabledInfo": "Tarefa desativada: ela não será executada até ser ativada novamente.",
+     "directoriesToBackup": "Diretórios para backup (um por linha)",
+     "physicalDisksToBackup": "Discos físicos para backup",
+     "loadingDisks": "Carregando discos disponíveis...",
+@@ -2233,6 +2250,7 @@ const translations = {
+     "backupIdRequired": "O ID do backup é obrigatório",
+     "snapshotsFound": "{n} snapshot(s) encontrado(s)",
+     "atStartup": "Na inicialização",
++    "jobDisabled": "Desativada",
+     "completionNoData": "conclusão informada sem dados",
+     "backupInProgress": "Backup em andamento...",
+     "startBackup": "Iniciar backup",
+diff --git a/gui/scheduler.go b/gui/scheduler.go
+index 8b4c6fa..9955cf4 100644
+--- a/gui/scheduler.go
++++ b/gui/scheduler.go
+@@ -89,8 +89,9 @@ func (a *App) SaveScheduledJob(job ScheduledJob) error {
+ 		return fmt.Errorf("failed to load existing jobs (refusing to overwrite): %w", err)
+ 	}
+ 
+-	// Set enabled by default
+-	job.Enabled = true
++	// Enabled is stored as sent (the form's "Enabled" checkbox): no longer
++	// forced to true. An HTTP API caller that sends no "enabled" key still
++	// gets an enabled job (see SaveScheduledJobFromMap).
+ 
+ 	// Calculate next run
+ 	job.NextRun = calculateNextRun(job.ScheduleTime)
+@@ -210,8 +211,9 @@ func (a *App) UpdateScheduledJob(job ScheduledJob) error {
+ 	found := false
+ 	for i, j := range jobs {
+ 		if j.ID == job.ID {
+-			// Preserve enabled state
+-			job.Enabled = j.Enabled
++			// Enabled is taken as sent: the edit form carries it (an HTTP API
++			// caller that omits it keeps the stored value, see
++			// UpdateScheduledJobFromMap).
+ 			// The edit form never carries the run record: keep it instead of
+ 			// overwriting it with an empty value (an update must not erase when
+ 			// the job last ran).
+diff --git a/gui/scheduler_test.go b/gui/scheduler_test.go
+index c60c0d5..0b6827a 100644
+--- a/gui/scheduler_test.go
++++ b/gui/scheduler_test.go
+@@ -37,7 +37,7 @@ func sampleJob() ScheduledJob {
+ 		BackupType:   "machine",
+ 		ExcludeList:  []string{"*.tmp", "cache/"},
+ 		Compression:  "better",
+-		Enabled:      true, // a stored job is enabled (SaveScheduledJob forces it)
++		Enabled:      true,
+ 	}
+ }
+ 
+@@ -287,7 +287,8 @@ func readJobsFile(t *testing.T) string {
+ }
+ 
+ // An update must not erase the run record: the edit form never carries
+-// lastRun (nor the enabled flag), so a save would otherwise wipe them.
++// lastRun, so a save would otherwise wipe it. The enabled flag is taken as
++// sent (here: the stored false, sent back unchanged).
+ func TestUpdateScheduledJobKeepsLastRunEnabledAndCompression(t *testing.T) {
+ 	a := newSchedulerTestApp(t)
+ 	if err := a.SaveScheduledJob(sampleJob()); err != nil {
+@@ -324,6 +325,70 @@ func TestUpdateScheduledJobKeepsLastRunEnabledAndCompression(t *testing.T) {
+ 	}
+ }
+ 
++// The form's "Enabled" checkbox: a job can be created disabled, then turned
++// back on by an update, which gives it a fresh nextRun.
++func TestScheduledJobEnabledFlagIsHonored(t *testing.T) {
++	a := newSchedulerTestApp(t)
++	job := sampleJob()
++	job.Enabled = false
++	if err := a.SaveScheduledJob(job); err != nil {
++		t.Fatalf("SaveScheduledJob() error = %v", err)
++	}
++	if got := list0(t, a); got.Enabled {
++		t.Fatalf("Enabled = true after saving a disabled job, want false")
++	}
++
++	job.Enabled = true
++	if err := a.UpdateScheduledJob(job); err != nil {
++		t.Fatalf("UpdateScheduledJob() error = %v", err)
++	}
++	got := list0(t, a)
++	if !got.Enabled {
++		t.Errorf("Enabled = false after re-enabling, want true")
++	}
++	if _, err := time.Parse(time.RFC3339, got.NextRun); err != nil {
++		t.Errorf("NextRun %q is not a valid run time after re-enabling: %v", got.NextRun, err)
++	}
++
++	job.Enabled = false
++	if err := a.UpdateScheduledJob(job); err != nil {
++		t.Fatalf("UpdateScheduledJob() error = %v", err)
++	}
++	if got := list0(t, a); got.Enabled {
++		t.Errorf("Enabled = true after disabling, want false")
++	}
++}
++
++// HTTP API callers that predate the option send no "enabled" key: a created
++// job is enabled, an updated job keeps its stored state.
++func TestScheduledJobFromMapWithoutEnabledKey(t *testing.T) {
++	a := newSchedulerTestApp(t)
++	m := jobToMap(&ScheduledJob{ID: "job-1", Name: "Nightly", ScheduleTime: "02:30",
++		BackupType: "directory", BackupDirs: []string{"/data"}, BackupID: "host-01"})
++	delete(m, "enabled")
++	if err := a.SaveScheduledJobFromMap(m); err != nil {
++		t.Fatalf("SaveScheduledJobFromMap() error = %v", err)
++	}
++	if got := list0(t, a); !got.Enabled {
++		t.Fatalf("Enabled = false, want a job created without the key to be enabled")
++	}
++
++	jobs := readStoredJobs(t)
++	jobs[0].Enabled = false
++	writeJobs(t, jobs)
++	m["scheduleTime"] = "04:45"
++	if err := a.UpdateScheduledJobFromMap(m); err != nil {
++		t.Fatalf("UpdateScheduledJobFromMap() error = %v", err)
++	}
++	got := list0(t, a)
++	if got.Enabled {
++		t.Errorf("Enabled = true, want the stored false kept when the key is absent")
++	}
++	if got.ScheduleTime != "04:45" {
++		t.Errorf("ScheduleTime = %q, want 04:45", got.ScheduleTime)
++	}
++}
++
+ func readStoredJobs(t *testing.T) []ScheduledJob {
+ 	t.Helper()
+ 	path, err := getScheduledJobsPath()
+-- 
+2.47.3
+

@@ -1,7 +1,7 @@
 From b4689eec55a83a10a82d79158f38cb8d9087b860 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 21 Oct 2026 08:31:12 +0200
-Subject: [PATCH 113/120] stats: chart and log our own stars only
+Subject: [PATCH 113/123] stats: chart and log our own stars only
 
 The public stats branch and README now hold Nimbus Backup's stars alone;
 the comparison with other projects is not published.

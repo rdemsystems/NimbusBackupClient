@@ -1,7 +1,7 @@
 From c05a3a10425221ef3aa129526db53cc079907065 Mon Sep 17 00:00:00 2001
 From: mjb-is <mjb-is@users.noreply.github.com>
 Date: Thu, 15 Oct 2026 00:10:44 +0100
-Subject: [PATCH 089/120] machinebackup: send the notification e-mail
+Subject: [PATCH 089/123] machinebackup: send the notification e-mail
 
 proxmoxbackup-machine accepts the -mail-* options and the config file's
 smtp section, and checks them in Config.Valid, but never sends anything.
