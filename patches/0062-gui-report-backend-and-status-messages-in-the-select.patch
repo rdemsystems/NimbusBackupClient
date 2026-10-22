@@ -1,7 +1,7 @@
 From cb4733773e4938ea315fc7590653c1ac483fd4a2 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Mon, 12 Oct 2026 14:34:39 +0200
-Subject: [PATCH 062/120] gui: report backend and status messages in the
+Subject: [PATCH 062/123] gui: report backend and status messages in the
  selected language (issue #10)
 
 Many messages produced by the Go side (progress, errors, job history)

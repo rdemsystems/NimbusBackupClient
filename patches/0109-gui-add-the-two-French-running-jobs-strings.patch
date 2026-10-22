@@ -1,7 +1,7 @@
 From 0b4256690e7bdf5db2ec5cd4d349f9a0e18ebeb1 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 21 Oct 2026 07:28:29 +0200
-Subject: [PATCH 109/120] gui: add the two French running-jobs strings
+Subject: [PATCH 109/123] gui: add the two French running-jobs strings
 
 The fr block lacked runningJobsCount and noRunningJobs, so the French
 Running tab showed the raw key "noRunningJobs" when nothing was running

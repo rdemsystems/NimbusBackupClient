@@ -1,7 +1,7 @@
 From 1597f1eeac6fdb6c3fd1ebee3a498f1b9014eb08 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Mon, 12 Oct 2026 15:09:07 +0200
-Subject: [PATCH 068/120] docs: CHANGELOG for the next release (issue #10,
+Subject: [PATCH 068/123] docs: CHANGELOG for the next release (issue #10,
  icon, CJInvent fixes)
 
 Fixes #10.

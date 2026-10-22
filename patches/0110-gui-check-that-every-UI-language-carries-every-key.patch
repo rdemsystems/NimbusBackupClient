@@ -1,7 +1,7 @@
 From cb42d5123dca8b0c48d53e928e56aa4f774bce28 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 21 Oct 2026 07:31:49 +0200
-Subject: [PATCH 110/120] gui: check that every UI language carries every key
+Subject: [PATCH 110/123] gui: check that every UI language carries every key
 
 The GUI has no fallback to English, so a key missing from a language
 shows up as its raw name. scripts/check-translations.mjs (npm test, no

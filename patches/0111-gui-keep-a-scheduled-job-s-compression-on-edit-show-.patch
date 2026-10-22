@@ -1,7 +1,7 @@
 From ec2f1162a4382b516ba1e4979bb25ffe84b519e8 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Wed, 21 Oct 2026 07:54:44 +0200
-Subject: [PATCH 111/120] gui: keep a scheduled job's compression on edit, show
+Subject: [PATCH 111/123] gui: keep a scheduled job's compression on edit, show
  the saved parallel count
 
 - Editing a scheduled job replaced it whole with the form's values, and

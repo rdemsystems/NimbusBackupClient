@@ -1,7 +1,7 @@
 From 5b71e9e6d00884c577ac6b8bbb38039bd5063516 Mon Sep 17 00:00:00 2001
 From: mjb-is <mjb-is@users.noreply.github.com>
 Date: Mon, 12 Oct 2026 21:34:15 +0100
-Subject: [PATCH 082/120] CLIs: report errors on stderr, never in a message box
+Subject: [PATCH 082/123] CLIs: report errors on stderr, never in a message box
 
 proxmoxbackup-directory and proxmoxbackup-machine showed a Windows
 message box (dialog.Error) for missing options and when another backup

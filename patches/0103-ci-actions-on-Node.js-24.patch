@@ -1,7 +1,7 @@
 From c66d0651fa6d27e31645fe9c930ed2500a4181f6 Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 17:32:55 +0200
-Subject: [PATCH 103/120] ci: actions on Node.js 24
+Subject: [PATCH 103/123] ci: actions on Node.js 24
 
 GitHub forces the Node.js 20 actions onto Node.js 24 and warns on every
 run. Each moves to its first major that runs on Node.js 24:

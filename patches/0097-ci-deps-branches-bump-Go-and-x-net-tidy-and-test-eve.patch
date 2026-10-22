@@ -1,7 +1,7 @@
 From b9523568fabf252d19ef3f53630e72202fa4cfab Mon Sep 17 00:00:00 2001
 From: Richard DEMONGEOT <richard@rdem-systems.com>
 Date: Tue, 20 Oct 2026 16:50:53 +0200
-Subject: [PATCH 097/120] ci: deps/** branches bump Go and x/net, tidy and test
+Subject: [PATCH 097/123] ci: deps/** branches bump Go and x/net, tidy and test
  every module
 
 Go 1.26.9 and golang.org/x/net v0.61.0 fix known net/http, crypto/tls and

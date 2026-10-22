@@ -1,0 +1,47 @@
+From 70ce7851244d2f49ac433cabe021ddef65721189 Mon Sep 17 00:00:00 2001
+From: Richard DEMONGEOT <richard@rdem-systems.com>
+Date: Thu, 22 Oct 2026 08:32:05 +0200
+Subject: [PATCH 123/123] =?UTF-8?q?release:=20v0.4.5=20=E2=80=94=20enable?=
+ =?UTF-8?q?=20or=20disable=20a=20scheduled=20job?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- gui/wails.json: 0.4.5
+- CHANGELOG: 0.4.5 section (2026-10-22)
+
+Fixes #17
+---
+ CHANGELOG.md   | 2 +-
+ gui/wails.json | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index ee64344..50969bd 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,7 +5,7 @@ All notable changes to Proxmox Backup Client (GUI) will be documented in this fi
+ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
+-## [Unreleased]
++## [0.4.5] - 2026-10-22
+ 
+ ### Added
+ - **Enable or disable a scheduled job** (issue #17, suggested by [Tácio Andrade](https://github.com/Tacioandrade)): a "Job enabled" checkbox in the schedule form, between the daily time and "Also run at machine startup". A disabled job is kept but does not run, neither at its time nor at startup, until it is enabled again; it is shown greyed out with a "Disabled" badge in the job list. "Run now" still runs it on demand. A job created through the local HTTP API without an `enabled` key is still enabled, and an update without the key keeps the stored state.
+diff --git a/gui/wails.json b/gui/wails.json
+index 2a50d77..5ccf91b 100644
+--- a/gui/wails.json
++++ b/gui/wails.json
+@@ -14,7 +14,7 @@
+   "info": {
+     "companyName": "Proxmox Backup Client",
+     "productName": "Proxmox Backup Client",
+-    "productVersion": "0.4.4",
++    "productVersion": "0.4.5",
+     "copyright": "© 2024-2026 Proxmox Backup Client GO Contributors and RDEM Systems.",
+     "comments": "Backup client for Proxmox Backup Server"
+   },
+-- 
+2.47.3
+

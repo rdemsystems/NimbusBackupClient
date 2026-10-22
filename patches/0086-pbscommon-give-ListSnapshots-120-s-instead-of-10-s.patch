@@ -1,7 +1,7 @@
 From 5c5d1d0943e155550e90755a99303afe23c60fdc Mon Sep 17 00:00:00 2001
 From: mjb-is <mjb-is@users.noreply.github.com>
 Date: Thu, 15 Oct 2026 00:09:17 +0100
-Subject: [PATCH 086/120] pbscommon: give ListSnapshots 120 s instead of 10 s
+Subject: [PATCH 086/123] pbscommon: give ListSnapshots 120 s instead of 10 s
 
 PBS answers /admin/datastore/{store}/snapshots by reading the manifest of
 every snapshot in the datastore or namespace. With a cold cache over
