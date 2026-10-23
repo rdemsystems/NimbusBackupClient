@@ -2,35 +2,37 @@
 <text fill="#8b949e" x="56" y="24" font-size="15" font-weight="600">Nimbus Backup — GitHub stars</text>
 <line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="320.0" y2="320.0"/>
 <text fill="#8b949e" x="48" y="324.0" text-anchor="end">0</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="264.8" y2="264.8"/>
-<text fill="#8b949e" x="48" y="268.8" text-anchor="end">10</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="209.6" y2="209.6"/>
-<text fill="#8b949e" x="48" y="213.6" text-anchor="end">20</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="154.4" y2="154.4"/>
-<text fill="#8b949e" x="48" y="158.4" text-anchor="end">30</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="99.2" y2="99.2"/>
-<text fill="#8b949e" x="48" y="103.2" text-anchor="end">40</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="274.0" y2="274.0"/>
+<text fill="#8b949e" x="48" y="278.0" text-anchor="end">10</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="228.0" y2="228.0"/>
+<text fill="#8b949e" x="48" y="232.0" text-anchor="end">20</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="182.0" y2="182.0"/>
+<text fill="#8b949e" x="48" y="186.0" text-anchor="end">30</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="136.0" y2="136.0"/>
+<text fill="#8b949e" x="48" y="140.0" text-anchor="end">40</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="90.0" y2="90.0"/>
+<text fill="#8b949e" x="48" y="94.0" text-anchor="end">50</text>
 <line stroke="#8b949e" stroke-opacity="0.25" x1="56" x2="620" y1="44.0" y2="44.0"/>
-<text fill="#8b949e" x="48" y="48.0" text-anchor="end">50</text>
+<text fill="#8b949e" x="48" y="48.0" text-anchor="end">60</text>
 <line stroke="#8b949e" stroke-opacity="0.25" x1="56.0" x2="56.0" y1="44" y2="320"/>
 <text fill="#8b949e" x="56.0" y="338" text-anchor="middle">Mar 26</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="130.3" x2="130.3" y1="44" y2="320"/>
-<text fill="#8b949e" x="130.3" y="338" text-anchor="middle">Apr 26</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="202.1" x2="202.1" y1="44" y2="320"/>
-<text fill="#8b949e" x="202.1" y="338" text-anchor="middle">May 26</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="276.4" x2="276.4" y1="44" y2="320"/>
-<text fill="#8b949e" x="276.4" y="338" text-anchor="middle">Jun 26</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="348.3" x2="348.3" y1="44" y2="320"/>
-<text fill="#8b949e" x="348.3" y="338" text-anchor="middle">Jul 26</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="422.5" x2="422.5" y1="44" y2="320"/>
-<text fill="#8b949e" x="422.5" y="338" text-anchor="middle">Aug 26</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="496.8" x2="496.8" y1="44" y2="320"/>
-<text fill="#8b949e" x="496.8" y="338" text-anchor="middle">Sep 26</text>
-<line stroke="#8b949e" stroke-opacity="0.25" x1="568.7" x2="568.7" y1="44" y2="320"/>
-<text fill="#8b949e" x="568.7" y="338" text-anchor="middle">Oct 26</text>
-<path fill="none" stroke="#2a78d6" stroke-width="2.5" stroke-linejoin="round" d="M114.3,314.5 L114.3,314.5 L114.3,309.0 L114.5,309.0 L114.5,303.4 L144.2,303.4 L144.2,297.9 L154.0,297.9 L154.0,292.4 L159.0,292.4 L159.0,286.9 L171.4,286.9 L171.4,281.4 L180.3,281.4 L180.3,275.8 L207.2,275.8 L207.2,270.3 L222.2,270.3 L222.2,264.8 L251.8,264.8 L251.8,259.3 L268.3,259.3 L268.3,253.8 L279.7,253.8 L279.7,248.2 L288.5,248.2 L288.5,242.7 L294.9,242.7 L294.9,237.2 L302.2,237.2 L302.2,231.7 L322.4,231.7 L322.4,226.2 L327.8,226.2 L327.8,220.6 L330.8,220.6 L330.8,215.1 L334.8,215.1 L334.8,209.6 L345.1,209.6 L345.1,204.1 L349.4,204.1 L349.4,198.6 L353.9,198.6 L353.9,193.0 L355.3,193.0 L355.3,187.5 L383.7,187.5 L383.7,182.0 L390.9,182.0 L390.9,176.5 L395.8,176.5 L395.8,171.0 L397.1,171.0 L397.1,165.4 L410.2,165.4 L410.2,159.9 L425.7,159.9 L425.7,154.4 L428.9,154.4 L428.9,148.9 L428.9,148.9 L428.9,143.4 L440.7,143.4 L440.7,137.8 L454.6,137.8 L454.6,132.3 L467.1,132.3 L467.1,126.8 L485.7,126.8 L485.7,121.3 L499.6,121.3 L499.6,115.8 L514.4,115.8 L514.4,110.2 L534.2,110.2 L534.2,104.7 L539.6,104.7 L539.6,99.2 L563.7,99.2 L563.7,93.7 L564.3,93.7 L564.3,88.2 L576.6,88.2 L576.6,82.6 L580.4,82.6 L580.4,77.1 L588.9,77.1 L588.9,71.6 L596.3,71.6 L596.3,66.1 L596.4,66.1 L596.4,60.6 L601.0,60.6 L601.0,55.0 L601.8,55.0 L601.8,49.5 L617.9,49.5 L617.9,44.0 L620.0,44.0"/>
-<circle cx="620.0" cy="44.0" r="2.5" fill="#2a78d6"/>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="130.0" x2="130.0" y1="44" y2="320"/>
+<text fill="#8b949e" x="130.0" y="338" text-anchor="middle">Apr 26</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="201.5" x2="201.5" y1="44" y2="320"/>
+<text fill="#8b949e" x="201.5" y="338" text-anchor="middle">May 26</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="275.5" x2="275.5" y1="44" y2="320"/>
+<text fill="#8b949e" x="275.5" y="338" text-anchor="middle">Jun 26</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="347.0" x2="347.0" y1="44" y2="320"/>
+<text fill="#8b949e" x="347.0" y="338" text-anchor="middle">Jul 26</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="421.0" x2="421.0" y1="44" y2="320"/>
+<text fill="#8b949e" x="421.0" y="338" text-anchor="middle">Aug 26</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="494.9" x2="494.9" y1="44" y2="320"/>
+<text fill="#8b949e" x="494.9" y="338" text-anchor="middle">Sep 26</text>
+<line stroke="#8b949e" stroke-opacity="0.25" x1="566.5" x2="566.5" y1="44" y2="320"/>
+<text fill="#8b949e" x="566.5" y="338" text-anchor="middle">Oct 26</text>
+<path fill="none" stroke="#2a78d6" stroke-width="2.5" stroke-linejoin="round" d="M114.0,315.4 L114.1,315.4 L114.1,310.8 L114.2,310.8 L114.2,306.2 L143.9,306.2 L143.9,301.6 L153.6,301.6 L153.6,297.0 L158.5,297.0 L158.5,292.4 L170.9,292.4 L170.9,287.8 L179.8,287.8 L179.8,283.2 L206.6,283.2 L206.6,278.6 L221.5,278.6 L221.5,274.0 L251.0,274.0 L251.0,269.4 L267.4,269.4 L267.4,264.8 L278.7,264.8 L278.7,260.2 L287.5,260.2 L287.5,255.6 L293.9,255.6 L293.9,251.0 L301.1,251.0 L301.1,246.4 L321.3,246.4 L321.3,241.8 L326.6,241.8 L326.6,237.2 L329.6,237.2 L329.6,232.6 L333.6,232.6 L333.6,228.0 L343.9,228.0 L343.9,223.4 L348.2,223.4 L348.2,218.8 L352.6,218.8 L352.6,214.2 L354.0,214.2 L354.0,209.6 L382.3,209.6 L382.3,205.0 L389.5,205.0 L389.5,200.4 L394.4,200.4 L394.4,195.8 L395.6,195.8 L395.6,191.2 L408.7,191.2 L408.7,186.6 L424.2,186.6 L424.2,182.0 L427.3,182.0 L427.3,177.4 L427.3,177.4 L427.3,172.8 L439.0,172.8 L439.0,168.2 L453.0,168.2 L453.0,163.6 L465.3,163.6 L465.3,159.0 L483.9,159.0 L483.9,154.4 L497.8,154.4 L497.8,149.8 L512.5,149.8 L512.5,145.2 L532.2,145.2 L532.2,140.6 L537.5,140.6 L537.5,136.0 L561.6,136.0 L561.6,131.4 L562.2,131.4 L562.2,126.8 L574.4,126.8 L574.4,122.2 L578.2,122.2 L578.2,117.6 L586.6,117.6 L586.6,113.0 L594.0,113.0 L594.0,108.4 L594.2,108.4 L594.2,103.8 L598.7,103.8 L598.7,99.2 L599.5,99.2 L599.5,94.6 L615.5,94.6 L615.5,90.0 L618.5,90.0 L618.5,85.4 L620.0,85.4"/>
+<circle cx="620.0" cy="85.4" r="2.5" fill="#2a78d6"/>
 <rect x="636" y="50" width="12" height="3" fill="#2a78d6"/>
-<text fill="#8b949e" x="654" y="55">NimbusBackupClient · 50</text>
-<text fill="#8b949e" x="620" y="354" text-anchor="end" font-size="10">updated 2026-10-22</text>
+<text fill="#8b949e" x="654" y="55">NimbusBackupClient · 51</text>
+<text fill="#8b949e" x="620" y="354" text-anchor="end" font-size="10">updated 2026-10-23</text>
 </svg>
