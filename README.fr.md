@@ -241,7 +241,7 @@ Merci à toutes celles et ceux qui ont aidé Nimbus Backup :
 
 - [Tácio Andrade](https://github.com/Tacioandrade) ([MultiTI](https://www.multiti.com.br)) — traduction en portugais du Brésil ([#16](https://github.com/rdemsystems/NimbusBackupClient/pull/16)).
 
-Le code partagé avec le projet d'origine vient aussi de [ses contributeurs](https://github.com/tizbac/proxmoxbackupclient_go/graphs/contributors). Les contributions sont bienvenues : voir les [issues](https://github.com/rdemsystems/NimbusBackupClient/issues) ouvertes, ou proposer une pull request sur `master`.
+Le code partagé avec le projet d'origine vient de [Tiziano Bacocco (tizbac)](https://github.com/tizbac), son auteur, et de [ses contributeurs](https://github.com/tizbac/proxmoxbackupclient_go/graphs/contributors). Nous suivons les issues des deux projets ([projet d'origine](https://github.com/tizbac/proxmoxbackupclient_go/issues), [Nimbus Backup](https://github.com/rdemsystems/NimbusBackupClient/issues)) pour vérifier si un problème signalé d'un côté concerne aussi l'autre. Les contributions sont bienvenues : voir les [issues](https://github.com/rdemsystems/NimbusBackupClient/issues) ouvertes, ou proposer une pull request sur `master`.
 
 ## ⭐ Étoiles
 
