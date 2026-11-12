@@ -20,6 +20,27 @@ Nimbus Backup هو إصدار RDEM Systems من [Proxmox Backup Client GO](https
 
 > 🔏 **الإصدارات الرسمية هي إصداراتنا فقط.** تُنشر إصدارات Nimbus Backup **حصريًا** على [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) و [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). منذ الإصدار 0.4.1، كل ملف Windows رسمي (الواجهة الرسومية، الخدمة، MSI) **موقَّع رقميًا من RDEM SYSTEMS**: انقر بزر الماوس الأيمن على الملف ← *خصائص* ← *التوقيعات الرقمية*، أو استخدم `Get-AuthenticodeSignature`. توجد تفرعات (forks) من هذا المشروع المرخّص بـ GPL ما زالت تحمل اسم Nimbus Backup وتذكر RDEM Systems كمؤلف؛ إصداراتها **ليست** من إنتاج RDEM Systems ولا موقَّعة ولا مدعومة منها.
 
+## 🚚 ينتقل Nimbus Backup إلى Salvanza
+
+أصبح اسم المشروع الأصلي [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxbackupclient_go) الآن **[Salvanza](https://salvanza.org/?utm_source=github)** ([Salvanza/salvanza_client](https://github.com/Salvanza/salvanza_client)). دمج إصداره 2.0 الواجهة الرسومية التي بدأناها، بعد أن أعاد mjb-is صياغتها ووسّعها، وهو يبني بالفعل إصدارًا باسم *Nimbus Backup*. بدلًا من صيانة قاعدتَي شيفرة بالتوازي، **ننقل تطويرنا إلى Salvanza** حيث يتقاسم عدد أكبر من المشرفين العمل.
+
+ماذا يعني ذلك:
+
+- **الشيفرة.** تُرسل الميزات الجديدة والإصلاحات إلى Salvanza على شكل pull requests. يتوقف هذا المستودع عن حمل سلسلة تصحيحات خاصة به.
+- **إصدارات موقّعة.** يواصل هذا المستودع ما لا يستطيعه Salvanza بعد: يبني إصدارات Salvanza باسم **Nimbus Backup**، **موقّعة رقميًا من RDEM SYSTEMS**، مع شهادة المصدر وقيم التحقق نفسها كما اليوم.
+- **التثبيتات الحالية.** سيصل الانتقال كترقية MSI عادية بعد دمج طلبات السحب أدناه واختبار الترقية من 0.4.x. حتى ذلك الحين يبقى 0.4.x مدعومًا بالإصلاحات الحرجة فقط.
+
+**طلبات السحب إلى Salvanza المطلوبة قبل الانتقال:**
+
+| طلب السحب | لماذا يهم مستخدمي Nimbus Backup | الحالة |
+|---|---|---|
+| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | بدونه لا يستطيع Salvanza 2.0 استعادة النسخ المشفّرة التي أنشأها Nimbus Backup 0.4.1 أو أحدث، أو `proxmox-backup-client`. كما تصبح النسخ المشفّرة مضغوطة. | ⏳ مفتوح |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | بدونه، سيعود الحاسوب المثبَّت أصلًا بـ Nimbus Backup ≤ 0.3 بعد الترقية إلى إعدادات 0.3 ومن دون مفتاح التشفير. | ⏳ مفتوح |
+
+دُمجت سابقًا في المشروع الأصلي من هذا المستودع: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (بصمة بمفتاح للنسخ المشفّرة في الواجهة), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (ترويسة Host في طلب الترقية), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (الإيقاف في منتصف مجلد), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (تفعيل مهمة أو تعطيلها), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (الرجوع إلى الإنجليزية عند نقص الترجمة).
+
+**تريد المساعدة؟** ساهم مباشرة في [Salvanza](https://github.com/Salvanza/salvanza_client): البلاغات وطلبات السحب والترجمات والاختبار على أجهزة حقيقية كلها مرحّب بها.
+
 ## 📦 التنزيل
 
 👉 **[تنزيل أحدث إصدار](https://github.com/rdemsystems/NimbusBackupClient/releases)**
