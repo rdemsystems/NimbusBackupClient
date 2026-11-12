@@ -18,6 +18,27 @@ Nimbus Backup è la build di RDEM Systems di [Proxmox Backup Client GO](https://
 
 > 🔏 **Solo le nostre build sono ufficiali.** Le release di Nimbus Backup sono pubblicate **solo** su [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) e [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github). Dalla 0.4.1 ogni binario Windows ufficiale (GUI, servizio, MSI) è **firmato da RDEM SYSTEMS**: clic destro sul file → *Proprietà* → *Firme digitali*, oppure `Get-AuthenticodeSignature`. Esistono fork di questo progetto GPL che mantengono il nome Nimbus Backup e RDEM Systems come autore: le loro build **non** sono prodotte, firmate né supportate da RDEM Systems.
 
+## 🚚 Nimbus Backup si trasferisce su Salvanza
+
+Il progetto upstream [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxbackupclient_go) ora si chiama **[Salvanza](https://salvanza.org/?utm_source=github)** ([Salvanza/salvanza_client](https://github.com/Salvanza/salvanza_client)). La sua versione 2.0 ha integrato la GUI che abbiamo avviato, rielaborata ed estesa da mjb-is, e produce già un'edizione *Nimbus Backup*. Invece di mantenere due basi di codice allineate, **spostiamo il nostro sviluppo su Salvanza**, dove più maintainer si dividono il lavoro.
+
+Cosa significa:
+
+- **Codice.** Nuove funzioni e correzioni vanno a Salvanza come pull request. Questo repository smette di portare una propria serie di patch.
+- **Build firmate.** Questo repository continua a fare ciò che Salvanza non fa ancora: compila le release di Salvanza come **Nimbus Backup**, **firmate da RDEM SYSTEMS**, con le stesse attestazioni e checksum di oggi.
+- **Installazioni esistenti.** Il passaggio arriverà come normale aggiornamento MSI, una volta integrate le pull request qui sotto e testato l'aggiornamento dalla 0.4.x. Fino ad allora la 0.4.x resta supportata, solo con correzioni critiche.
+
+**Pull request a Salvanza necessarie prima del passaggio:**
+
+| Pull request | Perché conta per gli utenti di Nimbus Backup | Stato |
+|---|---|---|
+| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | Senza di essa, Salvanza 2.0 non può ripristinare i backup cifrati fatti da Nimbus Backup 0.4.1 in poi o da `proxmox-backup-client`. Inoltre i backup cifrati vengono compressi. | ⏳ Aperta |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Senza di essa, un computer installato in origine con Nimbus Backup ≤ 0.3 tornerebbe dopo l'aggiornamento con le impostazioni della 0.3 e senza chiave di cifratura. | ⏳ Aperta |
+
+Già integrate upstream da questo repository: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (digest con chiave per i backup cifrati della GUI), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (header Host della richiesta di upgrade), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Stop a metà di una cartella), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (abilitare o disabilitare un job), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (ripiego sull'inglese per le traduzioni mancanti).
+
+**Vuoi aiutare?** Contribuisci direttamente a [Salvanza](https://github.com/Salvanza/salvanza_client): issue, pull request, traduzioni e test su hardware reale sono benvenuti.
+
 ## 📦 Download
 
 👉 **[Scarica l'ultima release](https://github.com/rdemsystems/NimbusBackupClient/releases)**

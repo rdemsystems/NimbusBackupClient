@@ -18,6 +18,27 @@ Nimbus Backup は [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxba
 
 > 🔏 **公式ビルドは当社のもののみです。** Nimbus Backup のリリースは [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) と [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github) で**のみ**公開されています。0.4.1 以降、公式の Windows バイナリ（GUI、サービス、MSI）はすべて **RDEM SYSTEMS によってコード署名**されています：ファイルを右クリック → *プロパティ* → *デジタル署名*、または `Get-AuthenticodeSignature` で確認できます。Nimbus Backup の名前と作者 RDEM Systems を残したままの GPL フォークが存在しますが、それらのビルドは RDEM Systems が作成・署名・サポートしたものでは**ありません**。
 
+## 🚚 Nimbus Backup は Salvanza へ移行します
+
+上流プロジェクト [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxbackupclient_go) は **[Salvanza](https://salvanza.org/?utm_source=github)**（[Salvanza/salvanza_client](https://github.com/Salvanza/salvanza_client)）に名称を変更しました。そのバージョン 2.0 には、私たちが始め mjb-is が改良・拡張した GUI が統合され、すでに *Nimbus Backup* エディションもビルドされています。2 つのコードベースを並行して維持する代わりに、**私たちは開発を Salvanza に移します**。より多くのメンテナーで作業を分担できます。
+
+これが意味すること：
+
+- **コード。** 新機能と修正は pull request として Salvanza に送ります。このリポジトリは独自のパッチシリーズを持たなくなります。
+- **署名付きビルド。** このリポジトリは、Salvanza がまだできないことを続けます。Salvanza のリリースを **Nimbus Backup** としてビルドし、**RDEM SYSTEMS がコード署名**し、現在と同じ証明書（attestation）とチェックサムを付けます。
+- **既存のインストール。** 下記の pull request がマージされ、0.4.x からのアップグレードがテストされた後、通常の MSI アップグレードとして切り替えます。それまで 0.4.x は重大な修正のみでサポートを続けます。
+
+**切り替え前に必要な Salvanza への pull request：**
+
+| Pull request | Nimbus Backup ユーザーにとっての重要性 | 状態 |
+|---|---|---|
+| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | これがないと、Salvanza 2.0 は Nimbus Backup 0.4.1 以降または `proxmox-backup-client` で作成した暗号化バックアップを復元できません。また、暗号化バックアップも圧縮されるようになります。 | ⏳ レビュー待ち |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | これがないと、最初に Nimbus Backup ≤ 0.3 でインストールしたコンピューターは、アップグレード後に 0.3 当時の設定に戻り、暗号化キーも失われます。 | ⏳ レビュー待ち |
+
+このリポジトリから上流にマージ済み： [#115](https://github.com/Salvanza/salvanza_client/pull/115) (GUI の暗号化バックアップに鍵付きダイジェスト), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (アップグレード要求の Host ヘッダー), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (フォルダーの途中での停止), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (ジョブの有効化・無効化), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (翻訳がない場合の英語フォールバック).
+
+**手伝いたい方へ：** [Salvanza](https://github.com/Salvanza/salvanza_client) に直接ご協力ください。issue、pull request、翻訳、実機でのテストを歓迎します。
+
 ## 📦 ダウンロード
 
 👉 **[最新リリースをダウンロード](https://github.com/rdemsystems/NimbusBackupClient/releases)**

@@ -18,6 +18,27 @@ Nimbus Backup 是 RDEM Systems 对 [Proxmox Backup Client GO](https://github.com
 
 > 🔏 **只有我们发布的版本才是官方版本。** Nimbus Backup 的版本**仅**在 [github.com/rdemsystems/NimbusBackupClient](https://github.com/rdemsystems/NimbusBackupClient/releases) 和 [nimbus.rdem-systems.com](https://nimbus.rdem-systems.com/en/?utm_source=github) 发布。自 0.4.1 起，每个官方 Windows 二进制文件（GUI、服务、MSI）都**由 RDEM SYSTEMS 代码签名**：右键单击文件 → *属性* → *数字签名*，或运行 `Get-AuthenticodeSignature`。存在一些仍使用 Nimbus Backup 名称并以 RDEM Systems 为作者的 GPL 项目分支；它们的构建**并非**由 RDEM Systems 制作、签名或支持。
 
+## 🚚 Nimbus Backup 正迁移到 Salvanza
+
+上游项目 [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxbackupclient_go) 现已更名为 **[Salvanza](https://salvanza.org/?utm_source=github)**（[Salvanza/salvanza_client](https://github.com/Salvanza/salvanza_client)）。其 2.0 版本合并了由我们发起、经 mjb-is 重构和扩展的图形界面，并已构建 *Nimbus Backup* 版本。与其同步维护两套代码，**我们将开发迁移到 Salvanza**，由更多维护者分担工作。
+
+这意味着：
+
+- **代码。** 新功能和修复以 pull request 的形式提交给 Salvanza。本仓库不再维护自己的补丁系列。
+- **签名构建。** 本仓库继续做 Salvanza 目前还做不到的事：将 Salvanza 的发布版构建为 **Nimbus Backup**，**由 RDEM SYSTEMS 代码签名**，并提供与现在相同的构建证明和校验和。
+- **现有安装。** 待下列 pull request 合并、且从 0.4.x 的升级经过测试后，切换将以普通 MSI 升级的方式发布。在此之前，0.4.x 继续受支持，仅提供关键修复。
+
+**切换前需要合并到 Salvanza 的 pull request：**
+
+| Pull request | 对 Nimbus Backup 用户的意义 | 状态 |
+|---|---|---|
+| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | 没有它，Salvanza 2.0 无法恢复 Nimbus Backup 0.4.1 及以后版本或 `proxmox-backup-client` 制作的加密备份。此外，加密备份也会被压缩。 | ⏳ 待合并 |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | 没有它，最初以 Nimbus Backup ≤ 0.3 安装的电脑在升级后会回到 0.3 时期的设置，且没有加密密钥。 | ⏳ 待合并 |
+
+本仓库已被上游合并的 PR： [#115](https://github.com/Salvanza/salvanza_client/pull/115) (GUI 加密备份使用带密钥的摘要), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (升级请求的 Host 头), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (在文件夹中途停止), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (启用或禁用任务), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (缺失翻译时回退到英文).
+
+**想帮忙？** 请直接为 [Salvanza](https://github.com/Salvanza/salvanza_client) 做贡献：欢迎提交 issue、pull request、翻译以及在真实硬件上测试。
+
 ## 📦 下载
 
 👉 **[下载最新版本](https://github.com/rdemsystems/NimbusBackupClient/releases)**
