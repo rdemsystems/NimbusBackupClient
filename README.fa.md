@@ -34,7 +34,7 @@ Nimbus Backup نسخه‌ی RDEM Systems از [Proxmox Backup Client GO](https:/
 
 | Pull request | چرا برای کاربران Nimbus Backup مهم است | وضعیت |
 |---|---|---|
-| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | بدون آن، Salvanza 2.0 نمی‌تواند پشتیبان‌های رمزنگاری‌شدهٔ Nimbus Backup 0.4.1 به بعد یا `proxmox-backup-client` را بازیابی کند. افزون بر این، پشتیبان‌های رمزنگاری‌شده فشرده هم می‌شوند. | ⏳ باز |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | بدون آن، Salvanza 2.0 نمی‌تواند پشتیبان‌های رمزنگاری‌شدهٔ Nimbus Backup 0.4.1 به بعد یا `proxmox-backup-client` را بازیابی کند. افزون بر این، پشتیبان‌های رمزنگاری‌شده فشرده هم می‌شوند. | ⏳ باز |
 | [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | بدون آن، رایانه‌ای که در ابتدا با Nimbus Backup ≤ 0.3 نصب شده، پس از ارتقا به تنظیمات 0.3 و بدون کلید رمزنگاری بازمی‌گشت. | ⏳ باز |
 
 از این مخزن پیش‌تر در بالادست ادغام شده‌اند: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (چکیدهٔ کلیددار برای پشتیبان‌های رمزنگاری‌شدهٔ رابط گرافیکی), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (سرآیند Host در درخواست ارتقا), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (توقف در میانهٔ یک پوشه), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (فعال یا غیرفعال کردن یک کار), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (بازگشت به انگلیسی برای ترجمه‌های ناموجود).

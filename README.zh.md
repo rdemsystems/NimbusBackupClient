@@ -32,7 +32,7 @@ Nimbus Backup 是 RDEM Systems 对 [Proxmox Backup Client GO](https://github.com
 
 | Pull request | 对 Nimbus Backup 用户的意义 | 状态 |
 |---|---|---|
-| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | 没有它，Salvanza 2.0 无法恢复 Nimbus Backup 0.4.1 及以后版本或 `proxmox-backup-client` 制作的加密备份。此外，加密备份也会被压缩。 | ⏳ 待合并 |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | 没有它，Salvanza 2.0 无法恢复 Nimbus Backup 0.4.1 及以后版本或 `proxmox-backup-client` 制作的加密备份。此外，加密备份也会被压缩。 | ⏳ 待合并 |
 | [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | 没有它，最初以 Nimbus Backup ≤ 0.3 安装的电脑在升级后会回到 0.3 时期的设置，且没有加密密钥。 | ⏳ 待合并 |
 
 本仓库已被上游合并的 PR： [#115](https://github.com/Salvanza/salvanza_client/pull/115) (GUI 加密备份使用带密钥的摘要), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (升级请求的 Host 头), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (在文件夹中途停止), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (启用或禁用任务), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (缺失翻译时回退到英文).
