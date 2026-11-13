@@ -34,7 +34,7 @@ Nimbus Backup هو إصدار RDEM Systems من [Proxmox Backup Client GO](https
 
 | طلب السحب | لماذا يهم مستخدمي Nimbus Backup | الحالة |
 |---|---|---|
-| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | بدونه لا يستطيع Salvanza 2.0 استعادة النسخ المشفّرة التي أنشأها Nimbus Backup 0.4.1 أو أحدث، أو `proxmox-backup-client`. كما تصبح النسخ المشفّرة مضغوطة. | ⏳ مفتوح |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | بدونه لا يستطيع Salvanza 2.0 استعادة النسخ المشفّرة التي أنشأها Nimbus Backup 0.4.1 أو أحدث، أو `proxmox-backup-client`. كما تصبح النسخ المشفّرة مضغوطة. | ⏳ مفتوح |
 | [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | بدونه، سيعود الحاسوب المثبَّت أصلًا بـ Nimbus Backup ≤ 0.3 بعد الترقية إلى إعدادات 0.3 ومن دون مفتاح التشفير. | ⏳ مفتوح |
 
 دُمجت سابقًا في المشروع الأصلي من هذا المستودع: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (بصمة بمفتاح للنسخ المشفّرة في الواجهة), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (ترويسة Host في طلب الترقية), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (الإيقاف في منتصف مجلد), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (تفعيل مهمة أو تعطيلها), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (الرجوع إلى الإنجليزية عند نقص الترجمة).

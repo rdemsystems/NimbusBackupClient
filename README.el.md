@@ -32,7 +32,7 @@
 
 | Pull request | Γιατί έχει σημασία για τους χρήστες του Nimbus Backup | Κατάσταση |
 |---|---|---|
-| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | Χωρίς αυτό, το Salvanza 2.0 δεν μπορεί να επαναφέρει κρυπτογραφημένα αντίγραφα του Nimbus Backup 0.4.1 και νεότερων ή του `proxmox-backup-client`. Επιπλέον, τα κρυπτογραφημένα αντίγραφα συμπιέζονται. | ⏳ Ανοιχτό |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Χωρίς αυτό, το Salvanza 2.0 δεν μπορεί να επαναφέρει κρυπτογραφημένα αντίγραφα του Nimbus Backup 0.4.1 και νεότερων ή του `proxmox-backup-client`. Επιπλέον, τα κρυπτογραφημένα αντίγραφα συμπιέζονται. | ⏳ Ανοιχτό |
 | [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Χωρίς αυτό, ένας υπολογιστής που εγκαταστάθηκε αρχικά με Nimbus Backup ≤ 0.3 θα επέστρεφε μετά την αναβάθμιση στις ρυθμίσεις της 0.3, χωρίς κλειδί κρυπτογράφησης. | ⏳ Ανοιχτό |
 
 Ήδη συγχωνευμένα upstream από αυτό το αποθετήριο: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (digest με κλειδί για κρυπτογραφημένα αντίγραφα του GUI), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (κεφαλίδα Host στο αίτημα upgrade), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Διακοπή στη μέση ενός φακέλου), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (ενεργοποίηση ή απενεργοποίηση εργασίας), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (εφεδρικά αγγλικά για μεταφράσεις που λείπουν).

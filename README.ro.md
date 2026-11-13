@@ -32,7 +32,7 @@ Ce înseamnă asta:
 
 | Pull request | De ce contează pentru utilizatorii Nimbus Backup | Stare |
 |---|---|---|
-| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | Fără el, Salvanza 2.0 nu poate restaura copiile criptate făcute de Nimbus Backup 0.4.1 sau mai nou ori de `proxmox-backup-client`. În plus, copiile criptate sunt comprimate. | ⏳ Deschis |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Fără el, Salvanza 2.0 nu poate restaura copiile criptate făcute de Nimbus Backup 0.4.1 sau mai nou ori de `proxmox-backup-client`. În plus, copiile criptate sunt comprimate. | ⏳ Deschis |
 | [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Fără el, un calculator instalat inițial cu Nimbus Backup ≤ 0.3 ar reveni după actualizare la setările din 0.3, fără cheie de criptare. | ⏳ Deschis |
 
 Deja integrate upstream din acest depozit: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (digest cu cheie pentru copiile criptate din GUI), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (antetul Host al cererii de upgrade), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Oprire la mijlocul unui dosar), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (activarea sau dezactivarea unei sarcini), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (revenire la engleză pentru traducerile lipsă).

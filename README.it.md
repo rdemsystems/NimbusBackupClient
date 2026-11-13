@@ -32,7 +32,7 @@ Cosa significa:
 
 | Pull request | Perché conta per gli utenti di Nimbus Backup | Stato |
 |---|---|---|
-| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | Senza di essa, Salvanza 2.0 non può ripristinare i backup cifrati fatti da Nimbus Backup 0.4.1 in poi o da `proxmox-backup-client`. Inoltre i backup cifrati vengono compressi. | ⏳ Aperta |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Senza di essa, Salvanza 2.0 non può ripristinare i backup cifrati fatti da Nimbus Backup 0.4.1 in poi o da `proxmox-backup-client`. Inoltre i backup cifrati vengono compressi. | ⏳ Aperta |
 | [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Senza di essa, un computer installato in origine con Nimbus Backup ≤ 0.3 tornerebbe dopo l'aggiornamento con le impostazioni della 0.3 e senza chiave di cifratura. | ⏳ Aperta |
 
 Già integrate upstream da questo repository: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (digest con chiave per i backup cifrati della GUI), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (header Host della richiesta di upgrade), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Stop a metà di una cartella), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (abilitare o disabilitare un job), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (ripiego sull'inglese per le traduzioni mancanti).

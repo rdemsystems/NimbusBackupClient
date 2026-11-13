@@ -32,7 +32,7 @@ Nimbus Backup は [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxba
 
 | Pull request | Nimbus Backup ユーザーにとっての重要性 | 状態 |
 |---|---|---|
-| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | これがないと、Salvanza 2.0 は Nimbus Backup 0.4.1 以降または `proxmox-backup-client` で作成した暗号化バックアップを復元できません。また、暗号化バックアップも圧縮されるようになります。 | ⏳ レビュー待ち |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | これがないと、Salvanza 2.0 は Nimbus Backup 0.4.1 以降または `proxmox-backup-client` で作成した暗号化バックアップを復元できません。また、暗号化バックアップも圧縮されるようになります。 | ⏳ レビュー待ち |
 | [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | これがないと、最初に Nimbus Backup ≤ 0.3 でインストールしたコンピューターは、アップグレード後に 0.3 当時の設定に戻り、暗号化キーも失われます。 | ⏳ レビュー待ち |
 
 このリポジトリから上流にマージ済み： [#115](https://github.com/Salvanza/salvanza_client/pull/115) (GUI の暗号化バックアップに鍵付きダイジェスト), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (アップグレード要求の Host ヘッダー), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (フォルダーの途中での停止), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (ジョブの有効化・無効化), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (翻訳がない場合の英語フォールバック).

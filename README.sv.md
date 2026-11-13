@@ -32,7 +32,7 @@ Vad det innebär:
 
 | Pull request | Varför det spelar roll för Nimbus Backup-användare | Status |
 |---|---|---|
-| [#145 — pbscommon: read and write compressed encrypted chunks (ENCR_COMPR)](https://github.com/Salvanza/salvanza_client/pull/145) | Utan den kan Salvanza 2.0 inte återställa krypterade säkerhetskopior gjorda av Nimbus Backup 0.4.1 eller senare eller av `proxmox-backup-client`. Dessutom komprimeras krypterade säkerhetskopior. | ⏳ Öppen |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Utan den kan Salvanza 2.0 inte återställa krypterade säkerhetskopior gjorda av Nimbus Backup 0.4.1 eller senare eller av `proxmox-backup-client`. Dessutom komprimeras krypterade säkerhetskopior. | ⏳ Öppen |
 | [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Utan den skulle en dator som ursprungligen installerades med Nimbus Backup ≤ 0.3 efter uppgraderingen få tillbaka sina 0.3-inställningar, utan krypteringsnyckel. | ⏳ Öppen |
 
 Redan sammanslaget uppströms från det här repot: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (nyckelbaserad digest för GUI:ts krypterade säkerhetskopior), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (Host-huvud i upgrade-förfrågan), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Stopp mitt i en mapp), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (aktivera eller inaktivera ett jobb), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (engelska som reserv för saknade översättningar).
