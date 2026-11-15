@@ -193,6 +193,7 @@ func Main() {
 	nbdFlag := flag.Int("nbd", 0, "NBD number")
 	backupPath := flag.String("path", "", "Path to backup, eg. vm/100/2026-03-01T00:07:00Z/drive-scsi0.img.fidx")
 	listFlag := flag.Bool("list", false, "List available fidx images as 'type/id/time/file' lines and exit (no TUI)")
+	groupsFlag := flag.Bool("groups", false, "List the backup groups as 'type/id<TAB>comment' lines and exit (no TUI)")
 	keyFileFlag := flag.String("keyfile", "", "Path to a Proxmox Backup Server encryption key file (required to restore a snapshot taken with encryption enabled)")
 	keyFilePassphraseFlag := flag.String("keyfile-passphrase", "", "Passphrase for a scrypt/PBKDF2 protected -keyfile (default $PBS_ENCRYPTION_PASSWORD; prompted for when neither is set)")
 	helpFlag := flag.Bool("help", false, "Show help")
@@ -224,8 +225,8 @@ func Main() {
 	}
 
 	// Mounting an NBD device requires root and the nbd kernel module; only
-	// -list runs without them.
-	if !*listFlag {
+	// -list and -groups run without them.
+	if !*listFlag && !*groupsFlag {
 		if err := requireRoot(); err != nil {
 			fmt.Fprintln(os.Stderr, "pbsnbd:", err)
 			os.Exit(1)
@@ -236,7 +237,7 @@ func Main() {
 		}
 	}
 
-	if *listFlag { // Non-interactive: print available fidx images and exit
+	if *listFlag || *groupsFlag { // Non-interactive: print available fidx images (or groups) and exit
 		client = &pbscommon.PBSClient{
 			BaseURL:         *baseURLFlag,
 			CertFingerPrint: *certFingerprintFlag,
@@ -254,6 +255,29 @@ func Main() {
 				fmt.Fprintln(os.Stderr, "ticket login failed:", err)
 				os.Exit(1)
 			}
+		}
+		if *groupsFlag {
+			// One line per group: the bare metal restore wizard shows the
+			// comment (the machine's name) next to the group in its menu.
+			groups, err := client.ListGroups()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "groups:", err)
+				os.Exit(1)
+			}
+			// A group with no notes of its own takes the comment of its
+			// newest snapshot that has one: Salvanza writes the machine's
+			// name ("Deepthought - Full Machine") on each snapshot, not on
+			// the group. Best effort: without the list, groups keep theirs.
+			newest, _ := client.SnapshotComments()
+			for _, g := range groups {
+				c := g.Comment
+				if strings.TrimSpace(c) == "" {
+					c = newest[g.BackupType+"/"+g.BackupID]
+				}
+				comment := strings.Join(strings.Fields(c), " ")
+				fmt.Printf("%s/%s\t%s\n", g.BackupType, g.BackupID, comment)
+			}
+			return
 		}
 		snaps, err := client.ListSnapshots()
 		if err != nil {

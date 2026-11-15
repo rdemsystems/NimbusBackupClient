@@ -41,7 +41,271 @@ DIA_TMP="$(mktemp /tmp/pbsbmr-dia.XXXXXX)"
 LIST_TMP="$(mktemp /tmp/pbsbmr-list.XXXXXX)"
 LIST_ERR="$(mktemp /tmp/pbsbmr-err.XXXXXX)"
 ATTACH_LOG="/tmp/pbsbmr-attach-$$.log"
-trap "rm -f \"$DIA_TMP\" \"$LIST_TMP\" \"$LIST_ERR\"" HUP INT QUIT TERM EXIT
+# What the terminal shows when the wizard stops before the restore starts.
+STOPPED="PBS Bare Metal Restore stopped. Nothing has been written to any disk."
+# Every dialog's title starts with this.
+TITLE="PBS Bare Metal Restore"
+# For "Start again" in the menu shown after a stop.
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+ARGS=("$@")
+# What the server said when something failed, word for word (the dialogs say
+# it in plain words).
+WIZ_LOG="${ocs_log_dir:-/var/log/clonezilla}"
+WIZ_LOG="${WIZ_LOG%/}/pbs-bare-metal-restore.log"
+
+# Sizes for the dialogs: gib BYTES gives "29.1 GiB", commas N gives
+# 23,404,216,320.
+gib() { numfmt --to=iec-i --suffix=B --format=%.1f "${1:-0}" 2>/dev/null | sed -E 's/\.0([KMGTP]iB)$/\1/; s/([0-9])([KMGTP]?i?B)$/\1 \2/'; }
+commas() { sed -E ':a; s/^([0-9]+)([0-9]{3})/\1,\2/; ta' <<<"$1"; }
+# readable FILE: the lines of a pbsnbd log that a person can read: no Go
+# stack trace (lines with .go:NN or goroutine, function call lines, indented
+# lines), no blank lines, and no Go date and time or "panic: " prefix.
+readable() {
+  grep -vE '\.go:[0-9]|goroutine|^[[:space:]]|^[A-Za-z0-9_./*()-]+\(.*\)( \.\.\.)?$|^$' "$1" 2>/dev/null |
+    sed -E 's#^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9:]{8}(\.[0-9]+)? ##; s/^panic: //'
+}
+# collapse: the same prefix twice in a row once only, so "ticket login
+# failed: ticket login failed: HTTP 401" reads "ticket login failed: HTTP 401".
+collapse() { sed -E ':a; s/(^|: )([^:]+): \2: /\1\2: /; ta'; }
+# plain_error TEXT: a known failure from pbsnbd (TEXT) in plain words, or
+# nothing when it is not one of these. Uses the answers given so far.
+plain_error() {
+  local e="$1" host="${PBS_SERVER#https://}"
+  host="${host%%/*}"
+  if grep -qiE 'ticket' <<<"$e" && grep -qiE '401|permission check failed|authentication|unauthori[sz]ed' <<<"$e"; then
+    echo "The server refused the user name or password."
+  elif grep -qiE 'x509|certificate|tls: ' <<<"$e"; then
+    echo "A secure connection to the server at ${host} could not be made: the server's certificate was not accepted."
+  elif grep -qiE 'HTTP response to HTTPS client' <<<"$e"; then
+    echo "The server at ${host} did not answer as a secure (https) server. Check the port in the address; a Proxmox Backup Server uses 8007."
+  elif grep -qiE 'connection refused|no route to host|network is unreachable|host is unreachable|timed out|timeout|deadline exceeded|no such host|server misbehaving|dial tcp|connection reset' <<<"$e"; then
+    echo "The server could not be reached at ${host}."
+  elif grep -qiE 'namespace not found' <<<"$e"; then
+    echo "There is no namespace called ${PBS_NS} in datastore ${PBS_DS} on that server."
+  elif grep -qiE 'HTTP error: 404|HTTP 404|does not exist|no such datastore|datastore .*not found' <<<"$e"; then
+    echo "There is no datastore called ${PBS_DS} on that server."
+  elif grep -qiE '401|unauthori[sz]ed' <<<"$e"; then
+    echo "The server refused the user name or password."
+  elif grep -qiE '403|permission check failed' <<<"$e"; then
+    echo "The user ${PBS_USER} may not see the backups in datastore ${PBS_DS}, or there is no datastore called ${PBS_DS} on that server."
+  fi
+  return 0
+}
+# when TIME: a backup time as people read it, "Wed 11 Nov 2026 06:00 UTC", in
+# the restore system's time zone; TIME itself when date cannot read it.
+when() { date -d "$1" '+%a %-d %b %Y %H:%M %Z' 2>/dev/null || printf '%s' "$1"; }
+
+# Box sizes. whiptail makes a box whose height or width is 0 as wide as its
+# longest line, so a long prompt stretched a box to the full screen width.
+# These boxes are about 70 columns (less on a narrow screen), the prompt is
+# wrapped onto as many lines as it needs and the height worked out from that.
+SCRCOLS="$(tput cols 2>/dev/null || echo 80)"
+SCRLINES="$(tput lines 2>/dev/null || echo 25)"
+BOXW=70
+[ "$BOXW" -gt $((SCRCOLS - 4)) ] && BOXW=$((SCRCOLS - 4))
+# text_rows TEXT [WIDTH]: the lines TEXT takes wrapped in a box WIDTH wide
+# (BOXW by default); a little more than whiptail needs, never less.
+text_rows() { printf '%b\n' "$1" | fold -s -w $(( ${2:-$BOXW} - 6 )) | wc -l; }
+# box_hw TEXT: height and width for an inputbox, passwordbox, infobox or
+# short message. whiptail keeps the room for buttons even in an infobox,
+# which draws none: with too little height its last line was cut off.
+box_hw() {
+  local h=$(( $(text_rows "$1") + 7 ))
+  [ "$h" -gt $((SCRLINES - 2)) ] && h=$((SCRLINES - 2))
+  echo "$h $BOXW"
+}
+# dia ARGS: $DIA, except that a --msgbox, --yesno or --infobox given a height
+# and width of 0 0 gets box_hw's size for its text instead. whiptail stretches
+# a 0 0 box to its longest line, so a long message (the "restore is complete"
+# box, the stop and error boxes) ran from edge to edge of the screen.
+dia() {
+  local a=() i=0 n=$# v
+  local -a in=("$@")
+  while [ $i -lt $n ]; do
+    v="${in[$i]}"
+    a+=("$v")
+    case "$v" in
+      --msgbox|--yesno|--infobox)
+        if [ $((i + 3)) -lt $((n + 1)) ] && [ "${in[$((i + 2))]}" = 0 ] && [ "${in[$((i + 3))]}" = 0 ]; then
+          local hw
+          hw="$(box_hw "${in[$((i + 1))]}")"
+          a+=("${in[$((i + 1))]}" ${hw})
+          i=$((i + 4))
+          continue
+        fi
+        ;;
+    esac
+    i=$((i + 1))
+  done
+  "$DIA" "${a[@]}"
+}
+# menu_hw TEXT TAG DESC [TAG DESC ...]: height, width and list height for a
+# menu with TEXT above these entries.
+menu_hw() {
+  local text="$1" w=$BOXW wide=0 n=0 l h
+  shift
+  while [ $# -ge 2 ]; do
+    [ $(( ${#1} + ${#2} )) -gt "$wide" ] && wide=$(( ${#1} + ${#2} ))
+    n=$((n + 1))
+    shift 2
+  done
+  [ $((wide + 12)) -gt "$w" ] && w=$((wide + 12))
+  [ "$w" -gt $((SCRCOLS - 4)) ] && w=$((SCRCOLS - 4))
+  l=$n
+  [ "$l" -gt 12 ] && l=12
+  h=$(( $(text_rows "$text" "$w") + l + 8 ))
+  while [ "$h" -gt $((SCRLINES - 2)) ] && [ "$l" -gt 3 ]; do
+    l=$((l - 1))
+    h=$((h - 1))
+  done
+  echo "$h $w $l"
+}
+# Button names for a yes/no box: whiptail and dialog name the option apart.
+yes_no_labels() {
+  case "$(basename "$DIA")" in
+    dialog) printf '%s\n' --yes-label "$1" --no-label "$2" ;;
+    *)      printf '%s\n' --yes-button "$1" --no-button "$2" ;;
+  esac
+}
+
+# on_nbd SYSDIR: true when the block device at SYSDIR (/sys/block/X) sits on
+# an NBD device, directly, through a partition of it, through a loop device
+# over it, or through device-mapper devices stacked on those.
+on_nbd() {
+  local s n
+  for s in "$1"/slaves/*; do
+    [ -e "$s" ] || continue
+    n="$(basename "$s")"
+    case "$n" in
+      nbd*) return 0 ;;
+      loop*) case "$(cat "/sys/block/$n/loop/backing_file" 2>/dev/null)" in /dev/nbd*) return 0 ;; esac ;;
+      dm-*) on_nbd "/sys/block/$n" && return 0 ;;
+    esac
+  done
+  return 1
+}
+# The shrink tool's check cache (CACHE in pbs-shrink-restore): what it worked
+# out from the backup, kept so that choosing scratch space, and the restore
+# after the plan, do not read the whole backup again. It belongs to the
+# attached backup, so it goes whenever the backup is let go.
+SHRINK_CACHE="/tmp/pbs-shrink-plan.cache"
+# release_image: let go of the backup's disk image so the next run can attach
+# it again. A run stopped short can leave the shrink tool's mounts, loop
+# devices and device-mapper views on /dev/nbdN, or a volume group the live
+# system activated from the backup; while anything holds the NBD device, a
+# new pbsnbd cannot attach to it. Quiet, and safe to run more than once.
+release_image() {
+  local m d n pass lp i
+  rm -f "$SHRINK_CACHE"
+  for m in $(findmnt -rno TARGET 2>/dev/null | grep -E '^(/mnt/pbs-scratch|/run/pbs-shrink-mnt)' | sort -r); do
+    umount "$m" >/dev/null 2>&1 || umount -l "$m" >/dev/null 2>&1
+  done
+  # Loop devices over the image, over the shrink tool's views or over its
+  # scratch file: detached now, or marked to go once nothing uses them.
+  for lp in $(losetup -l -n -O NAME,BACK-FILE 2>/dev/null | awk '$2 ~ /^\/dev\/(nbd|mapper\/pbs)/ || $2 ~ /pbs-shrink/ {print $1}'); do
+    losetup -d "$lp" >/dev/null 2>&1
+  done
+  # Device-mapper devices on the image, the topmost first (a few passes for
+  # stacked ones), then the shrink tool's own names wherever they are.
+  for pass in 1 2 3 4; do
+    udevadm settle --timeout=5 >/dev/null 2>&1
+    n=0
+    for d in /sys/block/dm-*; do
+      [ -e "$d" ] || continue
+      [ -z "$(ls -A "$d/holders" 2>/dev/null)" ] || continue
+      on_nbd "$d" || continue
+      dmsetup remove --retry "$(cat "$d/dm/name")" >/dev/null 2>&1 && n=$((n + 1))
+    done
+    [ "$n" -gt 0 ] || break
+  done
+  for d in $(dmsetup ls 2>/dev/null | awk '$1 ~ /^(pbsshrink|pbslv[0-9]+|pbstlv[0-9]+)$/ {print $1}'); do
+    dmsetup remove --retry "$d" >/dev/null 2>&1
+  done
+  for lp in $(losetup -l -n -O NAME,BACK-FILE 2>/dev/null | awk '$2 ~ /^\/dev\/(nbd|mapper\/pbs)/ || $2 ~ /pbs-shrink/ {print $1}'); do
+    losetup -d "$lp" >/dev/null 2>&1
+  done
+  partx -d "$NBDDEV" >/dev/null 2>&1
+  # Then pbsnbd itself, and the NBD device disconnected.
+  if pgrep -x pbsnbd >/dev/null 2>&1; then
+    echo "Stopping the earlier connection to the backup (pbsnbd, PID: $(pgrep -x pbsnbd | tr '\n' ' '))..."
+    pkill -INT -x pbsnbd 2>/dev/null
+    i=0
+    while pgrep -x pbsnbd >/dev/null 2>&1 && [ $i -lt 8 ]; do sleep 1; i=$((i + 1)); done
+    pgrep -x pbsnbd >/dev/null 2>&1 && pkill -KILL -x pbsnbd 2>/dev/null
+  fi
+  if [ -e "/sys/block/${NBDDEV#/dev/}" ]; then
+    command -v nbd-client >/dev/null 2>&1 && nbd-client -d "$NBDDEV" >/dev/null 2>&1
+    i=0
+    while [ "$(cat "/sys/block/${NBDDEV#/dev/}/size" 2>/dev/null || echo 0)" != "0" ] && [ $i -lt 20 ]; do
+      sleep 0.5
+      i=$((i + 1))
+    done
+  fi
+  return 0
+}
+# From the attach on, until the restore itself starts, every exit of this
+# wizard (No, cancel, an error) lets go of the image.
+RELEASE_ON_EXIT=0
+on_exit() {
+  rm -f "$DIA_TMP" "$LIST_TMP" "$LIST_ERR"
+  if [ "$RELEASE_ON_EXIT" = "1" ]; then
+    echo "Letting go of the backup's disk image ..."
+    release_image
+  fi
+}
+trap "rm -f \"$DIA_TMP\" \"$LIST_TMP\" \"$LIST_ERR\"" HUP INT QUIT TERM
+trap on_exit EXIT
+
+# stopped: the wizard stopped before anything was written, because the
+# person chose to (No, Cancel) or because it could not go on (a refused
+# sign-in, no backups, a key that would not open): every such box says what
+# to put right and that nothing was written. Neither is a failed restore, so Clonezilla's red "finished with error!" and its "Cloning
+# finished" menu are not shown: our own menu is, and this script never
+# returns to Clonezilla with an error. Exit code 99 is Clonezilla's own for
+# "go to the command line" (ocs-live-run-menu then shows no error and no menu
+# of its own); "Start again" runs this wizard afresh in place of this run.
+stopped() {
+  local c t h w l
+  echo "$STOPPED"
+  rm -f "$SHRINK_CACHE"
+  if [ "$RELEASE_ON_EXIT" = "1" ]; then
+    echo "Letting go of the backup's disk image ..."
+    release_image
+    RELEASE_ON_EXIT=0
+  fi
+  t="The restore was stopped. Nothing was written.\n\nWhat would you like to do now?"
+  read -r h w l <<<"$(menu_hw "$t" a "Start again" b "Power off" c "Reboot" d "Command line")"
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - stopped" --nocancel \
+  --menu "$t" "$h" "$w" "$l" \
+  a "Start again" \
+  b "Power off" \
+  c "Reboot" \
+  d "Command line" \
+  2> "$DIA_TMP"
+  c="$(cat "$DIA_TMP" 2>/dev/null)"
+  case "$c" in
+    a)
+      rm -f "$DIA_TMP" "$LIST_TMP" "$LIST_ERR"
+      clear
+      # The network is up already: the new run skips looking for it again.
+      PBSBMR_RESTART=1 exec "$SELF" "${ARGS[@]}"
+      ;;
+    b)
+      clear
+      echo "Switching the computer off ..."
+      poweroff
+      ;;
+    c)
+      clear
+      echo "Restarting the computer ..."
+      reboot
+      ;;
+    *)
+      echo "To start the restore again, type: sudo $SELF"
+      ;;
+  esac
+  exit 99
+}
 
 path_without_comment() { printf '%s' "${1%%\#*}"; }
 comment_of_line() {
@@ -89,12 +353,16 @@ load_credentials
 # common case (a real network with DHCP). If DHCP genuinely isn't
 # available, network_config_if_necessary still falls back to the
 # interactive wizard as a safety net, same as it always did.
-for nic in /sys/class/net/*; do
-  dev="$(basename "$nic")"
-  [ "$dev" = "lo" ] && continue
-  echo "> Attempting DHCP on ${dev}..."
-  dhcpcd -t 15 "$dev" >/dev/null 2>&1
-done
+# "Start again" after a stop (PBSBMR_RESTART=1) skips this: the network is
+# already up, possibly set by hand, and must not be asked for again.
+if [ "${PBSBMR_RESTART:-0}" != "1" ]; then
+  for nic in /sys/class/net/*; do
+    dev="$(basename "$nic")"
+    [ "$dev" = "lo" ] && continue
+    echo "> Looking for a network address on ${dev} (DHCP)..."
+    dhcpcd -t 15 "$dev" >/dev/null 2>&1
+  done
+fi
 network_config_if_necessary
 
 # Sync time via NTP automatically, no prompt either way: -b (batch, never
@@ -107,44 +375,36 @@ network_config_if_necessary
 # above ever runs after this succeeds.
 ocs-live-time-sync -b -i >/dev/null 2>&1 || true
 
-# 2. stop a previous pbsnbd instance so this run starts from a clean slate
-PIDS=""
-pgrep -x pbsnbd >/dev/null 2>&1 && PIDS="$(pgrep -x pbsnbd | tr '\n' ' ')"
-if [ -n "$PIDS" ]; then
-  echo "Stopping previous pbsnbd instance(s) (PID: ${PIDS})..."
-  pkill -INT -x pbsnbd 2>/dev/null || true
-  i=0
-  while pgrep -x pbsnbd >/dev/null 2>&1 && [ $i -lt 8 ]; do sleep 1; i=$((i+1)); done
-  pgrep -x pbsnbd >/dev/null 2>&1 && pkill -KILL -x pbsnbd 2>/dev/null || true
-fi
+# 2. start from a clean slate: anything an earlier run left on the image
+# (the shrink tool's loop and device-mapper devices, mounts, pbsnbd itself)
+# is let go, and the NBD device disconnected, or the new attach fails.
+release_image
 
 # 3. load the NBD kernel module
 if ! modprobe nbd max_part=0; then
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --msgbox "Unable to 'modprobe nbd max_part=0'!\n\n$msg_program_stop" 0 0 $DIA_ESC
-  exit 1
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - start" \
+  --msgbox "The restore system could not load the part of Linux it needs to read the backup (the nbd kernel module).\n\nNothing has been written to any disk.\n\nStart the computer from the restore stick again. If this happens again, make the restore stick again." 0 0 $DIA_ESC
+  stopped
 fi
 sleep 1
 
 # 4a. PBS server URL
+# Cancel (or Esc) in any of these boxes stops the wizard.
 ask_="true"
 while [ "$ask_" = "true" ]; do
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --inputbox "PBS server URL (https:// is pre-filled):" \
-  0 0 "${SAVED_SERVER:-https://}" $DIA_ESC \
-  2> "$DIA_TMP"
+  T="Address of the backup server (Proxmox Backup Server), for example https://pbs.example.com:8007"
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - backup server" \
+  --inputbox "$T" $(box_hw "$T") "${SAVED_SERVER:-https://}" $DIA_ESC \
+  2> "$DIA_TMP" || stopped
   PBS_SERVER="$(cat "$DIA_TMP")"
   case "$PBS_SERVER" in
     https://*) [ "$PBS_SERVER" != "https://" ] && ask_="false" ;;
     *) ;;
   esac
   if [ "$ask_" = "true" ]; then
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "$msg_nchc_clonezilla" \
-    --yesno "The server URL must be complete and start with https://\n(e.g. https://pbs.example.com:8007)\n\n$msg_do_u_want_to_do_it_again" 0 0
-    case "$?" in
-      0) ask_="true" ;;
-      1) echo "$msg_program_stop!"; exit 1 ;;
-    esac
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - backup server" \
+    --yesno "The address must be complete and start with https://\nFor example: https://pbs.example.com:8007\n\nTry again?" 0 0
+    [ "$?" = "0" ] || stopped
   fi
 done
 echo "PBS server URL  : $PBS_SERVER"
@@ -152,41 +412,39 @@ echo "PBS server URL  : $PBS_SERVER"
 # 4b. PBS username/password
 ask_="true"
 while [ "$ask_" = "true" ]; do
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --inputbox "PBS username (must include the realm, e.g. root@pam or user@pbs):" \
-  0 0 "${SAVED_USER:-root@pam}" $DIA_ESC \
-  2> "$DIA_TMP"
+  T="User name on the backup server, with its realm after the @, for example root@pam or backup@pbs:"
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - user name" \
+  --inputbox "$T" $(box_hw "$T") "${SAVED_USER:-root@pam}" $DIA_ESC \
+  2> "$DIA_TMP" || stopped
   PBS_USER="$(cat "$DIA_TMP")"
   case "$PBS_USER" in
     *@*) ask_="false" ;;
     *) ;;
   esac
   if [ "$ask_" = "true" ]; then
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "$msg_nchc_clonezilla" \
-    --yesno "The username must include a realm, e.g. 'user@pam' or 'user@pbs'.\n\n$msg_do_u_want_to_do_it_again" 0 0
-    case "$?" in
-      0) ask_="true" ;;
-      1) echo "$msg_program_stop!"; exit 1 ;;
-    esac
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - user name" \
+    --yesno "The user name must include its realm after an @, for example root@pam or backup@pbs.\n\nTry again?" 0 0
+    [ "$?" = "0" ] || stopped
   fi
 done
 echo "PBS username    : $PBS_USER"
 
+# The password box always starts empty. Filled in from the last run (shown as
+# stars), what was typed was added to the old password and the sign-in
+# failed. The server, user name and datastore are filled in: they can be seen.
 ask_="true"
 while [ "$ask_" = "true" ]; do
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --passwordbox "Enter the password for user '${PBS_USER}':" 8 60 "${SAVED_PASS}" \
-  2> "$DIA_TMP"
+  T="Password for ${PBS_USER} on the backup server:"
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - password" \
+  --passwordbox "$T" $(box_hw "$T") \
+  2> "$DIA_TMP" || stopped
   PBS_PASS="$(cat "$DIA_TMP")"
   if [ -n "$PBS_PASS" ]; then
     ask_="false"
   else
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "$msg_nchc_clonezilla" \
-    --yesno "The password must not be empty.\n\n$msg_do_u_want_to_do_it_again" 0 0
-    case "$?" in
-      0) ask_="true" ;;
-      1) echo "$msg_program_stop!"; exit 1 ;;
-    esac
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - password" \
+    --yesno "The password cannot be empty.\n\nTry again?" 0 0
+    [ "$?" = "0" ] || stopped
   fi
 done
 echo "PBS password    : (entered)"
@@ -194,10 +452,10 @@ echo "PBS password    : (entered)"
 # 4c. datastore (optionally with a namespace after the first "/")
 ask_="true"
 while [ "$ask_" = "true" ]; do
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --inputbox "PBS datastore (namespace may be appended after a '/', e.g. zfs or zfs/pippo):" \
-  0 0 "${SAVED_DSNS}" $DIA_ESC \
-  2> "$DIA_TMP"
+  T="Datastore on the backup server that holds the backups.\nIf they are in a namespace, add it after a /, for example store1 or store1/office:"
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - datastore" \
+  --inputbox "$T" $(box_hw "$T") "${SAVED_DSNS}" $DIA_ESC \
+  2> "$DIA_TMP" || stopped
   PBS_DS_NS="$(cat "$DIA_TMP")"
   case "$PBS_DS_NS" in
     '')      ;;
@@ -205,12 +463,9 @@ while [ "$ask_" = "true" ]; do
     *)       ask_="false" ;;
   esac
   if [ "$ask_" = "true" ]; then
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "$msg_nchc_clonezilla" \
-    --yesno "The datastore must not be empty and must not start with '/'.\nExample: zfs  or  zfs/pippo\n\n$msg_do_u_want_to_do_it_again" 0 0
-    case "$?" in
-      0) ask_="true" ;;
-      1) echo "$msg_program_stop!"; exit 1 ;;
-    esac
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - datastore" \
+    --yesno "The datastore cannot be empty or start with a /.\nFor example: store1  or  store1/office\n\nTry again?" 0 0
+    [ "$?" = "0" ] || stopped
   fi
 done
 PBS_DS="${PBS_DS_NS%%/*}"
@@ -236,18 +491,21 @@ KEYPASS=""
 KEY_PROTECTED=0
 KEY_COPY="/tmp/pbs-encryption-key.json"
 KEY_MNT="/mnt/pbs-keystick"
-KEY_TITLE="PBS Bare Metal Restore"
-$DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-  --menu "Were these backups made with an encryption key?" 0 0 0 \
-  none "No, the backups are not encrypted" \
-  usb  "Yes, the key file is on a USB stick or other disk" \
-  path "Yes, I will type the path of the key file" \
-  2> "$DIA_TMP"
+KEY_TITLE="$TITLE - encryption key"
+KEYQ=(none "No, the backups are not encrypted"
+      usb  "Yes, the key file is on a USB stick or other disk"
+      path "Yes, I will type the path of the key file")
+T="Were these backups made with an encryption key?"
+dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+  --menu "$T" $(menu_hw "$T" "${KEYQ[@]}") \
+  "${KEYQ[@]}" \
+  2> "$DIA_TMP" || stopped
 KEY_CHOICE="$(cat "$DIA_TMP")"
 case "$KEY_CHOICE" in
   path)
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-      --inputbox "Path of the encryption key file (for example /run/live/medium/key.json):" 0 0 "" 2> "$DIA_TMP"
+    T="Full path of the encryption key file, for example /run/live/medium/key.json:"
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+      --inputbox "$T" $(box_hw "$T") "" 2> "$DIA_TMP" || stopped
     KEYFILE="$(cat "$DIA_TMP")"
     ;;
   usb)
@@ -257,19 +515,20 @@ case "$KEY_CHOICE" in
       PARTS+=("$dev" "${fstype} ${size} ${label}")
     done < <(lsblk -rpno NAME,FSTYPE,SIZE,LABEL,TYPE 2>/dev/null | awk '$5=="part" && $2!="" && $1 !~ /nbd/ {print $1, $2, $3, $4}')
     if [ ${#PARTS[@]} -eq 0 ]; then
-      $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-        --msgbox "No disk partition with a filesystem was found. Plug in the USB stick that holds the key file and run this again." 0 0 $DIA_ESC
-      exit 1
+      dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+        --msgbox "No USB stick or disk with a readable partition was found, so the key file cannot be loaded.\n\nNothing has been written to any disk.\n\nPlug in the USB stick that holds the key file and start the restore again." 0 0 $DIA_ESC
+      stopped
     fi
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-      --menu "Which partition holds the key file?" 0 0 0 "${PARTS[@]}" 2> "$DIA_TMP"
+    T="Which partition holds the encryption key file?"
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+      --menu "$T" $(menu_hw "$T" "${PARTS[@]}") "${PARTS[@]}" 2> "$DIA_TMP" || stopped
     KEY_PART="$(cat "$DIA_TMP")"
-    [ -n "$KEY_PART" ] || { echo "$msg_program_stop!"; exit 1; }
+    [ -n "$KEY_PART" ] || stopped
     mkdir -p "$KEY_MNT"
     if ! mount -o ro "$KEY_PART" "$KEY_MNT" 2>/dev/null; then
-      $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-        --msgbox "Could not mount ${KEY_PART}." 0 0 $DIA_ESC
-      exit 1
+      dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+        --msgbox "${KEY_PART} could not be opened (mounted), so the key file on it cannot be read.\n\nNothing has been written to any disk.\n\nStart the restore again and choose another partition, or copy the key file to a USB stick formatted as FAT32, exFAT or NTFS." 0 0 $DIA_ESC
+      stopped
     fi
     KEYMENU=()
     while read -r f; do
@@ -278,15 +537,19 @@ case "$KEY_CHOICE" in
     done < <(find "$KEY_MNT" -maxdepth 3 -type f -name '*.json' -size -8k 2>/dev/null | sort)
     if [ ${#KEYMENU[@]} -eq 0 ]; then
       umount "$KEY_MNT" 2>/dev/null
-      $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-        --msgbox "No key file (*.json) found on ${KEY_PART}." 0 0 $DIA_ESC
-      exit 1
+      dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+        --msgbox "No key file (a .json file) was found on ${KEY_PART}. Only its top three folder levels are searched.\n\nNothing has been written to any disk.\n\nStart the restore again and choose the partition that holds the key file." 0 0 $DIA_ESC
+      stopped
     fi
     if [ ${#KEYMENU[@]} -eq 2 ]; then
       KEYFILE="${KEYMENU[0]}"
     else
-      $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-        --menu "Which file is the encryption key?" 0 0 0 "${KEYMENU[@]}" 2> "$DIA_TMP"
+      T="Which file is the encryption key?"
+      if ! dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+        --menu "$T" $(menu_hw "$T" "${KEYMENU[@]}") "${KEYMENU[@]}" 2> "$DIA_TMP"; then
+        umount "$KEY_MNT" 2>/dev/null
+        stopped
+      fi
       KEYFILE="$(cat "$DIA_TMP")"
     fi
     if [ -n "$KEYFILE" ]; then
@@ -298,17 +561,18 @@ case "$KEY_CHOICE" in
 esac
 if [ "$KEY_CHOICE" != "none" ] && [ -n "$KEY_CHOICE" ]; then
   if [ -z "$KEYFILE" ] || [ ! -r "$KEYFILE" ]; then
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-      --msgbox "Key file '${KEYFILE}' cannot be read.\n\n$msg_program_stop" 0 0 $DIA_ESC
-    exit 1
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+      --msgbox "The key file ${KEYFILE:-(none chosen)} cannot be read.\n\nNothing has been written to any disk.\n\nStart the restore again and check the path, or the USB stick that holds the key file." 0 0 $DIA_ESC
+    stopped
   fi
   KEY_ARGS=(-keyfile "$KEYFILE")
   # A key file protected by a passphrase has an object as "kdf" (Scrypt or
   # PBKDF2); an unprotected one has null.
   if grep -Eq '"kdf"[[:space:]]*:[[:space:]]*\{' "$KEYFILE"; then
     KEY_PROTECTED=1
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-      --passwordbox "Passphrase for the encryption key:" 8 60 2> "$DIA_TMP"
+    T="This key file is protected by a passphrase. Enter it:"
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+      --passwordbox "$T" $(box_hw "$T") 2> "$DIA_TMP" || stopped
     KEYPASS="$(cat "$DIA_TMP")"
   fi
   echo "Encryption key  : ${KEYFILE}"
@@ -328,26 +592,41 @@ while ! PBS_PASSWORD="$PBS_PASS" PBS_ENCRYPTION_PASSWORD="$KEYPASS" \
      -datastore "$PBS_DS" $NS_OPT "${KEY_ARGS[@]}" -list > "$LIST_TMP" 2> "$LIST_ERR"; do
   if [ "$KEY_PROTECTED" = "1" ] && grep -qi 'wrong password' "$LIST_ERR"; then
     if [ "$KEY_TRIES" -ge 3 ]; then
-      $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-      --msgbox "The passphrase was wrong 3 times.\n\n$msg_program_stop" 0 0 $DIA_ESC
-      exit 1
+      dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+      --msgbox "The passphrase did not unlock the key file, three times.\n\nNothing has been written to any disk.\n\nStart the restore again when you have the right passphrase." 0 0 $DIA_ESC
+      stopped
     fi
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-      --msgbox "That passphrase did not unlock the key (attempt ${KEY_TRIES} of 3). Try again." 0 0 $DIA_ESC
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+      --msgbox "That passphrase did not unlock the key file (attempt ${KEY_TRIES} of 3). Please try again." 0 0 $DIA_ESC
     KEY_TRIES=$((KEY_TRIES + 1))
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
-      --passwordbox "Passphrase for the encryption key (attempt ${KEY_TRIES} of 3):" 8 60 2> "$DIA_TMP"
+    T="Passphrase for the encryption key (attempt ${KEY_TRIES} of 3):"
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
+      --passwordbox "$T" $(box_hw "$T") 2> "$DIA_TMP" || stopped
     KEYPASS="$(cat "$DIA_TMP")"
     continue
   fi
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --msgbox "Could not list the backups:\n$(cat "$LIST_ERR")\n\n$msg_program_stop" 0 0 $DIA_ESC
-  exit 1
+  # The server's own words go to the log; the box says it plainly.
+  RAW="$(readable "$LIST_ERR" | collapse | tail -n 6 | cut -c1-300)"
+  { echo "$(date '+%F %T') the backups could not be listed (${PBS_SERVER}, ${PBS_USER}, ${PBS_DS_NS}):"; cat "$LIST_ERR"; } >> "$WIZ_LOG" 2>/dev/null
+  WHY="$(plain_error "$RAW")"
+  [ -n "$WHY" ] || WHY="The backups could not be listed. The server or the network said:\n\n${RAW}"
+  T="${WHY}\n\nNothing has been written to any disk.\n\nCheck the server address, user name, password and datastore, and that this computer is on the network, then start the restore again.\n\nThe full message is in ${WIZ_LOG}."
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - backups" \
+  --msgbox "$T" $(box_hw "$T") $DIA_ESC
+  stopped
 done
+# The comment of each backup group (a Salvanza machine backup puts the
+# machine's name there), shown next to it: "vm/9000198  Deepthought". Not
+# needed: without it (an older pbsnbd, an error) the menu shows the names only.
+declare -A GCOMMENT
+while IFS=$'\t' read -r g c; do
+  [ -n "$g" ] && [ -n "$c" ] && GCOMMENT[$g]="$c"
+done < <(PBS_PASSWORD="$PBS_PASS" "$PBSNBD" -baseurl "$PBS_SERVER" -username "$PBS_USER" \
+           -datastore "$PBS_DS" $NS_OPT -groups 2>>"$WIZ_LOG")
 if [ ! -s "$LIST_TMP" ]; then
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --msgbox "No backups found in datastore '${PBS_DS}'${PBS_NS:+ (namespace '${PBS_NS}')}.\n\n$msg_program_stop" 0 0 $DIA_ESC
-  exit 1
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - backups" \
+  --msgbox "No backups were found in datastore '${PBS_DS}'${PBS_NS:+ (namespace '${PBS_NS}')}.\n\nNothing has been written to any disk.\n\nCheck the datastore and namespace names, and that this user may see the backups, then start the restore again." 0 0 $DIA_ESC
+  stopped
 fi
 
 # 6. three-level selection: (a) <kind>/<backupid>, (b) date, (c) .fidx file
@@ -380,32 +659,36 @@ if [ "$n" -gt 1 ]; then
   declare -a MENU1
   i=1
   for key in "${KEYS[@]}"; do
-    comment=""
-    while IFS= read -r line; do
-      r2="${line#*/}"
-      [ "${line%%/*}/${r2%%/*}" = "$key" ] || continue
-      comment="$(comment_of_line "$line")"
-      break
-    done < "$LIST_TMP"
+    # The group's comment; else a snapshot comment from the list, if any.
+    comment="${GCOMMENT[$key]}"
+    if [ -z "$comment" ]; then
+      while IFS= read -r line; do
+        r2="${line#*/}"
+        [ "${line%%/*}/${r2%%/*}" = "$key" ] || continue
+        comment="$(comment_of_line "$line")"
+        break
+      done < "$LIST_TMP"
+    fi
     label="$key"
-    [ -n "$comment" ] && label="$key  ($comment)"
+    [ -n "$comment" ] && label="$key  $(cut -c1-40 <<<"$comment")"
     MENU1+=("$i" "$label")
     i=$((i+1))
   done
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --menu "Select the VM / container / host to restore:" 0 0 15 \
+  T="Which machine do you want to restore?"
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - choose the machine" \
+  --menu "$T" $(menu_hw "$T" "${MENU1[@]}") \
   "${MENU1[@]}" $DIA_ESC \
   2> "$DIA_TMP"
   CHOICE1="$(cat "$DIA_TMP")"
-  if [ -z "$CHOICE1" ]; then
-    echo "$msg_program_stop!"
-    exit 1
-  fi
+  [ -n "$CHOICE1" ] || stopped
   KEY="${KEYS[$((CHOICE1-1))]}"
 else
   KEY="${KEYS[0]}"
 fi
 echo "Selected backup ID : $KEY"
+# The machine as the dialogs name it: "vm/9000198 (Deepthought)".
+KEY_NAME="$KEY"
+[ -n "${GCOMMENT[$KEY]}" ] && KEY_NAME="$KEY ($(cut -c1-40 <<<"${GCOMMENT[$KEY]}"))"
 
 declare -a MENU2
 declare -a DATES2
@@ -413,25 +696,28 @@ i=1
 for kdt in "${KDT_ORDER[@]}"; do
   [ "${kdt%%|*}" = "$KEY" ] || continue
   dt="${kdt#*|}"
-  MENU2+=("$i" "$dt  (${KDT[$kdt]} file(s))")
+  # "Wed 11 Nov 2026 06:00 UTC", and "2 disks" when the backup holds more
+  # than one disk image. The tag (a number) picks DATES2 as before.
+  label="$(when "$dt")"
+  [ "${KDT[$kdt]}" -gt 1 ] && label="$label  (${KDT[$kdt]} disks)"
+  MENU2+=("$i" "$label")
   DATES2+=("$dt")
   i=$((i+1))
 done
 num2=$((i-1))
 if [ "$num2" -gt 1 ]; then
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --menu "Backups of ${KEY} (select by date):" 0 0 15 \
+  T="Backups of ${KEY_NAME}. Choose the date to restore from:"
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - choose the date" \
+  --menu "$T" $(menu_hw "$T" "${MENU2[@]}") \
   "${MENU2[@]}" $DIA_ESC \
   2> "$DIA_TMP"
   CHOICE2="$(cat "$DIA_TMP")"
-  if [ -z "$CHOICE2" ]; then
-    echo "$msg_program_stop!"
-    exit 1
-  fi
+  [ -n "$CHOICE2" ] || stopped
   DT="${DATES2[$((CHOICE2-1))]}"
 else
   DT="${DATES2[0]}"
 fi
+DT_NAME="$(when "$DT")"
 echo "Selected backup    : $KEY/$DT"
 
 declare -a MENU3
@@ -449,15 +735,13 @@ while IFS= read -r line; do
 done < "$LIST_TMP"
 num3=$((i-1))
 if [ "$num3" -gt 1 ]; then
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --menu "Select the disk image of ${KEY} (${DT}) to restore:" 0 0 15 \
+  T="The backup of ${KEY_NAME} from ${DT_NAME} holds more than one disk image. Choose the one to restore:"
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - choose the disk" \
+  --menu "$T" $(menu_hw "$T" "${MENU3[@]}") \
   "${MENU3[@]}" $DIA_ESC \
   2> "$DIA_TMP"
   CHOICE3="$(cat "$DIA_TMP")"
-  if [ -z "$CHOICE3" ]; then
-    echo "$msg_program_stop!"
-    exit 1
-  fi
+  [ -n "$CHOICE3" ] || stopped
   SELECTED="${LINES3[$((CHOICE3-1))]}"
 else
   SELECTED="${LINES3[0]}"
@@ -472,6 +756,7 @@ PBS_PASSWORD="$PBS_PASS" PBS_ENCRYPTION_PASSWORD="$KEYPASS" \
 setsid "$PBSNBD" -baseurl "$PBS_SERVER" -username "$PBS_USER" \
      -datastore "$PBS_DS" $NS_OPT "${KEY_ARGS[@]}" -nbd "$NBDNUM" -path "$SELECTED" < /dev/null > "$ATTACH_LOG" 2>&1 &
 PBSNBD_PID=$!
+RELEASE_ON_EXIT=1
 
 # /dev/nbdN exists as soon as the nbd module is loaded, so wait for it to
 # report a size. pbsnbd exits without attaching when it cannot read the image
@@ -484,9 +769,25 @@ while [ "$WAITED" -lt 40 ]; do
   WAITED=$((WAITED + 1))
 done
 if [ "$(blockdev --getsize64 "$NBDDEV" 2>/dev/null || echo 0)" -le 0 ]; then
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --msgbox "WARNING: ${NBDDEV} could not be attached.\n\n$(tail -n 4 "$ATTACH_LOG" 2>/dev/null | cut -c1-200)\n\nIf the backup is encrypted, check that you chose the right key file.\n\nLog: ${ATTACH_LOG}\n\n$msg_program_stop" 0 0 $DIA_ESC
-  exit 1
+  # A plain explanation, from what pbsnbd logged (never its Go stack trace).
+  ERRLINE="$(readable "$ATTACH_LOG" | collapse | grep -iE 'error|fail|cannot|could not|denied|refused|busy|invalid|wrong|timeout|unable' | head -n 1 | cut -c1-200)"
+  [ -n "$ERRLINE" ] || ERRLINE="$(readable "$ATTACH_LOG" | collapse | head -n 1 | cut -c1-200)"
+  if grep -qiE 'resource busy|device busy|is busy|already in use|ebusy' "$ATTACH_LOG" 2>/dev/null; then
+    WHY="The device the backup is read through (${NBDDEV}) is still held by an earlier attempt.\n\nStart the restore again. If this happens again, restart the computer from the restore stick and start the restore again."
+  elif [ "${#KEY_ARGS[@]}" -gt 0 ] && grep -qiE 'decrypt|cipher|message authentication|encryption|key ?file|fingerprint|wrong key' "$ATTACH_LOG" 2>/dev/null; then
+    WHY="The backup could not be decrypted with the chosen key file.\n\nStart the restore again and choose the key file these backups were made with."
+  elif grep -qiE 'decrypt|encrypted|needs a key|no key' "$ATTACH_LOG" 2>/dev/null; then
+    WHY="This backup is encrypted.\n\nStart the restore again and answer Yes to the encryption key question, with the key file these backups were made with."
+  elif grep -qiE '401|403|unauthori[sz]ed|permission denied|authentication|login|ticket|password' "$ATTACH_LOG" 2>/dev/null; then
+    WHY="The backup server did not accept the user name or password, or this user may not read this backup.\n\nStart the restore again and check them."
+  elif grep -qiE 'connection refused|connection reset|no route|unreachable|timed out|timeout|no such host|dial tcp|tls|x509|certificate|EOF' "$ATTACH_LOG" 2>/dev/null; then
+    WHY="The backup server could not be reached, or the connection broke.\n\nCheck the network and that the server is running, then start the restore again."
+  else
+    WHY="If the backup is encrypted, check that you chose the right key file. Otherwise check the network and that the server is running, then start the restore again."
+  fi
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - open the backup" \
+  --msgbox "The chosen backup could not be opened for reading.\n\n${ERRLINE:+The error was: ${ERRLINE}\n\n}${WHY}\n\nNothing has been written to any disk.\n\nFull details: ${ATTACH_LOG}" 0 0 $DIA_ESC
+  stopped
 fi
 partprobe "$NBDDEV" >/dev/null 2>&1
 partx -a "$NBDDEV" >/dev/null 2>&1
@@ -522,7 +823,7 @@ disks_of_dev() {
     echo "/dev/$(basename "$sys")"
   fi
 }
-disk_size() { LC_ALL=C parted -s "$1" unit GB print 2>/dev/null | grep -m1 '^Disk .*:' | sed -E 's/.*: *//'; }
+disk_size() { local b; b="$(blockdev --getsize64 "$1" 2>/dev/null)"; [ -n "$b" ] && gib "$b"; }
 for mm in $(findmnt -nro MAJ:MIN /run/live/medium 2>/dev/null); do
   for d in $(disks_of_dev "$mm"); do add_boot_disk "$d"; done
 done
@@ -535,18 +836,18 @@ for d in $(for dm in /sys/block/dm-*; do
 done
 
 # The boot disk(s) are named in the dialogs below, so it is clear why the
-# stick is not offered: "Not eligible as target: /dev/sdb (0.5GB) boot disk".
+# stick is not offered: "Not offered as the target: /dev/sdb (0.5 GiB) ...".
 NOT_ELIGIBLE=""
 for d in $BOOT_DISKS; do
-  what="boot disk"
-  case "$VENTOY_DISKS" in *" $d "*) what="boot disk (Ventoy)" ;; esac
+  what="the stick this restore system started from"
+  case "$VENTOY_DISKS" in *" $d "*) what="the stick this restore system started from (Ventoy)" ;; esac
   sz="$(disk_size "$d")"
   NOT_ELIGIBLE+="\n  $d  (${sz:-unknown size})  $what"
 done
 NOT_ELIGIBLE_BLOCK=""
 if [ -n "$NOT_ELIGIBLE" ]; then
-  NOT_ELIGIBLE_BLOCK="\n\nNot eligible as target:$NOT_ELIGIBLE"
-  echo -e "Not eligible as target:$NOT_ELIGIBLE"
+  NOT_ELIGIBLE_BLOCK="\n\nNot offered as the target:$NOT_ELIGIBLE"
+  echo -e "Not offered as the target:$NOT_ELIGIBLE"
 fi
 
 declare -a CANDIDATES
@@ -561,9 +862,9 @@ for bd in /sys/block/*; do
 done
 
 if [ "${#CANDIDATES[@]}" -eq 0 ]; then
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --msgbox "No local target disk found.${NOT_ELIGIBLE_BLOCK}\n\nCheck that the machine's own disk is connected and enabled in the firmware setup.\n\n$msg_program_stop" 0 0 $DIA_ESC
-  exit 1
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - target disk" \
+  --msgbox "No disk was found to restore onto.${NOT_ELIGIBLE_BLOCK}\n\nNothing has been written to any disk.\n\nCheck that the computer's own disk is connected and turned on in the firmware (BIOS or UEFI) setup, then start the restore again." 0 0 $DIA_ESC
+  stopped
 elif [ "${#CANDIDATES[@]}" -eq 1 ]; then
   TARGET="${CANDIDATES[0]}"
 else
@@ -574,15 +875,13 @@ else
     MENUT+=("$i" "$c  (${sz:-unknown size})")
     i=$((i+1))
   done
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --menu "Multiple local disks found -- select the RESTORE TARGET (will be COMPLETELY OVERWRITTEN):${NOT_ELIGIBLE_BLOCK}" 0 0 15 \
+  T="This computer has more than one disk. Choose the disk to restore onto. EVERYTHING on it will be PERMANENTLY OVERWRITTEN.${NOT_ELIGIBLE_BLOCK}"
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - target disk" \
+  --menu "$T" $(menu_hw "$T" "${MENUT[@]}") \
   "${MENUT[@]}" $DIA_ESC \
   2> "$DIA_TMP"
   CHOICET="$(cat "$DIA_TMP")"
-  if [ -z "$CHOICET" ]; then
-    echo "$msg_program_stop!"
-    exit 1
-  fi
+  [ -n "$CHOICET" ] || stopped
   TARGET="${CANDIDATES[$((CHOICET-1))]}"
 fi
 echo "Target disk        : $TARGET"
@@ -610,76 +909,139 @@ PLANW=$(( $(tput cols 2>/dev/null || echo 108) - 8 ))
 # plan_h TEXT: rows for a box PLANW wide holding TEXT. whiptail re-sizes a
 # box whose height is 0 to fit its longest line, which overrides the width,
 # so the height is worked out here.
+plan_rows() { printf '%b\n' "$1" | awk -v w=$((PLANW - 6)) '{ l = length($0); n += (l > w) ? int((l + w - 1) / w) + 1 : 1 } END { print n }'; }
+plan_max() { echo $(( $(tput lines 2>/dev/null || echo 40) - 2 )); }
 plan_h() {
-  local n h max
-  n=$(printf '%b\n' "$1" | awk -v w=$((PLANW - 6)) '{ l = length($0); n += (l > w) ? int((l + w - 1) / w) + 1 : 1 } END { print n }')
-  h=$(( n + 5 ))
-  max=$(( $(tput lines 2>/dev/null || echo 40) - 2 ))
+  local h max
+  h=$(( $(plan_rows "$1") + 5 ))
+  max=$(plan_max)
   [ "$h" -gt "$max" ] && h=$max
   echo "$h"
 }
+# plan_scroll TEXT: whiptail's --scrolltext when TEXT is taller than the
+# screen, so the rest of it can be scrolled to instead of being cut off.
+plan_scroll() {
+  case "$(basename "$DIA")" in
+    whiptail) [ $(( $(plan_rows "$1") + 5 )) -gt "$(plan_max)" ] && echo "--scrolltext" ;;
+  esac
+  return 0
+}
+# A line between the plan and the question under it.
+SEP="$(printf '%*s' $((PLANW - 8)) '' | tr ' ' '-')"
 SCRATCH="/tmp/pbs-shrink"     # RAM; a partition on another disk when that is too small
 SCRATCH_MNT=""
+SCRATCH_DEV=""                # the partition chosen for scratch space
+NEED_MB=""                    # the scratch space the plan needs, from the tool
+# What the backup is, for the key of the shrink tool's check cache: another
+# backup never meets the results worked out for this one.
+SHRINK_ID="${PBS_SERVER}|${PBS_DS}|${NS_OPT}|${SELECTED}"
+OSNAME="the operating system" # "Windows" when the backup has an NTFS partition
 SRC_BYTES="$(blockdev --getsize64 "$NBDDEV" 2>/dev/null)"
 TGT_BYTES="$(blockdev --getsize64 "$TARGET" 2>/dev/null)"
+
+# no_scratch [REASON]: the restore cannot go on without scratch space. Says
+# what can be done instead, and stops (the image is let go on the way out).
+no_scratch() {
+  local t need="at least $(commas "$NEED_MB") MB"
+  [ -n "$NEED_MB" ] || need="enough"
+  t="${1:+$1\n\n}Without suitable scratch space this restore cannot be done automatically onto the $(gib "$TGT_BYTES") disk. Nothing has been written to it.\n\nWhat you can do instead:\n\na) Start the restore again with a USB stick or another disk that has ${need} free (exFAT, NTFS or ext4). It is only used during the restore, and nothing else on it is touched.\n\nb) Restore onto a disk of at least $(gib "$SRC_BYTES"), the size of the backed up disk. That needs no scratch space.\n\nc) Install ${OSNAME} and the Salvanza backup client on this disk, then use the app's Restore page to open the disk image from this backup and restore your folders and files from it. Programs must be reinstalled, and the disk and ${OSNAME} get new identities.\n\nPress OK to stop. The backup itself is not changed."
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - no scratch space" $(plan_scroll "$t") \
+  --msgbox "$t" "$(plan_h "$t")" "$PLANW" $DIA_ESC
+  stopped
+}
 
 # Lets the user pick scratch space for a big cut: a partition on a disk that
 # is not the target (a USB stick will do). It is mounted, a folder is made on
 # it for the restore and removed afterwards; nothing else there is touched.
+# When a partition cannot be mounted, the user can choose again. With none to
+# choose from yet (a stick just plugged in may not be seen yet), the user can
+# look again or stop; on Stop, or on Cancel, the wizard stops through
+# no_scratch.
 pick_scratch() {
-  local menu=() devs=() i=1 n fs pk c dev
-  while read -r n fs pk; do
-    [ -n "$fs" ] || continue
-    case "$fs" in ext2|ext3|ext4|xfs|btrfs|ntfs|exfat|vfat) ;; *) continue ;; esac
-    case "$pk" in "$TARGET"|/dev/nbd*|/dev/loop*|/dev/sr*|/dev/zram*|"") continue ;; esac
-    devs+=("$n"); menu+=("$i" "$n  ($fs, $(lsblk -dno SIZE "$n" | tr -d ' ')$(case "$VENTOY_DISKS" in *" $pk "*) echo ', boot stick' ;; esac))")
-    i=$((i+1))
-  done < <(lsblk -lnpo NAME,FSTYPE,PKNAME 2>/dev/null)
-  if [ "${#devs[@]}" -eq 0 ]; then
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-    --msgbox "No partition on another disk was found for scratch space.\n\nPlug in a USB stick or disk with enough free space (exFAT, NTFS or ext4) and start the restore again.\n\nNothing has been written to ${TARGET}.\n\n$msg_program_stop" 0 0 $DIA_ESC
-    return 1
-  fi
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore - scratch space" \
-  --menu "Choose a partition for scratch space. A folder pbs-shrink-scratch is made on it for the restore and removed afterwards; nothing else on it is touched." 0 0 10 \
-  "${menu[@]}" $DIA_ESC 2> "$DIA_TMP"
-  c="$(cat "$DIA_TMP")"
-  [ -n "$c" ] || return 1
-  dev="${devs[$((c-1))]}"
-  mkdir -p /mnt/pbs-scratch
-  [ -n "$SCRATCH_MNT" ] && umount "$SCRATCH_MNT" >/dev/null 2>&1
-  if ! mount "$dev" /mnt/pbs-scratch >/tmp/pbs-scratch-mount.log 2>&1; then
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-    --msgbox "${dev} could not be mounted:\n\n$(tail -2 /tmp/pbs-scratch-mount.log)" 0 0 $DIA_ESC
-    return 1
-  fi
-  SCRATCH_MNT=/mnt/pbs-scratch
-  SCRATCH=/mnt/pbs-scratch/pbs-shrink-scratch
-  return 0
+  local menu devs i n fs pk c dev t lbl
+  # A stick plugged in just before Yes: give the system a moment to see it.
+  sleep 2
+  udevadm settle --timeout=10 >/dev/null 2>&1
+  while true; do
+    menu=(); devs=(); i=1
+    while read -r n fs pk; do
+      [ -n "$fs" ] || continue
+      case "$fs" in ext2|ext3|ext4|xfs|btrfs|ntfs|exfat|vfat) ;; *) continue ;; esac
+      case "$pk" in "$TARGET"|/dev/nbd*|/dev/loop*|/dev/sr*|/dev/zram*|"") continue ;; esac
+      devs+=("$n"); menu+=("$i" "$n  ($fs, $(lsblk -dno SIZE "$n" | tr -d ' ')$(case "$VENTOY_DISKS" in *" $pk "*) echo ', the restore stick' ;; esac))")
+      i=$((i+1))
+    done < <(lsblk -lnpo NAME,FSTYPE,PKNAME 2>/dev/null)
+    if [ "${#devs[@]}" -eq 0 ]; then
+      t="No USB stick or other disk with a usable partition was found yet.\n\nPlug it in, wait a few seconds, then choose Look again."
+      mapfile -t lbl < <(yes_no_labels "Look again" "Stop")
+      if dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - scratch space" "${lbl[@]}" \
+         --yesno "$t" $(box_hw "$t"); then
+        sleep 3
+        udevadm settle --timeout=10 >/dev/null 2>&1
+        continue
+      fi
+      no_scratch "No USB stick or other disk with a usable partition was found. The disk being restored onto (${TARGET}) cannot be used for this."
+    fi
+    t="Choose the partition to use for scratch space. It needs ${NEED_MB:+at least $(commas "$NEED_MB") MB }free space.\n\nA folder named pbs-shrink-scratch is made on it for the restore and removed afterwards. Nothing else on it is touched."
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - scratch space" \
+    --menu "$t" $(menu_hw "$t" "${menu[@]}") \
+    "${menu[@]}" $DIA_ESC 2> "$DIA_TMP"
+    c="$(cat "$DIA_TMP")"
+    [ -n "$c" ] || no_scratch ""
+    dev="${devs[$((c-1))]}"
+    mkdir -p /mnt/pbs-scratch
+    [ -n "$SCRATCH_MNT" ] && umount "$SCRATCH_MNT" >/dev/null 2>&1
+    SCRATCH_MNT=""
+    if mount "$dev" /mnt/pbs-scratch >/tmp/pbs-scratch-mount.log 2>&1; then
+      SCRATCH_MNT=/mnt/pbs-scratch
+      SCRATCH=/mnt/pbs-scratch/pbs-shrink-scratch
+      SCRATCH_DEV="$dev"
+      return 0
+    fi
+    t="${dev} could not be opened (mounted), so it cannot be used for scratch space. The system said:\n\n$(tail -n 2 /tmp/pbs-scratch-mount.log | cut -c1-150)\n\nNothing has been written to it, or to ${TARGET}.\n\nYou can:\n\na) Choose another partition, or plug in another USB stick and choose it.\n\nb) Use a stick formatted as exFAT, NTFS or ext4. An NTFS disk from a Windows computer that was not shut down fully (Fast Startup or hibernation) cannot be used until Windows is shut down fully.\n\nPress OK to choose again."
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - scratch space" \
+    --msgbox "$t" "$(plan_h "$t")" "$PLANW" $DIA_ESC
+    udevadm settle --timeout=10 >/dev/null 2>&1
+  done
 }
 
 if [ -n "$SRC_BYTES" ] && [ -n "$TGT_BYTES" ] && [ "$SRC_BYTES" -gt "$TGT_BYTES" ]; then
-  echo "Target ${TARGET} (${TGT_BYTES} bytes) is smaller than the source ${NBDDEV} (${SRC_BYTES} bytes): planning a restore that shrinks"
+  echo "Target ${TARGET} (${TGT_BYTES} bytes) is smaller than the backed up disk ${NBDDEV} (${SRC_BYTES} bytes): checking whether the data fits"
+  PASS=1
   while true; do
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-    --infobox "The target disk ${TARGET} is smaller than the backed up disk.\n\nChecking whether the backup's data fits on it. This reads the backup's file systems and takes about a minute ..." 10 78
-    PLAN="$("$SHRINK_TOOL" -n -c "$SCRATCH" "$NBDDEV" "$TARGET" 2>&1)"
+    # The first pass reads the backup; after scratch space is chosen the tool
+    # takes the rest from its check cache, so only the scratch space is new.
+    if [ "$PASS" = "1" ]; then
+      T="The new disk ${TARGET} ($(gib "$TGT_BYTES")) is smaller than the backed up disk ($(gib "$SRC_BYTES")).\n\nChecking whether the data fits on it. This reads the backup and takes about a minute. Nothing is written yet."
+    else
+      SFREE="$(df -Pk "${SCRATCH_MNT:-/tmp}" 2>/dev/null | awk 'NR==2{print int($4/1024)}')"
+      T="Checking the scratch space on ${SCRATCH_DEV:-the chosen partition}${SFREE:+ ($(commas "$SFREE") MB free)} ..."
+    fi
+    PASS=$((PASS + 1))
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - smaller disk" \
+    --infobox "$T" $(box_hw "$T")
+    PLAN="$("$SHRINK_TOOL" -n -k "$SHRINK_ID" -c "$SCRATCH" "$NBDDEV" "$TARGET" 2>&1)"
     PRC=$?
     echo "$PLAN" >> "${ocs_log_dir}/pbs-shrink-plan.log"
-    # For the dialogs: the tool's own "plan only" line and STOP prefix go.
-    PLAN="$(sed -e '/^Plan only/d' -e 's/^STOP: //' <<<"$PLAN")"
+    # The scratch space needed, from the tool's last line when it is short.
+    NEED_MB="$(sed -n 's/^SCRATCH_NEED_MB=\([0-9]*\)$/\1/p' <<<"$PLAN" | tail -n 1)"
+    # The table's Type column: an NTFS partition means a Windows backup.
+    grep -qE '^[0-9]+ +ntfs ' <<<"$PLAN" && OSNAME="Windows"
+    # For the dialogs: the tool's own "plan only" and SCRATCH_NEED_MB lines
+    # and its STOP prefix go.
+    PLAN="$(sed -e '/^Plan only/d' -e '/^SCRATCH_NEED_MB=/d' -e 's/^STOP: //' <<<"$PLAN")"
     [ "$PRC" = "3" ] || break
-    T="The target disk is smaller than the backed up disk. The data fits, but while a partition shrinks, the data that has to move is held in scratch space, and there is not enough here:\n\n${PLAN}\n\nChoose scratch space on another disk (a USB stick will do)?"
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore - scratch space needed" $NOCOLLAPSE \
+    T="The new disk is smaller than the backed up disk. The data fits, but some of it must be moved while a partition shrinks.\n\n${PLAN}\n\n${SEP}\nDo you have a suitable volume with at least $(commas "${NEED_MB:-0}") MB available to use as temporary scratch space? If so, please insert it now if required and select Yes."
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - scratch space needed" $NOCOLLAPSE $(plan_scroll "$T") \
     --yesno "$T" "$(plan_h "$T")" "$PLANW"
-    [ "$?" = "0" ] || { echo "$msg_program_stop!"; exit 1; }
-    pick_scratch || { echo "$msg_program_stop!"; exit 1; }
+    [ "$?" = "0" ] || no_scratch ""
+    pick_scratch
   done
   if [ "$PRC" != "0" ]; then
-    T="The target disk is smaller than the backed up disk, and the backup's data does not fit on it.\n\nSource (PBS snapshot) : ${NBDDEV}  (${SRC_BYTES} bytes)\nTarget (THIS MACHINE)  : ${TARGET}  (${TGT_BYTES} bytes)\n\n${PLAN}\n\nNothing has been written to ${TARGET}.\n\n$msg_program_stop"
-    $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" $NOCOLLAPSE \
+    T="This backup cannot be restored onto the $(gib "$TGT_BYTES") disk ${TARGET}, which is smaller than the backed up disk ($(gib "$SRC_BYTES")):\n\n${PLAN}\n\n${SEP}\nNothing has been written to ${TARGET}.\n\nWhat you can do instead:\n\na) Restore onto a disk of at least $(gib "$SRC_BYTES"), the size of the backed up disk. That needs no shrinking.\n\nb) Install ${OSNAME} and the Salvanza backup client on this disk, then use the app's Restore page to open the disk image from this backup and restore your folders and files from it. Programs must be reinstalled, and the disk and ${OSNAME} get new identities.\n\nThe full check is in ${ocs_log_dir}/pbs-shrink-plan.log.\n\nPress OK to stop. The backup itself is not changed."
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - cannot use this disk" $NOCOLLAPSE $(plan_scroll "$T") \
     --msgbox "$T" "$(plan_h "$T")" "$PLANW" $DIA_ESC
-    exit 1
+    stopped
   fi
   SHRINK=1
 fi
@@ -695,17 +1057,14 @@ fi
 if [ "$SHRINK" = "1" ]; then
   # The plan is the confirmation: Clonezilla, and its own two questions, are
   # not used for a restore that shrinks.
-  T="The target disk is smaller than the backed up disk. The data fits; this is how:\n\n${PLAN}\n\nThe backup on the PBS is only read. EVERYTHING on ${TARGET} will be PERMANENTLY OVERWRITTEN.\n\nContinue?"
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore - CONFIRM (smaller disk)" $NOCOLLAPSE \
+  T="The new disk is smaller than the backed up disk, but the data fits. This is the plan:\n\n${PLAN}\n\n${SEP}\nThe backup on the server is only read, never changed. EVERYTHING on ${TARGET} ($(gib "$TGT_BYTES")) will be PERMANENTLY OVERWRITTEN.\n\nStart the restore?"
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - confirm (smaller disk)" $NOCOLLAPSE $(plan_scroll "$T") \
   --yesno "$T" "$(plan_h "$T")" "$PLANW"
 else
-$DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore - CONFIRM" \
---yesno "Source (PBS snapshot) : ${NBDDEV}  (${SRC_SIZE:-unknown size})\nTarget (THIS MACHINE)  : ${TARGET}  (${TGT_SIZE:-unknown size})${NOT_ELIGIBLE_BLOCK}\n\nEVERYTHING on ${TARGET} will be PERMANENTLY OVERWRITTEN.\n\nContinue?" 0 0
+dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - confirm" \
+--yesno "Restore from : ${KEY_NAME}, backup of ${DT_NAME}  (${SRC_SIZE:-unknown size})\nRestore onto : ${TARGET}  (${TGT_SIZE:-unknown size}), a disk in this computer${NOT_ELIGIBLE_BLOCK}\n\nEVERYTHING on ${TARGET} will be PERMANENTLY OVERWRITTEN. The backup on the server is only read, never changed.\n\nClonezilla then asks you to confirm twice more before it writes anything.\n\nStart the restore?" 0 0
 fi
-if [ "$?" != "0" ]; then
-  echo "$msg_program_stop!"
-  exit 1
-fi
+[ "$?" = "0" ] || stopped
 
 # 10. run the restore directly -- skips Clonezilla's own generic
 # device-image/device-device/beginner-mode wizard tree entirely.
@@ -755,6 +1114,9 @@ remove_snapshot_stores() {
   rmdir "$mnt" 2>/dev/null
 }
 
+# The restore itself starts here: from now on an exit leaves the image
+# attached, as before (the next run's start lets go of it).
+RELEASE_ON_EXIT=0
 if [ "$SHRINK" = "1" ]; then
   # Blue boxes only from here: nothing on the terminal behind them.
   echo "> Starting restore (smaller disk): ${NBDDEV} -> ${TARGET} ..." >> "${ocs_log_dir}/pbs-shrink-plan.log"
@@ -764,8 +1126,14 @@ if [ "$SHRINK" = "1" ]; then
   # screen, as a normal restore does. Its record is
   # /tmp/pbs-shrink-logs/run.log, copied to the log folder.
   mkdir -p /tmp/pbs-shrink-logs
-  DIA="$DIA" "$SHRINK_TOOL" -y -b -c "$SCRATCH" "$NBDDEV" "$TARGET" 2>>/tmp/pbs-shrink-logs/stderr.log
+  DIA="$DIA" "$SHRINK_TOOL" -y -b -k "$SHRINK_ID" -c "$SCRATCH" "$NBDDEV" "$TARGET" 2>>/tmp/pbs-shrink-logs/stderr.log
   RC=$?
+  rm -f "$SHRINK_CACHE"
+  # A box over the tool's last one while the scratch space and the restored
+  # partitions are tidied (a few seconds), so the screen never goes blank.
+  T="Finishing: tidying up the scratch space and the restored partitions ..."
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - smaller disk" \
+  --infobox "$T" $(box_hw "$T")
   cp -a /tmp/pbs-shrink-logs "${ocs_log_dir}/" 2>/dev/null
   if [ -n "$SCRATCH_MNT" ]; then
     rm -rf "$SCRATCH"
@@ -778,12 +1146,12 @@ else
 fi
 [ "$RC" = "0" ] && remove_snapshot_stores
 if [ "$RC" != "0" ] && [ "$SHRINK" = "1" ]; then
-  T="The restore onto the smaller disk stopped (exit code $RC):\n\n$(tail -n 8 /tmp/pbs-shrink-logs/run.log 2>/dev/null | cut -c1-150)\n\nThe backup on the PBS was only read. ${TARGET} may be partly written: restore again before using it.\n\nLogs: ${ocs_log_dir}/pbs-shrink-logs\n\n$msg_press_enter_to_continue"
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
+  T="The restore onto the smaller disk did not finish. The last lines of its log:\n\n$(tail -n 8 /tmp/pbs-shrink-logs/run.log 2>/dev/null | sed 's/^STOP: //' | cut -c1-150)\n\n${SEP}\n${TARGET} may be partly written and will probably not start. Do not use it until a restore has finished. The backup on the server was only read and has not changed.\n\nWhat you can do:\n\na) Start the restore again. If it stops at the same step, the logs say why.\n\nb) Restore onto a disk of at least $(gib "$SRC_BYTES"), the size of the backed up disk. That needs no shrinking.\n\nThe logs are in ${ocs_log_dir}/pbs-shrink-logs (run.log first). Exit code: $RC.\n\nPress OK to continue."
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - restore failed" $(plan_scroll "$T") \
   --msgbox "$T" "$(plan_h "$T")" "$PLANW" $DIA_ESC
 elif [ "$RC" != "0" ]; then
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --msgbox "Restore finished with a non-zero exit code ($RC).\nCheck ${ocs_log_dir} for details.\n\n$msg_press_enter_to_continue" 0 0 $DIA_ESC
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - restore failed" \
+  --msgbox "The restore did not finish (Clonezilla stopped with exit code $RC).\n\nIf you answered no to one of Clonezilla's questions, nothing has been written. Otherwise ${TARGET} may be partly written: do not use it until a restore has finished. The backup on the server was only read and has not changed.\n\nStart the restore again. If it fails again, the logs in ${ocs_log_dir} say why.\n\nPress OK to continue." 0 0 $DIA_ESC
 else
   # Power off rather than reboot: started from a USB stick there is no
   # "remove the medium" prompt (live-boot only gives one for a disc), so a
@@ -791,8 +1159,8 @@ else
   # stick cannot be pulled before the reboot either, as the live system runs
   # from it. Off, the stick comes out safely and the next start is the
   # restored disk.
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --msgbox "Restore is complete.\n\nChoose OK to switch the machine off. Then remove the boot stick or disc and switch the machine on again: it starts from the restored disk ${TARGET}.\n\nIf it starts this restore system again, choose the restored disk in the firmware's boot menu." 0 0 $DIA_ESC
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - complete" \
+  --msgbox "The restore is complete.\n\nPress OK to switch the computer off. Then remove the restore stick or disc and switch the computer on again: it starts from the restored disk ${TARGET}.\n\nIf it starts this restore system again, choose the restored disk in the firmware's boot menu." 0 0 $DIA_ESC
   poweroff
 fi
 

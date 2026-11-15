@@ -2,7 +2,7 @@
 # pbs-shrink-restore: restore a whole-disk backup onto a SMALLER disk when the
 # data fits (issue #153).
 #
-#   pbs-shrink-restore [-n] [-y] [-b] [-c COWDIR] SOURCE TARGET
+#   pbs-shrink-restore [-n] [-y] [-b] [-C] [-k ID] [-c COWDIR] SOURCE TARGET
 #     SOURCE  the backup's disk, read-only (/dev/nbd0 from pbsnbd)
 #     TARGET  the new disk; everything on it is overwritten
 #     -n      check and show the plan only; nothing is written
@@ -11,9 +11,24 @@
 #     -c DIR  scratch folder for the data that has to move while a file
 #             system shrinks (default /tmp/pbs-shrink, in RAM on the live
 #             system); a folder on another disk or a USB stick for big cuts
+#     -k ID   what the backup is (the wizard: server, datastore, namespace
+#             and snapshot path), made part of the check cache's key
+#     -C      a fresh check: the check cache is not read (it is written)
+#
+# The check cache (CACHE, below): reading the backup to work out how small
+# each partition can get, and how much data has to move, takes a minute or
+# more. A run keeps those results, and a later run for the same backup and
+# the same new disk (another scratch folder, or the restore after the plan)
+# uses them instead of reading it all again; the scratch folder's room is
+# always checked afresh. The key is SOURCE and TARGET with their sizes, ID,
+# the backup's partition table and the first sectors of each partition (for
+# NTFS also of its MFT, whose records change with every change to the
+# volume), so another snapshot or another disk never meets old results.
 #
 # Exit: 0 done (or plan fits), 1 refused or failed, 2 usage, 3 the scratch
-# folder has too little room (choose another with -c).
+# folder has too little room (choose another with -c); with -n the last line
+# is then SCRATCH_NEED_MB=N, the room needed, for the wizard. Every exit
+# lets go of the loop and device-mapper devices this made, so SOURCE is free.
 #
 # How: the partitions in front of the one that shrinks keep their places; the
 # one with the most room gets just small enough (the shortfall rounded up to a
@@ -46,18 +61,23 @@
 # meet the new disk's copy.
 
 set -u
-PLAN_ONLY=0; YES=0; COWDIR=/tmp/pbs-shrink; BLUE=0
-while getopts "nybc:" o; do
+COWDEF=/tmp/pbs-shrink           # the default scratch folder, in RAM on the live system
+CACHE=/tmp/pbs-shrink-plan.cache  # the check cache; the wizard removes it when it lets go of the backup
+PLAN_ONLY=0; YES=0; COWDIR=$COWDEF; BLUE=0; FRESH=0; CACHE_ID=""
+USAGE="usage: $0 [-n] [-y] [-b] [-C] [-k ID] [-c COWDIR] SOURCE TARGET"
+while getopts "nybCk:c:" o; do
   case "$o" in
     n) PLAN_ONLY=1 ;;
     y) YES=1 ;;
     b) BLUE=1 ;;
+    C) FRESH=1 ;;
+    k) CACHE_ID="$OPTARG" ;;
     c) COWDIR="$OPTARG" ;;
-    *) echo "usage: $0 [-n] [-y] [-b] [-c COWDIR] SOURCE TARGET" >&2; exit 2 ;;
+    *) echo "$USAGE" >&2; exit 2 ;;
   esac
 done
 shift $((OPTIND - 1))
-[ $# -eq 2 ] || { echo "usage: $0 [-n] [-y] [-b] [-c COWDIR] SOURCE TARGET" >&2; exit 2; }
+[ $# -eq 2 ] || { echo "$USAGE" >&2; exit 2; }
 SRC="$1"; TGT="$2"
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 2; }
 
@@ -86,36 +106,76 @@ step() {
   [ $BLUE = 1 ] && "$DIAB" --title "$BOXTITLE" --infobox "$1" 10 78
 }
 die() { echo "STOP: $1" >&2; echo "STOP: $1" >>"$LOGDIR/run.log" 2>/dev/null; exit "${2:-1}"; }
+# dmgone NAME: remove a device-mapper device, quietly; udev may still have a
+# new one open for a moment, so it is tried again a few times.
+dmgone() {
+  local k
+  dmsetup info "$1" >/dev/null 2>&1 || return 0
+  for k in 1 2 3 4 5; do
+    dmsetup remove --retry "$1" >/dev/null 2>&1 && return 0
+    udevadm settle --timeout=5 >/dev/null 2>&1
+    sleep 1
+  done
+  return 1
+}
+# holders_of DEV: the names of the device-mapper devices stacked on DEV, the
+# topmost first. On the live system udev can activate a volume group as soon
+# as its physical volume appears, also the backup's, on one of our loops.
+holders_of() {
+  local b h
+  b="$(basename "$(readlink -f "$1")")"
+  for h in /sys/block/"$b"/holders/*; do
+    [ -e "$h" ] || continue
+    holders_of "/dev/$(basename "$h")"
+    cat "$h/dm/name" 2>/dev/null
+  done
+}
+# On every exit (done, die, a plan run, a signal): everything this run made is
+# let go, so the backup's disk (SOURCE) is free again. Quiet, and safe to run
+# twice.
 cleanup() {
-  local i
-  for ((i = ${#MOUNTS[@]} - 1; i >= 0; i--)); do umount "${MOUNTS[$i]}" >/dev/null 2>&1; done
+  local i n
+  for ((i = ${#MOUNTS[@]} - 1; i >= 0; i--)); do
+    umount "${MOUNTS[$i]}" >/dev/null 2>&1 || umount -l "${MOUNTS[$i]}" >/dev/null 2>&1
+  done
   MOUNTS=()
   # The new disk's volume group may have been activated by udev: off again.
   [ -n "$TVG" ] && lvm vgchange -an --config "$TCONF" "$TVG" >/dev/null 2>&1
-  # Newest first: the loop over the writable layer, then the layer and the
-  # logical volume views, then the loops under them (a loop still in use is
-  # only marked to go when freed).
+  udevadm settle --timeout=5 >/dev/null 2>&1
+  # Newest first: the loop over the writable layer, then anything stacked on
+  # the loops, the layer and the logical volume views, then the loops under
+  # them (a loop still in use is only marked to go when freed, so they are
+  # detached once more at the end).
   for ((i = ${#LOOPS[@]} - 1; i >= 0; i--)); do losetup -d "${LOOPS[$i]}" >/dev/null 2>&1; done
-  dmsetup remove "$DM" >/dev/null 2>&1
-  for ((i = ${#DMS[@]} - 1; i >= 0; i--)); do dmsetup remove "${DMS[$i]}" >/dev/null 2>&1; done
+  for ((i = ${#LOOPS[@]} - 1; i >= 0; i--)); do
+    for n in $(holders_of "${LOOPS[$i]}"); do dmgone "$n"; done
+  done
+  dmgone "$DM"
+  for ((i = ${#DMS[@]} - 1; i >= 0; i--)); do dmgone "${DMS[$i]}"; done
   for ((i = ${#LOOPS[@]} - 1; i >= 0; i--)); do losetup -d "${LOOPS[$i]}" >/dev/null 2>&1; done
   LOOPS=(); DMS=()
   rm -f "$COWDIR/cow" 2>/dev/null
   rmdir "$COWDIR" 2>/dev/null
+  return 0
 }
 trap 'cleanup' EXIT
-human() { numfmt --to=iec-i --suffix=B --format=%.1f "$(( $1 * 512 ))" | sed -E 's/\.0([KMGTP]iB)$/\1/'; }
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+human() { numfmt --to=iec-i --suffix=B --format=%.1f "$(( $1 * 512 ))" | sed -E 's/\.0([KMGTP]iB)$/\1/; s/([0-9])([KMGTP]?i?B)$/\1 \2/'; }
+# commas N: N with thousands separators (23404216320 -> 23,404,216,320).
+commas() { sed -E ':a; s/^([0-9]+)([0-9]{3})/\1,\2/; ta' <<<"$1"; }
 # loop DEV START SIZE [-r]: a loop device over DEV's sectors START to
 # START+SIZE-1, read-only with -r; its name in LOOP (not echoed: a $(...)
 # subshell would lose it from LOOPS, and a die inside it would not stop us).
 loop() {
-  LOOP="$(losetup -f --show ${4:-} -o $(( $2 * 512 )) --sizelimit $(( $3 * 512 )) "$1")" || die "losetup over $1 failed"
+  LOOP="$(losetup -f --show ${4:-} -o $(( $2 * 512 )) --sizelimit $(( $3 * 512 )) "$1")" || die "An internal step failed: $1 could not be opened through a loop device (losetup)."
   LOOPS+=("$LOOP")
 }
 unloop() { losetup -d "$1" >/dev/null 2>&1; local a=() l; for l in "${LOOPS[@]}"; do [ "$l" != "$1" ] && a+=("$l"); done; LOOPS=("${a[@]}"); }
 # dmmap NAME [--readonly]: a device-mapper device from the table on stdin.
 dmmap() {
-  dmsetup create ${2:-} --noudevsync "$1" >>"$LOGDIR/dm.log" 2>&1 || die "could not map $1 (see dm.log)"
+  dmsetup create ${2:-} --noudevsync "$1" >>"$LOGDIR/dm.log" 2>&1 || die "An internal step failed: the view $1 could not be made (see dm.log)."
   dmsetup mknodes "$1"
   DMS+=("$1")
 }
@@ -131,21 +191,24 @@ partdev() { if [[ "$TGT" =~ [0-9]$ ]]; then echo "${TGT}p$1"; else echo "${TGT}$
 # LVM sees only the device named here (and nothing activates by itself).
 lvmconf() { echo "devices { filter=[\"a|^$1\$|\",\"r|.*|\"] global_filter=[\"a|^$1\$|\",\"r|.*|\"] use_devicesfile=0 obtain_device_list_from_udev=0 } global { event_activation=0 }"; }
 
-for t in sfdisk losetup dmsetup blockdev blkid numfmt dd mount; do has "$t" || die "missing tool: $t"; done
+# With -b the wizard has cleared the screen: a box at once, so the time
+# until step 1 (the plan worked out again) is never a black screen.
+[ $BLUE = 1 ] && step "Getting ready: reading the backup's partitions and checking the new disk ..."
+for t in sfdisk losetup dmsetup blockdev blkid numfmt dd mount md5sum od; do has "$t" || die "This restore system lacks the tool $t, which a restore onto a smaller disk needs."; done
 # Views left by a run that was stopped short.
-for d in $(dmsetup ls 2>/dev/null | awk '$1 ~ /^(pbsshrink|pbslv[0-9]+|pbstlv[0-9]+)$/ {print $1}'); do dmsetup remove "$d" >/dev/null 2>&1; done
-[ -b "$SRC" ] || die "$SRC is not a block device"
-[ -b "$TGT" ] || die "$TGT is not a block device"
-[ "$(blockdev --getss "$SRC")" = "$(blockdev --getss "$TGT")" ] || die "the disks have different sector sizes"
-[ "$(blockdev --getss "$SRC")" = 512 ] || die "only 512 byte sectors are handled"
+for d in $(dmsetup ls 2>/dev/null | awk '$1 ~ /^(pbsshrink|pbslv[0-9]+|pbstlv[0-9]+)$/ {print $1}'); do dmgone "$d"; done
+[ -b "$SRC" ] || die "$SRC (the backup) is not a disk device."
+[ -b "$TGT" ] || die "$TGT (the new disk) is not a disk device."
+[ "$(blockdev --getss "$SRC")" = "$(blockdev --getss "$TGT")" ] || die "The backed up disk uses $(blockdev --getss "$SRC") byte sectors and the new disk $(blockdev --getss "$TGT") byte sectors. A restore onto a smaller disk needs both the same."
+[ "$(blockdev --getss "$SRC")" = 512 ] || die "Only disks with 512 byte sectors can be restored onto a smaller disk; these have $(blockdev --getss "$SRC") byte sectors."
 
 # ---- 1. the backup's partition table
-DUMP="$(sfdisk -d "$SRC" 2>/dev/null)" || die "cannot read the partition table of $SRC"
+DUMP="$(sfdisk -d "$SRC" 2>/dev/null)" || die "The backup's partition table could not be read."
 LABEL="$(sed -n 's/^label: *//p' <<<"$DUMP")"
-case "$LABEL" in gpt|dos) ;; *) die "partition table type '$LABEL' not handled" ;; esac
+case "$LABEL" in gpt|dos) ;; *) die "The backup's partition table is of type '$LABEL'. Only GPT and MBR can be restored onto a smaller disk." ;; esac
 mapfile -t PLINES < <(grep -E '^/dev/[^ ]+ *:' <<<"$DUMP")
 N=${#PLINES[@]}
-[ "$N" -gt 0 ] || die "no partitions on $SRC"
+[ "$N" -gt 0 ] || die "The backed up disk has no partitions, so there is nothing that could shrink."
 # Items: partitions are 0..N-1; the logical volumes of an LVM partition are
 # 100 and up. Each has SIZE, FS, MIN, HOW, WHY and NSIZE.
 declare -a NUM START SIZE REST PTYPE CONT FS FSUUID FSLABEL MIN HOW WHY NSTART NSIZE USEDB F2FEAT FATVER
@@ -161,6 +224,42 @@ for ((i = 0; i < N; i++)); do
   CONT[$i]=0
   [ "$LABEL" = dos ] && [[ "${PTYPE[$i]}" =~ ^(5|f|85)$ ]] && CONT[$i]=1
 done
+
+# ---- the check cache (see the top): CF holds "TAG|FIELD" -> value for each
+# item probed, and "REL|TAG|NEWSIZE" -> the data to move. Read only when its
+# first line is this run's key.
+# fp START: what identifies the partition at START: its first 128 KiB (boot
+# sector or superblock, with the btrfs one at 64 KiB) and, for NTFS, the
+# first 64 KiB of its MFT, whose records carry log sequence numbers.
+fp() {
+  local s=$1 bps spc mft
+  dd if="$SRC" bs=512 skip="$s" count=256 status=none 2>/dev/null
+  [ "$(dd if="$SRC" bs=512 skip="$s" count=1 status=none 2>/dev/null | od -An -c -j3 -N4 | tr -d ' ')" = NTFS ] || return 0
+  bps="$(dd if="$SRC" bs=512 skip="$s" count=1 status=none 2>/dev/null | od -An -tu2 -j11 -N2 | tr -d ' ')"
+  spc="$(dd if="$SRC" bs=512 skip="$s" count=1 status=none 2>/dev/null | od -An -tu1 -j13 -N1 | tr -d ' ')"
+  mft="$(dd if="$SRC" bs=512 skip="$s" count=1 status=none 2>/dev/null | od -An -tu8 -j48 -N8 | tr -d ' ')"
+  [ -n "$bps" ] && [ -n "$spc" ] && [ -n "$mft" ] && [ "$bps" -gt 0 ] || return 0
+  [ "$spc" -gt 128 ] && spc=$(( 1 << (256 - spc) ))
+  dd if="$SRC" bs=512 skip=$(( s + mft * spc * bps / 512 )) count=128 status=none 2>/dev/null
+  return 0
+}
+CKEY="$( {
+  echo "$SRC $(blockdev --getsize64 "$SRC") $TGT $(blockdev --getsize64 "$TGT")"
+  echo "$CACHE_ID"
+  echo "$DUMP"
+  for ((i = 0; i < N; i++)); do fp "${START[$i]}"; done
+} | md5sum | cut -d' ' -f1)"
+declare -A CF=()
+if [ $FRESH = 0 ] && [ -f "$CACHE" ] && [ -O "$CACHE" ] && [ "$(head -n 1 "$CACHE")" = "# key $CKEY" ]; then
+  . "$CACHE" || CF=()
+fi
+# cache_save: CF written out with this run's key (only root may read it).
+cache_save() {
+  ( umask 077
+    { echo "# key $CKEY"; declare -p CF; } >"$CACHE.$$" 2>/dev/null && mv -f "$CACHE.$$" "$CACHE" ) || rm -f "$CACHE.$$" 2>/dev/null
+  return 0
+}
+CFIELDS="SIZE FS FSUUID FSLABEL MIN HOW WHY USEDB F2FEAT FATVER"
 itemname() { if [ "$1" -lt 100 ]; then echo "partition ${NUM[$1]}"; else echo "logical volume ${LVN[$1]}"; fi; }
 itemtag() { if [ "$1" -lt 100 ]; then echo "${NUM[$1]}"; else echo "lv-${LVN[$1]}"; fi; }
 # srcdev X: the backup's device for item X in SDEV (a loop for a partition,
@@ -169,8 +268,21 @@ srcdev() { if [ "$1" -lt 100 ]; then loop "$SRC" "${START[$1]}" "${SIZE[$1]}" -r
 srcdone() { [ "$1" -lt 100 ] && unloop "$2"; return 0; }
 
 # ---- 2. what is in each partition (and logical volume), and how small it can get
-# probe X DEV: sets FS, FSUUID, FSLABEL, MIN, HOW and WHY of item X.
+# probe X DEV: sets FS, FSUUID, FSLABEL, MIN, HOW and WHY of item X (and
+# USEDB, F2FEAT, FATVER), from the check cache when it holds item X at the
+# same size, else from the backup (probe_fs), and keeps them in the cache.
 probe() {
+  local x=$1 tag f r
+  tag="$(itemtag "$x")"
+  if [ "${CF[$tag|SIZE]-}" = "${SIZE[$x]}" ]; then
+    for f in $CFIELDS; do [ $f = SIZE ] || printf -v "$f[$x]" '%s' "${CF[$tag|$f]-}"; done
+    return 0
+  fi
+  probe_fs "$@"
+  for f in $CFIELDS; do r="$f[$x]"; CF[$tag|$f]="${!r-}"; done
+  return 0
+}
+probe_fs() {
   local x=$1 lp=$2 out b bs blocks cowk used extra lo mo
   MIN[$x]="${SIZE[$x]}"; HOW[$x]=keep
   FS[$x]="$(blkid -p -o value -s TYPE "$lp" 2>/dev/null)"
@@ -203,14 +315,14 @@ probe() {
             WHY[$x]="can shrink (its $((cowk / 1024)) MiB snapshot store goes)"
           fi
         fi
-      else WHY[$x]="kept: resize2fs gave no minimum"; fi ;;
+      else WHY[$x]="kept: its smallest size could not be worked out"; fi ;;
     btrfs)
       if has btrfs && mnt "$lp" "$MNT/p" ro,rescue=nologreplay btrfs; then
         b="$(btrfs inspect-internal min-dev-size "$MNT/p" 2>/dev/null | grep -oE '^[0-9]+')"
         USEDB[$x]="$(df -B1 --output=used "$MNT/p" | tail -1 | tr -d ' ')"
         unmnt "$MNT/p"; btrfs device scan --forget "$lp" >/dev/null 2>&1
         if [ -n "$b" ]; then MIN[$x]=$(( (b + 511) / 512 )); HOW[$x]=btrfs; WHY[$x]="can shrink"
-        else WHY[$x]="kept: btrfs gave no minimum size"; fi
+        else WHY[$x]="kept: its smallest size could not be worked out"; fi
       else WHY[$x]="kept: could not read the btrfs file system"; fi ;;
     xfs)
       if has mkfs.xfs && mnt "$lp" "$MNT/p" ro,norecovery xfs; then
@@ -262,7 +374,7 @@ spare() { # what item $1 can give up, in sectors (not rounded)
 LVPART=-1; LVITEMS=()
 lvm_probe() {
   local i=$1 vg pvuuid pestart pecount ext pvc lvc line name uuid segtype lstart ranges a b x j off len ord
-  has lvm || { WHY[$i]="kept: no LVM tools"; return; }
+  has lvm || { WHY[$i]="kept: this system has no LVM tools"; return; }
   [ $LVPART -ge 0 ] && { WHY[$i]="kept: only one LVM physical volume is handled"; return; }
   loop "$SRC" "${START[$i]}" "${SIZE[$i]}" -r; LVLOOP="$LOOP"
   LVC="$(lvmconf "$LVLOOP")"
@@ -321,6 +433,7 @@ for ((i = 0; i < N; i++)); do
   unloop "$lp"
   [ "${FS[$i]}" = LVM2_member ] && lvm_probe $i
 done
+cache_save
 
 # ---- 3. the plan
 SRC_SECT="$(blockdev --getsz "$SRC")"
@@ -376,7 +489,7 @@ if [ $K -ge 0 ] && [ "${HOW[$K]}" = lvm ]; then
       done
       [ $SK -ge 0 ] && break
     done
-    [ $SK -ge 0 ] || die "no logical volume in $LVVG can give up $NEED extents"
+    [ $SK -ge 0 ] || die "No logical volume in volume group $LVVG can shrink by the $(human $(( NEED * LVEXTS ))) needed."
   fi
   pos=0
   for x in "${LVITEMS[@]}"; do
@@ -421,21 +534,36 @@ for ((i = 0; i < N; i++)); do
   fi
 done
 say ""
+# Under the table, lettered points, each its own paragraph (the wizard's
+# boxes wrap them readably): a) what shrinks, b) the smallest disk, c) the
+# data that moves and where it is held, d) the scratch space needed when the
+# folder has too little room. With -n and too little room, the last line is
+# SCRATCH_NEED_MB=N for the wizard, which does not show it.
 REL=0   # data to move, in MB: held in the scratch folder while it moves
 if [ $SHORT -le 0 ]; then
-  say "Everything fits as it is."
+  say "All the partitions fit on the new disk as they are, so none needs to shrink."
 elif [ $K -lt 0 ]; then
-  die "the new disk is too small: this backup needs a disk of at least $(human $SMALLEST) ($(( SMALLEST * 512 )) bytes)."
+  die "The new disk is too small for this backup, even with a partition shrunk. $(human $SMALLEST) ($(commas $(( SMALLEST * 512 ))) bytes) is the smallest disk this data could fit onto."
 else
-  if [ "${HOW[$K]}" = lvm ]; then
-    say "Partition ${NUM[$K]} (LVM volume group $LVVG) goes from $(human "${SIZE[$K]}") to $(human "${NSIZE[$K]}")."
-    [ $SK -ge 0 ] && say "Logical volume ${LVN[$SK]} (${FS[$SK]}) goes from $(human "${SIZE[$SK]}") to $(human "${NSIZE[$SK]}"); its data needs $(human "${MIN[$SK]}")."
-    [ $SK -lt 0 ] && say "The volume group's free space covers it: no logical volume shrinks."
+  if [ "${HOW[$K]}" = lvm ] && [ $SK -ge 0 ]; then
+    say "a) Logical volume ${LVN[$SK]} (${FS[$SK]}) holds $(human "${MIN[$SK]}") of data, so it will be $(human "${NSIZE[$SK]}") instead of $(human "${SIZE[$SK]}"), inside partition ${NUM[$K]}, which will be $(human "${NSIZE[$K]}") instead of $(human "${SIZE[$K]}")."
+  elif [ "${HOW[$K]}" = lvm ]; then
+    say "a) Partition ${NUM[$K]} (LVM volume group $LVVG) will be $(human "${NSIZE[$K]}") instead of $(human "${SIZE[$K]}"). The volume group has enough free space for that, so no logical volume needs to shrink."
+  elif [ "${HOW[$K]}" = swap ]; then
+    say "a) Partition ${NUM[$K]} (swap) holds no data that has to be kept, so it will be made again at $(human "${NSIZE[$K]}") instead of $(human "${SIZE[$K]}")."
   else
-    say "Partition ${NUM[$K]} (${FS[$K]}) goes from $(human "${SIZE[$K]}") to $(human "${NSIZE[$K]}"); its data needs $(human "${MIN[$K]}")."
+    say "a) Partition ${NUM[$K]} (${FS[$K]}) holds $(human "${MIN[$K]}") of data, so the new partition will be $(human "${NSIZE[$K]}") instead of $(human "${SIZE[$K]}")."
   fi
-  say "The smallest disk this backup fits: $(human $SMALLEST) ($(( SMALLEST * 512 )) bytes)."
+  say ""
+  say "b) $(human $SMALLEST) ($(commas $(( SMALLEST * 512 ))) bytes) is the smallest disk this data could fit onto."
+  # The data to move, from the check cache when it holds it for this item
+  # and this new size.
+  RTAG=""
   if [ $SK -ge 0 ]; then
+    RTAG="REL|$(itemtag "$SK")|${NSIZE[$SK]}"
+    [ -n "${CF[$RTAG]-}" ] && REL="${CF[$RTAG]}"
+  fi
+  if [ -n "$RTAG" ] && [ -z "${CF[$RTAG]-}" ]; then
     case "${HOW[$SK]}" in
       ntfs)
         srcdev $SK; lp="$SDEV"
@@ -469,31 +597,50 @@ else
       filecopy) REL=0 ;;    # read straight from the backup, nothing moves
       swap) REL=0 ;;
     esac
+    # Kept for the next run when it could be worked out.
+    [ -n "$REL" ] && { CF[$RTAG]="$REL"; cache_save; }
   fi
   REL=${REL:-0}
   if [ "$REL" -gt 0 ]; then
     mkdir -p "$COWDIR" 2>/dev/null
     free="$(df -Pk "$COWDIR" 2>/dev/null | awk 'NR==2{print int($4/1024)}')"
-    say "Data to move while it shrinks: about ${REL} MB, held in $COWDIR (${free:-?} MB free there)."
     need=$(( REL + REL / 10 + 256 ))
-    if [ -z "$free" ] || [ "$free" -lt "$need" ]; then
-      die "Not enough scratch space: $need MB is needed in the scratch folder, $COWDIR has ${free:-no} MB free. Choose a folder on another disk or a USB stick." 3
+    short=0; { [ -z "$free" ] || [ "$free" -lt "$need" ]; } && short=1
+    fat=0; [ "$(stat -f -c %T "$COWDIR" 2>/dev/null)" = msdos ] && [ "$need" -ge 4095 ] && fat=1
+    where="$COWDIR"; [ "$COWDIR" = "$COWDEF" ] && where="$COWDIR (memory)"
+    say ""
+    if [ -z "$free" ]; then
+      say "c) $(commas "$REL") MB has to be stored while it shrinks. It would be held in $where, whose free space could not be read."
+    elif [ $short = 1 ]; then
+      say "c) $(commas "$REL") MB has to be stored while it shrinks. It would be held in $where, which has only $(commas "$free") MB available."
+    else
+      say "c) $(commas "$REL") MB has to be stored while it shrinks. It will be held in $where, which has $(commas "$free") MB available."
     fi
-    if [ "$(stat -f -c %T "$COWDIR" 2>/dev/null)" = msdos ] && [ "$need" -ge 4095 ]; then
-      die "the scratch folder is on FAT, whose files stop at 4 GB, and $need MB is needed. Choose an exFAT, NTFS or ext4 one." 3
+    if [ $short = 1 ] || [ $fat = 1 ]; then
+      say ""
+      if [ $short = 1 ]; then
+        say "d) Scratch space of at least $(commas "$need") MB is needed, in a folder on another volume (a USB stick or another disk)."
+      else
+        say "d) $COWDIR is on a FAT volume, which cannot hold a file larger than 4 GB. Scratch space of at least $(commas "$need") MB is needed, on an exFAT, NTFS or ext4 volume (a USB stick or another disk)."
+      fi
+      [ $PLAN_ONLY = 1 ] && echo "SCRATCH_NEED_MB=$need"
+      exit 3
     fi
   fi
 fi
-[ $PLAN_ONLY = 1 ] && { say "Plan only: nothing written."; exit 0; }
+[ $PLAN_ONLY = 1 ] && { say "Plan only: nothing has been written."; exit 0; }
 if [ $YES != 1 ]; then
   read -r -p "EVERYTHING on $TGT will be overwritten. Type yes to go on: " a
-  [ "$a" = yes ] || die "not confirmed"
+  [ "$a" = yes ] || die "Not confirmed, so nothing has been written."
 fi
 
 # ---- 4. shrink the file system in a writable layer over the backup
 SHR=""; SHRDM=""
 if [ $SK -ge 0 ] && [ "${HOW[$SK]}" != swap ] && [ "${HOW[$SK]}" != filecopy ]; then
-  mkdir -p "$COWDIR" || die "cannot make $COWDIR"
+  # Nothing is written to the new disk until step 2, so a stop in this step
+  # says so.
+  NOTYET="Nothing has been written to $TGT yet."
+  mkdir -p "$COWDIR" || die "The scratch folder $COWDIR could not be made. $NOTYET"
   srcdev $SK; base="$SDEV"
   # The layer only needs room for what changes: the data that moves and the
   # file system's own updates, so it is sized from that, not the partition.
@@ -501,17 +648,17 @@ if [ $SK -ge 0 ] && [ "${HOW[$SK]}" != swap ] && [ "${HOW[$SK]}" != filecopy ]; 
   cowmb=$(( REL * 2 + 1024 )); [ $cowmb -gt $(( free - 64 )) ] && cowmb=$(( free - 64 ))
   [ $cowmb -gt $(( SIZE[SK] / 2048 )) ] && cowmb=$(( SIZE[SK] / 2048 ))
   [ "$(stat -f -c %T "$COWDIR")" = msdos ] && [ $cowmb -gt 4095 ] && cowmb=4095
-  truncate -s "${cowmb}M" "$COWDIR/cow" || die "cannot make the scratch file in $COWDIR"
+  truncate -s "${cowmb}M" "$COWDIR/cow" || die "The scratch file could not be made in $COWDIR. $NOTYET"
   loop "$COWDIR/cow" 0 $(( cowmb * MIB )); cow="$LOOP"
-  dmsetup create --noudevsync "$DM" --table "0 ${SIZE[$SK]} snapshot $base $cow N 8" || die "could not make the writable layer"
+  dmsetup create --noudevsync "$DM" --table "0 ${SIZE[$SK]} snapshot $base $cow N 8" || die "An internal step failed: the temporary writable copy of the backup could not be made (dmsetup). $NOTYET"
   dmsetup mknodes "$DM"
   SHRDM="/dev/mapper/$DM"
   newbytes=$(( NSIZE[SK] * 512 ))
-  SHRHEAD="Step 1: $(itemname $SK) (${FS[$SK]}) $( [ "${HOW[$SK]}" = xfscopy ] && echo "is prepared for copying (its log is replayed)" || echo "shrinks from $(human "${SIZE[$SK]}") to $(human "${NSIZE[$SK]}")")"
+  SHRHEAD="Step 1 of 4: $(itemname $SK) (${FS[$SK]}) $( [ "${HOW[$SK]}" = xfscopy ] && echo "is made ready to copy" || echo "shrinks from $(human "${SIZE[$SK]}") to $(human "${NSIZE[$SK]}")")"
   case "${HOW[$SK]}" in
     ntfs)
       step "$SHRHEAD\n\nChecking that it can shrink ..."
-      ntfsresize --no-action --force --force -s "$newbytes" "$SHRDM" >"$LOGDIR/ntfsresize-test.log" 2>&1 || { tail -5 "$LOGDIR/ntfsresize-test.log"; die "ntfsresize test run failed"; }
+      ntfsresize --no-action --force --force -s "$newbytes" "$SHRDM" >"$LOGDIR/ntfsresize-test.log" 2>&1 || { tail -5 "$LOGDIR/ntfsresize-test.log"; die "The NTFS file system cannot be shrunk (the test run failed, see ntfsresize-test.log). Windows may not have been shut down fully when it was backed up. $NOTYET"; }
       if [ $BLUE = 1 ]; then
         # A gauge fed by ntfsresize's own "NN.NN percent completed" lines, one
         # per stage (check, move the data past the new end, update).
@@ -527,38 +674,38 @@ if [ $SK -ge 0 ] && [ "${HOW[$SK]}" != swap ] && [ "${HOW[$SK]}" != filecopy ]; 
           "$DIAB" --title "$BOXTITLE" --gauge "$SHRHEAD\n\nStarting ..." 11 78 0
         # (whiptail sizes the gauge's text area from this first text: three
         # lines, so the stage line of each update shows.)
-        grep -q '^RC=0$' "$LOGDIR/ntfsresize.log" || die "ntfsresize failed: $(grep -iE 'error|fail' "$LOGDIR/ntfsresize.log" | tail -1)"
+        grep -q '^RC=0$' "$LOGDIR/ntfsresize.log" || die "Shrinking the NTFS file system failed: $(grep -iE 'error|fail' "$LOGDIR/ntfsresize.log" | tail -1) (see ntfsresize.log). $NOTYET"
       elif [ $TTY = 1 ]; then
         echo y | ntfsresize --force --force -s "$newbytes" "$SHRDM" 2>&1 | tee "$LOGDIR/ntfsresize.log"
-        [ "${PIPESTATUS[1]}" = 0 ] || die "ntfsresize failed"
+        [ "${PIPESTATUS[1]}" = 0 ] || die "Shrinking the NTFS file system failed (see ntfsresize.log). $NOTYET"
       else
-        echo y | ntfsresize --force --force --no-progress-bar -s "$newbytes" "$SHRDM" >"$LOGDIR/ntfsresize.log" 2>&1 || { tail -5 "$LOGDIR/ntfsresize.log"; die "ntfsresize failed"; }
+        echo y | ntfsresize --force --force --no-progress-bar -s "$newbytes" "$SHRDM" >"$LOGDIR/ntfsresize.log" 2>&1 || { tail -5 "$LOGDIR/ntfsresize.log"; die "Shrinking the NTFS file system failed (see ntfsresize.log). $NOTYET"; }
       fi ;;
     ext)
-      step "$SHRHEAD\n\nChecking the file system (e2fsck) ..."
+      step "$SHRHEAD\n\nChecking the file system ..."
       e2fsck -f -y "$SHRDM" >"$LOGDIR/e2fsck.log" 2>&1
-      [ $? -le 1 ] || { tail -5 "$LOGDIR/e2fsck.log"; die "e2fsck found errors it could not fix"; }
+      [ $? -le 1 ] || { tail -5 "$LOGDIR/e2fsck.log"; die "The check found errors in the file system that it could not fix (see e2fsck.log). $NOTYET"; }
       if mnt "$SHRDM" "$MNT/s" rw; then
         for f in "$MNT"/s/.pbs_snapshot_*.cow; do [ -f "$f" ] && rm -f "$f" && say "  removed the backup's snapshot store $(basename "$f")"; done
         unmnt "$MNT/s"
         # Mounted, so resize2fs wants it checked again.
         e2fsck -f -y "$SHRDM" >>"$LOGDIR/e2fsck.log" 2>&1
-        [ $? -le 1 ] || { tail -5 "$LOGDIR/e2fsck.log"; die "e2fsck found errors it could not fix"; }
+        [ $? -le 1 ] || { tail -5 "$LOGDIR/e2fsck.log"; die "The check found errors in the file system that it could not fix (see e2fsck.log). $NOTYET"; }
       fi
       if [ $BLUE = 1 ]; then
-        step "$SHRHEAD\n\nShrinking (resize2fs), moving about ${REL:-0} MB of data.\nThis gives no percentage; it can take several minutes."
-        resize2fs "$SHRDM" "$(( newbytes / 1024 ))K" >"$LOGDIR/resize2fs.log" 2>&1 || die "resize2fs failed: $(tail -1 "$LOGDIR/resize2fs.log")"
+        step "$SHRHEAD\n\nShrinking the file system and moving about ${REL:-0} MB of data.\nThere is no progress bar for this; it can take several minutes."
+        resize2fs "$SHRDM" "$(( newbytes / 1024 ))K" >"$LOGDIR/resize2fs.log" 2>&1 || die "Shrinking the file system failed: $(tail -1 "$LOGDIR/resize2fs.log") (see resize2fs.log). $NOTYET"
       elif [ $TTY = 1 ]; then
         resize2fs -p "$SHRDM" "$(( newbytes / 1024 ))K" 2>&1 | tee "$LOGDIR/resize2fs.log"
-        [ "${PIPESTATUS[0]}" = 0 ] || die "resize2fs failed"
+        [ "${PIPESTATUS[0]}" = 0 ] || die "Shrinking the file system failed (see resize2fs.log). $NOTYET"
       else
-        resize2fs "$SHRDM" "$(( newbytes / 1024 ))K" >"$LOGDIR/resize2fs.log" 2>&1 || { tail -5 "$LOGDIR/resize2fs.log"; die "resize2fs failed"; }
+        resize2fs "$SHRDM" "$(( newbytes / 1024 ))K" >"$LOGDIR/resize2fs.log" 2>&1 || { tail -5 "$LOGDIR/resize2fs.log"; die "Shrinking the file system failed (see resize2fs.log). $NOTYET"; }
       fi ;;
     btrfs)
-      step "$SHRHEAD\n\nShrinking (btrfs filesystem resize). This gives no percentage."
-      mnt "$SHRDM" "$MNT/s" rw btrfs || { tail -3 "$LOGDIR/mount.log"; die "could not mount the btrfs file system"; }
+      step "$SHRHEAD\n\nShrinking the file system. There is no progress bar for this; it can take several minutes."
+      mnt "$SHRDM" "$MNT/s" rw btrfs || { tail -3 "$LOGDIR/mount.log"; die "The btrfs file system could not be opened to shrink it (see mount.log). $NOTYET"; }
       for f in "$MNT"/s/.pbs_snapshot_*.cow; do [ -f "$f" ] && rm -f "$f" && say "  removed the backup's snapshot store $(basename "$f")"; done
-      btrfs filesystem resize "1:$newbytes" "$MNT/s" >"$LOGDIR/btrfs-resize.log" 2>&1 || { tail -5 "$LOGDIR/btrfs-resize.log"; die "btrfs resize failed"; }
+      btrfs filesystem resize "1:$newbytes" "$MNT/s" >"$LOGDIR/btrfs-resize.log" 2>&1 || { tail -5 "$LOGDIR/btrfs-resize.log"; die "Shrinking the btrfs file system failed (see btrfs-resize.log). $NOTYET"; }
       unmnt "$MNT/s"; btrfs device scan --forget "$SHRDM" >/dev/null 2>&1 ;;
     xfscopy) step "$SHRHEAD" ;;   # mounted (log replay into the layer) when it is copied
   esac
@@ -579,8 +726,8 @@ SCRIPT="$LOGDIR/table.sfdisk"
     echo "$(partdev "${NUM[$i]}") : start=${NSTART[$i]}, size=${NSIZE[$i]}, ${REST[$i]}"
   done
 } > "$SCRIPT"
-step "Step 2: writing the new partition table and boot code to $TGT ..."
-sfdisk -q --wipe always --no-reread --no-tell-kernel "$TGT" < "$SCRIPT" >"$LOGDIR/sfdisk.log" 2>&1 || { cat "$LOGDIR/sfdisk.log"; die "sfdisk could not write the table"; }
+step "Step 2 of 4: writing the new partition table and boot code to $TGT ..."
+sfdisk -q --wipe always --no-reread --no-tell-kernel "$TGT" < "$SCRIPT" >"$LOGDIR/sfdisk.log" 2>&1 || { cat "$LOGDIR/sfdisk.log"; die "The new partition table could not be written to $TGT (see sfdisk.log)."; }
 # Boot code in the first sector (not the table), then the gap before the
 # first partition (GRUB's core image on a BIOS/MBR disk).
 dd if="$SRC" of="$TGT" bs=440 count=1 conv=notrunc status=none
@@ -612,15 +759,15 @@ copy_item() {
   local x=$1 from=$2 to=$3 t0 what log tool popts fs fsname ml mo id fopt feats cf f opts
   what="$(itemname $x)"; log="$LOGDIR/copy-$(itemtag $x).log"; t0=$(date +%s)
   if [ "${HOW[$x]}" = swap ]; then
-    step "Step 3: $what (swap, $(human "${NSIZE[$x]}")) is made again ..."
-    mkswap ${FSUUID[$x]:+-U "${FSUUID[$x]}"} ${FSLABEL[$x]:+-L "${FSLABEL[$x]}"} "$to" >"$log" 2>&1 || die "mkswap failed"
+    step "Step 3 of 4: $what (swap, $(human "${NSIZE[$x]}")) is made again ..."
+    mkswap ${FSUUID[$x]:+-U "${FSUUID[$x]}"} ${FSLABEL[$x]:+-L "${FSLABEL[$x]}"} "$to" >"$log" 2>&1 || die "The swap space of $what could not be made again (see copy-$(itemtag $x).log)."
     return
   fi
   if [ $x -eq $SK ] && [ "${HOW[$x]}" = filecopy ]; then
     fs="${FS[$x]}"; fsname="$fs"; [ "$fs" = vfat ] && fsname=FAT
-    step "Step 3: $what ($fsname, $(human "${NSIZE[$x]}")): a new, smaller $fsname is made and $(human "${MIN[$x]}") of files are copied into it.\nThis gives no percentage; it can take several minutes."
+    step "Step 3 of 4: $what ($fsname, $(human "${NSIZE[$x]}")): a new, smaller $fsname is made and $(human "${MIN[$x]}") of files are copied into it.\nThere is no progress bar for this; it can take several minutes."
     mo=ro; [ "$fs" = f2fs ] && mo=ro,norecovery
-    mnt "$from" "$MNT/s" "$mo" "$fs" || { tail -3 "$LOGDIR/mount.log"; die "could not mount the $fsname file system of $what"; }
+    mnt "$from" "$MNT/s" "$mo" "$fs" || { tail -3 "$LOGDIR/mount.log"; die "The $fsname file system of $what in the backup could not be opened (see mount.log)."; }
     ml="$LOGDIR/mkfs-$(itemtag $x).log"
     case "$fs" in
       vfat)
@@ -630,9 +777,9 @@ copy_item() {
         # -h records the partition's start, as Windows expects.
         mkfs.vfat $fopt ${id:+-i "$id"} ${FSLABEL[$x]:+-n "${FSLABEL[$x]}"} -h "${NSTART[$x]:-0}" "$to" >"$ml" 2>&1 ||
           mkfs.vfat ${id:+-i "$id"} ${FSLABEL[$x]:+-n "${FSLABEL[$x]}"} -h "${NSTART[$x]:-0}" "$to" >>"$ml" 2>&1 ||
-          { tail -3 "$ml"; die "mkfs.vfat failed"; } ;;
+          { tail -3 "$ml"; die "The new FAT file system for $what could not be made (see $(basename "$ml"))."; } ;;
       exfat)
-        mkfs.exfat ${FSLABEL[$x]:+-L "${FSLABEL[$x]}"} "$to" >"$ml" 2>&1 || { tail -3 "$ml"; die "mkfs.exfat failed"; }
+        mkfs.exfat ${FSLABEL[$x]:+-L "${FSLABEL[$x]}"} "$to" >"$ml" 2>&1 || { tail -3 "$ml"; die "The new exFAT file system for $what could not be made (see $(basename "$ml"))."; }
         if [ -n "${FSUUID[$x]}" ] && has tune.exfat; then
           tune.exfat -I "0x${FSUUID[$x]//-/}" "$to" >>"$ml" 2>&1 || say "  (the exFAT volume serial could not be set)"
         fi ;;
@@ -650,30 +797,30 @@ copy_item() {
           feats+="${feats:+,}$f"
         done
         mkfs.f2fs -f -q ${feats:+-O "$feats"} $cf ${FSUUID[$x]:+-U "${FSUUID[$x]}"} ${FSLABEL[$x]:+-l "${FSLABEL[$x]}"} "$to" >"$ml" 2>&1 ||
-          { tail -3 "$ml"; die "mkfs.f2fs failed (features: $feats)"; } ;;
+          { tail -3 "$ml"; die "The new f2fs file system for $what could not be made with the features $feats (see $(basename "$ml"))."; } ;;
     esac
-    mnt "$to" "$MNT/d" rw "$fs" || { tail -3 "$LOGDIR/mount.log"; die "could not mount the new $fsname file system"; }
+    mnt "$to" "$MNT/d" rw "$fs" || { tail -3 "$LOGDIR/mount.log"; die "The new $fsname file system for $what could not be opened (see mount.log)."; }
     if [ "$fs" = f2fs ]; then
       ( cd "$MNT/s" && tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner --sparse -cpf - . | tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner -xpf - -C "$MNT/d" ) >"$log" 2>&1
     else
       # FAT and exFAT keep no owners or permissions: the files and their times.
       cp -r --preserve=timestamps "$MNT/s/." "$MNT/d/" >"$log" 2>&1
-    fi || { tail -5 "$log"; die "copying the files of $what failed"; }
+    fi || { tail -5 "$log"; die "Copying the files of $what failed (see copy-$(itemtag $x).log)."; }
     unmnt "$MNT/d"; unmnt "$MNT/s"
     say "  done in $(( $(date +%s) - t0 )) s"
     return
   fi
   if [ $x -eq $SK ] && [ "${HOW[$x]}" = xfscopy ]; then
-    step "Step 3: $what (XFS, $(human "${NSIZE[$x]}")): a new XFS is made and $(human "${MIN[$x]}") of files are copied into it.\nThis gives no percentage; it can take several minutes."
-    mnt "$SHRDM" "$MNT/s" rw,nouuid xfs || { tail -3 "$LOGDIR/mount.log"; die "could not mount the XFS file system"; }
+    step "Step 3 of 4: $what (XFS, $(human "${NSIZE[$x]}")): a new XFS is made and $(human "${MIN[$x]}") of files are copied into it.\nThere is no progress bar for this; it can take several minutes."
+    mnt "$SHRDM" "$MNT/s" rw,nouuid xfs || { tail -3 "$LOGDIR/mount.log"; die "The XFS file system of $what in the backup could not be opened (see mount.log)."; }
     opts="$(xfs_like "$MNT/s")"
-    mkfs.xfs -f -q $opts -m uuid="${FSUUID[$x]}" ${FSLABEL[$x]:+-L "${FSLABEL[$x]}"} "$to" >"$LOGDIR/mkfs-xfs.log" 2>&1 || { tail -5 "$LOGDIR/mkfs-xfs.log"; die "mkfs.xfs failed (options:$opts)"; }
-    mnt "$to" "$MNT/d" rw,nouuid xfs || die "could not mount the new XFS file system"
+    mkfs.xfs -f -q $opts -m uuid="${FSUUID[$x]}" ${FSLABEL[$x]:+-L "${FSLABEL[$x]}"} "$to" >"$LOGDIR/mkfs-xfs.log" 2>&1 || { tail -5 "$LOGDIR/mkfs-xfs.log"; die "The new XFS file system for $what could not be made with the options$opts (see mkfs-xfs.log)."; }
+    mnt "$to" "$MNT/d" rw,nouuid xfs || die "The new XFS file system for $what could not be opened (see mount.log)."
     if has xfsdump && has xfsrestore; then
       ( xfsdump -J -l 0 -L pbs -M pbs - "$MNT/s" | xfsrestore -J - "$MNT/d" ) >"$log" 2>&1
     else
       ( cd "$MNT/s" && tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner --sparse -cpf - . | tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner -xpf - -C "$MNT/d" ) >"$log" 2>&1
-    fi || { tail -5 "$log"; die "copying the files of $what failed"; }
+    fi || { tail -5 "$log"; die "Copying the files of $what failed (see copy-$(itemtag $x).log)."; }
     unmnt "$MNT/d"; unmnt "$MNT/s"
     say "  done in $(( $(date +%s) - t0 )) s"
     return
@@ -691,7 +838,7 @@ copy_item() {
   esac
   has $tool || tool=partclone.dd
   has $tool || tool=dd
-  step "Step 3: copying $what (${FS[$x]:-no file system}, $(human "${NSIZE[$x]}")) ..."
+  step "Step 3 of 4: copying $what (${FS[$x]:-no file system}, $(human "${NSIZE[$x]}")) ..."
   if [ $tool = dd ]; then
     dd if="$from" of="$to" bs=4M status=none conv=fsync >"$log" 2>&1
   else
@@ -705,7 +852,7 @@ copy_item() {
     else
       $tool $popts -s "$from" -o "$to" >"$log" 2>&1
     fi
-  fi || { tail -5 "$log"; die "copying $what failed"; }
+  fi || { tail -5 "$log"; die "Copying $what failed (see copy-$(itemtag $x).log)."; }
   say "  done in $(( $(date +%s) - t0 )) s"
   if [ "${FS[$x]}" = ntfs ]; then
     # The backup boot sector is in the last sector, outside the volume that
@@ -719,8 +866,8 @@ copy_item() {
 lvm_rebuild() {
   local i=$1 tpv=$2 ct tpes map x j
   ct="$(lvmconf "$tpv")"
-  step "Step 3: partition ${NUM[$i]}: LVM volume group $LVVG is written again, $(human "${NSIZE[$i]}"), the same names and UUIDs ..."
-  lvm vgcfgbackup --config "$LVC" -f "$LOGDIR/vg.old" "$LVVG" >"$LOGDIR/lvm.log" 2>&1 || { tail -3 "$LOGDIR/lvm.log"; die "could not read volume group $LVVG"; }
+  step "Step 3 of 4: partition ${NUM[$i]} (LVM): volume group $LVVG is made again at $(human "${NSIZE[$i]}"), with the same names and IDs ..."
+  lvm vgcfgbackup --config "$LVC" -f "$LOGDIR/vg.old" "$LVVG" >"$LOGDIR/lvm.log" 2>&1 || { tail -3 "$LOGDIR/lvm.log"; die "The backup's LVM volume group $LVVG could not be read (see lvm.log)."; }
   map=""
   for x in "${LVITEMS[@]}"; do map+="${LVN[$x]}:${LVNEWSTART[$x]}:${LVNEWEXT[$x]};"; done
   # The physical volume gets the new size and extent count; each logical
@@ -769,14 +916,14 @@ lvm_rebuild() {
   # restoring over active volumes. So: deactivate first, answer yes, and never
   # read the terminal (a question would wait unseen behind the blue box).
   TVG="$LVVG"; TCONF="$ct"
-  lvm pvcreate --config "$ct" -ff -y --uuid "$LVPVUUID" --restorefile "$LOGDIR/vg.new" "$tpv" </dev/null >>"$LOGDIR/lvm.log" 2>&1 || { tail -3 "$LOGDIR/lvm.log"; die "pvcreate on the new disk failed"; }
+  lvm pvcreate --config "$ct" -ff -y --uuid "$LVPVUUID" --restorefile "$LOGDIR/vg.new" "$tpv" </dev/null >>"$LOGDIR/lvm.log" 2>&1 || { tail -3 "$LOGDIR/lvm.log"; die "The LVM physical volume could not be made on the new disk (pvcreate, see lvm.log)."; }
   udevadm settle --timeout=10 >/dev/null 2>&1
   lvm vgchange -an --config "$ct" "$LVVG" </dev/null >>"$LOGDIR/lvm.log" 2>&1
-  lvm vgcfgrestore --config "$ct" --yes -f "$LOGDIR/vg.new" "$LVVG" </dev/null >>"$LOGDIR/lvm.log" 2>&1 || { tail -3 "$LOGDIR/lvm.log"; die "vgcfgrestore on the new disk failed"; }
+  lvm vgcfgrestore --config "$ct" --yes -f "$LOGDIR/vg.new" "$LVVG" </dev/null >>"$LOGDIR/lvm.log" 2>&1 || { tail -3 "$LOGDIR/lvm.log"; die "Volume group $LVVG could not be written to the new disk (vgcfgrestore, see lvm.log)."; }
   udevadm settle --timeout=10 >/dev/null 2>&1
   lvm vgchange -an --config "$ct" "$LVVG" </dev/null >>"$LOGDIR/lvm.log" 2>&1
   tpes="$(lvm pvs --config "$ct" --noheadings --nosuffix --units s -o pe_start "$tpv" 2>/dev/null | tr -d ' ')"
-  [ -n "$tpes" ] || die "the new physical volume cannot be read back"
+  [ -n "$tpes" ] || die "The new LVM physical volume could not be read back after it was written (see lvm.log)."
   say "  volume group $LVVG written: $(lvm lvs --config "$ct" --noheadings --units m -o lv_name,lv_size "$LVVG" 2>/dev/null | tr -s ' ' | tr '\n' ';')"
   j=0
   for x in "${LVITEMS[@]}"; do
@@ -808,7 +955,7 @@ for ((i = 0; i < N; i++)); do
   srcdone $i "$from"
   unloop "$to"
 done
-step "Step 4: finishing (writing everything out to $TGT) ..."
+step "Step 4 of 4: finishing (writing everything out to $TGT) ..."
 sync
 blockdev --rereadpt "$TGT" >/dev/null 2>&1 || partx -u "$TGT" >/dev/null 2>&1
 # A UEFI computer needs a boot entry for the new disk in its firmware. Windows

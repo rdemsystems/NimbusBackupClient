@@ -706,6 +706,115 @@ func (pbs *PBSClient) listSnapshots(params url.Values) ([]BackupManifest, error)
 
 }
 
+// SnapshotComments returns, for each backup group ("type/id"), the comment of
+// its newest snapshot that has one. The snapshot listing carries each
+// snapshot's comment (the first line of its notes), which BackupManifest
+// cannot hold: its Comment is kept out of JSON for manifest signing.
+func (pbs *PBSClient) SnapshotComments() (map[string]string, error) {
+	client := &http.Client{
+		Timeout:   120 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: pbs.buildTLSConfig()},
+	}
+	params := url.Values{}
+	if pbs.Namespace != "" {
+		params.Add("ns", pbs.Namespace)
+	}
+	fullURL := fmt.Sprintf("%s/api2/json/admin/datastore/%s/snapshots?%s", pbs.BaseURL, pbs.Datastore, params.Encode())
+	resp, err := pbs.doREST(client, func() (*http.Request, error) {
+		req, err := http.NewRequest(http.MethodGet, fullURL, nil)
+		if err == nil {
+			req.Header.Set("Accept", "application/json")
+		}
+		return req, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("HTTP error: %d - %s", resp.StatusCode, string(body))
+	}
+	var r struct {
+		Data []snapshotComment `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return nil, err
+	}
+	return newestComments(r.Data), nil
+}
+
+// snapshotComment is the part of a snapshot listing entry SnapshotComments reads.
+type snapshotComment struct {
+	BackupType string `json:"backup-type"`
+	BackupID   string `json:"backup-id"`
+	BackupTime int64  `json:"backup-time"`
+	Comment    string `json:"comment"`
+}
+
+// newestComments picks, per "type/id", the comment of the newest snapshot
+// that has a non-blank one.
+func newestComments(snaps []snapshotComment) map[string]string {
+	out := map[string]string{}
+	at := map[string]int64{}
+	for _, s := range snaps {
+		c := strings.TrimSpace(s.Comment)
+		if c == "" {
+			continue
+		}
+		k := s.BackupType + "/" + s.BackupID
+		if t, ok := at[k]; !ok || s.BackupTime > t {
+			at[k], out[k] = s.BackupTime, c
+		}
+	}
+	return out
+}
+
+// BackupGroup is one backup group as GET .../admin/datastore/{store}/groups
+// lists it. Comment is the first line of the group's notes, empty when it has
+// none; a Salvanza machine backup puts the machine's name there.
+type BackupGroup struct {
+	BackupType string `json:"backup-type"`
+	BackupID   string `json:"backup-id"`
+	Comment    string `json:"comment"`
+}
+
+// ListGroups lists the backup groups of the datastore, in the client's
+// namespace when it has one, with their comments.
+func (pbs *PBSClient) ListGroups() ([]BackupGroup, error) {
+	client := &http.Client{
+		Timeout:   120 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: pbs.buildTLSConfig()},
+	}
+	params := url.Values{}
+	if pbs.Namespace != "" {
+		params.Add("ns", pbs.Namespace)
+	}
+	fullURL := fmt.Sprintf("%s/api2/json/admin/datastore/%s/groups?%s", pbs.BaseURL, pbs.Datastore, params.Encode())
+	resp, err := pbs.doREST(client, func() (*http.Request, error) {
+		req, err := http.NewRequest(http.MethodGet, fullURL, nil)
+		if err == nil {
+			req.Header.Set("Accept", "application/json")
+		}
+		return req, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("HTTP error: %d - %s", resp.StatusCode, string(body))
+	}
+	var r struct {
+		Data []BackupGroup `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return nil, err
+	}
+	return r.Data, nil
+}
+
 func (pbs *PBSClient) CreateFixedIndex(fic FixedIndexCreateReq) (uint64, error) {
 	jd, err := json.Marshal(fic)
 	if err != nil {
