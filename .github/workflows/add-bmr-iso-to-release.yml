@@ -1,0 +1,66 @@
+name: Add the BMR ISO to a release
+
+# Run by hand on a tag: builds the bare-metal restore ISO from that tag and
+# adds it to the tag's release. Build and Release already does this for every
+# v* tag, so this is for a release made before it did, or to replace the ISO
+# of a release. Only the file: the release text stays as it is, and the
+# release must exist already.
+#
+# It lives apart from build-clonezilla-iso.yml because uploading to a release
+# needs write access, and the build workflow asks for read only so that it can
+# be called from pull requests from forks (see the note at its top).
+on:
+  workflow_dispatch:
+    inputs:
+      clonezilla_version:
+        description: 'Clonezilla version to patch (e.g., 3.3.3-37)'
+        required: true
+        default: '3.3.3-37'
+      clonezilla_arch:
+        description: 'Architecture (amd64 or i686)'
+        required: true
+        default: 'amd64'
+
+permissions:
+  contents: read
+
+jobs:
+  # Fails at once when run on a branch, rather than building for twenty
+  # minutes and then finding no release to add the ISO to.
+  tag-check:
+    name: Run on a tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the run is on a tag
+        run: |
+          if [ "${{ github.ref_type }}" != tag ]; then
+            echo "::error::Run this workflow on a tag (Use workflow from > Tags), not on ${GITHUB_REF_NAME}."
+            exit 1
+          fi
+
+  build-iso:
+    name: Build Bare Metal Restore ISO
+    needs: tag-check
+    uses: ./.github/workflows/build-clonezilla-iso.yml
+    with:
+      clonezilla_version: ${{ inputs.clonezilla_version }}
+      clonezilla_arch: ${{ inputs.clonezilla_arch }}
+      artifact_name: clonezilla-patched-iso
+
+  add-to-release:
+    name: Add the ISO to the release
+    needs: build-iso
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to add the ISO to the tag's release
+    steps:
+      - name: Download the ISO
+        uses: actions/download-artifact@v4
+        with:
+          name: clonezilla-patched-iso
+          path: iso
+
+      - name: Add the ISO to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" iso/*.iso --repo "${{ github.repository }}" --clobber

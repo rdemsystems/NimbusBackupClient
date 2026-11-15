@@ -39,7 +39,7 @@ A bare-metal restore needs a **machine** backup: a Backup Set or one-off backup 
 
 The ISO is a Clonezilla Live image with this project's restore tools added.
 
-1. Download `Salvanza-BMR-<version>.iso` from the [releases page](https://github.com/salvanza/salvanza_client/releases). In the GUI, **Tools > Download Bare Metal Restore ISO…** opens that page. A release that did not change the ISO links to the one from an earlier release.
+1. Download `Salvanza-BMR-<version>.iso` from the [releases page](https://github.com/salvanza/salvanza_client/releases). In the GUI, **Tools > Download Bare Metal Restore ISO…** opens that page. Each release now has its own ISO, built with the rest of the release; an older release that did not change the ISO links to the one from an earlier release.
 2. Check it against that release's `SHA256SUMS.txt`.
 3. Write it to a USB stick (everything on the stick is erased):
    * Linux: `sudo dd if=Salvanza-BMR-<version>.iso of=/dev/sdX bs=4M conv=fsync status=progress`

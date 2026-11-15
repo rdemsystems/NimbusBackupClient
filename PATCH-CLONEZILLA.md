@@ -5,7 +5,10 @@ binaries into a stock Clonezilla Live ISO **without breaking boot**, so the
 resulting ISO boots from CD, USB (`dd`) and UEFI exactly like the original,
 just with our ticket-enabled `pbsnbd` binary and the two restore helper
 scripts shipped inside the live rootfs. `make clonezilla` names the result
-`dist/Salvanza-BMR-<version>.iso`.
+`dist/Salvanza-BMR-<version>.iso`. In GitHub Actions the workflow
+**Build Bare Metal Restore ISO** (`.github/workflows/build-clonezilla-iso.yml`)
+runs the same script; Build and Release calls it for every release and for
+changes to what goes into the ISO (see [BUILD.md](BUILD.md#bare-metal-recovery-iso)).
 
 ## Why a full rebuild (and not an in-place patch)
 

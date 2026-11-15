@@ -84,6 +84,8 @@ The Arch package is built on Arch with `make pkgarch`: it stages a source tarbal
 
 `make clonezilla` downloads the stock Clonezilla live ISO (version `CLONEZILLA_VER`, 3.3.3-37 by default, cached in `dist/clonezilla/`), builds `pbsnbd`, and patches it and the restore scripts into `dist/Salvanza-BMR-<version>.iso`. It needs network access, `7z`, `xorriso`, `squashfs-tools`, `fakeroot`, `patch` and the isolinux MBR, and is not part of `make all`. See [PATCH-CLONEZILLA.md](PATCH-CLONEZILLA.md).
 
+GitHub Actions builds the same ISO with the workflow **Build Bare Metal Restore ISO** (`.github/workflows/build-clonezilla-iso.yml`, which keeps the stock ISO in the Actions cache). **Build and Release** calls it on every `v*` tag, so the ISO is in the release with its checksum and build attestation like the other files, and on a branch push or pull request that changes something in the ISO (`clonezilla-patch/`, `nbd/`, `pbscommon/`, `pkg/retry/`, `patch-clonezilla.sh`, `go.work`, the `Makefile` or the ISO workflow); a development build is `Salvanza-BMR-<version>-dev-<commit>.iso`, an artifact of the run. It can also be run by hand, and **Add the BMR ISO to a release** adds an ISO to an existing release.
+
 ## Tests
 
 `make test` runs `go test -race` in every module (the separate modules with `GOWORK=off`). `make test-e2e` backs up with `salvanza-cli` against a real PBS in Docker and restores with the official client; see `testing/e2e/README.md`.

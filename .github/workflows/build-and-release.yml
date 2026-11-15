@@ -464,11 +464,123 @@ jobs:
           name: linux-${{ matrix.kind }}-${{ matrix.arch }}
           path: dist/*
 
+  # Decides whether this run builds the bare-metal restore ISO, and its
+  # version. The ISO takes 15 minutes or so and changes far less often than the
+  # app, so a branch push or pull request builds it only when something that
+  # goes into it changed. A tag always builds it (it ships with the release),
+  # and so does a run by hand (which tries the whole pipeline before a tag).
+  iso-changes:
+    name: Does the ISO need building?
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The whole history, so the commits of a push or pull request can be
+          # compared.
+          fetch-depth: 0
+
+      # The same version as the MSIs (build-gui, "Determine version"): the tag
+      # without its v, or <productVersion>-dev-<short sha> for any other build.
+      - name: ISO version
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            base=$(sed -n 's/.*"productVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' gui/wails.json)
+            version="${base}-dev-${GITHUB_SHA:0:7}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "ISO version: $version"
+
+      - name: Check the changed files
+        id: check
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # What goes into the ISO: the Clonezilla scripts and menu patches,
+          # the script that patches the ISO, pbsnbd (nbd/) and the local
+          # modules it is built from (nbd/go.mod: pbscommon, pkg/retry), the
+          # Go workspace it is built in, the ISO workflow itself, and the
+          # Makefile (its clonezilla target is the local build of the same ISO).
+          iso_paths='^(clonezilla-patch/|nbd/|pbscommon/|pkg/retry/|patch-clonezilla\.sh$|go\.work(\.sum)?$|Makefile$|\.github/workflows/build-clonezilla-iso\.yml$)'
+          has_commit() { git cat-file -e "$1^{commit}" 2>/dev/null; }
+          build=false
+          range=""
+          if [ "$REF_TYPE" = tag ] || [ "$EVENT" = workflow_dispatch ]; then
+            build=true
+            echo "A tag or a run by hand: the ISO is always built."
+          elif [ "$EVENT" = pull_request ]; then
+            if has_commit "$PR_BASE" && has_commit "$PR_HEAD"; then
+              # Three dots: what the pull request changes since it left its
+              # base branch, not what the base branch did since.
+              range="$PR_BASE...$PR_HEAD"
+            else
+              build=true
+              echo "The pull request's commits are not all here: building the ISO to be safe."
+            fi
+          else
+            # A new branch has no previous commit (before is all zeros), and a
+            # force push can leave the old one unreachable. Neither says what
+            # changed, so the ISO is built.
+            if [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ] && has_commit "$PUSH_BEFORE"; then
+              range="$PUSH_BEFORE..$GITHUB_SHA"
+            else
+              build=true
+              echo "No earlier commit to compare with: building the ISO to be safe."
+            fi
+          fi
+          if [ -n "$range" ]; then
+            changed=$(git diff --name-only "$range" | grep -E "$iso_paths" || true)
+            if [ -n "$changed" ]; then
+              build=true
+              echo "Files that go into the ISO changed in $range:"
+              echo "$changed"
+            else
+              echo "Nothing that goes into the ISO changed in $range: no ISO this time."
+            fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+  # The bare-metal restore ISO, Salvanza-BMR-<version>.iso, built by the same
+  # workflow as a build by hand. The artifact's name puts it in its own folder
+  # when the release job downloads every artifact, from where it is copied into
+  # release/ with the rest.
+  build-iso:
+    name: Build Bare Metal Restore ISO
+    needs: iso-changes
+    if: needs.iso-changes.outputs.build == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-clonezilla-iso.yml
+    with:
+      version: ${{ needs.iso-changes.outputs.version }}
+      artifact_name: salvanza-bmr-iso
+
   # Create release on tag
   release:
     name: Create Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-cli, build-gui, build-linux]
+    # A skipped job would normally skip this one too, so the results are
+    # checked here instead: every build must have succeeded, except that the
+    # ISO may have been skipped (a tag always builds it, so in practice it is
+    # there). A failed or cancelled ISO build stops the release, as a failed
+    # MSI does.
+    if: >-
+      !cancelled()
+      && startsWith(github.ref, 'refs/tags/v')
+      && needs.build-cli.result == 'success'
+      && needs.build-gui.result == 'success'
+      && needs.build-linux.result == 'success'
+      && needs.iso-changes.result == 'success'
+      && (needs.build-iso.result == 'success' || needs.build-iso.result == 'skipped')
+    needs: [build-cli, build-gui, build-linux, iso-changes, build-iso]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -520,6 +632,12 @@ jobs:
           # Linux packages: .deb and .rpm (amd64, arm64), Arch (x86_64).
           cp artifacts/linux-*/* release/
 
+          # The bare-metal restore ISO, as it is: it is not put in an archive
+          # (it is compressed already). Copied only when it was built.
+          if [ "${{ needs.build-iso.result }}" = success ]; then
+            cp artifacts/salvanza-bmr-iso/*.iso release/
+          fi
+
       - name: Generate SHA256 checksums
         run: |
           cd release
@@ -540,6 +658,7 @@ jobs:
             release/*.pkg.tar.zst
             release/*.zip
             release/*.tar.gz
+            release/*.iso
 
       # Best-effort: submit the Windows binaries to VirusTotal so the release
       # page can link a live multi-engine report (transparency while the
@@ -562,6 +681,7 @@ jobs:
           emitted=0
           VER="${{ steps.version.outputs.VERSION }}"
           # Every branded MSI in this release (the .exe is no longer published).
+          # Not the ISO: at about 500 MB it is far over the free API's limit.
            for f in release/*-${VER}-x64.msi; do
             [ -f "$f" ] || continue
             name=$(basename "$f")
@@ -641,6 +761,10 @@ jobs:
           The command line, `salvanza-cli`, is in every installer and package
           and in the per-platform archives (`salvanza-cli-*` and
           `salvanza_client_*`).
+
+          The bare-metal restore ISO, `Salvanza-BMR-<version>.iso`, boots a
+          machine with no system and restores a disk backup onto it; see the
+          [bare-metal restore manual](https://github.com/${{ github.repository }}/blob/${{ steps.version.outputs.VERSION }}/docs/manual/BMR.md).
 
           ## 📝 What's in this release
 

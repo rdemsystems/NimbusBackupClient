@@ -1,6 +1,53 @@
-name: Build Patched Clonezilla ISO
+name: Build Bare Metal Restore ISO
 
+# Builds the bare-metal restore ISO, Salvanza-BMR-<version>.iso, and uploads
+# it as an artifact. Two ways in:
+#   - Build and Release (build-and-release.yml) calls it: on every v* tag, so
+#     the ISO ships with the release like the MSIs and packages, and on a
+#     branch push or pull request that changes what goes into the ISO.
+#   - Run by hand (workflow_dispatch) for a one-off build. To add the ISO to a
+#     release made before the release job built it, run "Add the BMR ISO to a
+#     release" (add-bmr-iso-to-release.yml) on that tag instead.
+# It asks for read access only. A called workflow may not ask for more than its
+# caller has, and a pull request from a fork has a read-only token: a write
+# permission here would stop every fork pull request's run from starting.
 on:
+  workflow_call:
+    inputs:
+      clonezilla_version:
+        description: 'Clonezilla version to patch (keep in step with CLONEZILLA_VER in the Makefile)'
+        type: string
+        required: false
+        default: '3.3.3-37'
+      clonezilla_arch:
+        description: 'Architecture (amd64 or i686)'
+        type: string
+        required: false
+        default: 'amd64'
+      patch_dir:
+        description: 'Patch directory (relative to repo root)'
+        type: string
+        required: false
+        default: 'clonezilla-patch'
+      version:
+        description: 'Version in the file name, Salvanza-BMR-<version>.iso (empty: the version from gui/wails.json)'
+        type: string
+        required: false
+        default: ''
+      output_name:
+        description: 'Output ISO filename; overrides version'
+        type: string
+        required: false
+        default: ''
+      artifact_name:
+        description: 'Name of the uploaded artifact'
+        type: string
+        required: false
+        default: 'clonezilla-patched-iso'
+    outputs:
+      iso_name:
+        description: 'File name of the ISO in the artifact'
+        value: ${{ jobs.build-clonezilla-iso.outputs.iso_name }}
   workflow_dispatch:
     inputs:
       clonezilla_version:
@@ -21,15 +68,24 @@ on:
         default: ''
 
 permissions:
-  contents: write   # to add the ISO to a tag's release
-  actions: read
-  id-token: write
+  contents: read
 
 jobs:
   build-clonezilla-iso:
-    name: Build Clonezilla ISO with PBS NBD
+    name: Build the ISO
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      iso_name: ${{ steps.iso.outputs.name }}
+    env:
+      # The inputs context covers both triggers; a run by hand has no
+      # artifact_name or version input, and an emptied patch_dir would build
+      # an ISO without the restore scripts.
+      CLONEZILLA_VER: ${{ inputs.clonezilla_version }}
+      CLONEZILLA_ARCH: ${{ inputs.clonezilla_arch }}
+      PATCH_SRC: ${{ inputs.patch_dir || 'clonezilla-patch' }}
+      ARTIFACT_NAME: ${{ inputs.artifact_name || 'clonezilla-patched-iso' }}
+      STOCK_DIR: clonezilla-cache
 
     steps:
       - name: Checkout repository
@@ -44,11 +100,15 @@ jobs:
       - name: ISO file name
         id: iso
         env:
-          OUTPUT_NAME: ${{ github.event.inputs.output_name }}
+          OUTPUT_NAME: ${{ inputs.output_name }}
+          ISO_VERSION: ${{ inputs.version }}
         run: |
           name="$OUTPUT_NAME"
           if [ -z "$name" ]; then
-            version=$(sed -n 's/.*"productVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' gui/wails.json)
+            version="$ISO_VERSION"
+            if [ -z "$version" ]; then
+              version=$(sed -n 's/.*"productVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' gui/wails.json)
+            fi
             name="Salvanza-BMR-${version}.iso"
           fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
@@ -61,29 +121,58 @@ jobs:
           cd nbd
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o pbsnbd ./cmd/pbsnbd
 
+      # The stock ISO is about 500 MB and the same for every build of one
+      # Clonezilla version, so it is kept in the Actions cache rather than
+      # fetched from SourceForge each time (which is slow and sometimes fails).
+      - name: Restore the stock Clonezilla ISO from the cache
+        id: stock-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.STOCK_DIR }}
+          key: clonezilla-live-${{ inputs.clonezilla_version }}-${{ inputs.clonezilla_arch }}
+
       - name: Download Clonezilla ISO
-        env:
-          CLONEZILLA_VER: ${{ github.event.inputs.clonezilla_version }}
-          CLONEZILLA_ARCH: ${{ github.event.inputs.clonezilla_arch }}
+        if: steps.stock-cache.outputs.cache-hit != 'true'
         run: |
+          mkdir -p "$STOCK_DIR"
           # osdn.net (the upstream default) no longer resolves; the official
           # releases are mirrored on SourceForge under clonezilla_live_stable.
           ISO_URL="https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/${CLONEZILLA_VER}/clonezilla-live-${CLONEZILLA_VER}-${CLONEZILLA_ARCH}.iso"
           echo "Downloading $ISO_URL"
-          curl -fL --retry 3 -o clonezilla-live.iso "$ISO_URL"
+          curl -fL --retry 3 -o "$STOCK_DIR/clonezilla-live.iso" "$ISO_URL"
+          # The download's own SHA-256 goes into the cache with it, so a later
+          # build can tell a damaged cache entry from the file it stored.
+          ( cd "$STOCK_DIR" && sha256sum clonezilla-live.iso > clonezilla-live.iso.sha256 )
+
+      # Run after a download and after a cache hit alike: the checksum is
+      # checked on the file the build is about to use, wherever it came from.
+      - name: Verify the stock Clonezilla ISO
+        run: |
+          ( cd "$STOCK_DIR" && sha256sum -c clonezilla-live.iso.sha256 )
           # SourceForge does not publish a checksum file: verify only if the
           # upstream sha256sum.txt happens to be reachable (it lives on osdn.net).
           if curl -fsSL --retry 1 "https://osdn.net/projects/clonezilla/downloads/79926/sha256sum.txt" -o sha256sum.txt; then
-            grep "clonezilla-live-${CLONEZILLA_VER}-${CLONEZILLA_ARCH}.iso" sha256sum.txt | sha256sum -c -
+            grep "clonezilla-live-${CLONEZILLA_VER}-${CLONEZILLA_ARCH}.iso" sha256sum.txt \
+              | sed "s|clonezilla-live-${CLONEZILLA_VER}-${CLONEZILLA_ARCH}.iso|$STOCK_DIR/clonezilla-live.iso|" \
+              | sha256sum -c -
           else
             echo "warning: sha256sum.txt unreachable, skipping checksum verification" >&2
           fi
+
+      # Saved straight after the check rather than at the end of the job, so a
+      # later failure in the patching still leaves the download cached.
+      - name: Save the stock Clonezilla ISO to the cache
+        if: steps.stock-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.STOCK_DIR }}
+          key: ${{ steps.stock-cache.outputs.cache-primary-key }}
 
       - name: Install patching dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            7z \
+            7zip \
             patch \
             xorriso \
             squashfs-tools \
@@ -95,38 +184,35 @@ jobs:
           # The unified diffs live in <patch_dir>/patches; pointing PATCH_DIR at
           # <patch_dir> itself found no *.patch and silently shipped an ISO
           # WITHOUT the PBS-NBD main-menu entry.
-          PATCH_DIR: ${{ github.workspace }}/${{ github.event.inputs.patch_dir }}/patches
+          PATCH_DIR: ${{ github.workspace }}/${{ inputs.patch_dir || 'clonezilla-patch' }}/patches
           ISO_SQFS: /live/filesystem.squashfs
           INSTALL_DIR: usr/local/sbin
+          ISO_NAME: ${{ steps.iso.outputs.name }}
         run: |
           chmod +x patch-clonezilla.sh
           ./patch-clonezilla.sh \
-            -o "${{ steps.iso.outputs.name }}" \
-            clonezilla-live.iso \
+            -o "$ISO_NAME" \
+            "$STOCK_DIR/clonezilla-live.iso" \
             nbd/pbsnbd \
-            "${{ github.event.inputs.patch_dir }}/ocs-pbs-nbd" \
-            "${{ github.event.inputs.patch_dir }}/ocs-pbs-bare-metal-restore" \
-            "${{ github.event.inputs.patch_dir }}/pbs-shrink-restore"
+            "$PATCH_SRC/ocs-pbs-nbd" \
+            "$PATCH_SRC/ocs-pbs-bare-metal-restore" \
+            "$PATCH_SRC/pbs-shrink-restore"
 
       - name: Verify output ISO
+        env:
+          ISO_NAME: ${{ steps.iso.outputs.name }}
         run: |
-          ls -la "${{ steps.iso.outputs.name }}"
+          ls -la "$ISO_NAME"
           # Quick sanity check: verify it's a valid ISO
-          file "${{ steps.iso.outputs.name }}"
+          file "$ISO_NAME"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v6
         with:
-          name: clonezilla-patched-iso
+          name: ${{ env.ARTIFACT_NAME }}
           path: ${{ steps.iso.outputs.name }}
           retention-days: 30
-
-      # Run on a tag, the ISO is added to that tag's release. Only the file:
-      # the release text (written by hand or by build-and-release.yml) stays
-      # as it is. The release must exist already (the tag's other workflows
-      # create it).
-      - name: Add the ISO to the release (on tag)
-        if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${GITHUB_REF_NAME}" "${{ steps.iso.outputs.name }}" --repo "${{ github.repository }}" --clobber
+          # The ISO is compressed already (squashfs); zipping it again only
+          # costs time.
+          compression-level: 0
+          if-no-files-found: error
