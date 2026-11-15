@@ -565,8 +565,11 @@ A schedule that cannot run is named in the list and the set is not saved: a repe
 | Setting | Notes |
 |---|---|
 | Also run at machine startup | Under the list. Runs the set when the computer starts as well. With the background service, the set runs when the service starts, which is when the computer starts, whether or not anyone signs in. Without the service, it runs when the app starts |
+| Wake the computer from sleep to run this backup | Off to begin with. The computer is woken from sleep about 2 minutes before each of the set's scheduled runs, so a backup set for the night runs at night, not when someone wakes the computer in the morning. Once awake it stays awake until the backup ends, then sleeps again as usual. See below |
 
-A summary under the settings gives the set's next run and which schedule it comes from. If the computer is off or asleep at a run time, the set runs once when it is back, however many times it missed.
+A summary under the settings gives the set's next run and which schedule it comes from. If the computer is off or asleep at a run time, the set runs once when it is back, however many times it missed, unless the set wakes the computer.
+
+**Waking the computer.** It wakes a computer from sleep, and usually from hibernate, but not from shut down. Whatever runs the schedules sets the wake: the background service, or the app when there is no service (it must then be running, in the tray is fine). On Windows the power plan decides: **Power Options > Change plan settings > Change advanced power settings > Sleep > Allow wake timers** must be **Enable**. Windows usually allows it on mains power and not on battery, so a laptop on battery is not woken; the option's note in the editor says what this computer's plan allows. On Linux the background service sets the wake (it needs the rights of the service, not just the app), and the computer's hardware clock must be able to wake it (`/sys/class/rtc/rtc0/wakealarm`). The service's log notes each wake it sets (`[Wake] wake timer set for ...`); on Windows `powercfg /waketimers` lists it.
 
 Schedules run while the GUI is running (in the tray is fine) or in the installed background service ([section 15](#15-background-service-tray-and-closing-the-window)).
 

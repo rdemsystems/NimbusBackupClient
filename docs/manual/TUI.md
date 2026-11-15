@@ -70,7 +70,7 @@ On the Dashboard or the Backup Sets screen:
 | **u** | Undelete: puts back files that are in the set's backups but gone from the disk ([below](#undelete-and-roll-back)) |
 | **k** | Roll back: puts the set's folders back as an earlier backup had them ([below](#undelete-and-roll-back)) |
 
-The editor has three steps like the app's: **General** (name, backup ID, folders, server), **Schedule** (on a schedule or manual; every N minutes, hours, days, weeks or months; time of day; days of the week) and **Options** (change detection, VSS, files to leave out, e-mail when it fails). **PgDn** and **PgUp** move between the steps, **Ctrl+S** saves and **Esc** cancels. The service checks what you save, as for the app, and says what is wrong. A set that has several schedules keeps the others: only the first is edited here.
+The editor has three steps like the app's: **General** (name, backup ID, folders, server), **Schedule** (on a schedule or manual; every N minutes, hours, days, weeks or months; time of day; days of the week; whether to wake the computer from sleep to run it, as in the app's [Schedule tab](GUI.md)) and **Options** (change detection, VSS, files to leave out, e-mail when it fails). **PgDn** and **PgUp** move between the steps, **Ctrl+S** saves and **Esc** cancels. The service checks what you save, as for the app, and says what is wrong. A set that has several schedules keeps the others: only the first is edited here.
 
 ### Disk images (machine sets)
 

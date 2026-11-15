@@ -38,6 +38,7 @@ type editor struct {
 	mode                *tview.DropDown
 	unit                *tview.DropDown
 	every, at, weekdayF *tview.InputField
+	wake                *tview.Checkbox // wakeToRun: wake the computer from sleep for its runs (#140)
 	// step 3
 	detect   *tview.DropDown
 	vss      *tview.Checkbox
@@ -227,8 +228,9 @@ func (e *editor) build() {
 	e.every = tview.NewInputField().SetLabel("Every (number) ").SetText(strconv.Itoa(every(sc))).SetFieldWidth(6)
 	e.at = tview.NewInputField().SetLabel("At (HH:MM) ").SetText(str(sc, "at")).SetFieldWidth(8)
 	e.weekdayF = tview.NewInputField().SetLabel("Only on days ").SetText(strings.Join(strList(sc, "weekdays"), ",")).SetFieldWidth(32)
-	f2 := styleForm(tview.NewForm()).AddFormItem(e.mode).AddFormItem(e.unit).AddFormItem(e.every).AddFormItem(e.at).AddFormItem(e.weekdayF)
-	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept.", 70, 3, true, false)
+	e.wake = tview.NewCheckbox().SetLabel("Wake the computer from sleep to run it ").SetChecked(boolean(e.orig, "wakeToRun"))
+	f2 := styleForm(tview.NewForm()).AddFormItem(e.mode).AddFormItem(e.unit).AddFormItem(e.every).AddFormItem(e.at).AddFormItem(e.weekdayF).AddFormItem(e.wake)
+	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept.\nWaking works from sleep (usually hibernate too), not from shut down.", 70, 4, true, false)
 	f2.SetTitle(" Schedule ")
 
 	// ---- step 3: options
@@ -446,8 +448,10 @@ func (e *editor) document() (map[string]interface{}, error) {
 	// schedule
 	if mi, _ := e.mode.GetCurrentOption(); mi == 1 {
 		doc["scheduleMode"] = "manual"
+		doc["wakeToRun"] = false
 	} else {
 		doc["scheduleMode"] = "scheduled"
+		doc["wakeToRun"] = e.wake.IsChecked()
 		sc := copyMap(e.firstSchedule())
 		_, unit := e.unit.GetCurrentOption()
 		sc["unit"] = unit

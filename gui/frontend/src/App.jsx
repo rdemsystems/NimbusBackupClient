@@ -48,6 +48,7 @@ let GetJobPolicy, SetRequireAdminForJobs, RequestElevation, SnapshotSupport, Run
 let ExportSettings, ImportSettings
 let SetSMTPSettings, SendTestEmail
 let GetLogsFolder, OpenLogsFolder, SaveLogs, GetServiceLogsStatus, OpenServiceLogsFolder
+let GetWakeTimerInfo
 // Encryption key management
 let InspectEncryptionKeyFile, GenerateEncryptionKeyFile, OpenEncryptionKeyDialog, OpenEncryptionKeySaveDialog
 // Undelete, Roll back, Run as Service
@@ -135,6 +136,7 @@ if (window.go) {
   SaveLogs = window.go.main.App.SaveLogs
   GetServiceLogsStatus = window.go.main.App.GetServiceLogsStatus
   OpenServiceLogsFolder = window.go.main.App.OpenServiceLogsFolder
+  GetWakeTimerInfo = window.go.main.App.GetWakeTimerInfo
   SetSMTPSettings = window.go.main.App.SetSMTPSettings
   SendTestEmail = window.go.main.App.SendTestEmail
   // Encryption key management
@@ -715,6 +717,14 @@ function App() {
   // Scheduling states
   const [backupMode, setBackupMode] = useState('oneshot') // 'oneshot' or 'scheduled'
   const [runAtStartup, setRunAtStartup] = useState(false)
+  // Wake the computer from sleep for the set's runs (#140), and what this
+  // computer allows (App.GetWakeTimerInfo, read once).
+  const [wakeToRun, setWakeToRun] = useState(false)
+  const [wakeInfo, setWakeInfo] = useState(null)
+  useEffect(() => {
+    if (!GetWakeTimerInfo) return
+    GetWakeTimerInfo().then(setWakeInfo).catch(() => setWakeInfo(null))
+  }, [])
   // The set's schedules (gui/schedules.go): 'scheduled' runs on the list,
   // 'manual' only on Run Now (the list is kept).
   const [scheduleMode, setScheduleMode] = useState('scheduled')
@@ -3007,7 +3017,7 @@ function App() {
     setJobName('')
     setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
     setChangeDetectionMode(NEW_SET_CHANGE_DETECTION); setFullReadEvery(NEW_SET_FULL_READ_EVERY)
-    setRunAtStartup(false)
+    setRunAtStartup(false); setWakeToRun(false)
     setScheduleMode('scheduled'); setSchedules([newSchedule('days', 's1')])
     setBackupDirs('')
     setExcludeList('')
@@ -3143,6 +3153,7 @@ function App() {
         id: editingJobId || Date.now().toString(),
         name: jobName.trim() || `Backup ${config['backup-id'] || hostname}`,
         runAtStartup: scheduleMode === 'manual' ? false : runAtStartup,
+        wakeToRun: scheduleMode === 'manual' ? false : wakeToRun,
         scheduleMode,
         schedules,
         backupDirs: backupType === 'directory' ? dirList : [],
@@ -3224,7 +3235,7 @@ function App() {
         // Reset form after save
         setJobName('')
         setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
-        setRunAtStartup(false)
+        setRunAtStartup(false); setWakeToRun(false)
         setScheduleMode('scheduled'); setSchedules([newSchedule('days', 's1')])
         setBackupDirs('')
         setEmailOnSuccess(false); setEmailOnSuccessTo('')
@@ -5313,7 +5324,7 @@ function App() {
                     setJobName('')
                     setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
                     setBackupMode('scheduled')
-                    setRunAtStartup(false)
+                    setRunAtStartup(false); setWakeToRun(false)
                     setScheduleMode('scheduled'); setSchedules([newSchedule('days', 's1')])
                     setBackupDirs('')
                     setExcludeList('')
@@ -5573,7 +5584,7 @@ function App() {
                               setEditingJobId(job.id)
                               setJobName(job.name || '')
                               setBackupMode('scheduled')
-                              setRunAtStartup(job.runAtStartup)
+                              setRunAtStartup(job.runAtStartup); setWakeToRun(!!job.wakeToRun)
                               { const js = jobScheduling(job); setScheduleMode(js.mode); setSchedules(js.schedules.map(sc => ({ ...sc, weekdays: [...(sc.weekdays || [])] }))) }
                               setBackupDirs((job.backupDirs || []).join('\n'))
                               // Machine-type jobs keep their selected disks in driveLetters, not
@@ -5652,7 +5663,7 @@ function App() {
                                     setEditingJobId(null)
                                     setJobName(t('cloneNameSuffix').replace('{name}', job.name || ''))
                                     setBackupMode('scheduled')
-                                    setRunAtStartup(job.runAtStartup)
+                                    setRunAtStartup(job.runAtStartup); setWakeToRun(!!job.wakeToRun)
                                     { const js = jobScheduling(job); setScheduleMode(js.mode); setSchedules(js.schedules.map(sc => ({ ...sc, weekdays: [...(sc.weekdays || [])] }))) }
                                     setBackupDirs((job.backupDirs || []).join('\n'))
                                     setSelectedDrives(job.driveLetters || [])
@@ -5866,6 +5877,7 @@ function App() {
                 scheduleMode={scheduleMode} setScheduleMode={setScheduleMode}
                 schedules={schedules} setSchedules={setSchedules}
                 runAtStartup={runAtStartup} setRunAtStartup={setRunAtStartup}
+                wakeToRun={wakeToRun} setWakeToRun={setWakeToRun} wakeInfo={wakeInfo}
               />
             </div>
           )}

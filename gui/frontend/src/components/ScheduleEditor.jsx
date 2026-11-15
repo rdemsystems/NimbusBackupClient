@@ -9,7 +9,9 @@ import {
 // schedules (each in plain words, with Edit, Delete and an on/off tick), or
 // "Only when I click Run Now". Editing a schedule shows only the fields its
 // unit needs and its next 3 runs.
-export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedules, setSchedules, runAtStartup, setRunAtStartup }) {
+// wakeToRun: wake the computer from sleep for the set's runs (#140); wakeInfo
+// is App.GetWakeTimerInfo, what this computer allows (null while unknown).
+export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedules, setSchedules, runAtStartup, setRunAtStartup, wakeToRun = false, setWakeToRun = () => {}, wakeInfo = null }) {
   const { t, language } = useTranslation()
   const [editingId, setEditingId] = useState(null)
   const editing = schedules.find(s => s.id === editingId)
@@ -243,6 +245,22 @@ export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedule
               <span>{t('runAtStartup')}</span>
             </label>
           </div>
+
+          <div className="form-group">
+            <label className="sched-startup">
+              <input type="checkbox" id="sched-wake" checked={wakeToRun} onChange={e => setWakeToRun(e.target.checked)} />
+              <span>{t('wakeToRun')}</span>
+            </label>
+            {wakeToRun && (
+              <p className="sched-hint" id="sched-wake-note">
+                {t('wakeNote')}
+                {wakeInfo && !wakeInfo.supported && <><br />{t('wakeUnsupported')}</>}
+                {wakeInfo && wakeInfo.supported && !wakeInfo.onMains && <><br />{t('wakeBlocked')}</>}
+                {wakeInfo && wakeInfo.supported && wakeInfo.onMains && !wakeInfo.onBattery && <><br />{t('wakeMainsOnly')}</>}
+                {wakeInfo && wakeInfo.supported && wakeInfo.modernStandby && <><br />{t('wakeModernStandby')}</>}
+              </p>
+            )}
+          </div>
         </>
       )}
 
@@ -253,6 +271,7 @@ export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedule
             ? <>{t('schedSetNext', { time: fmt(setNext.time) })} ({describe(t, language, setNext.schedule)})
                 {enabledCount > 1 && <><br />{tp(t, language, 'schedCountOn', enabledCount)}</>}
                 {runAtStartup && <><br />{t('andAtStartup')}</>}
+                {wakeToRun && <><br />{t('andWakes')}</>}
                 <br />{t('schedCatchUp')}</>
             : <>{t('schedNoneOn')}{runAtStartup && <><br />{t('andAtStartup')}</>}</>}
       </div>

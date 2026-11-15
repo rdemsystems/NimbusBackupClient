@@ -24,6 +24,7 @@ type ScheduledJob struct {
 	Name         string   `json:"name"`
 	ScheduleTime string   `json:"scheduleTime"` // HH:MM format, used when TriggerMode == "daily"
 	RunAtStartup bool     `json:"runAtStartup"`
+	WakeToRun    bool     `json:"wakeToRun,omitempty"` // wake the computer from sleep for the set's scheduled runs (wake_timer.go)
 	BackupDirs   []string `json:"backupDirs"`
 	DriveLetters []string `json:"driveLetters"` // physical disks for machine backups
 	// DiskIDs is the identity of each disk in DriveLetters, at the same index
@@ -885,12 +886,16 @@ func (a *App) StartScheduler() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
+		// Only a running scheduler starts the backup a wake is for.
+		a.refreshWakeTimer()
+		defer dropWakeTimer()
 
 		for {
 			select {
 			case <-ticker.C:
 				a.checkAndRunScheduledJobs()
 				a.RefreshIdleTooltip()
+				a.refreshWakeTimer()
 			case <-stop:
 				writeDebugLog("Scheduler stopped")
 				return
