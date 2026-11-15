@@ -22,6 +22,7 @@ It is a **suite of tools**:
   - **`salvanza-cli backup-disk`**: live whole-disk backups (fidx) of Windows and Linux machines. The image is bootable after a restore.
   - **`salvanza-cli attach-nbd`**: attaches a disk backup as an NBD block device (Linux).
 - **A bare-metal restore ISO** (Salvanza-BMR) built on Clonezilla Live, with a guided restore from power-on to reboot.
+- **Restores onto a smaller disk** when the data fits: the restore ISO shrinks a partition on the way, keeps the disk and partition IDs, and never writes to the backup ([how](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk)).
 
 > Keywords: salvanza · proxmox backup server client windows · PBS client · Windows VSS backup · immutable offsite backups · physical to virtual (P2V) · bare-metal restore · Proxmox Backup Server interface.
 
@@ -91,7 +92,7 @@ Salvanza is the new name of Proxmox Backup Client, and the upgrade is automatic.
 | **[GUI manual](docs/manual/GUI.md)** | Install, PBS servers, Backup Sets and schedules, incremental backups, progress, restore, Undelete, Roll back, Reports, logs, Preferences, the background service, troubleshooting |
 | **[Text-mode window manual](docs/manual/TUI.md)** | `salvanza-cli tui`: the app in a terminal, for servers and SSH sessions: every screen and key |
 | **[Command line manual](docs/manual/CLI.md)** | `salvanza-cli backup-folder`, `backup-disk`, `attach-nbd`: every flag, config files, exit codes, scheduling |
-| **[Bare-metal restore manual](docs/manual/BMR.md)** | The restore ISO, step by step; `vm` backups onto Proxmox VE; physical to virtual; different hardware |
+| **[Bare-metal restore manual](docs/manual/BMR.md)** | The restore ISO, step by step; smaller disks; `vm` backups onto Proxmox VE; physical to virtual; different hardware |
 | [Restore scenarios](docs/RESTORE_GUIDE.md) | Which restore to use when |
 | [Manuals index](docs/manual/README.md) | An overview of the manuals |
 
