@@ -16,7 +16,8 @@ import (
 //
 // The platform files (wake_windows.go, wake_linux.go, wake_other.go) set the
 // timer: a waitable timer with resume on Windows, a CLOCK_REALTIME_ALARM timer
-// on Linux. It can wake a computer from sleep, and usually from hibernate,
+// on Linux, with the hardware clock's wake alarm kept set beside it for
+// hibernate. It can wake a computer from sleep, and usually from hibernate,
 // not from shut down.
 
 // wakeLead is how long before the run the computer is woken: time to resume,
@@ -26,6 +27,12 @@ const wakeLead = 2 * time.Minute
 // armWakeTimer sets the system's wake timer for at and returns what cancels
 // it. A variable so the tests can stand in for the system.
 var armWakeTimer = platformArmWakeTimer
+
+// syncWakeAlarm makes sure, just before the computer is put to sleep or
+// hibernated, that the system will wake it for the armed wake: on Linux the
+// hardware clock's own wake alarm, which the kernel does not set for
+// hibernate (wake_linux.go). A variable so the tests can stand in for it.
+var syncWakeAlarm = platformSyncWakeAlarm
 
 // wakeTarget is the run a wake timer is for.
 type wakeTarget struct {
@@ -150,10 +157,19 @@ type WakeTimerInfo struct {
 	// says it may not wake rather than promising it.
 	ModernStandby bool   `json:"modernStandby"`
 	Note          string `json:"note"`
+	// HasBattery: the computer has a battery of its own (a laptop).
+	HasBattery bool `json:"hasBattery"`
+	// Alert is the question the app asks under the Wake option when the
+	// power plan stops a timer waking the computer (wakeAlertFor): "all",
+	// "battery" or "" for none.
+	Alert string `json:"alert"`
+	// planRead: the power plan's setting was read, not assumed. The alert
+	// offers to change only a setting that is really there.
+	planRead bool
 }
 
 // GetWakeTimerInfo tells the window whether waking for a backup can work on
 // this computer, and what stops it.
 func (a *App) GetWakeTimerInfo() WakeTimerInfo {
-	return platformWakeTimerInfo()
+	return wakeTimerInfoNow()
 }

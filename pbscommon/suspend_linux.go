@@ -3,9 +3,12 @@
 package pbscommon
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // SleepComputer suspends the computer through systemd (systemctl suspend),
@@ -29,6 +32,29 @@ func runSystemctl(cmd *exec.Cmd) error {
 }
 
 // CanHibernate says whether this computer can hibernate (ReadLinuxHibernate).
-func CanHibernate() (ok bool, why string) {
-	return ReadLinuxHibernate("/")
+// With no resume device set it asks logind as well: systemd 255 and later,
+// on a computer started through UEFI, records where the memory was saved in
+// an EFI variable and reads it back at boot without resume=, and its
+// CanHibernate says "yes" only when that works.
+func CanHibernate() HibernateCheck {
+	c := ReadLinuxHibernate("/")
+	if c.Why == HibernateNoResume && logindCanHibernateWithoutResume() {
+		return HibernateCheck{OK: true}
+	}
+	return c
+}
+
+func logindCanHibernateWithoutResume() bool {
+	if _, err := os.Stat("/sys/firmware/efi"); err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "systemctl", "--version").Output()
+	if err != nil || ParseSystemdVersion(string(out)) < 255 {
+		return false
+	}
+	out, err = exec.CommandContext(ctx, "busctl", "call", "org.freedesktop.login1", "/org/freedesktop/login1",
+		"org.freedesktop.login1.Manager", "CanHibernate").Output()
+	return err == nil && strings.TrimSpace(string(out)) == `s "yes"`
 }

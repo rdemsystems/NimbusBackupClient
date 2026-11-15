@@ -84,6 +84,11 @@ type Backend interface {
 	// passphrase when it is not stored (ErrNeedPassphrase says it is wanted).
 	RestoreCatalog(serverID string, s SnapshotInfo, passphrase string) ([]CatalogItem, error)
 	RestoreFiles(serverID string, s SnapshotInfo, includes []string, dest string, overwrite bool, passphrase string, progress func(file string)) (int, error)
+	// WakeTimers is what the power plan lets a timer do (the alert under a
+	// set's Wake option); EnableWakeTimers turns wake timers on at the
+	// user's request, scope "battery" or "all" as the alert.
+	WakeTimers() (WakeInfo, error)
+	EnableWakeTimers(scope string) (WakeInfo, error)
 	Name() string
 }
 

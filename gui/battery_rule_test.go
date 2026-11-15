@@ -27,9 +27,8 @@ func newBatteryTest(t *testing.T) *batteryTest {
 	sleepAfterHoldDelay = 0
 	bt.wake.install(t)
 	reset := func() {
-		batteryHolds.Lock()
-		batteryHolds.m = map[string]batteryHold{}
-		batteryHolds.Unlock()
+		restartBatteryHolds()
+		noteResume(time.Time{}, "")
 		wokenRun.Lock()
 		wokenRun.setID, wokenRun.at, wokenRun.used = "", time.Time{}, false
 		wokenRun.Unlock()
@@ -40,6 +39,15 @@ func newBatteryTest(t *testing.T) *batteryTest {
 		reset()
 	})
 	return bt
+}
+
+// restartBatteryHolds forgets the held runs in memory, as a restart of the
+// service does: they are read back from the file when next looked at.
+func restartBatteryHolds() {
+	batteryHolds.Lock()
+	batteryHolds.m = map[string]batteryHold{}
+	batteryHolds.loaded = false
+	batteryHolds.Unlock()
 }
 
 func onBatteryAt(pct int) clientcommon.BatteryStatus {
@@ -108,6 +116,83 @@ func TestBatteryHoldsAScheduledRunOnceAndPluggingInReleasesIt(t *testing.T) {
 	}
 	if entry.Status != "success" || entry.Message != "Backup completed" {
 		t.Errorf("a successful run was changed: %+v", entry)
+	}
+}
+
+// A service restarted while a run is held (an upgrade, say) neither records
+// the hold a second time nor forgets when it began.
+func TestBatteryHoldIsKeptAcrossARestart(t *testing.T) {
+	bt := newBatteryTest(t)
+	a := &App{}
+	job := batterySet("above", 30, 0)
+	at := time.Date(2026, 11, 15, 2, 0, 30, 0, time.Local)
+	job.NextRun = at.Add(-30 * time.Second).Format(time.RFC3339)
+
+	bt.now = onBatteryAt(22)
+	if _, ok := a.batteryGate(job, "scheduled", at); ok {
+		t.Fatal("a run at 22% with a start level of 30% started")
+	}
+
+	restartBatteryHolds()
+	restarted := at.Add(20 * time.Minute)
+	dropStaleBatteryHolds([]ScheduledJob{job}, restarted) // the first tick after the restart
+	if trigger, held := batteryHeld(job.ID); !held || trigger != "scheduled" {
+		t.Fatal("the restart forgot the held run")
+	}
+	if _, ok := a.batteryGate(job, "scheduled", restarted); ok {
+		t.Fatal("the held run started after the restart, still on battery")
+	}
+	if h := historyOf(t, a); len(h) != 1 || h[0].Status != "held" {
+		t.Fatalf("want the one held entry from before the restart, got %+v", h)
+	}
+
+	restartBatteryHolds()
+	bt.now = onMainsAt(25)
+	info, ok := a.batteryGate(job, "scheduled", at.Add(time.Hour))
+	if !ok || info == nil {
+		t.Fatal("plugged in, the held run did not start")
+	}
+	if !info.heldAt.Equal(at) || info.heldPct != 22 {
+		t.Fatalf("held at %s (%v%%), want %s (22%%)", info.heldAt, info.heldPct, at)
+	}
+	entry := JobHistory{Name: job.Name, JobID: job.ID, Status: "success", Message: "Backup completed"}
+	a.applyBatteryToHistory(&entry, info)
+	if len(entry.Notes) != 1 || entry.Notes[0].Key != NoteBatteryRanLate ||
+		entry.Notes[0].Params["time"] != at.Format(time.RFC3339) || entry.Notes[0].Params["pct"] != 22 {
+		t.Fatalf("the late run does not say when it was first held: %+v", entry.Notes)
+	}
+
+	// Released, the hold is gone from the file too.
+	restartBatteryHolds()
+	if _, held := batteryHeld(job.ID); held {
+		t.Error("the released hold came back after a restart")
+	}
+	path, err := batteryHoldsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("the held runs file is left with no held runs (%v)", err)
+	}
+}
+
+// A hold no longer due (the set's schedule was changed) is forgotten in the
+// file as well, so a restart does not bring it back.
+func TestBatteryHoldNoLongerDueIsNotKept(t *testing.T) {
+	bt := newBatteryTest(t)
+	a := &App{}
+	job := batterySet("plugged", 0, 0)
+	at := time.Date(2026, 11, 15, 2, 0, 0, 0, time.Local)
+	job.NextRun = at.Format(time.RFC3339)
+	bt.now = onBatteryAt(50)
+	if _, ok := a.batteryGate(job, "scheduled", at.Add(time.Minute)); ok {
+		t.Fatal("a set that waits for mains started on battery")
+	}
+	job.NextRun = at.Add(24 * time.Hour).Format(time.RFC3339)
+	dropStaleBatteryHolds([]ScheduledJob{job}, at.Add(2*time.Minute))
+	restartBatteryHolds()
+	if _, held := batteryHeld(job.ID); held {
+		t.Fatal("a hold no longer due came back after a restart")
 	}
 }
 

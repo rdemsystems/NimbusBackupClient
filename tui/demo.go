@@ -27,6 +27,9 @@ type demoBackend struct {
 	keys     map[string]KeyInfo
 	shares   []ShareLogin
 	testNote string // what TestServer warns of, set by tests
+
+	wake        WakeInfo // what the power plan allows, set by tests
+	wakeEnabled []string // the scopes EnableWakeTimers was asked for
 }
 
 func newDemoBackend() *demoBackend {

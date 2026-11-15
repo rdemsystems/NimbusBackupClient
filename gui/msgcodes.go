@@ -89,6 +89,11 @@ const (
 	MsgLogAfterBackupCancelled MessageKey = "msgAfterBackupCancelled" // (none)
 	MsgLogAfterBackupFailed    MessageKey = "msgAfterBackupFailed"    // {error}
 
+	// Wake timers turned on in the power plan at the user's request
+	// (gui/wake_plan.go).
+	MsgWakeTimersEnabledBattery MessageKey = "logWakeTimersEnabledBattery" // {plan}
+	MsgWakeTimersEnabled        MessageKey = "logWakeTimersEnabled"        // {plan}
+
 	// Restore (gui/main.go, RestoreSnapshot's goroutine).
 	MsgRestoreCompleted MessageKey = "logRestoreCompleted" // (none)
 	MsgRestoreFailed    MessageKey = "logRestoreFailed"    // {error}

@@ -521,6 +521,19 @@ var apiCalls = map[string]func(a *App, args []json.RawMessage) (interface{}, err
 		}
 		return nil, cancelAfterBackup(id)
 	},
+	// The alert under a set's Wake option (wake_plan.go): what the power plan
+	// allows, for the TUI, which cannot read it itself, and turning wake
+	// timers on at the user's request, which needs the service's rights.
+	"GetWakeTimerInfo": func(a *App, args []json.RawMessage) (interface{}, error) {
+		return wakeTimerInfoNow(), nil
+	},
+	"EnableWakeTimers": func(a *App, args []json.RawMessage) (interface{}, error) {
+		var scope string
+		if err := arg(args, 0, &scope); err != nil {
+			return nil, err
+		}
+		return enableWakeTimers(scope)
+	},
 	// Keys in the service's own folder only (keyInService): the service
 	// runs as SYSTEM or root, and must not read, create or describe a file
 	// anywhere else for whoever holds the token.

@@ -4,7 +4,13 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -69,17 +75,143 @@ func platformArmWakeTimer(at time.Time) (func(), error) {
 	}, nil
 }
 
+// platformSyncWakeAlarm: a waitable timer with resume wakes Windows from
+// sleep and hibernate alike, so there is nothing more to set before either.
+func platformSyncWakeAlarm() {}
+
 // readWakeTimerSetting reads Allow wake timers from the active power plan, on
 // mains (ac) and on battery; ok is false when it cannot be read.
 func readWakeTimerSetting() (ac, dc uint32, ok bool) {
-	var scheme *windows.GUID
-	if r, _, _ := procPowerGetActiveScheme.Call(0, uintptr(unsafe.Pointer(&scheme))); r != 0 || scheme == nil {
+	scheme, err := activeScheme()
+	if err != nil {
 		return 0, 0, false
 	}
-	defer func() { _, _, _ = procLocalFree.Call(uintptr(unsafe.Pointer(scheme))) }() // PowerGetActiveScheme allocated it
+	defer freeScheme(scheme)
+	ac, dc, err = readWakeTimerValues(scheme)
+	return ac, dc, err == nil
+}
+
+// activeScheme is the active power plan's GUID; freeScheme releases it, as
+// PowerGetActiveScheme allocated it.
+func activeScheme() (*windows.GUID, error) {
+	var scheme *windows.GUID
+	if r, _, _ := procPowerGetActiveScheme.Call(0, uintptr(unsafe.Pointer(&scheme))); r != 0 || scheme == nil {
+		return nil, fmt.Errorf("PowerGetActiveScheme: %v", windows.Errno(r))
+	}
+	return scheme, nil
+}
+
+func freeScheme(scheme *windows.GUID) {
+	_, _, _ = procLocalFree.Call(uintptr(unsafe.Pointer(scheme)))
+}
+
+// readWakeTimerValues reads Allow wake timers from the power plan scheme.
+func readWakeTimerValues(scheme *windows.GUID) (ac, dc uint32, err error) {
 	r1, _, _ := procPowerReadACValue.Call(0, uintptr(unsafe.Pointer(scheme)), uintptr(unsafe.Pointer(&guidSubSleep)), uintptr(unsafe.Pointer(&guidAllowWakeTimer)), uintptr(unsafe.Pointer(&ac)))
+	if r1 != 0 {
+		return 0, 0, fmt.Errorf("PowerReadACValueIndex: %v", windows.Errno(r1))
+	}
 	r2, _, _ := procPowerReadDCValue.Call(0, uintptr(unsafe.Pointer(scheme)), uintptr(unsafe.Pointer(&guidSubSleep)), uintptr(unsafe.Pointer(&guidAllowWakeTimer)), uintptr(unsafe.Pointer(&dc)))
-	return ac, dc, r1 == 0 && r2 == 0
+	if r2 != 0 {
+		return 0, 0, fmt.Errorf("PowerReadDCValueIndex: %v", windows.Errno(r2))
+	}
+	return ac, dc, nil
+}
+
+// Changing Allow wake timers in the active power plan, at the user's request
+// (wake_plan.go). The service does it: a power plan belongs to the computer,
+// and changing one can need rights the app does not have.
+var (
+	procPowerWriteACValue     = powrprof.NewProc("PowerWriteACValueIndex")
+	procPowerWriteDCValue     = powrprof.NewProc("PowerWriteDCValueIndex")
+	procPowerSetActiveScheme  = powrprof.NewProc("PowerSetActiveScheme")
+	procPowerReadFriendlyName = powrprof.NewProc("PowerReadFriendlyName")
+)
+
+const errorMoreData = 234 // ERROR_MORE_DATA
+
+// systemWakePlan is the active power plan, through powrprof's own calls.
+type systemWakePlan struct{ scheme *windows.GUID }
+
+// platformOpenWakePlan opens the active power plan, with powercfg to fall
+// back on where a powrprof call is refused.
+func platformOpenWakePlan() (wakePlan, wakePlanWriter, error) {
+	scheme, err := activeScheme()
+	if err != nil {
+		return nil, nil, err
+	}
+	return &systemWakePlan{scheme: scheme}, powercfgWakePlan{}, nil
+}
+
+func (p *systemWakePlan) Close() { freeScheme(p.scheme) }
+
+// Name is the plan's name as Power Options shows it ("Balanced"), or its
+// GUID when the name cannot be read.
+func (p *systemWakePlan) Name() string {
+	var size uint32
+	r, _, _ := procPowerReadFriendlyName.Call(0, uintptr(unsafe.Pointer(p.scheme)), 0, 0, 0, uintptr(unsafe.Pointer(&size)))
+	if (r != 0 && r != errorMoreData) || size < 2 {
+		return p.scheme.String()
+	}
+	buf := make([]uint16, size/2+1)
+	r, _, _ = procPowerReadFriendlyName.Call(0, uintptr(unsafe.Pointer(p.scheme)), 0, 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)))
+	if r != 0 {
+		return p.scheme.String()
+	}
+	if name := windows.UTF16ToString(buf); name != "" {
+		return name
+	}
+	return p.scheme.String()
+}
+
+func (p *systemWakePlan) Read() (ac, dc uint32, err error) { return readWakeTimerValues(p.scheme) }
+
+func (p *systemWakePlan) Write(onMains bool, value uint32) error {
+	proc, name := procPowerWriteDCValue, "PowerWriteDCValueIndex"
+	if onMains {
+		proc, name = procPowerWriteACValue, "PowerWriteACValueIndex"
+	}
+	r, _, _ := proc.Call(0, uintptr(unsafe.Pointer(p.scheme)), uintptr(unsafe.Pointer(&guidSubSleep)), uintptr(unsafe.Pointer(&guidAllowWakeTimer)), uintptr(value))
+	if r != 0 {
+		return fmt.Errorf("%s: %v", name, windows.Errno(r))
+	}
+	return nil
+}
+
+// Activate sets the plan active again: a value written to the active plan
+// takes effect only then.
+func (p *systemWakePlan) Activate() error {
+	if r, _, _ := procPowerSetActiveScheme.Call(0, uintptr(unsafe.Pointer(p.scheme))); r != 0 {
+		return fmt.Errorf("PowerSetActiveScheme: %v", windows.Errno(r))
+	}
+	return nil
+}
+
+// powercfgWakePlan writes the active plan with powercfg, as an administrator
+// would by hand.
+type powercfgWakePlan struct{}
+
+func (powercfgWakePlan) Write(onMains bool, value uint32) error {
+	flag := "/setdcvalueindex"
+	if onMains {
+		flag = "/setacvalueindex"
+	}
+	return runPowercfg(flag, "SCHEME_CURRENT", "SUB_SLEEP", "RTCWAKE", strconv.FormatUint(uint64(value), 10))
+}
+
+func (powercfgWakePlan) Activate() error { return runPowercfg("/setactive", "SCHEME_CURRENT") }
+
+func runPowercfg(args ...string) error {
+	exe := "powercfg.exe"
+	if win := os.Getenv("SystemRoot"); win != "" {
+		exe = filepath.Join(win, "System32", "powercfg.exe") // not whatever PATH finds first
+	}
+	cmd := exec.Command(exe, args...) // #nosec G204 -- powercfg from System32, with our own fixed arguments
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("powercfg %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 var procGetPwrCapabilities = powrprof.NewProc("GetPwrCapabilities")
@@ -118,6 +250,6 @@ func platformWakeTimerInfo() WakeTimerInfo {
 		// No such setting (some editions): the system decides; assume it allows.
 		return WakeTimerInfo{Supported: true, OnMains: true, OnBattery: true, ModernStandby: modern}
 	}
-	return WakeTimerInfo{Supported: true, OnMains: ac == 1, OnBattery: dc == 1, ModernStandby: modern,
+	return WakeTimerInfo{Supported: true, OnMains: ac == 1, OnBattery: dc == 1, ModernStandby: modern, planRead: true,
 		Note: fmt.Sprintf("Allow wake timers: on mains %d, on battery %d (0 off, 1 on, 2 important only); Modern Standby %v", ac, dc, modern)}
 }

@@ -311,6 +311,7 @@ body {
 .sched-key { min-width: 110px; color: #5a6478; }
 .form-group .sched-row .sched-field { width: auto; margin: 0; }
 .form-group .sched-row .sched-field.narrow { width: 90px; }
+.form-group .sched-row .sched-field:disabled { background: #edf2f7; color: #a0aec0; cursor: not-allowed; }
 .sched-days { display: flex; gap: 6px; flex-wrap: wrap; }
 .sched-chip {
     padding: 6px 10px;

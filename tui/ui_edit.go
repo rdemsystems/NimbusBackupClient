@@ -58,6 +58,7 @@ type editor struct {
 	afterWait    *tview.InputField
 	afterWoken   *tview.Checkbox
 	canHibernate bool
+	noHibernate  string // why not, in English, when !canHibernate
 
 	// a machine (disk image) set
 	sel        machineSel
@@ -94,11 +95,22 @@ func afterChoiceOf(doc map[string]interface{}) string {
 }
 
 // The On battery choices, as the set stores them ("" is start anyway) and as
-// the form lists them.
+// the form lists them, in the app's order.
 var (
-	batteryModes   = []string{"", "above", "plugged"}
-	batteryChoices = []string{"Start backup anyway", "Start only if the charge is at least the start level", "Wait for the computer to be plugged in"}
+	batteryModes   = []string{"plugged", "above", ""}
+	batteryChoices = []string{"Wait for the computer to be plugged in before starting the backup", "Start backup only if battery charge is at least the start level", "Start backup anyway"}
 )
+
+// batteryModeIndex is the form's choice for a set's onBattery: a value the
+// form does not know starts anyway, as the backup does.
+func batteryModeIndex(mode string) int {
+	for i, m := range batteryModes {
+		if m == mode {
+			return i
+		}
+	}
+	return len(batteryModes) - 1
+}
 
 // vmBackupID is the numeric PBS vm/<id> a machine set backs up as: 9000000+N
 // cannot collide with a real VM's ID, 000N is the other style.
@@ -175,9 +187,9 @@ func (a *App) newSetDoc(machine bool) map[string]interface{} {
 		"id": strconv.FormatInt(time.Now().UnixMilli(), 10), "backupType": "directory", "enabled": true,
 		"scheduleMode": "scheduled", "useVSS": true, "changeDetectionMode": "legacy", "excludeList": []interface{}{},
 		"schedules": []interface{}{map[string]interface{}{"id": "s1", "enabled": true, "unit": "days", "every": 1.0, "at": "02:00"}},
-		// A new set on a laptop's battery starts at 30% or more and is
-		// cancelled below 10%, as in the app.
-		"onBattery": "above", "batteryStartPercent": 30.0, "batteryCancel": true, "batteryCancelBelow": 10.0,
+		// A new set on a laptop's battery waits to be plugged in, and a
+		// running backup is cancelled below 10%, as in the app.
+		"onBattery": "plugged", "batteryStartPercent": 30.0, "batteryCancel": true, "batteryCancelBelow": 10.0,
 	}
 	if machine {
 		host, _ := os.Hostname()
@@ -271,11 +283,11 @@ func (e *editor) build() {
 	e.every = tview.NewInputField().SetLabel("Every (number) ").SetText(strconv.Itoa(every(sc))).SetFieldWidth(6)
 	e.at = tview.NewInputField().SetLabel("At (HH:MM) ").SetText(str(sc, "at")).SetFieldWidth(8)
 	e.weekdayF = tview.NewInputField().SetLabel("Only on days ").SetText(strings.Join(strList(sc, "weekdays"), ",")).SetFieldWidth(32)
-	e.wake = tview.NewCheckbox().SetLabel("Wake the computer from sleep to run it ").SetChecked(boolean(e.orig, "wakeToRun"))
+	e.wake = tview.NewCheckbox().SetLabel("Wake the computer from sleep or hibernate to run it ").SetChecked(boolean(e.orig, "wakeToRun"))
 	// A set saved before the rule existed has none of its fields: start
 	// anyway, never cancel.
 	e.battery = tview.NewDropDown().SetLabel("On battery ").SetOptions(batteryChoices, nil).
-		SetCurrentOption(indexOf(batteryModes, str(e.orig, "onBattery")))
+		SetCurrentOption(batteryModeIndex(str(e.orig, "onBattery")))
 	start := int(num(e.orig, "batteryStartPercent"))
 	if start == 0 {
 		start = 30
@@ -287,8 +299,9 @@ func (e *editor) build() {
 	e.batteryStart = tview.NewInputField().SetLabel("  Start level (5 to 95 %) ").SetText(strconv.Itoa(start)).SetFieldWidth(4)
 	e.batteryCancel = tview.NewCheckbox().SetLabel("Cancel a running backup on battery below a charge ").SetChecked(boolean(e.orig, "batteryCancel"))
 	e.batteryBelow = tview.NewInputField().SetLabel("  Cancel level (0 to 99 %, 0 never) ").SetText(strconv.Itoa(below)).SetFieldWidth(4)
-	f2 := styleForm(tview.NewForm()).AddFormItem(e.mode).AddFormItem(e.unit).AddFormItem(e.every).AddFormItem(e.at).AddFormItem(e.weekdayF).AddFormItem(e.wake).
-		AddFormItem(e.battery).AddFormItem(e.batteryStart).AddFormItem(e.batteryCancel).AddFormItem(e.batteryBelow)
+	f2 := styleForm(tview.NewForm()).AddFormItem(e.mode).AddFormItem(e.unit).AddFormItem(e.every).AddFormItem(e.at).AddFormItem(e.weekdayF).AddFormItem(e.wake)
+	e.addWakeAlert(f2)
+	f2.AddFormItem(e.battery).AddFormItem(e.batteryStart).AddFormItem(e.batteryCancel).AddFormItem(e.batteryBelow)
 	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept.\nWaking works from sleep (usually hibernate too), not from shut down.\nOn battery: laptops only; on mains the set always runs. A cancelled backup is not saved.", 70, 5, true, false)
 	f2.SetTitle(" Schedule ")
 
@@ -377,19 +390,73 @@ func (e *editor) build() {
 	}
 }
 
+// addWakeAlert puts under Wake the alert the app shows there when the power
+// plan stops a timer waking the computer (read from the service; an older
+// one has none), while Wake is ticked, and a button that turns wake timers
+// on. The app's "Leave" button has no counterpart here: not pressing the
+// button leaves the plan as it is.
+func (e *editor) addWakeAlert(f *tview.Form) {
+	info, err := e.a.be.WakeTimers()
+	text, button := wakeAlertText(info.Alert)
+	if err != nil || text == "" {
+		return
+	}
+	// As wide as the form allows (0), and tall enough for the text wrapped
+	// beside the form's longest label.
+	note := tview.NewTextView().SetLabel("").SetSize(5, 0).SetDynamicColors(true).SetScrollable(false)
+	show := func(on bool) {
+		if on {
+			note.SetText(tag(colWarn) + text)
+		} else {
+			note.SetText("")
+		}
+	}
+	show(e.wake.IsChecked())
+	e.wake.SetChangedFunc(show)
+	f.AddFormItem(note)
+	f.AddButton(button, func() { e.enableWake(f, note, info.Alert, button) })
+}
+
+// enableWake has the service turn wake timers on, the user having pressed
+// the alert's button: scope as the alert, "battery" or "all".
+func (e *editor) enableWake(f *tview.Form, note *tview.TextView, scope, button string) {
+	e.a.setFlash("turning on wake timers...")
+	go func() {
+		_, err := e.a.be.EnableWakeTimers(scope)
+		e.a.app.QueueUpdateDraw(func() {
+			if err != nil {
+				e.a.setFlash("wake timers were not turned on")
+				e.a.errorBox("The power plan was not changed: " + describeErr(err))
+				return
+			}
+			e.wake.SetChangedFunc(nil)
+			note.SetText("")
+			if i := f.GetButtonIndex(button); i >= 0 {
+				f.RemoveButton(i)
+			}
+			f.SetFocus(f.GetFormItemIndex(e.wake.GetLabel()))
+			e.a.app.SetFocus(f)
+			e.a.setFlash("wake timers turned on in the power plan")
+		})
+	}()
+}
+
 // buildAfterBackup adds to f what the computer does after the backup. This
 // computer's hibernation is read here: the form runs on the computer whose
 // service runs the set.
 func (e *editor) buildAfterBackup(f *tview.Form) {
 	choice := afterChoiceOf(e.orig)
-	var why string
-	e.canHibernate, why = pbscommon.CanHibernate()
+	hib := pbscommon.CanHibernate()
+	e.canHibernate, e.noHibernate = hib.OK, hib.Reason()
 	choices := append([]string{}, afterChoices...)
 	if !e.canHibernate {
-		if why == pbscommon.HibernateOff {
+		switch hib.Why {
+		case pbscommon.HibernateOff:
 			choices[2] += " (turned off on this computer)"
-		} else {
+		case pbscommon.HibernateNone:
 			choices[2] += " (not on this computer)"
+		default:
+			choices[2] += " (unavailable: " + hib.Reason() + ")"
 		}
 	}
 	wait := int(num(e.orig, "afterBackupWait"))
@@ -419,7 +486,7 @@ func (e *editor) applyAfterBackup(doc map[string]interface{}) error {
 		return fmt.Errorf("the wait after the backup must be a whole number of minutes from 0 to 240 (0 at once)")
 	}
 	if choice == "hibernate" && !e.canHibernate && afterChoiceOf(e.orig) != "hibernate" {
-		return fmt.Errorf("this computer cannot hibernate: choose another thing for it to do after the backup")
+		return fmt.Errorf("this computer cannot hibernate (%s): choose another thing for it to do after the backup", e.noHibernate)
 	}
 	if choice == "" {
 		wait = 0
@@ -614,7 +681,7 @@ func (e *editor) document() (map[string]interface{}, error) {
 func (e *editor) applyBattery(doc map[string]interface{}) error {
 	bi, _ := e.battery.GetCurrentOption()
 	if bi < 0 || bi >= len(batteryModes) {
-		bi = 0
+		bi = batteryModeIndex("")
 	}
 	start, err := strconv.Atoi(strings.TrimSpace(e.batteryStart.GetText()))
 	if err != nil || start < 5 || start > 95 {

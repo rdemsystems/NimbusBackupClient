@@ -49,20 +49,20 @@ func setSuspendState(hibernate bool) error {
 // /hibernate on). With hibernation off Windows may report neither, so a
 // computer that has any sleep state is taken to have hibernation turned off
 // rather than missing; one with none (a VM) cannot hibernate at all.
-func CanHibernate() (ok bool, why string) {
+func CanHibernate() HibernateCheck {
 	var caps [128]byte // SYSTEM_POWER_CAPABILITIES is 76 bytes
 	if r, _, _ := procGetPwrCapabilities.Call(uintptr(unsafe.Pointer(&caps[0]))); r == 0 {
-		return false, HibernateNone
+		return HibernateCheck{Why: HibernateNone}
 	}
 	const (
 		offS1, offS2, offS3, offS4 = 3, 4, 5, 6
 		offHiberFile, offAoAc      = 8, 20
 	)
 	if caps[offS4] != 0 && caps[offHiberFile] != 0 {
-		return true, ""
+		return HibernateCheck{OK: true}
 	}
 	if caps[offS1] != 0 || caps[offS2] != 0 || caps[offS3] != 0 || caps[offS4] != 0 || caps[offAoAc] != 0 {
-		return false, HibernateOff
+		return HibernateCheck{Why: HibernateOff}
 	}
-	return false, HibernateNone
+	return HibernateCheck{Why: HibernateNone}
 }

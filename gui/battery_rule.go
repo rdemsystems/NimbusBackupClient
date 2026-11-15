@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -19,7 +22,8 @@ import (
 // is left where it was, so the scheduler's catch-up finds it due on every
 // tick and starts it, once, when the computer is plugged in. The hold is
 // recorded once (a Reports entry, a Message Log line, a [Battery] line in the
-// service log); the run that later starts says it ran late. When the computer
+// service log), and remembered across a restart of the service; the run that
+// later starts says it ran late, from when it was first held. When the computer
 // was woken by the set's wake timer (wake_timer.go) for a run that is then
 // held, it is put straight back to sleep, with the wake for the next run set.
 
@@ -100,32 +104,126 @@ func clock(t time.Time) string { return t.Format("15:04") }
 
 // ---- held runs
 
-// batteryHold is a run of a set held back for the battery.
+// batteryHold is a run of a set held back for the battery. The holds are
+// kept in battery_holds.json as well as in memory: a service restarted while
+// a run was held (an upgrade, say) recorded the hold a second time in
+// Reports, and the run that later started said it was held back from the
+// restart, not from when it really was.
 type batteryHold struct {
-	at      time.Time
-	pct     interface{}
-	trigger string // "scheduled" or "startup"
+	At      time.Time `json:"at"`
+	Pct     *int      `json:"pct,omitempty"` // nil when the charge could not be read
+	Trigger string    `json:"trigger"`       // "scheduled" or "startup"
 }
 
+func newBatteryHold(at time.Time, b clientcommon.BatteryStatus, trigger string) batteryHold {
+	h := batteryHold{At: at, Trigger: trigger}
+	if b.Known {
+		p := b.Percent
+		h.Pct = &p
+	}
+	return h
+}
+
+// pct is the charge when the run was held, for a message: the number, or
+// "?" when unknown (as pctParam).
+func (h batteryHold) pct() interface{} {
+	if h.Pct == nil {
+		return "?"
+	}
+	return *h.Pct
+}
+
+// batteryHolds is the held runs by set ID. loaded is false until the file
+// has been read, which is done the first time a hold is looked at.
 var batteryHolds = struct {
 	sync.Mutex
-	m map[string]batteryHold
+	m      map[string]batteryHold
+	loaded bool
 }{m: map[string]batteryHold{}}
+
+func batteryHoldsPath() (string, error) {
+	dir, err := getConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "battery_holds.json"), nil
+}
+
+// loadBatteryHoldsLocked reads the holds an earlier run of this program left,
+// once. A file that cannot be read loses only the memory of the holds: a run
+// still held is recorded once more, as before they were kept. Called with
+// batteryHolds locked.
+func loadBatteryHoldsLocked() {
+	if batteryHolds.loaded {
+		return
+	}
+	batteryHolds.loaded = true
+	path, err := batteryHoldsPath()
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("[Battery] the held runs could not be read: %v", err))
+		return
+	}
+	data, err := os.ReadFile(path) // #nosec G703 -- the settings folder's file with a fixed name: not user input
+	if err != nil {
+		if !os.IsNotExist(err) {
+			writeDebugLog(fmt.Sprintf("[Battery] the held runs could not be read: %v", err))
+		}
+		return
+	}
+	saved := map[string]batteryHold{}
+	if err := json.Unmarshal(stripUTF8BOM(data), &saved); err != nil {
+		writeDebugLog(fmt.Sprintf("[Battery] the held runs could not be read: %v", err))
+		return
+	}
+	for id, h := range saved {
+		if _, ok := batteryHolds.m[id]; !ok && !h.At.IsZero() {
+			batteryHolds.m[id] = h
+		}
+	}
+}
+
+// saveBatteryHoldsLocked writes the holds, removing the file when there are
+// none. Called with batteryHolds locked.
+func saveBatteryHoldsLocked() {
+	path, err := batteryHoldsPath()
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("[Battery] the held runs could not be saved: %v", err))
+		return
+	}
+	if len(batteryHolds.m) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) { // #nosec G703 -- the settings folder's file with a fixed name: not user input
+			writeDebugLog(fmt.Sprintf("[Battery] the held runs could not be saved: %v", err))
+		}
+		return
+	}
+	data, err := json.MarshalIndent(batteryHolds.m, "", "  ")
+	if err == nil {
+		err = atomicWriteFile(path, data, 0600)
+	}
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("[Battery] the held runs could not be saved: %v", err))
+	}
+}
 
 // batteryHeld reports whether a run of the set is held back, and by which
 // trigger.
 func batteryHeld(setID string) (trigger string, held bool) {
 	batteryHolds.Lock()
 	defer batteryHolds.Unlock()
+	loadBatteryHoldsLocked()
 	h, ok := batteryHolds.m[setID]
-	return h.trigger, ok
+	return h.Trigger, ok
 }
 
 func takeBatteryHold(setID string) (batteryHold, bool) {
 	batteryHolds.Lock()
 	defer batteryHolds.Unlock()
+	loadBatteryHoldsLocked()
 	h, ok := batteryHolds.m[setID]
-	delete(batteryHolds.m, setID)
+	if ok {
+		delete(batteryHolds.m, setID)
+		saveBatteryHoldsLocked()
+	}
 	return h, ok
 }
 
@@ -139,17 +237,23 @@ func dropStaleBatteryHolds(jobs []ScheduledJob, now time.Time) {
 	}
 	batteryHolds.Lock()
 	defer batteryHolds.Unlock()
+	loadBatteryHoldsLocked()
+	dropped := false
 	for id, h := range batteryHolds.m {
 		j, ok := byID[id]
 		stale := !ok || !j.Enabled
-		if ok && h.trigger == "scheduled" {
+		if ok && h.Trigger == "scheduled" {
 			next, err := time.Parse(time.RFC3339, j.NextRun)
 			stale = stale || err != nil || next.After(now)
 		}
 		if stale {
 			delete(batteryHolds.m, id)
-			writeDebugLog(fmt.Sprintf("[Battery] %s: the run held back at %s is no longer due", j.Name, clock(h.at)))
+			dropped = true
+			writeDebugLog(fmt.Sprintf("[Battery] %s: the run held back at %s is no longer due", j.Name, clock(h.At)))
 		}
+	}
+	if dropped {
+		saveBatteryHoldsLocked()
 	}
 }
 
@@ -178,6 +282,9 @@ func noteSchedulerTick(prev, now time.Time) {
 	if n.Sub(p) < wokenGap {
 		return
 	}
+	// However it was woken, runs starting now first wait for the network
+	// to come back (network_wait.go).
+	noteResume(n, "after the computer woke")
 	wakeState.mu.Lock()
 	t, armed := wakeState.target, wakeState.armed
 	wakeState.mu.Unlock()
@@ -242,13 +349,13 @@ func (a *App) batteryGate(job ScheduledJob, trigger string, now time.Time) (info
 	}
 	if h, held := takeBatteryHold(job.ID); held {
 		if trigger != "manual" && !onBattery(b) {
-			info.heldAt, info.heldPct = h.at, h.pct
-			writeDebugLog(fmt.Sprintf("[Battery] %s: computer plugged in (battery %s%%): starting the run held back at %s", job.Name, pctText(pctParam(b)), clock(h.at)))
+			info.heldAt, info.heldPct = h.At, h.pct()
+			writeDebugLog(fmt.Sprintf("[Battery] %s: computer plugged in (battery %s%%): starting the run held back at %s", job.Name, pctText(pctParam(b)), clock(h.At)))
 			LogMessage("Backup", "info",
-				fmt.Sprintf("%s: computer plugged in (battery %s%%); starting the run held back at %s.", job.Name, pctText(pctParam(b)), clock(h.at)),
-				job.Name, MsgLogBatteryPluggedIn, msgParams{"pct": pctParam(b), "time": h.at.Format(time.RFC3339)})
+				fmt.Sprintf("%s: computer plugged in (battery %s%%); starting the run held back at %s.", job.Name, pctText(pctParam(b)), clock(h.At)),
+				job.Name, MsgLogBatteryPluggedIn, msgParams{"pct": pctParam(b), "time": h.At.Format(time.RFC3339)})
 		} else {
-			writeDebugLog(fmt.Sprintf("[Battery] %s: the run held back at %s is replaced by this %s run", job.Name, clock(h.at), trigger))
+			writeDebugLog(fmt.Sprintf("[Battery] %s: the run held back at %s is replaced by this %s run", job.Name, clock(h.At), trigger))
 		}
 	}
 	if onBattery(b) {
@@ -288,9 +395,11 @@ func otherBackupsActive(selfID string) bool {
 func (a *App) holdForBattery(job ScheduledJob, trigger string, now time.Time, b clientcommon.BatteryStatus, min int, woken time.Time) {
 	pct := pctParam(b)
 	batteryHolds.Lock()
+	loadBatteryHoldsLocked()
 	_, already := batteryHolds.m[job.ID]
 	if !already {
-		batteryHolds.m[job.ID] = batteryHold{at: now, pct: pct, trigger: trigger}
+		batteryHolds.m[job.ID] = newBatteryHold(now, b, trigger)
+		saveBatteryHoldsLocked()
 	}
 	batteryHolds.Unlock()
 
@@ -374,6 +483,7 @@ func (a *App) sleepForHeldRun(job ScheduledJob) {
 			return
 		}
 		writeDebugLog(fmt.Sprintf("[Battery] %s: putting the computer back to sleep (the run is held back for the battery)", job.Name))
+		syncWakeAlarm()
 		if err := sleepComputer(); err != nil {
 			writeDebugLog(fmt.Sprintf("[Battery] could not put the computer back to sleep: %v", err))
 		}

@@ -5,6 +5,12 @@ import {
   nextSetRun, scheduleProblem, weekdayName, monthName, tp, nthWord,
 } from './schedules'
 
+// Where the app keeps which wake alert the user chose to leave as it is.
+const WAKE_ALERT_LEFT = 'wakeAlertLeft'
+const readWakeAlertLeft = () => {
+  try { return localStorage.getItem(WAKE_ALERT_LEFT) || '' } catch { return '' }
+}
+
 // The Schedule tab of the Backup Set editor: "On a schedule" with a list of
 // schedules (each in plain words, with Edit, Delete and an on/off tick), or
 // "Only when I click Run Now". Editing a schedule shows only the fields its
@@ -14,9 +20,36 @@ import {
 // battery is the set's On battery rule ({ mode: 'anyway' | 'above' | 'plugged',
 // start, cancel, cancelBelow }), setBattery changes part of it, and
 // batteryInfo is App.GetBatteryInfo: with no battery the section is greyed.
+// onEnableWake(scope) is App.EnableWakeTimers, for the alert below.
 export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedules, setSchedules, runAtStartup, setRunAtStartup, wakeToRun = false, setWakeToRun = () => {}, wakeInfo = null,
-  battery = null, setBattery = () => {}, batteryInfo = null }) {
+  battery = null, setBattery = () => {}, batteryInfo = null, onEnableWake = null }) {
   const { t, language } = useTranslation()
+  // The alert under the Wake option when the power plan stops a timer waking
+  // this computer (wakeInfo.alert: 'all', or 'battery' on a laptop). Only its
+  // first button changes anything. "Leave" hides it on this computer: the
+  // choice belongs to the computer, not the set, so it is kept in the app's
+  // local storage, and for that alert only, so a plan that later stops
+  // waking the computer altogether asks again.
+  const [wakeLeft, setWakeLeft] = useState(readWakeAlertLeft)
+  const [wakeBusy, setWakeBusy] = useState(false)
+  const [wakeError, setWakeError] = useState('')
+  const wakeAlert = wakeToRun && wakeInfo && wakeInfo.alert && wakeInfo.alert !== wakeLeft ? wakeInfo.alert : ''
+  const leaveWake = () => {
+    try { localStorage.setItem(WAKE_ALERT_LEFT, wakeAlert) } catch { /* shown again next time */ }
+    setWakeLeft(wakeAlert)
+    setWakeError('')
+  }
+  const enableWake = () => {
+    if (!onEnableWake || wakeBusy) return
+    setWakeBusy(true)
+    setWakeError('')
+    Promise.resolve(onEnableWake(wakeAlert))
+      .then(() => setWakeBusy(false))
+      .catch(err => {
+        setWakeBusy(false)
+        setWakeError(String((err && err.message) || err || ''))
+      })
+  }
   const noBattery = !!batteryInfo && !batteryInfo.hasBattery
   const cancelTooHigh = !!battery && battery.mode === 'above' && battery.cancel && battery.cancelBelow > 0 && battery.cancelBelow >= battery.start
   // A sentence with a number box in it: the text before and after {n} or {m}.
@@ -275,12 +308,27 @@ export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedule
               <input type="checkbox" id="sched-wake" checked={wakeToRun} onChange={e => setWakeToRun(e.target.checked)} />
               <span>{t('wakeToRun')}</span>
             </label>
+            {wakeAlert && (
+              <div className="sched-warn" id="sched-wake-alert" role="alert">
+                <div>{t(wakeAlert === 'all' ? 'wakeAlertAll' : 'wakeAlertBattery')}</div>
+                {wakeError && <div id="sched-wake-alert-error">{t('wakeEnableFailed', { error: wakeError })}</div>}
+                <div className="sched-add-row">
+                  <button type="button" className="btn btn-primary" id="sched-wake-enable" disabled={wakeBusy || !onEnableWake} onClick={enableWake}>
+                    {t(wakeAlert === 'all' ? 'wakeEnableAll' : 'wakeEnableBattery')}
+                  </button>
+                  <button type="button" className="btn btn-secondary" id="sched-wake-leave" disabled={wakeBusy} onClick={leaveWake}>
+                    {t(wakeAlert === 'all' ? 'wakeLeaveOff' : 'wakeLeaveMainsOnly')}
+                  </button>
+                </div>
+              </div>
+            )}
             {wakeToRun && (
               <p className="sched-hint" id="sched-wake-note">
                 {t('wakeNote')}
                 {wakeInfo && !wakeInfo.supported && <><br />{t('wakeUnsupported')}</>}
-                {wakeInfo && wakeInfo.supported && !wakeInfo.onMains && <><br />{t('wakeBlocked')}</>}
-                {wakeInfo && wakeInfo.supported && wakeInfo.onMains && !wakeInfo.onBattery && <><br />{t('wakeMainsOnly')}</>}
+                {/* The short notes say what the alert above already asks about: shown once it is left. */}
+                {wakeInfo && wakeInfo.supported && !wakeInfo.onMains && wakeAlert !== 'all' && <><br />{t('wakeBlocked')}</>}
+                {wakeInfo && wakeInfo.supported && wakeInfo.onMains && !wakeInfo.onBattery && wakeAlert !== 'battery' && <><br />{t('wakeMainsOnly')}</>}
                 {wakeInfo && wakeInfo.supported && wakeInfo.modernStandby && <><br />{t('wakeModernStandby')}</>}
               </p>
             )}
@@ -300,8 +348,8 @@ export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedule
             <div role="radiogroup" aria-labelledby="sched-battery-label">
               <div className="sched-row">
                 <label className="sched-radio">
-                  <input type="radio" name="sched-battery" id="sched-battery-anyway" disabled={noBattery}
-                    checked={battery.mode === 'anyway'} onChange={() => setBattery({ mode: 'anyway' })} /> {t('batteryAnyway')}
+                  <input type="radio" name="sched-battery" id="sched-battery-plugged" disabled={noBattery}
+                    checked={battery.mode === 'plugged'} onChange={() => setBattery({ mode: 'plugged' })} /> {t('batteryPlugged')}
                 </label>
               </div>
               <div className="sched-row">
@@ -314,8 +362,8 @@ export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedule
               </div>
               <div className="sched-row">
                 <label className="sched-radio">
-                  <input type="radio" name="sched-battery" id="sched-battery-plugged" disabled={noBattery}
-                    checked={battery.mode === 'plugged'} onChange={() => setBattery({ mode: 'plugged' })} /> {t('batteryPlugged')}
+                  <input type="radio" name="sched-battery" id="sched-battery-anyway" disabled={noBattery}
+                    checked={battery.mode === 'anyway'} onChange={() => setBattery({ mode: 'anyway' })} /> {t('batteryAnyway')}
                 </label>
               </div>
             </div>

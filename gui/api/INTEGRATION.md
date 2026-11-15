@@ -354,6 +354,13 @@ waiting to do to the computer after a Backup Set's run: `id`, `set`, `action` (`
 `waiting_for_others` once the wait is over and other backups or restores still run. The
 app shows each with Cancel, which sends `POST /call/CancelAfterBackup` with `["<id>"]`.
 
+Under a Backup Set's Wake option, on Windows, the app asks whether to turn on Allow wake
+timers when the active power plan stops a timer waking the computer (`alert` of
+`POST /call/GetWakeTimerInfo`: `all`, or `battery` on a computer with a battery). Its first
+button sends `POST /call/EnableWakeTimers` with `["battery"]` or `["all"]`: the service
+writes the plan, reads it back, notes the change in the Message Log and answers with the
+new state. Nothing changes without that call.
+
 ### POST /backup/pause, POST /backup/resume, POST /backup/stop
 
 Act on the backup the service is running, whoever started it. No request body.

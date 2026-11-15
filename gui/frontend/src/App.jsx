@@ -48,7 +48,7 @@ let GetJobPolicy, SetRequireAdminForJobs, RequestElevation, SnapshotSupport, Run
 let ExportSettings, ImportSettings
 let SetSMTPSettings, SendTestEmail
 let GetLogsFolder, OpenLogsFolder, SaveLogs, GetServiceLogsStatus, OpenServiceLogsFolder
-let GetWakeTimerInfo, GetBatteryInfo
+let GetWakeTimerInfo, EnableWakeTimers, GetBatteryInfo
 // What the computer does after a set's backup (gui/after_backup.go)
 let GetPowerActionsInfo, GetAfterBackupPending, CancelAfterBackup
 // Encryption key management
@@ -139,6 +139,7 @@ if (window.go) {
   GetServiceLogsStatus = window.go.main.App.GetServiceLogsStatus
   OpenServiceLogsFolder = window.go.main.App.OpenServiceLogsFolder
   GetWakeTimerInfo = window.go.main.App.GetWakeTimerInfo
+  EnableWakeTimers = window.go.main.App.EnableWakeTimers
   GetBatteryInfo = window.go.main.App.GetBatteryInfo
   GetPowerActionsInfo = window.go.main.App.GetPowerActionsInfo
   GetAfterBackupPending = window.go.main.App.GetAfterBackupPending
@@ -747,7 +748,7 @@ function App() {
   // at a charge of at least batteryStart %, or wait for mains; and cancel a
   // running backup below batteryCancelBelow %. batteryInfo is
   // App.GetBatteryInfo: a computer with no battery shows the section greyed.
-  const [onBattery, setOnBattery] = useState('above')
+  const [onBattery, setOnBattery] = useState('plugged')
   const [batteryStart, setBatteryStart] = useState(30)
   const [batteryCancel, setBatteryCancel] = useState(true)
   const [batteryCancelBelow, setBatteryCancelBelow] = useState(10)
@@ -757,11 +758,12 @@ function App() {
     GetBatteryInfo().then(setBatteryInfo).catch(() => setBatteryInfo(null))
   }, [])
   // presetBattery fills the rule from a set, or with a new set's defaults
-  // (at least 30 %, cancel below 10 %) for null. A set saved before the rule
-  // existed has none of its fields: it starts anyway and never cancels.
+  // (wait to be plugged in, cancel below 10 %) for null. A set saved before
+  // the rule existed has none of its fields: it starts anyway and never
+  // cancels.
   const presetBattery = (job) => {
     if (!job) {
-      setOnBattery('above'); setBatteryStart(30); setBatteryCancel(true); setBatteryCancelBelow(10)
+      setOnBattery('plugged'); setBatteryStart(30); setBatteryCancel(true); setBatteryCancelBelow(10)
       return
     }
     setOnBattery(job.onBattery === 'above' || job.onBattery === 'plugged' ? job.onBattery : 'anyway')
@@ -5996,6 +5998,7 @@ function App() {
                 schedules={schedules} setSchedules={setSchedules}
                 runAtStartup={runAtStartup} setRunAtStartup={setRunAtStartup}
                 wakeToRun={wakeToRun} setWakeToRun={setWakeToRun} wakeInfo={wakeInfo}
+                onEnableWake={EnableWakeTimers ? (scope) => EnableWakeTimers(scope).then(setWakeInfo) : null}
                 battery={{ mode: onBattery, start: batteryStart, cancel: batteryCancel, cancelBelow: batteryCancelBelow }}
                 setBattery={(p) => {
                   if (p.mode !== undefined) setOnBattery(p.mode)
@@ -6426,6 +6429,21 @@ function App() {
           {(() => {
             const wakeOn = scheduleMode !== 'manual' && wakeToRun
             const noHibernate = !!powerInfo && !powerInfo.hibernate
+            // Why it cannot hibernate (PowerActionsInfo.hibernateWhy), shown
+            // under the choices and as the greyed choice's tooltip.
+            let hibernateReason = ''
+            if (noHibernate) {
+              switch (powerInfo.hibernateWhy) {
+                case 'off': hibernateReason = t('afterBackupHibernateOff'); break
+                case 'kernel': hibernateReason = t('afterBackupHibernateKernel'); break
+                case 'noresume': hibernateReason = t('afterBackupHibernateNoResume'); break
+                case 'swap':
+                  hibernateReason = (powerInfo.swapHaveGB > 0 ? t('afterBackupHibernateSwap') : t('afterBackupHibernateNoSwap'))
+                    .replace('{need}', powerInfo.swapNeedGB || 1).replace('{have}', powerInfo.swapHaveGB || 0)
+                  break
+                default: hibernateReason = t('afterBackupHibernateNone')
+              }
+            }
             const [waitBefore, waitAfter = ''] = t('afterBackupWaitMinutes').split('{n}')
             return (
               <div className="form-group" id="after-backup">
@@ -6439,17 +6457,19 @@ function App() {
                   ].map(([v, label]) => {
                     const off = v === 'hibernate' && noHibernate
                     return (
-                      <label key={v || 'stay'} style={{display: 'flex', alignItems: 'center', gap: '8px', cursor: off ? 'not-allowed' : 'pointer', fontWeight: 'normal', marginTop: '4px', opacity: off ? 0.55 : 1}}>
+                      <label key={v || 'stay'} title={off ? hibernateReason : undefined}
+                        style={{display: 'flex', alignItems: 'center', gap: '8px', cursor: off ? 'not-allowed' : 'pointer', fontWeight: 'normal', marginTop: '4px', opacity: off ? 0.55 : 1}}>
                         <input type="radio" name="afterBackupComputer" value={v} id={`after-backup-${v || 'stay'}`}
+                          title={off ? hibernateReason : undefined}
                           checked={afterBackup === v} disabled={off} onChange={() => setAfterBackup(v)} />
-                        <span>{label}</span>
+                        <span title={off ? hibernateReason : undefined}>{label}</span>
                       </label>
                     )
                   })}
                 </div>
                 {noHibernate && (
                   <p className="sched-hint" id="after-backup-no-hibernate">
-                    {powerInfo.hibernateWhy === 'off' ? t('afterBackupHibernateOff') : t('afterBackupHibernateNone')}
+                    {hibernateReason}
                   </p>
                 )}
                 {afterBackup && (

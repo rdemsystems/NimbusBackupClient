@@ -927,6 +927,13 @@ func (a *App) StartScheduler() {
 		// The tick before, so a tick after a long gap tells that the computer
 		// slept, and woke for a set's run (battery_rule.go).
 		lastTick := time.Now()
+		// Started with the computer, the network may not be up yet: runs
+		// starting soon wait for their server (network_wait.go).
+		started := "after the app started"
+		if a.isServiceProcess {
+			started = "after the service started"
+		}
+		noteResume(lastTick, started)
 
 		for {
 			select {
@@ -1158,6 +1165,10 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 	if !mayStart {
 		return
 	}
+	// Just after the computer woke or this program started, the network may
+	// not be back yet: an automatic run waits for its server first, here in
+	// its own goroutine (network_wait.go).
+	a.waitForServerAfterWake(job, trigger)
 
 	writeDebugLog(fmt.Sprintf("Executing scheduled job: %s", job.Name))
 

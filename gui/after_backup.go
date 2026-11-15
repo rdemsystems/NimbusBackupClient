@@ -346,7 +346,8 @@ func (a *App) runAfterBackup(job ScheduledJob, p *pendingAfterBackup, wait, poll
 
 // carryOutAfterBackup puts the computer to sleep, hibernates it or shuts it
 // down. Before sleep or hibernation the wake timer is set for the next run,
-// so a set that wakes the computer still runs on time.
+// so a set that wakes the computer still runs on time, and the system's wake
+// alarm is checked to match it (syncWakeAlarm) before the call is made.
 func (a *App) carryOutAfterBackup(job ScheduledJob, action string) {
 	writeDebugLog(fmt.Sprintf("[After backup] %s: the computer %s now", job.Name, afterBackupVerb(action)))
 	LogMessage("Backup", "info", fmt.Sprintf("%s: the computer %s after the backup, as this set is set to do.", job.Name, afterBackupVerb(action)),
@@ -355,9 +356,11 @@ func (a *App) carryOutAfterBackup(job ScheduledJob, action string) {
 	switch action {
 	case afterBackupSleep:
 		a.refreshWakeTimer()
+		syncWakeAlarm()
 		err = sleepComputer()
 	case afterBackupHibernate:
 		a.refreshWakeTimer()
+		syncWakeAlarm()
 		err = hibernateComputer()
 	case afterBackupShutdown:
 		var method string
@@ -424,16 +427,27 @@ func (a *App) AfterBackupPendingForAPI() []api.AfterBackupPending {
 }
 
 // PowerActionsInfo is what the Alerts tab needs to offer the choices: whether
-// this computer can hibernate and, when not, why: "off" (turned off) or
-// "none" (no hibernate state).
+// this computer can hibernate and, when not, why, as a code the app
+// translates: "off" (turned off, Windows), "none" (no hibernate state),
+// "kernel" (turned off in the Linux kernel), "swap" (no or not enough swap
+// space: SwapNeedGB is about what is needed, SwapHaveGB what there is, 0 for
+// none) or "noresume" (no resume device set). HibernateReason is the same in
+// English.
 type PowerActionsInfo struct {
-	Hibernate    bool   `json:"hibernate"`
-	HibernateWhy string `json:"hibernateWhy"`
+	Hibernate       bool   `json:"hibernate"`
+	HibernateWhy    string `json:"hibernateWhy"`
+	HibernateReason string `json:"hibernateReason"`
+	SwapNeedGB      uint64 `json:"swapNeedGB"`
+	SwapHaveGB      uint64 `json:"swapHaveGB"`
 }
 
 // GetPowerActionsInfo reads it from this computer (the app and its service
 // are on the same one, so the app reads it itself).
 func (a *App) GetPowerActionsInfo() PowerActionsInfo {
-	ok, why := canHibernate()
-	return PowerActionsInfo{Hibernate: ok, HibernateWhy: why}
+	c := canHibernate()
+	info := PowerActionsInfo{Hibernate: c.OK, HibernateWhy: c.Why, HibernateReason: c.Reason()}
+	if c.Why == pbscommon.HibernateSwap {
+		info.SwapNeedGB, info.SwapHaveGB = c.SwapGB()
+	}
+	return info
 }

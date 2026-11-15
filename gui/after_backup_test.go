@@ -260,3 +260,22 @@ func TestAfterBackupFailureIsReported(t *testing.T) {
 		t.Errorf("no failure line in %+v", log)
 	}
 }
+
+// Before sleep and hibernation the system's wake alarm is brought in line with
+// the wake timer, before the computer is told to go (on Linux the kernel does
+// not set the hardware clock for hibernate).
+func TestAfterBackupSyncsWakeAlarmFirst(t *testing.T) {
+	newAfterBackupTest(t)
+	oldSync := syncWakeAlarm
+	t.Cleanup(func() { syncWakeAlarm = oldSync })
+	for _, action := range []string{afterBackupSleep, afterBackupHibernate} {
+		var steps []string
+		syncWakeAlarm = func() { steps = append(steps, "sync") }
+		sleepComputer = func() error { steps = append(steps, afterBackupSleep); return nil }
+		hibernateComputer = func() error { steps = append(steps, afterBackupHibernate); return nil }
+		(&App{}).carryOutAfterBackup(afterSet(action, 0, false), action)
+		if len(steps) != 2 || steps[0] != "sync" || steps[1] != action {
+			t.Errorf("%s: steps %v, want [sync %s]", action, steps, action)
+		}
+	}
+}

@@ -16,6 +16,6 @@ func HibernateComputer() error {
 }
 
 // CanHibernate: not on this system.
-func CanHibernate() (ok bool, why string) {
-	return false, HibernateNone
+func CanHibernate() HibernateCheck {
+	return HibernateCheck{Why: HibernateNone}
 }
