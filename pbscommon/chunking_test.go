@@ -2,9 +2,21 @@ package pbscommon
 
 import (
 	"bytes"
-	"crypto/rand"
+	"math/rand/v2"
 	"testing"
 )
+
+// fillRandom fills buf with pseudo random bytes from a fixed seed, so every
+// run chunks exactly the same data and a result cannot vary by chance.
+func fillRandom(buf []byte, seed uint64) {
+	r := rand.New(rand.NewPCG(seed, 0x9e3779b97f4a7c15))
+	for i := 0; i < len(buf); i += 8 {
+		v := r.Uint64()
+		for j := 0; j < 8 && i+j < len(buf); j++ {
+			buf[i+j] = byte(v >> (8 * j))
+		}
+	}
+}
 
 // TestChunkerNew verifies chunker initialization
 func TestChunkerNew(t *testing.T) {
@@ -68,7 +80,7 @@ func TestChunkerDeterministic(t *testing.T) {
 
 	// Create test data
 	testData := make([]byte, 10*1024*1024) // 10MB
-	rand.Read(testData)
+	fillRandom(testData, 1)
 
 	// Chunk the same data twice
 	chunks1 := chunkData(t, testData, avgSize)
@@ -97,7 +109,7 @@ func TestChunkerMinMaxBoundaries(t *testing.T) {
 
 	// Create data larger than max chunk size
 	testData := make([]byte, maxSize+1024*1024)
-	rand.Read(testData)
+	fillRandom(testData, 2)
 
 	chunks := chunkData(t, testData, avgSize)
 
@@ -118,12 +130,12 @@ func TestChunkerContentAwareness(t *testing.T) {
 	// Create data with a recognizable pattern in the middle
 	data1 := make([]byte, 5*1024*1024)
 	data2 := make([]byte, 5*1024*1024)
-	rand.Read(data1)
-	rand.Read(data2)
+	fillRandom(data1, 3)
+	fillRandom(data2, 4)
 
 	// Insert same 1MB block in the middle of both
 	commonBlock := make([]byte, 1024*1024)
-	rand.Read(commonBlock)
+	fillRandom(commonBlock, 5)
 
 	copy(data1[2*1024*1024:3*1024*1024], commonBlock)
 	copy(data2[2*1024*1024:3*1024*1024], commonBlock)
@@ -177,37 +189,46 @@ func TestChunkerIncrementalScanning(t *testing.T) {
 
 	// Full scan
 	testData := make([]byte, 5*1024*1024)
-	rand.Read(testData)
+	fillRandom(testData, 6)
 	chunksFullScan := chunkData(t, testData, avgSize)
 
-	// Incremental scan (feed data in 100KB chunks)
+	// Incremental scan (feed data in 100KB pieces). After a boundary the
+	// rest of the piece is fed again, and a chunk's size is the bytes fed
+	// since the last boundary: Scan has already reset c.chunk_size to 0.
 	c := &Chunker{}
 	c.New(avgSize)
 	chunksIncremental := []uint64{}
 
-	chunkSize := 100 * 1024
-	for offset := 0; offset < len(testData); {
-		end := offset + chunkSize
-		if end > len(testData) {
-			end = len(testData)
+	pieceSize := 100 * 1024
+	var pending uint64 // bytes fed since the last boundary
+	for offset := 0; offset < len(testData); offset += pieceSize {
+		piece := testData[offset:min(offset+pieceSize, len(testData))]
+		for len(piece) > 0 {
+			pos := c.Scan(piece)
+			if pos == 0 {
+				pending += uint64(len(piece))
+				break
+			}
+			chunksIncremental = append(chunksIncremental, pending+pos)
+			pending = 0
+			piece = piece[pos:]
 		}
-
-		pos := c.Scan(testData[offset:end])
-		if pos > 0 {
-			chunksIncremental = append(chunksIncremental, c.chunk_size)
-		}
-
-		offset = end
 	}
 
-	// Results should be similar (chunking is independent of how data is fed)
 	t.Logf("Full scan: %d chunks", len(chunksFullScan))
 	t.Logf("Incremental: %d chunks", len(chunksIncremental))
 
-	// Allow some tolerance due to boundary effects
-	if abs(len(chunksFullScan)-len(chunksIncremental)) > 2 {
-		t.Errorf("chunk counts differ significantly: full=%d, incremental=%d",
+	// The chunker keeps its rolling state between calls, so how the data is
+	// fed must not move a single boundary.
+	if len(chunksFullScan) != len(chunksIncremental) {
+		t.Fatalf("chunk counts differ: full=%d, incremental=%d",
 			len(chunksFullScan), len(chunksIncremental))
+	}
+	for i := range chunksFullScan {
+		if chunksFullScan[i] != chunksIncremental[i] {
+			t.Errorf("chunk %d differs: full=%d, incremental=%d",
+				i, chunksFullScan[i], chunksIncremental[i])
+		}
 	}
 }
 
@@ -217,7 +238,7 @@ func TestChunkerAverageSize(t *testing.T) {
 
 	// Create 100MB of test data
 	testData := make([]byte, 100*1024*1024)
-	rand.Read(testData)
+	fillRandom(testData, 7)
 
 	chunks := chunkData(t, testData, avgSize)
 
@@ -303,13 +324,6 @@ func chunkData(t *testing.T, data []byte, avgSize uint64) []uint64 {
 }
 
 // Helper functions
-func abs(n int) int {
-	if n < 0 {
-		return -n
-	}
-	return n
-}
-
 func abs64(n int64) int64 {
 	if n < 0 {
 		return -n
@@ -329,7 +343,7 @@ func BenchmarkChunker4MB(b *testing.B) {
 func benchmarkChunker(b *testing.B, avgSize uint64) {
 	// Create 10MB test data
 	testData := make([]byte, 10*1024*1024)
-	rand.Read(testData)
+	fillRandom(testData, 8)
 
 	b.ResetTimer()
 	b.SetBytes(int64(len(testData)))
