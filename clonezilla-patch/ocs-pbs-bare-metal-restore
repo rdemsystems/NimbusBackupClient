@@ -140,25 +140,56 @@ dia() {
   "$DIA" "${a[@]}"
 }
 # menu_hw TEXT TAG DESC [TAG DESC ...]: height, width and list height for a
-# menu with TEXT above these entries.
+# menu with TEXT above these entries. whiptail shows an entry as its tag, a
+# space and its text in a list 14 columns narrower than the box, or 19 with a
+# scroll bar (measured on the 3.3.3 live system), and cuts off the rest: the
+# box is made wide enough for the longest entry (MENU_PAD, MENU_PAD_SCROLL
+# with a column to spare), up to the screen's width less 4.
+MENU_PAD=16
+MENU_PAD_SCROLL=21
 menu_hw() {
-  local text="$1" w=$BOXW wide=0 n=0 l h
+  local text="$1" w=$BOXW wide=0 n=0 l h pad=$MENU_PAD
   shift
   while [ $# -ge 2 ]; do
     [ $(( ${#1} + ${#2} )) -gt "$wide" ] && wide=$(( ${#1} + ${#2} ))
     n=$((n + 1))
     shift 2
   done
-  [ $((wide + 12)) -gt "$w" ] && w=$((wide + 12))
-  [ "$w" -gt $((SCRCOLS - 4)) ] && w=$((SCRCOLS - 4))
   l=$n
   [ "$l" -gt 12 ] && l=12
+  [ "$l" -lt "$n" ] && pad=$MENU_PAD_SCROLL
+  [ $((wide + pad)) -gt "$w" ] && w=$((wide + pad))
+  [ "$w" -gt $((SCRCOLS - 4)) ] && w=$((SCRCOLS - 4))
   h=$(( $(text_rows "$text" "$w") + l + 8 ))
   while [ "$h" -gt $((SCRLINES - 2)) ] && [ "$l" -gt 3 ]; do
     l=$((l - 1))
     h=$((h - 1))
   done
+  # A list made shorter on a small screen scrolls: room for the scroll bar.
+  if [ "$l" -lt "$n" ] && [ "$pad" = "$MENU_PAD" ] && [ $((wide + MENU_PAD_SCROLL)) -gt "$w" ]; then
+    w=$((wide + MENU_PAD_SCROLL))
+    [ "$w" -gt $((SCRCOLS - 4)) ] && w=$((SCRCOLS - 4))
+  fi
   echo "$h $w $l"
+}
+# cut_words TEXT MAX: TEXT, or when it is longer than MAX, as much of it as
+# fits with "..." after it, cut where a word ends (at a space, - or _) when
+# that keeps at least half of it.
+cut_words() {
+  local s="$1" m="$2" p q
+  if [ "${#s}" -le "$m" ]; then printf '%s' "$s"; return 0; fi
+  p="${s:0:$((m - 3))}"
+  case "${s:$((m - 3)):1}" in
+    " "|-|_) ;;
+    *)
+      q="${p%[ _-]*}"
+      [ "${#q}" -ge $(( (m - 3) / 2 )) ] && p="$q"
+      ;;
+  esac
+  while [ -n "$p" ]; do
+    case "${p: -1}" in " "|-|_|,|.|:|";"|"(") p="${p%?}" ;; *) break ;; esac
+  done
+  printf '%s...' "$p"
 }
 # Button names for a yes/no box: whiptail and dialog name the option apart.
 yes_no_labels() {
@@ -225,7 +256,9 @@ release_image() {
     losetup -d "$lp" >/dev/null 2>&1
   done
   partx -d "$NBDDEV" >/dev/null 2>&1
-  # Then pbsnbd itself, and the NBD device disconnected.
+  # Then pbsnbd itself, and the NBD device disconnected. The saved sign-in
+  # (with the password) goes with it.
+  rm -f "$CRED_FILE"
   if pgrep -x pbsnbd >/dev/null 2>&1; then
     echo "Stopping the earlier connection to the backup (pbsnbd, PID: $(pgrep -x pbsnbd | tr '\n' ' '))..."
     pkill -INT -x pbsnbd 2>/dev/null
@@ -267,7 +300,7 @@ trap on_exit EXIT
 stopped() {
   local c t h w l
   echo "$STOPPED"
-  rm -f "$SHRINK_CACHE"
+  rm -f "$SHRINK_CACHE" "$CRED_FILE"
   if [ "$RELEASE_ON_EXIT" = "1" ]; then
     echo "Letting go of the backup's disk image ..."
     release_image
@@ -288,7 +321,11 @@ stopped() {
       rm -f "$DIA_TMP" "$LIST_TMP" "$LIST_ERR"
       clear
       # The network is up already: the new run skips looking for it again.
-      PBSBMR_RESTART=1 exec "$SELF" "${ARGS[@]}"
+      # The saved sign-in file is gone, so the server, user name and
+      # datastore are handed over to fill in the boxes again (never the
+      # password, which is always asked for).
+      PBSBMR_RESTART=1 PBSBMR_SERVER="${PBS_SERVER:-$SAVED_SERVER}" PBSBMR_USER="${PBS_USER:-$SAVED_USER}" \
+      PBSBMR_DSNS="${PBS_DS_NS:-$SAVED_DSNS}" exec "$SELF" "${ARGS[@]}"
       ;;
     b)
       clear
@@ -315,6 +352,10 @@ comment_of_line() {
   esac
 }
 
+# The sign-in, for filling in the boxes of the next run. It holds the
+# password, so it goes whenever the wizard stops or lets go of the backup
+# (release_image); "Start again" hands over the rest (PBSBMR_SERVER,
+# PBSBMR_USER, PBSBMR_DSNS).
 CRED_FILE="/tmp/pbsnbd-credentials"
 save_credentials() {
   {
@@ -326,7 +367,7 @@ save_credentials() {
   chmod 600 "$CRED_FILE"
 }
 load_credentials() {
-  SAVED_SERVER=""; SAVED_USER=""; SAVED_PASS=""; SAVED_DSNS=""
+  SAVED_SERVER="${PBSBMR_SERVER:-}"; SAVED_USER="${PBSBMR_USER:-}"; SAVED_PASS=""; SAVED_DSNS="${PBSBMR_DSNS:-}"
   [ -f "$CRED_FILE" ] || return 0
   while IFS='|' read -r key value; do
     [ -n "$key" ] || continue
@@ -589,7 +630,7 @@ echo "> Listing backups on ${PBS_SERVER} (datastore=${PBS_DS}${PBS_NS:+, namespa
 KEY_TRIES=1
 while ! PBS_PASSWORD="$PBS_PASS" PBS_ENCRYPTION_PASSWORD="$KEYPASS" \
      "$PBSNBD" -baseurl "$PBS_SERVER" -username "$PBS_USER" \
-     -datastore "$PBS_DS" $NS_OPT "${KEY_ARGS[@]}" -list > "$LIST_TMP" 2> "$LIST_ERR"; do
+     -datastore "$PBS_DS" $NS_OPT "${KEY_ARGS[@]}" -list -sizes > "$LIST_TMP" 2> "$LIST_ERR"; do
   if [ "$KEY_PROTECTED" = "1" ] && grep -qi 'wrong password' "$LIST_ERR"; then
     if [ "$KEY_TRIES" -ge 3 ]; then
       dia --backtitle "$msg_nchc_free_software_labs" --title "$KEY_TITLE" \
@@ -615,6 +656,20 @@ while ! PBS_PASSWORD="$PBS_PASS" PBS_ENCRYPTION_PASSWORD="$KEYPASS" \
   --msgbox "$T" $(box_hw "$T") $DIA_ESC
   stopped
 done
+# -sizes starts each line with the image's size in bytes and a tab: the sizes
+# are kept apart (FSIZE, by path) for the disk image menu, and LIST_TMP keeps
+# the lines as they were.
+declare -A FSIZE
+SIZE_RE="^([0-9]+)"$'\t'"(.*)$"
+while IFS= read -r line; do
+  if [[ "$line" =~ $SIZE_RE ]]; then
+    FSIZE[$(path_without_comment "${BASH_REMATCH[2]}")]="${BASH_REMATCH[1]}"
+    printf '%s\n' "${BASH_REMATCH[2]}"
+  else
+    printf '%s\n' "$line"
+  fi
+done < "$LIST_TMP" > "$LIST_TMP.lines"
+mv -f "$LIST_TMP.lines" "$LIST_TMP"
 # The comment of each backup group (a Salvanza machine backup puts the
 # machine's name there), shown next to it: "vm/9000198  Deepthought". Not
 # needed: without it (an older pbsnbd, an error) the menu shows the names only.
@@ -655,22 +710,43 @@ for kdt in "${KDT_ORDER[@]}"; do
     n=$((n+1))
   fi
 done
+# Each machine's name: the group's comment, else a snapshot comment from the
+# list, if any, on one line.
+declare -A KCOMMENT
+for key in "${KEYS[@]}"; do
+  comment="${GCOMMENT[$key]}"
+  if [ -z "$comment" ]; then
+    while IFS= read -r line; do
+      r2="${line#*/}"
+      [ "${line%%/*}/${r2%%/*}" = "$key" ] || continue
+      comment="$(comment_of_line "$line")"
+      break
+    done < "$LIST_TMP"
+  fi
+  KCOMMENT[$key]="$(tr -s '[:space:]' ' ' <<<"$comment" | sed -E 's/^ //; s/ $//')"
+done
 if [ "$n" -gt 1 ]; then
-  declare -a MENU1
+  # Named machines first, by name, then the rest by type and ID (numbers in
+  # numeric order). The tags number them as shown; SORTED maps a tag back.
+  declare -a MENU1 SORTED
+  mapfile -t SORTED < <(for key in "${KEYS[@]}"; do
+      if [ -n "${KCOMMENT[$key]}" ]; then
+        printf '0\t%s\t%s\n' "${KCOMMENT[$key],,}" "$key"
+      else
+        printf '1\t%s\t%s\n' "$key" "$key"
+      fi
+    done | sort -t $'\t' -k1,1n -k2,2V -k3,3V | cut -f3)
+  # The IDs padded to the longest, so the names line up; a name cut at a
+  # word to fit the screen (the tag, the ID and the menu's own frame).
+  IDW=0
+  for key in "${SORTED[@]}"; do [ "${#key}" -gt "$IDW" ] && IDW=${#key}; done
+  NAMEW=$(( SCRCOLS - 4 - MENU_PAD_SCROLL - ${#n} - IDW - 2 ))
+  [ "$NAMEW" -gt 50 ] && NAMEW=50
+  [ "$NAMEW" -lt 12 ] && NAMEW=12
   i=1
-  for key in "${KEYS[@]}"; do
-    # The group's comment; else a snapshot comment from the list, if any.
-    comment="${GCOMMENT[$key]}"
-    if [ -z "$comment" ]; then
-      while IFS= read -r line; do
-        r2="${line#*/}"
-        [ "${line%%/*}/${r2%%/*}" = "$key" ] || continue
-        comment="$(comment_of_line "$line")"
-        break
-      done < "$LIST_TMP"
-    fi
+  for key in "${SORTED[@]}"; do
     label="$key"
-    [ -n "$comment" ] && label="$key  $(cut -c1-40 <<<"$comment")"
+    [ -n "${KCOMMENT[$key]}" ] && label="$(printf '%-*s  %s' "$IDW" "$key" "$(cut_words "${KCOMMENT[$key]}" "$NAMEW")")"
     MENU1+=("$i" "$label")
     i=$((i+1))
   done
@@ -681,14 +757,14 @@ if [ "$n" -gt 1 ]; then
   2> "$DIA_TMP"
   CHOICE1="$(cat "$DIA_TMP")"
   [ -n "$CHOICE1" ] || stopped
-  KEY="${KEYS[$((CHOICE1-1))]}"
+  KEY="${SORTED[$((CHOICE1-1))]}"
 else
   KEY="${KEYS[0]}"
 fi
 echo "Selected backup ID : $KEY"
 # The machine as the dialogs name it: "vm/9000198 (Deepthought)".
 KEY_NAME="$KEY"
-[ -n "${GCOMMENT[$KEY]}" ] && KEY_NAME="$KEY ($(cut -c1-40 <<<"${GCOMMENT[$KEY]}"))"
+[ -n "${KCOMMENT[$KEY]}" ] && KEY_NAME="$KEY ($(cut_words "${KCOMMENT[$KEY]}" 40))"
 
 declare -a MENU2
 declare -a DATES2
@@ -720,19 +796,33 @@ fi
 DT_NAME="$(when "$DT")"
 echo "Selected backup    : $KEY/$DT"
 
+# The disk images of the chosen backup in their order (drive-sata0 before
+# drive-scsi0, drive-scsi2 before drive-scsi10), each with its size.
 declare -a MENU3
 declare -a LINES3
+mapfile -t LINES3 < <(while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    r2="${line#*/}"; f2="${r2%%/*}"; r3="${r2#*/}"; dt="${r3%%/*}"
+    [ "${line%%/*}/${f2}" = "$KEY" ] || continue
+    [ "$dt" = "$DT" ] || continue
+    printf '%s\t%s\n' "$(path_without_comment "${r3#*/}")" "$line"
+  done < "$LIST_TMP" | sort -t $'\t' -k1,1V | cut -f2-)
+FILEW=0
+for line in "${LINES3[@]}"; do
+  file="$(path_without_comment "${line#*/*/*/}")"
+  [ "${#file}" -gt "$FILEW" ] && FILEW=${#file}
+done
 i=1
-while IFS= read -r line; do
-  [ -n "$line" ] || continue
-  r2="${line#*/}"; f2="${r2%%/*}"; r3="${r2#*/}"; dt="${r3%%/*}"
-  [ "${line%%/*}/${f2}" = "$KEY" ] || continue
-  [ "$dt" = "$DT" ] || continue
-  file="$(path_without_comment "${r3#*/}")"
-  MENU3+=("$i" "$file")
-  LINES3+=("$line")
+for line in "${LINES3[@]}"; do
+  file="$(path_without_comment "${line#*/*/*/}")"
+  sz="${FSIZE[$(path_without_comment "$line")]}"
+  if [ -n "$sz" ] && [ "$sz" -gt 0 ] 2>/dev/null; then
+    MENU3+=("$i" "$(printf '%-*s  %s' "$FILEW" "$file" "$(gib "$sz")")")
+  else
+    MENU3+=("$i" "$file")
+  fi
   i=$((i+1))
-done < "$LIST_TMP"
+done
 num3=$((i-1))
 if [ "$num3" -gt 1 ]; then
   T="The backup of ${KEY_NAME} from ${DT_NAME} holds more than one disk image. Choose the one to restore:"
@@ -760,19 +850,43 @@ RELEASE_ON_EXIT=1
 
 # /dev/nbdN exists as soon as the nbd module is loaded, so wait for it to
 # report a size. pbsnbd exits without attaching when it cannot read the image
-# (wrong or missing encryption key, unreachable server).
-WAITED=0
-while [ "$WAITED" -lt 40 ]; do
+# (wrong or missing encryption key, unreachable server). A busy server can
+# take 20 s or more before pbsnbd has opened the backup (seen 15/11/2026, when
+# a wait of 20 s stopped pbsnbd while it was still fetching), so the wait goes
+# on while pbsnbd runs and has logged no error, for up to 2 minutes, and ends
+# at once when it exits or logs one.
+PBS_HOST="${PBS_SERVER#https://}"
+PBS_HOST="${PBS_HOST%%/*}"
+ATTACH_MAX=120
+# attach_error: pbsnbd has logged a failure: a Go panic, one of its own
+# "pbsnbd: " messages (it exits after those) or a refused sign-in.
+attach_error() { grep -qE '^panic: |^pbsnbd: |^ticket login failed' "$ATTACH_LOG" 2>/dev/null; }
+T="Connecting to the backup on ${PBS_HOST} ...\n\n${ATTACH_MAX} s so far. A busy server can take a minute or more."
+ATTACH_HW="$(box_hw "$T")"
+ATTACH_T0="$(date +%s)"
+SHOWN=-1
+while true; do
   [ "$(blockdev --getsize64 "$NBDDEV" 2>/dev/null || echo 0)" -gt 0 ] && break
   pgrep -x pbsnbd >/dev/null 2>&1 || break
+  attach_error && break
+  WAITED=$(( $(date +%s) - ATTACH_T0 ))
+  [ "$WAITED" -ge "$ATTACH_MAX" ] && break
+  if [ "$WAITED" != "$SHOWN" ]; then
+    SHOWN="$WAITED"
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - open the backup" \
+    --infobox "Connecting to the backup on ${PBS_HOST} ...\n\n${WAITED} s so far. A busy server can take a minute or more." $ATTACH_HW
+  fi
   sleep 0.5
-  WAITED=$((WAITED + 1))
 done
 if [ "$(blockdev --getsize64 "$NBDDEV" 2>/dev/null || echo 0)" -le 0 ]; then
   # A plain explanation, from what pbsnbd logged (never its Go stack trace).
   ERRLINE="$(readable "$ATTACH_LOG" | collapse | grep -iE 'error|fail|cannot|could not|denied|refused|busy|invalid|wrong|timeout|unable' | head -n 1 | cut -c1-200)"
   [ -n "$ERRLINE" ] || ERRLINE="$(readable "$ATTACH_LOG" | collapse | head -n 1 | cut -c1-200)"
-  if grep -qiE 'resource busy|device busy|is busy|already in use|ebusy' "$ATTACH_LOG" 2>/dev/null; then
+  if pgrep -x pbsnbd >/dev/null 2>&1 && ! attach_error; then
+    # Still at it after the whole wait: no error to show.
+    ERRLINE=""
+    WHY="The backup server at ${PBS_HOST} did not open the backup within $((ATTACH_MAX / 60)) minutes. It may be busy, for example with a backup, verify or garbage collection job.\n\nStart the restore again, or wait until the server is less busy."
+  elif grep -qiE 'resource busy|device busy|is busy|already in use|ebusy' "$ATTACH_LOG" 2>/dev/null; then
     WHY="The device the backup is read through (${NBDDEV}) is still held by an earlier attempt.\n\nStart the restore again. If this happens again, restart the computer from the restore stick and start the restore again."
   elif [ "${#KEY_ARGS[@]}" -gt 0 ] && grep -qiE 'decrypt|cipher|message authentication|encryption|key ?file|fingerprint|wrong key' "$ATTACH_LOG" 2>/dev/null; then
     WHY="The backup could not be decrypted with the chosen key file.\n\nStart the restore again and choose the key file these backups were made with."
@@ -839,7 +953,11 @@ done
 # stick is not offered: "Not offered as the target: /dev/sdb (0.5 GiB) ...".
 NOT_ELIGIBLE=""
 for d in $BOOT_DISKS; do
-  what="the stick this restore system started from"
+  # A CD or DVD drive (or a VM's virtual one) is a disc, anything else a stick.
+  case "$d" in
+    /dev/sr*) what="the disc this restore system started from" ;;
+    *) what="the stick this restore system started from" ;;
+  esac
   case "$VENTOY_DISKS" in *" $d "*) what="the stick this restore system started from (Ventoy)" ;; esac
   sz="$(disk_size "$d")"
   NOT_ELIGIBLE+="\n  $d  (${sz:-unknown size})  $what"
@@ -902,35 +1020,112 @@ SHRINK=0
 NOCOLLAPSE=""
 case "$(basename "$DIA")" in dialog) NOCOLLAPSE="--no-collapse" ;; esac
 # The plan dialogs: about 100 columns, less on a narrow screen, so the box
-# keeps a margin instead of filling the screen edge to edge.
-PLANW=$(( $(tput cols 2>/dev/null || echo 108) - 8 ))
+# keeps a margin instead of filling the screen edge to edge, and never wider
+# than the screen less 4 columns.
+PLANW=$(( SCRCOLS - 8 ))
 [ "$PLANW" -gt 100 ] && PLANW=100
 [ "$PLANW" -lt 72 ] && PLANW=72
-# plan_h TEXT: rows for a box PLANW wide holding TEXT. whiptail re-sizes a
-# box whose height is 0 to fit its longest line, which overrides the width,
-# so the height is worked out here.
-plan_rows() { printf '%b\n' "$1" | awk -v w=$((PLANW - 6)) '{ l = length($0); n += (l > w) ? int((l + w - 1) / w) + 1 : 1 } END { print n }'; }
-plan_max() { echo $(( $(tput lines 2>/dev/null || echo 40) - 2 )); }
-plan_h() {
-  local h max
-  h=$(( $(plan_rows "$1") + 5 ))
-  max=$(plan_max)
-  [ "$h" -gt "$max" ] && h=$max
-  echo "$h"
+[ "$PLANW" -gt $((SCRCOLS - 4)) ] && PLANW=$((SCRCOLS - 4))
+# The shrink tool's plan table is wrapped to a little less than the box's
+# text width, so its columns stay in line and plan_wrap leaves it alone.
+PLAN_COLS=$((PLANW - 8))
+# None of the plan boxes scrolls. whiptail's --scrolltext puts the focus in
+# the text, with no button highlighted: Enter then does nothing until Tab is
+# pressed (seen at 800x600, and the same in a box with only OK). A text too
+# tall for the screen is shown in pages instead (plan_msg), and a question
+# under such a text gets a small box of its own (plan_ask).
+# plan_wrap TEXT: TEXT with each \n made a new line and wrapped for a box
+# PLANW wide. whiptail wraps at the box's width less 4; at less 6 here it
+# never wraps a line again, so the rows counted are the rows it shows.
+plan_wrap() { printf '%b\n' "$1" | fold -s -w $((PLANW - 6)); }
+# nlines TEXT: the lines in TEXT, as it is (already wrapped).
+nlines() { printf '%s\n' "$1" | wc -l; }
+# BOX_EXTRA: the rows a message or Yes/No box needs besides its text: with
+# fewer, whiptail 0.52 cut off the last line of the text.
+BOX_EXTRA=6
+# plan_max: the most rows a plan box may have: the screen less 4, so its
+# title stays clear of the back title on the top line (at 800x600, 37 rows,
+# a box of the screen less 2 touched it).
+plan_max() { echo $(( SCRLINES - 4 )); }
+# plan_fits TEXT: true when TEXT fits in one plan box.
+plan_fits() { [ $(( $(plan_wrap "$1" | wc -l) + BOX_EXTRA )) -le "$(plan_max)" ]; }
+# plan_pages TEXT: TEXT wrapped (plan_wrap) and cut into pages that each fit
+# a plan box, separated by form feeds. A page ends at a blank line when there
+# is one in its lower half, and no page starts with a blank line.
+plan_pages() {
+  local cap=$(( $(plan_max) - BOX_EXTRA ))
+  [ "$cap" -lt 5 ] && cap=5
+  plan_wrap "$1" | awk -v cap="$cap" '
+    { line[NR] = $0 }
+    END {
+      n = NR; i = 1; first = 1
+      while (i <= n) {
+        while (i <= n && line[i] == "") i++
+        if (i > n) break
+        last = i + cap - 1
+        if (last >= n) last = n
+        else {
+          for (j = last + 1; j > i + cap / 2; j--) if (line[j] == "") break
+          if (j > i + cap / 2) last = j - 1
+        }
+        while (last > i && line[last] == "") last--
+        if (!first) printf "\f"
+        first = 0
+        for (k = i; k <= last; k++) print line[k]
+        i = last + 1
+      }
+    }'
 }
-# plan_scroll TEXT: whiptail's --scrolltext when TEXT is taller than the
-# screen, so the rest of it can be scrolled to instead of being cut off.
-plan_scroll() {
+# ok_label LABEL: the options that name the button of a message box.
+ok_label() {
   case "$(basename "$DIA")" in
-    whiptail) [ $(( $(plan_rows "$1") + 5 )) -gt "$(plan_max)" ] && echo "--scrolltext" ;;
+    dialog) printf '%s\n' --ok-label "$1" ;;
+    *)      printf '%s\n' --ok-button "$1" ;;
   esac
+}
+# plan_msg TITLE TEXT [LABEL]: TEXT in a message box PLANW wide whose button
+# is LABEL (OK when not given). A TEXT too tall for the screen is shown in
+# pages, "(1 of 2)" after the title, each page but the last with a Next
+# button. Returns 1 when a page is closed with Esc.
+plan_msg() {
+  local title="$1" label="${3:-OK}" pages p i n t
+  local -a lbl
+  mapfile -d $'\f' -t pages < <(plan_pages "$2")
+  n=${#pages[@]}
+  for ((i = 0; i < n; i++)); do
+    p="${pages[$i]%$'\n'}"
+    mapfile -t lbl < <(ok_label "$label")
+    [ $((i + 1)) -lt "$n" ] && mapfile -t lbl < <(ok_label "Next")
+    t="$title"
+    [ "$n" -gt 1 ] && t="$title ($((i + 1)) of $n)"
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$t" $NOCOLLAPSE "${lbl[@]}" \
+    --msgbox "$p" $(( $(nlines "$p") + BOX_EXTRA )) "$PLANW" $DIA_ESC || return 1
+  done
   return 0
+}
+# plan_ask TITLE PLAN QUESTION: PLAN, a line, then QUESTION, in one Yes/No
+# box when that fits on the screen. When it does not, PLAN comes first in a
+# box of its own (plan_msg, its button Next), then QUESTION in a small Yes/No
+# box with Yes highlighted, so Enter always has a button. Returns 0 for Yes.
+plan_ask() {
+  local title="$1" plan="$2" q="$3" t
+  t="${plan}\n\n${SEP}\n${q}"
+  if plan_fits "$t"; then
+    t="$(plan_wrap "$t")"
+    dia --backtitle "$msg_nchc_free_software_labs" --title "$title" $NOCOLLAPSE \
+    --yesno "$t" $(( $(nlines "$t") + BOX_EXTRA )) "$PLANW"
+    return
+  fi
+  plan_msg "$title" "$plan" "Next" || return 1
+  dia --backtitle "$msg_nchc_free_software_labs" --title "$title" \
+  --yesno "$q" $(box_hw "$q")
 }
 # A line between the plan and the question under it.
 SEP="$(printf '%*s' $((PLANW - 8)) '' | tr ' ' '-')"
 SCRATCH="/tmp/pbs-shrink"     # RAM; a partition on another disk when that is too small
 SCRATCH_MNT=""
 SCRATCH_DEV=""                # the partition chosen for scratch space
+SCRATCH_FREE_MB=""            # its free space as the scratch space menu showed it
 NEED_MB=""                    # the scratch space the plan needs, from the tool
 # What the backup is, for the key of the shrink tool's check cache: another
 # backup never meets the results worked out for this one.
@@ -945,8 +1140,7 @@ no_scratch() {
   local t need="at least $(commas "$NEED_MB") MB"
   [ -n "$NEED_MB" ] || need="enough"
   t="${1:+$1\n\n}Without suitable scratch space this restore cannot be done automatically onto the $(gib "$TGT_BYTES") disk. Nothing has been written to it.\n\nWhat you can do instead:\n\na) Start the restore again with a USB stick or another disk that has ${need} free (exFAT, NTFS or ext4). It is only used during the restore, and nothing else on it is touched.\n\nb) Restore onto a disk of at least $(gib "$SRC_BYTES"), the size of the backed up disk. That needs no scratch space.\n\nc) Install ${OSNAME} and the Salvanza backup client on this disk, then use the app's Restore page to open the disk image from this backup and restore your folders and files from it. Programs must be reinstalled, and the disk and ${OSNAME} get new identities.\n\nPress OK to stop. The backup itself is not changed."
-  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - no scratch space" $(plan_scroll "$t") \
-  --msgbox "$t" "$(plan_h "$t")" "$PLANW" $DIA_ESC
+  plan_msg "$TITLE - no scratch space" "$t"
   stopped
 }
 
@@ -957,18 +1151,56 @@ no_scratch() {
 # choose from yet (a stick just plugged in may not be seen yet), the user can
 # look again or stop; on Stop, or on Cancel, the wizard stops through
 # no_scratch.
+# part_free DEV FS: the free space on partition DEV (file system FS) in bytes,
+# or nothing when it cannot be read. A partition that is not mounted is
+# mounted read-only for a moment, with no journal or log replayed, so nothing
+# is written to it.
+part_free() {
+  local m opts dir=/run/pbs-scratch-probe b=""
+  m="$(findmnt -rno TARGET -S "$1" 2>/dev/null | head -n 1)"
+  if [ -n "$m" ]; then
+    df -B1 --output=avail "$m" 2>/dev/null | tail -n 1 | tr -d ' '
+    return 0
+  fi
+  case "$2" in
+    ext2|ext3|ext4) opts=ro,noload ;;
+    xfs) opts=ro,norecovery ;;
+    btrfs) opts=ro,rescue=nologreplay ;;
+    *) opts=ro ;;
+  esac
+  mkdir -p "$dir"
+  if mount -o "$opts" "$1" "$dir" >/dev/null 2>&1; then
+    b="$(df -B1 --output=avail "$dir" 2>/dev/null | tail -n 1 | tr -d ' ')"
+    umount "$dir" >/dev/null 2>&1 || umount -l "$dir" >/dev/null 2>&1
+  fi
+  rmdir "$dir" 2>/dev/null
+  printf '%s' "$b"
+}
+# fs_name FS: a file system type as the boxes name it.
+fs_name() {
+  case "$1" in
+    vfat) echo FAT ;; exfat) echo exFAT ;; ntfs) echo NTFS ;; xfs) echo XFS ;;
+    *) echo "$1" ;;
+  esac
+}
 pick_scratch() {
-  local menu devs i n fs pk c dev t lbl
+  local menu devs frees i n fs pk c dev t lbl sz fr
   # A stick plugged in just before Yes: give the system a moment to see it.
   sleep 2
   udevadm settle --timeout=10 >/dev/null 2>&1
   while true; do
-    menu=(); devs=(); i=1
+    menu=(); devs=(); frees=(); i=1
     while read -r n fs pk; do
       [ -n "$fs" ] || continue
       case "$fs" in ext2|ext3|ext4|xfs|btrfs|ntfs|exfat|vfat) ;; *) continue ;; esac
       case "$pk" in "$TARGET"|/dev/nbd*|/dev/loop*|/dev/sr*|/dev/zram*|"") continue ;; esac
-      devs+=("$n"); menu+=("$i" "$n  ($fs, $(lsblk -dno SIZE "$n" | tr -d ' ')$(case "$VENTOY_DISKS" in *" $pk "*) echo ', the restore stick' ;; esac))")
+      # "/dev/sdb1  ext4, 16 GiB, 15,182 MB free": the free space in MB, as
+      # the plan and the needed space are given (MB of 1,048,576 bytes, as
+      # everywhere in the wizard and the shrink tool).
+      sz="$(lsblk -bdno SIZE "$n" 2>/dev/null | tr -d ' ')"
+      fr="$(part_free "$n" "$fs")"
+      [ -n "$fr" ] && fr=$(( fr / 1048576 ))
+      devs+=("$n"); frees+=("$fr"); menu+=("$i" "$n  $(fs_name "$fs")${sz:+, $(gib "$sz")}${fr:+, $(commas "$fr") MB free}$(case "$VENTOY_DISKS" in *" $pk "*) echo ', the restore stick' ;; esac)")
       i=$((i+1))
     done < <(lsblk -lnpo NAME,FSTYPE,PKNAME 2>/dev/null)
     if [ "${#devs[@]}" -eq 0 ]; then
@@ -996,11 +1228,11 @@ pick_scratch() {
       SCRATCH_MNT=/mnt/pbs-scratch
       SCRATCH=/mnt/pbs-scratch/pbs-shrink-scratch
       SCRATCH_DEV="$dev"
+      SCRATCH_FREE_MB="${frees[$((c-1))]}"
       return 0
     fi
     t="${dev} could not be opened (mounted), so it cannot be used for scratch space. The system said:\n\n$(tail -n 2 /tmp/pbs-scratch-mount.log | cut -c1-150)\n\nNothing has been written to it, or to ${TARGET}.\n\nYou can:\n\na) Choose another partition, or plug in another USB stick and choose it.\n\nb) Use a stick formatted as exFAT, NTFS or ext4. An NTFS disk from a Windows computer that was not shut down fully (Fast Startup or hibernation) cannot be used until Windows is shut down fully.\n\nPress OK to choose again."
-    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - scratch space" \
-    --msgbox "$t" "$(plan_h "$t")" "$PLANW" $DIA_ESC
+    plan_msg "$TITLE - scratch space" "$t"
     udevadm settle --timeout=10 >/dev/null 2>&1
   done
 }
@@ -1014,33 +1246,31 @@ if [ -n "$SRC_BYTES" ] && [ -n "$TGT_BYTES" ] && [ "$SRC_BYTES" -gt "$TGT_BYTES"
     if [ "$PASS" = "1" ]; then
       T="The new disk ${TARGET} ($(gib "$TGT_BYTES")) is smaller than the backed up disk ($(gib "$SRC_BYTES")).\n\nChecking whether the data fits on it. This reads the backup and takes about a minute. Nothing is written yet."
     else
-      SFREE="$(df -Pk "${SCRATCH_MNT:-/tmp}" 2>/dev/null | awk 'NR==2{print int($4/1024)}')"
-      T="Checking the scratch space on ${SCRATCH_DEV:-the chosen partition}${SFREE:+ ($(commas "$SFREE") MB free)} ..."
+      # The free space the scratch space menu showed for it, so the two agree.
+      T="Checking the scratch space on ${SCRATCH_DEV:-the chosen partition}${SCRATCH_FREE_MB:+ ($(commas "$SCRATCH_FREE_MB") MB free)} ..."
     fi
     PASS=$((PASS + 1))
     dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - smaller disk" \
     --infobox "$T" $(box_hw "$T")
-    PLAN="$("$SHRINK_TOOL" -n -k "$SHRINK_ID" -c "$SCRATCH" "$NBDDEV" "$TARGET" 2>&1)"
+    PLAN="$(PBS_SHRINK_COLS="$PLAN_COLS" "$SHRINK_TOOL" -n -k "$SHRINK_ID" -c "$SCRATCH" "$NBDDEV" "$TARGET" 2>&1)"
     PRC=$?
     echo "$PLAN" >> "${ocs_log_dir}/pbs-shrink-plan.log"
     # The scratch space needed, from the tool's last line when it is short.
     NEED_MB="$(sed -n 's/^SCRATCH_NEED_MB=\([0-9]*\)$/\1/p' <<<"$PLAN" | tail -n 1)"
     # The table's Type column: an NTFS partition means a Windows backup.
-    grep -qE '^[0-9]+ +ntfs ' <<<"$PLAN" && OSNAME="Windows"
+    grep -qiE '^[0-9]+ +ntfs ' <<<"$PLAN" && OSNAME="Windows"
     # For the dialogs: the tool's own "plan only" and SCRATCH_NEED_MB lines
     # and its STOP prefix go.
     PLAN="$(sed -e '/^Plan only/d' -e '/^SCRATCH_NEED_MB=/d' -e 's/^STOP: //' <<<"$PLAN")"
     [ "$PRC" = "3" ] || break
-    T="The new disk is smaller than the backed up disk. The data fits, but some of it must be moved while a partition shrinks.\n\n${PLAN}\n\n${SEP}\nDo you have a suitable volume with at least $(commas "${NEED_MB:-0}") MB available to use as temporary scratch space? If so, please insert it now if required and select Yes."
-    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - scratch space needed" $NOCOLLAPSE $(plan_scroll "$T") \
-    --yesno "$T" "$(plan_h "$T")" "$PLANW"
-    [ "$?" = "0" ] || no_scratch ""
+    T="The new disk is smaller than the backed up disk. The data fits, but some of it must be moved while a partition shrinks.\n\n${PLAN}"
+    Q="Do you have a suitable volume with at least $(commas "${NEED_MB:-0}") MB available to use as temporary scratch space? If so, please insert it now if required and select Yes."
+    plan_ask "$TITLE - scratch space needed" "$T" "$Q" || no_scratch ""
     pick_scratch
   done
   if [ "$PRC" != "0" ]; then
     T="This backup cannot be restored onto the $(gib "$TGT_BYTES") disk ${TARGET}, which is smaller than the backed up disk ($(gib "$SRC_BYTES")):\n\n${PLAN}\n\n${SEP}\nNothing has been written to ${TARGET}.\n\nWhat you can do instead:\n\na) Restore onto a disk of at least $(gib "$SRC_BYTES"), the size of the backed up disk. That needs no shrinking.\n\nb) Install ${OSNAME} and the Salvanza backup client on this disk, then use the app's Restore page to open the disk image from this backup and restore your folders and files from it. Programs must be reinstalled, and the disk and ${OSNAME} get new identities.\n\nThe full check is in ${ocs_log_dir}/pbs-shrink-plan.log.\n\nPress OK to stop. The backup itself is not changed."
-    dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - cannot use this disk" $NOCOLLAPSE $(plan_scroll "$T") \
-    --msgbox "$T" "$(plan_h "$T")" "$PLANW" $DIA_ESC
+    plan_msg "$TITLE - cannot use this disk" "$T"
     stopped
   fi
   SHRINK=1
@@ -1057,9 +1287,9 @@ fi
 if [ "$SHRINK" = "1" ]; then
   # The plan is the confirmation: Clonezilla, and its own two questions, are
   # not used for a restore that shrinks.
-  T="The new disk is smaller than the backed up disk, but the data fits. This is the plan:\n\n${PLAN}\n\n${SEP}\nThe backup on the server is only read, never changed. EVERYTHING on ${TARGET} ($(gib "$TGT_BYTES")) will be PERMANENTLY OVERWRITTEN.\n\nStart the restore?"
-  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - confirm (smaller disk)" $NOCOLLAPSE $(plan_scroll "$T") \
-  --yesno "$T" "$(plan_h "$T")" "$PLANW"
+  T="The new disk is smaller than the backed up disk, but the data fits. This is the plan:\n\n${PLAN}"
+  Q="The backup on the server is only read, never changed. EVERYTHING on ${TARGET} ($(gib "$TGT_BYTES")) will be PERMANENTLY OVERWRITTEN.\n\nStart the restore?"
+  plan_ask "$TITLE - confirm (smaller disk)" "$T" "$Q"
 else
 dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - confirm" \
 --yesno "Restore from : ${KEY_NAME}, backup of ${DT_NAME}  (${SRC_SIZE:-unknown size})\nRestore onto : ${TARGET}  (${TGT_SIZE:-unknown size}), a disk in this computer${NOT_ELIGIBLE_BLOCK}\n\nEVERYTHING on ${TARGET} will be PERMANENTLY OVERWRITTEN. The backup on the server is only read, never changed.\n\nClonezilla then asks you to confirm twice more before it writes anything.\n\nStart the restore?" 0 0
@@ -1130,8 +1360,18 @@ if [ "$SHRINK" = "1" ]; then
   RC=$?
   rm -f "$SHRINK_CACHE"
   # A box over the tool's last one while the scratch space and the restored
-  # partitions are tidied (a few seconds), so the screen never goes blank.
-  T="Finishing: tidying up the scratch space and the restored partitions ..."
+  # partitions are tidied (a few seconds), so the screen never goes blank. It
+  # names only what is done: scratch space when a partition was used for it,
+  # the restored partitions when the restore finished.
+  if [ -n "$SCRATCH_MNT" ] && [ "$RC" = "0" ]; then
+    T="Finishing: tidying up the scratch space and the restored partitions ..."
+  elif [ -n "$SCRATCH_MNT" ]; then
+    T="Tidying up the scratch space and saving the logs ..."
+  elif [ "$RC" = "0" ]; then
+    T="Finishing: tidying up the restored partitions ..."
+  else
+    T="Saving the logs ..."
+  fi
   dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - smaller disk" \
   --infobox "$T" $(box_hw "$T")
   cp -a /tmp/pbs-shrink-logs "${ocs_log_dir}/" 2>/dev/null
@@ -1147,8 +1387,7 @@ fi
 [ "$RC" = "0" ] && remove_snapshot_stores
 if [ "$RC" != "0" ] && [ "$SHRINK" = "1" ]; then
   T="The restore onto the smaller disk did not finish. The last lines of its log:\n\n$(tail -n 8 /tmp/pbs-shrink-logs/run.log 2>/dev/null | sed 's/^STOP: //' | cut -c1-150)\n\n${SEP}\n${TARGET} may be partly written and will probably not start. Do not use it until a restore has finished. The backup on the server was only read and has not changed.\n\nWhat you can do:\n\na) Start the restore again. If it stops at the same step, the logs say why.\n\nb) Restore onto a disk of at least $(gib "$SRC_BYTES"), the size of the backed up disk. That needs no shrinking.\n\nThe logs are in ${ocs_log_dir}/pbs-shrink-logs (run.log first). Exit code: $RC.\n\nPress OK to continue."
-  dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - restore failed" $(plan_scroll "$T") \
-  --msgbox "$T" "$(plan_h "$T")" "$PLANW" $DIA_ESC
+  plan_msg "$TITLE - restore failed" "$T"
 elif [ "$RC" != "0" ]; then
   dia --backtitle "$msg_nchc_free_software_labs" --title "$TITLE - restore failed" \
   --msgbox "The restore did not finish (Clonezilla stopped with exit code $RC).\n\nIf you answered no to one of Clonezilla's questions, nothing has been written. Otherwise ${TARGET} may be partly written: do not use it until a restore has finished. The backup on the server was only read and has not changed.\n\nStart the restore again. If it fails again, the logs in ${ocs_log_dir} say why.\n\nPress OK to continue." 0 0 $DIA_ESC

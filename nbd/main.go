@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"pbscommon"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -159,22 +160,38 @@ func nbdStart(pbsclient *pbscommon.PBSClient, archive string, fidxdata []byte, n
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
 
+	// On Ctrl+C (the restore wizard stops pbsnbd with SIGINT) the device is
+	// let go and pbsnbd ends. The device may not be connected yet (stopped
+	// while the image was still being opened), or Connect may already have
+	// returned: Disconnect's first ioctl ends Connect, and its later ones
+	// then met a closed file ("bad file descriptor", seen 15/11/2026). Either
+	// is logged, never a panic. stopping keeps Connect's return from closing
+	// the file while Disconnect still uses it.
+	var stopping atomic.Bool
 	go func() {
 		for range sigCh {
+			stopping.Store(true)
 			if err := client.Disconnect(f); err != nil {
-				panic(err)
+				fmt.Printf("Stopping: %s was not connected, or was already let go (%v).\n", nbddev, err)
+			} else {
+				fmt.Printf("Stopping: %s disconnected.\n", nbddev)
 			}
-
 			os.Exit(0)
 		}
 	}()
 
 	setReadOnly(f, true)
 	fmt.Printf("Starting NBD on %s...\n", nbddev)
-	if err := client.Connect(conn, f, &client.Options{
+	err = client.Connect(conn, f, &client.Options{
 		ExportName: "FIDX",
 		BlockSize:  512,
-	}); err != nil {
+	})
+	if stopping.Load() {
+		// The signal handler finishes the disconnect and exits.
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	}
+	if err != nil {
 		panic(err)
 	}
 }
@@ -194,6 +211,7 @@ func Main() {
 	backupPath := flag.String("path", "", "Path to backup, eg. vm/100/2026-03-01T00:07:00Z/drive-scsi0.img.fidx")
 	listFlag := flag.Bool("list", false, "List available fidx images as 'type/id/time/file' lines and exit (no TUI)")
 	groupsFlag := flag.Bool("groups", false, "List the backup groups as 'type/id<TAB>comment' lines and exit (no TUI)")
+	sizesFlag := flag.Bool("sizes", false, "With -list: start each line with the image's size in bytes and a TAB")
 	keyFileFlag := flag.String("keyfile", "", "Path to a Proxmox Backup Server encryption key file (required to restore a snapshot taken with encryption enabled)")
 	keyFilePassphraseFlag := flag.String("keyfile-passphrase", "", "Passphrase for a scrypt/PBKDF2 protected -keyfile (default $PBS_ENCRYPTION_PASSWORD; prompted for when neither is set)")
 	helpFlag := flag.Bool("help", false, "Show help")
@@ -288,11 +306,16 @@ func Main() {
 			for _, f := range sn.Files {
 				if strings.HasSuffix(f.Filename, ".fidx") {
 					t := time.Unix(sn.BackupTime, 0).Format(time.RFC3339)
+					line := fmt.Sprintf("%s/%s/%s/%s", sn.BackupType, sn.BackupID, t, f.Filename)
 					if sn.Comment != "" {
-						fmt.Printf("%s/%s/%s/%s#%s\n", sn.BackupType, sn.BackupID, t, f.Filename, sn.Comment)
-					} else {
-						fmt.Printf("%s/%s/%s/%s\n", sn.BackupType, sn.BackupID, t, f.Filename)
+						line += "#" + sn.Comment
 					}
+					// -sizes: the bare-metal restore wizard shows each
+					// disk image's size when a backup holds more than one.
+					if *sizesFlag {
+						line = fmt.Sprintf("%d\t%s", f.Size, line)
+					}
+					fmt.Println(line)
 				}
 			}
 		}

@@ -89,6 +89,7 @@ MNT=/run/pbs-shrink-mnt
 LOGDIR=/tmp/pbs-shrink-logs
 LOOPS=(); MOUNTS=(); DMS=()
 TVG=""; TCONF=""
+BGPID=""                         # a long step running in the background (progress_run)
 mkdir -p "$LOGDIR" "$MNT"
 
 # On a terminal the long steps show their progress: partclone's own progress
@@ -100,10 +101,21 @@ TTY=0; [ -t 1 ] && TTY=1
 DIAB="${DIA:-whiptail}"
 BOXTITLE="PBS Bare Metal Restore - onto a smaller disk"
 say() { [ $BLUE = 1 ] || echo "$*"; echo "$*" >>"$LOGDIR/run.log"; }
-# step TEXT: a stage of the restore, in a blue box with -b.
+SCOLS="$(tput cols 2>/dev/null || echo 80)"; SLINES="$(tput lines 2>/dev/null || echo 25)"
+STEPW=78; [ $STEPW -gt $(( SCOLS - 4 )) ] && STEPW=$(( SCOLS - 4 ))
+# step TEXT: a stage of the restore, in a blue box with -b, as tall as TEXT
+# wrapped needs (whiptail keeps room for buttons even in an infobox, so 7
+# more rows; a fixed height cut off the end of a longer text). As text, its
+# paragraphs (TEXT's \n) are lines of their own.
 step() {
-  say "> $1"
-  [ $BLUE = 1 ] && "$DIAB" --title "$BOXTITLE" --infobox "$1" 10 78
+  local h
+  say "> $(printf '%b' "$1" | sed '/^$/d; 2,$s/^/  /')"
+  if [ $BLUE = 1 ]; then
+    h=$(( $(printf '%b\n' "$1" | fold -s -w $(( STEPW - 6 )) | wc -l) + 7 ))
+    [ $h -gt $(( SLINES - 2 )) ] && h=$(( SLINES - 2 ))
+    "$DIAB" --title "$BOXTITLE" --infobox "$1" "$h" "$STEPW"
+  fi
+  return 0
 }
 die() { echo "STOP: $1" >&2; echo "STOP: $1" >>"$LOGDIR/run.log" 2>/dev/null; exit "${2:-1}"; }
 # dmgone NAME: remove a device-mapper device, quietly; udev may still have a
@@ -135,6 +147,14 @@ holders_of() {
 # twice.
 cleanup() {
   local i n
+  # A long step still running (stopped short): it goes first, so nothing
+  # below is still in use by it.
+  if [ -n "${BGPID:-}" ]; then
+    has pkill && pkill -TERM -P "$BGPID" >/dev/null 2>&1
+    kill "$BGPID" >/dev/null 2>&1
+    wait "$BGPID" 2>/dev/null
+    BGPID=""
+  fi
   for ((i = ${#MOUNTS[@]} - 1; i >= 0; i--)); do
     umount "${MOUNTS[$i]}" >/dev/null 2>&1 || umount -l "${MOUNTS[$i]}" >/dev/null 2>&1
   done
@@ -165,6 +185,15 @@ trap 'exit 143' TERM
 human() { numfmt --to=iec-i --suffix=B --format=%.1f "$(( $1 * 512 ))" | sed -E 's/\.0([KMGTP]iB)$/\1/; s/([0-9])([KMGTP]?i?B)$/\1 \2/'; }
 # commas N: N with thousands separators (23404216320 -> 23,404,216,320).
 commas() { sed -E ':a; s/^([0-9]+)([0-9]{3})/\1,\2/; ta' <<<"$1"; }
+# fsname TYPE: a file system type (blkid's) as the plan and the boxes name it:
+# FAT, exFAT, NTFS, XFS, LUKS, RAID; ext4, btrfs, f2fs and swap as they are.
+fsname() {
+  case "$1" in
+    vfat) echo FAT ;; exfat) echo exFAT ;; ntfs) echo NTFS ;; xfs) echo XFS ;;
+    crypto_LUKS) echo LUKS ;; LVM2_member) echo LVM ;; *_raid_member) echo RAID ;;
+    *) echo "$1" ;;
+  esac
+}
 # loop DEV START SIZE [-r]: a loop device over DEV's sectors START to
 # START+SIZE-1, read-only with -r; its name in LOOP (not echoed: a $(...)
 # subshell would lose it from LOOPS, and a die inside it would not stop us).
@@ -190,6 +219,130 @@ has() { command -v "$1" >/dev/null 2>&1; }
 partdev() { if [[ "$TGT" =~ [0-9]$ ]]; then echo "${TGT}p$1"; else echo "${TGT}$1"; fi; }
 # LVM sees only the device named here (and nothing activates by itself).
 lvmconf() { echo "devices { filter=[\"a|^$1\$|\",\"r|.*|\"] global_filter=[\"a|^$1\$|\",\"r|.*|\"] use_devicesfile=0 obtain_device_list_from_udev=0 } global { event_activation=0 }"; }
+
+# ---- progress for the long steps that have none of their own
+# alive PID: PID still runs (a finished one not yet reaped counts as gone).
+alive() { kill -0 "$1" 2>/dev/null && [ "$(sed -E 's/^.*\) ([A-Za-z]).*$/\1/' "/proc/$1/stat" 2>/dev/null)" != Z ]; }
+# secs N: N seconds in words (45 s, 3 min 05 s).
+secs() { if [ "$1" -lt 60 ]; then echo "$1 s"; else printf '%d min %02d s' $(( $1 / 60 )) $(( $1 % 60 )); fi; }
+# Meters, in MB: written to the writable layer over the backup (the
+# snapshot's "allocated/total" sectors), and in use on the mount DIR.
+mb_layer() { dmsetup status "$DM" 2>/dev/null | awk '{split($4, a, "/"); printf "%d", a[1] / 2048}'; }
+mb_used() { df -Pk "$1" 2>/dev/null | awk 'NR==2{printf "%d", $3 / 1024}'; }
+# rz_pass LOG: the pass resize2fs -p last began and how far it is through
+# it, as "PASS PERCENT" (nothing before the first pass). Each pass prints
+# "Begin pass N (max = M)", its name, a bar of 40 dashes and backspaces over
+# them, then an X for each 40th of the pass done.
+rz_pass() {
+  awk '/Begin pass [0-9]+/ { t = $0; sub(/.*Begin pass /, "", t); p = t + 0; s = ""; next }
+    { s = s $0 }
+    END { if (p == "") exit; sub(/^[^-]*-+/, "", s); n = gsub(/X/, "", s); if (n > 40) n = 40; printf "%d %d\n", p, n * 100 / 40 }' "$1" 2>/dev/null
+}
+# stage_resize2fs LOG: the pass resize2fs -p is in, in plain words, and how
+# far it is through it.
+stage_resize2fs() {
+  local p pp name
+  read -r p pp <<<"$(rz_pass "$1")"
+  case "$p" in
+    1) name="making room" ;;
+    2) name="moving blocks" ;;
+    3) name="scanning the inode table" ;;
+    4) name="updating references" ;;
+    5) name="moving the inode table" ;;
+    *) return 0 ;;
+  esac
+  echo "Now: $name ($pp%)"
+}
+# lastmsg LOG: the last line of LOG that is not resize2fs's progress (its
+# "Begin pass" lines and bars of - and X drawn with backspaces).
+lastmsg() { tr '\b\r' '\n\n' <"$1" | grep -avE '^Begin pass|^[[:alpha:] ]+ +-+$|^X+$|^[[:space:]]*$' | tail -1; }
+# progress_run HEAD WHAT SHOWN EXPECT METER MARG STAGE LOG CMD [ARG...]:
+# runs CMD (stdout and stderr to LOG, as a step did before) in the
+# background and, while it runs, shows HEAD and "WHAT: <done> of about SHOWN
+# MB (<pct>%), <time> so far", and the line STAGE LOG prints (STAGE - for
+# none). Done is what METER MARG reports less what it reported at the start;
+# the percentage is done against EXPECT MB, held at 99 until CMD ends and
+# never going back. For resize2fs (STAGE stage_resize2fs) the data moved
+# takes it to 90 at most, and its passes that move little data take it on
+# (see progress_lines). With -b in a gauge, updated every 2 s; else a line
+# every 10 s (which also goes to run.log with -b). Returns CMD's exit code.
+progress_run() {
+  local head=$1 what=$2 shown=$3 expect=$4 meter=$5 marg=$6 stage=$7 log=$8 base t0 rc
+  shift 8
+  [ "$expect" -ge 1 ] 2>/dev/null || expect=1
+  base="$($meter "$marg")"; base=${base:-0}
+  t0=$(date +%s)
+  ( trap - EXIT; "$@" ) >"$log" 2>&1 &
+  BGPID=$!
+  if [ $BLUE = 1 ]; then
+    # whiptail sizes the gauge's text area from this first text: a blank
+    # line (whiptail puts a gauge's text right under the top border; the
+    # other boxes have a blank line there), the head, a blank line, the
+    # progress line and the stage line.
+    progress_lines | "$DIAB" --title "$BOXTITLE" --gauge "\n$head\n\nStarting ...\nPlease wait." 14 78 0
+  else
+    progress_lines
+  fi
+  wait "$BGPID"; rc=$?
+  BGPID=""
+  return $rc
+}
+# progress_lines: progress_run's updates (it reads progress_run's locals).
+progress_lines() {
+  local n=0 now got pct line st last=0 p pp over fpass="" fbase=0 fpp0=0 fend=0 fval
+  while alive "$BGPID"; do
+    sleep 2; n=$(( n + 1 ))
+    now="$($meter "$marg")"; got=$(( ${now:-0} - base )); [ $got -lt 0 ] && got=0
+    pct=$(( got * 100 / expect ))
+    if [ "$stage" = stage_resize2fs ]; then
+      # resize2fs's later passes (scanning the inode table, updating
+      # references) move almost no data, so the data moved would stand
+      # still. Once the data expected has moved, or in pass 3 or 4, the
+      # gauge follows the pass's own bar instead, from where it is to the
+      # pass's share of what is left: a third in pass 1 or 2, half in pass
+      # 3, all of it after that.
+      read -r p pp <<<"$(rz_pass "$log")"
+      over=0; [ $pct -ge 100 ] && over=1
+      [ $pct -gt 90 ] && pct=90
+      [ $pct -lt $last ] && pct=$last
+      if [ -n "$p" ] && { [ $over = 1 ] || [ "$p" = 3 ] || [ "$p" = 4 ]; }; then
+        if [ "$p" != "$fpass" ]; then
+          fpass=$p; fbase=$pct; fpp0=$pp
+          case "$p" in
+            1|2) fend=$(( pct + (99 - pct) / 3 )) ;;
+            3) fend=$(( pct + (99 - pct) / 2 )) ;;
+            *) fend=99 ;;
+          esac
+        fi
+        if [ $fpp0 -ge 100 ]; then fval=$fend; else fval=$(( fbase + (fend - fbase) * (pp - fpp0) / (100 - fpp0) )); fi
+        if [ $fval -lt $pct ]; then
+          # The data moved took the gauge further: follow on from there.
+          fbase=$pct; fpp0=$pp; [ $fend -lt $pct ] && fend=$pct; fval=$pct
+        fi
+        pct=$fval
+      fi
+    fi
+    [ $pct -gt 99 ] && pct=99
+    [ $pct -lt $last ] && pct=$last
+    last=$pct
+    if [ "$shown" -gt 0 ]; then
+      line="$what: $(commas $got) of about $(commas "$shown") MB ($pct%), $(secs $(( $(date +%s) - t0 ))) so far"
+    else
+      line="$what: $(commas $got) MB, $(secs $(( $(date +%s) - t0 ))) so far"
+    fi
+    st=""; [ "$stage" != - ] && st="$($stage "$log")"
+    [ $BLUE = 1 ] && printf 'XXX\n%d\n\n%s\n\n%s\n%s\nXXX\n' "$pct" "$head" "$line" "$st"
+    [ $(( n % 5 )) = 0 ] && say "  $line${st:+; $st}"
+  done
+  [ $BLUE = 1 ] && printf 'XXX\n100\n\n%s\n\n%s\n\nXXX\n' "$head" "Finished, $(secs $(( $(date +%s) - t0 ))) in all."
+  return 0
+}
+# The long commands progress_run runs (each in its own background shell, so
+# cd stays there).
+rz_shrink() { if has stdbuf; then stdbuf -oL resize2fs -p "$@"; else resize2fs -p "$@"; fi; }
+copy_tar() { cd "$1" && tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner --sparse -cpf - . | tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner -xpf - -C "$2"; }
+copy_cp() { cp -r --preserve=timestamps "$1/." "$2/"; }
+copy_xfsdump() { xfsdump -J -l 0 -L pbs -M pbs - "$1" | xfsrestore -J - "$2"; }
 
 # With -b the wizard has cleared the screen: a box at once, so the time
 # until step 1 (the plan worked out again) is never a black screen.
@@ -312,7 +465,7 @@ probe_fs() {
           unmnt "$MNT/p"
           if [ "${cowk:-0}" -gt 0 ]; then
             MIN[$x]=$(( MIN[x] - cowk * 2 )); [ ${MIN[$x]} -lt $(( SIZE[x] / 100 )) ] && MIN[$x]=$(( SIZE[x] / 100 ))
-            WHY[$x]="can shrink (its $((cowk / 1024)) MiB snapshot store goes)"
+            WHY[$x]="can shrink (its $(commas $((cowk / 1024))) MB snapshot store goes)"
           fi
         fi
       else WHY[$x]="kept: its smallest size could not be worked out"; fi ;;
@@ -498,38 +651,65 @@ if [ $K -ge 0 ] && [ "${HOW[$K]}" = lvm ]; then
   done
 fi
 
-# note X: what happens to item X, for the plan.
+# note X: what happens to item X, for the plan, in lower case: "shrinks" for
+# the one that gets smaller, "kept as it is" for one copied at its size
+# (whether or not it could have shrunk), or why it is kept.
 note() {
-  local x=$1 n="${WHY[$1]}" fsn="${FS[$1]}"
-  [ "$fsn" = vfat ] && fsn=FAT
+  local x=$1 n="${WHY[$1]}" fsn
+  fsn="$(fsname "${FS[$1]}")"
   if [ $x -eq $SK ]; then
     case "${HOW[$x]}" in
-      filecopy|xfscopy) n="SHRINKS: a new, smaller $fsn, its files copied" ;;
-      swap) n="SHRINKS: made again, smaller" ;;
-      *) n="SHRINKS$(grep -oE ' \(.*\)$' <<<"${WHY[$x]}")" ;;
+      filecopy|xfscopy) n="shrinks: a new, smaller $fsn, its files copied" ;;
+      swap) n="shrinks: made again, smaller" ;;
+      *) n="shrinks$(grep -oE ' \(.*\)$' <<<"${WHY[$x]}")" ;;
     esac
   elif [ $x -eq $K ] && [ "${HOW[$x]}" = lvm ]; then
-    n="SHRINKS: volume group $LVVG written again, its logical volumes packed"
-  elif [ "${HOW[$x]}" = filecopy ] || [ "${HOW[$x]}" = xfscopy ]; then
-    n="can shrink (by copying its files)"
-  elif [ "${HOW[$x]}" = swap ]; then
-    n="can shrink (made again)"
+    n="shrinks: volume group $LVVG made again, its logical volumes packed"
+  else
+    case "${HOW[$x]}" in
+      ntfs|ext|btrfs|filecopy|xfscopy) n="kept as it is" ;;
+      swap) n="made again at its size" ;;
+      lvm) n="kept as it is (volume group $LVVG)" ;;
+      *) [ "$n" = kept ] && n="kept as it is" ;;
+    esac
   fi
-  [ $x -lt 100 ] && [ "${NSTART[$x]}" != "${START[$x]}" ] && n="moves; $n"
+  if [ $x -lt 100 ] && [ "${NSTART[$x]}" != "${START[$x]}" ]; then
+    case "$n" in
+      "kept as it is"*) n="moves, otherwise kept as it is${n#kept as it is}" ;;
+      *) n="moves; $n" ;;
+    esac
+  fi
   echo "$n"
+}
+# The table is shown in a box PCOLS wide: the wizard says how wide
+# (PBS_SHRINK_COLS), else the terminal's width, else 100. A What happens
+# longer than its column wraps onto more lines under that column, so the
+# other columns stay in line.
+PCOLS="${PBS_SHRINK_COLS:-}"
+if [ -z "$PCOLS" ] && [ $TTY = 1 ]; then PCOLS="$SCOLS"; fi
+[ "${PCOLS:-0}" -ge 60 ] 2>/dev/null || PCOLS=100
+# row NO TYPE SIZE NEEDS NEWSIZE NOTE: one line of the table (or more).
+row() {
+  local pre w line first=1
+  pre="$(printf '%-3s %-7s %9s %9s %9s  ' "$1" "$2" "$3" "$4" "$5")"
+  w=$(( PCOLS - ${#pre} )); [ $w -lt 20 ] && w=20
+  while IFS= read -r line; do
+    if [ $first = 1 ]; then say "$pre$line"; first=0; else say "$(printf '%*s' ${#pre} '')$line"; fi
+  done < <(fold -s -w "$w" <<<"$6" | sed 's/ *$//')
 }
 say "Backup disk: $(human "$SRC_SECT") ($( [ "$LABEL" = dos ] && echo MBR || echo GPT )), $SRC"
 say "New disk   : $(human "$TGT_SECT"), $TGT"
 say ""
-say "$(printf '%-3s %-7s %9s %9s %9s  %s' "No" "Type" "Size" "Needs" "New size" "What happens")"
+row "No" "Type" "Size" "Needs" "New size" "What happens"
 for ((i = 0; i < N; i++)); do
   needs="$(human "${MIN[$i]}")"; [ "${HOW[$i]}" = keep ] && needs="-"
-  t="${FS[$i]:--}"; [ "${HOW[$i]}" = lvm ] && t=LVM
-  say "$(printf '%-3s %-7s %9s %9s %9s  %s' "${NUM[$i]}" "$t" "$(human "${SIZE[$i]}")" "$needs" "$(human "${NSIZE[$i]}")" "$(note $i)")"
+  t="$(fsname "${FS[$i]}")"; [ -n "$t" ] || t=-; [ "${HOW[$i]}" = lvm ] && t=LVM
+  row "${NUM[$i]}" "$t" "$(human "${SIZE[$i]}")" "$needs" "$(human "${NSIZE[$i]}")" "$(note $i)"
   if [ $i -eq $LVPART ]; then
     for x in "${LVITEMS[@]}"; do
       needs="$(human "${MIN[$x]}")"; [ "${HOW[$x]}" = keep ] && needs="-"
-      say "$(printf '%-3s %-7s %9s %9s %9s  %s' " lv" "${FS[$x]:--}" "$(human "${SIZE[$x]}")" "$needs" "$(human "${NSIZE[$x]}")" "${LVN[$x]}: $(note $x)")"
+      t="$(fsname "${FS[$x]}")"; [ -n "$t" ] || t=-
+      row " lv" "$t" "$(human "${SIZE[$x]}")" "$needs" "$(human "${NSIZE[$x]}")" "${LVN[$x]}: $(note $x)"
     done
   fi
 done
@@ -546,13 +726,13 @@ elif [ $K -lt 0 ]; then
   die "The new disk is too small for this backup, even with a partition shrunk. $(human $SMALLEST) ($(commas $(( SMALLEST * 512 ))) bytes) is the smallest disk this data could fit onto."
 else
   if [ "${HOW[$K]}" = lvm ] && [ $SK -ge 0 ]; then
-    say "a) Logical volume ${LVN[$SK]} (${FS[$SK]}) holds $(human "${MIN[$SK]}") of data, so it will be $(human "${NSIZE[$SK]}") instead of $(human "${SIZE[$SK]}"), inside partition ${NUM[$K]}, which will be $(human "${NSIZE[$K]}") instead of $(human "${SIZE[$K]}")."
+    say "a) Logical volume ${LVN[$SK]} ($(fsname "${FS[$SK]}")) holds $(human "${MIN[$SK]}") of data, so it will be $(human "${NSIZE[$SK]}") instead of $(human "${SIZE[$SK]}"), inside partition ${NUM[$K]}, which will be $(human "${NSIZE[$K]}") instead of $(human "${SIZE[$K]}")."
   elif [ "${HOW[$K]}" = lvm ]; then
     say "a) Partition ${NUM[$K]} (LVM volume group $LVVG) will be $(human "${NSIZE[$K]}") instead of $(human "${SIZE[$K]}"). The volume group has enough free space for that, so no logical volume needs to shrink."
   elif [ "${HOW[$K]}" = swap ]; then
     say "a) Partition ${NUM[$K]} (swap) holds no data that has to be kept, so it will be made again at $(human "${NSIZE[$K]}") instead of $(human "${SIZE[$K]}")."
   else
-    say "a) Partition ${NUM[$K]} (${FS[$K]}) holds $(human "${MIN[$K]}") of data, so the new partition will be $(human "${NSIZE[$K]}") instead of $(human "${SIZE[$K]}")."
+    say "a) Partition ${NUM[$K]} ($(fsname "${FS[$K]}")) holds $(human "${MIN[$K]}") of data, so the new partition will be $(human "${NSIZE[$K]}") instead of $(human "${SIZE[$K]}")."
   fi
   say ""
   say "b) $(human $SMALLEST) ($(commas $(( SMALLEST * 512 ))) bytes) is the smallest disk this data could fit onto."
@@ -654,7 +834,7 @@ if [ $SK -ge 0 ] && [ "${HOW[$SK]}" != swap ] && [ "${HOW[$SK]}" != filecopy ]; 
   dmsetup mknodes "$DM"
   SHRDM="/dev/mapper/$DM"
   newbytes=$(( NSIZE[SK] * 512 ))
-  SHRHEAD="Step 1 of 4: $(itemname $SK) (${FS[$SK]}) $( [ "${HOW[$SK]}" = xfscopy ] && echo "is made ready to copy" || echo "shrinks from $(human "${SIZE[$SK]}") to $(human "${NSIZE[$SK]}")")"
+  SHRHEAD="Step 1 of 4: $(itemname $SK) ($(fsname "${FS[$SK]}")) $( [ "${HOW[$SK]}" = xfscopy ] && echo "is made ready to copy" || echo "shrinks from $(human "${SIZE[$SK]}") to $(human "${NSIZE[$SK]}")")"
   case "${HOW[$SK]}" in
     ntfs)
       step "$SHRHEAD\n\nChecking that it can shrink ..."
@@ -664,16 +844,17 @@ if [ $SK -ge 0 ] && [ "${HOW[$SK]}" != swap ] && [ "${HOW[$SK]}" != filecopy ]; 
         # per stage (check, move the data past the new end, update).
         TR="tr"; has stdbuf && TR="stdbuf -o0 tr"
         { echo y | ntfsresize --force --force -s "$newbytes" "$SHRDM" 2>&1; echo "RC=$?"; } | tee "$LOGDIR/ntfsresize.log" | $TR '\r' '\n' |
-          awk -v head="$SHRHEAD" -v mv="${REL:-0}" '
+          awk -v head="$SHRHEAD" -v mv="$(commas "${REL:-0}")" '
             /Checking filesystem consistency/ { stage = "Checking the file system" }
             /Accounting clusters/            { stage = "Counting the clusters in use" }
             /Relocating needed data/         { stage = "Moving the data that is past the new end (about " mv " MB)" }
             /Updating/                       { stage = "Updating the file system" }
             / percent completed/ { for (i = 1; i < NF; i++) if ($(i+1) == "percent") p = int($i)
-                                   printf "XXX\n%d\n%s\n\n%s\nXXX\n", p, head, stage; fflush() }' |
-          "$DIAB" --title "$BOXTITLE" --gauge "$SHRHEAD\n\nStarting ..." 11 78 0
-        # (whiptail sizes the gauge's text area from this first text: three
-        # lines, so the stage line of each update shows.)
+                                   printf "XXX\n%d\n\n%s\n\n%s\nXXX\n", p, head, stage; fflush() }' |
+          "$DIAB" --title "$BOXTITLE" --gauge "\n$SHRHEAD\n\nStarting ..." 12 78 0
+        # (whiptail sizes the gauge's text area from this first text: four
+        # lines, a blank one first as in the other boxes, so the stage line
+        # of each update shows.)
         grep -q '^RC=0$' "$LOGDIR/ntfsresize.log" || die "Shrinking the NTFS file system failed: $(grep -iE 'error|fail' "$LOGDIR/ntfsresize.log" | tail -1) (see ntfsresize.log). $NOTYET"
       elif [ $TTY = 1 ]; then
         echo y | ntfsresize --force --force -s "$newbytes" "$SHRDM" 2>&1 | tee "$LOGDIR/ntfsresize.log"
@@ -692,20 +873,24 @@ if [ $SK -ge 0 ] && [ "${HOW[$SK]}" != swap ] && [ "${HOW[$SK]}" != filecopy ]; 
         e2fsck -f -y "$SHRDM" >>"$LOGDIR/e2fsck.log" 2>&1
         [ $? -le 1 ] || { tail -5 "$LOGDIR/e2fsck.log"; die "The check found errors in the file system that it could not fix (see e2fsck.log). $NOTYET"; }
       fi
-      if [ $BLUE = 1 ]; then
-        step "$SHRHEAD\n\nShrinking the file system and moving about ${REL:-0} MB of data.\nThere is no progress bar for this; it can take several minutes."
-        resize2fs "$SHRDM" "$(( newbytes / 1024 ))K" >"$LOGDIR/resize2fs.log" 2>&1 || die "Shrinking the file system failed: $(tail -1 "$LOGDIR/resize2fs.log") (see resize2fs.log). $NOTYET"
-      elif [ $TTY = 1 ]; then
+      if [ $BLUE = 0 ] && [ $TTY = 1 ]; then
+        # On a plain terminal resize2fs draws its own progress bars.
         resize2fs -p "$SHRDM" "$(( newbytes / 1024 ))K" 2>&1 | tee "$LOGDIR/resize2fs.log"
         [ "${PIPESTATUS[0]}" = 0 ] || die "Shrinking the file system failed (see resize2fs.log). $NOTYET"
       else
-        resize2fs "$SHRDM" "$(( newbytes / 1024 ))K" >"$LOGDIR/resize2fs.log" 2>&1 || { tail -5 "$LOGDIR/resize2fs.log"; die "Shrinking the file system failed (see resize2fs.log). $NOTYET"; }
+        # The data moved so far is what the writable layer has taken in,
+        # against about REL MB plus the file system's own updates; its
+        # "Begin pass" lines name the stage.
+        progress_run "$SHRHEAD" "Moving data" "$REL" $(( REL + REL / 10 + 64 )) mb_layer "" stage_resize2fs "$LOGDIR/resize2fs.log" \
+          rz_shrink "$SHRDM" "$(( newbytes / 1024 ))K" ||
+          { [ $BLUE = 1 ] || tail -5 "$LOGDIR/resize2fs.log"; die "Shrinking the file system failed: $(lastmsg "$LOGDIR/resize2fs.log") (see resize2fs.log). $NOTYET"; }
       fi ;;
     btrfs)
-      step "$SHRHEAD\n\nShrinking the file system. There is no progress bar for this; it can take several minutes."
+      step "$SHRHEAD\n\nOpening the file system ..."
       mnt "$SHRDM" "$MNT/s" rw btrfs || { tail -3 "$LOGDIR/mount.log"; die "The btrfs file system could not be opened to shrink it (see mount.log). $NOTYET"; }
       for f in "$MNT"/s/.pbs_snapshot_*.cow; do [ -f "$f" ] && rm -f "$f" && say "  removed the backup's snapshot store $(basename "$f")"; done
-      btrfs filesystem resize "1:$newbytes" "$MNT/s" >"$LOGDIR/btrfs-resize.log" 2>&1 || { tail -5 "$LOGDIR/btrfs-resize.log"; die "Shrinking the btrfs file system failed (see btrfs-resize.log). $NOTYET"; }
+      progress_run "$SHRHEAD" "Moving data" "$REL" $(( REL + REL / 10 + 64 )) mb_layer "" - "$LOGDIR/btrfs-resize.log" \
+        btrfs filesystem resize "1:$newbytes" "$MNT/s" || { tail -5 "$LOGDIR/btrfs-resize.log"; die "Shrinking the btrfs file system failed (see btrfs-resize.log). $NOTYET"; }
       unmnt "$MNT/s"; btrfs device scan --forget "$SHRDM" >/dev/null 2>&1 ;;
     xfscopy) step "$SHRHEAD" ;;   # mounted (log replay into the layer) when it is copied
   esac
@@ -756,7 +941,7 @@ xfs_like() { # mkfs.xfs options that give a new XFS the features of the one moun
 # partition or logical volume, NSIZE[X] sectors). The item that shrank is
 # read from the writable layer instead.
 copy_item() {
-  local x=$1 from=$2 to=$3 t0 what log tool popts fs fsname ml mo id fopt feats cf f opts
+  local x=$1 from=$2 to=$3 t0 what log tool popts fs fsname ml mo id fopt feats cf f opts head total copier
   what="$(itemname $x)"; log="$LOGDIR/copy-$(itemtag $x).log"; t0=$(date +%s)
   if [ "${HOW[$x]}" = swap ]; then
     step "Step 3 of 4: $what (swap, $(human "${NSIZE[$x]}")) is made again ..."
@@ -764,8 +949,9 @@ copy_item() {
     return
   fi
   if [ $x -eq $SK ] && [ "${HOW[$x]}" = filecopy ]; then
-    fs="${FS[$x]}"; fsname="$fs"; [ "$fs" = vfat ] && fsname=FAT
-    step "Step 3 of 4: $what ($fsname, $(human "${NSIZE[$x]}")): a new, smaller $fsname is made and $(human "${MIN[$x]}") of files are copied into it.\nThere is no progress bar for this; it can take several minutes."
+    fs="${FS[$x]}"; fsname="$(fsname "$fs")"
+    head="Step 3 of 4: $what ($fsname, $(human "${NSIZE[$x]}")): a new, smaller $fsname is made and $(human "${MIN[$x]}") of files are copied into it."
+    step "$head\n\nMaking the new file system ..."
     mo=ro; [ "$fs" = f2fs ] && mo=ro,norecovery
     mnt "$from" "$MNT/s" "$mo" "$fs" || { tail -3 "$LOGDIR/mount.log"; die "The $fsname file system of $what in the backup could not be opened (see mount.log)."; }
     ml="$LOGDIR/mkfs-$(itemtag $x).log"
@@ -800,27 +986,28 @@ copy_item() {
           { tail -3 "$ml"; die "The new f2fs file system for $what could not be made with the features $feats (see $(basename "$ml"))."; } ;;
     esac
     mnt "$to" "$MNT/d" rw "$fs" || { tail -3 "$LOGDIR/mount.log"; die "The new $fsname file system for $what could not be opened (see mount.log)."; }
-    if [ "$fs" = f2fs ]; then
-      ( cd "$MNT/s" && tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner --sparse -cpf - . | tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner -xpf - -C "$MNT/d" ) >"$log" 2>&1
-    else
-      # FAT and exFAT keep no owners or permissions: the files and their times.
-      cp -r --preserve=timestamps "$MNT/s/." "$MNT/d/" >"$log" 2>&1
-    fi || { tail -5 "$log"; die "Copying the files of $what failed (see copy-$(itemtag $x).log)."; }
+    # Progress: what the new file system has taken in, against what the
+    # backup's holds (less what the empty new one already uses).
+    total=$(( $(mb_used "$MNT/s") - $(mb_used "$MNT/d") ))
+    # FAT and exFAT keep no owners or permissions: the files and their times.
+    copier=copy_cp; [ "$fs" = f2fs ] && copier=copy_tar
+    progress_run "$head" "Copying files" "$total" "$total" mb_used "$MNT/d" - "$log" $copier "$MNT/s" "$MNT/d" ||
+      { tail -5 "$log"; die "Copying the files of $what failed (see copy-$(itemtag $x).log)."; }
     unmnt "$MNT/d"; unmnt "$MNT/s"
     say "  done in $(( $(date +%s) - t0 )) s"
     return
   fi
   if [ $x -eq $SK ] && [ "${HOW[$x]}" = xfscopy ]; then
-    step "Step 3 of 4: $what (XFS, $(human "${NSIZE[$x]}")): a new XFS is made and $(human "${MIN[$x]}") of files are copied into it.\nThere is no progress bar for this; it can take several minutes."
+    head="Step 3 of 4: $what (XFS, $(human "${NSIZE[$x]}")): a new XFS is made and $(human "${MIN[$x]}") of files are copied into it."
+    step "$head\n\nOpening the backup's file system and making the new one ..."
     mnt "$SHRDM" "$MNT/s" rw,nouuid xfs || { tail -3 "$LOGDIR/mount.log"; die "The XFS file system of $what in the backup could not be opened (see mount.log)."; }
     opts="$(xfs_like "$MNT/s")"
     mkfs.xfs -f -q $opts -m uuid="${FSUUID[$x]}" ${FSLABEL[$x]:+-L "${FSLABEL[$x]}"} "$to" >"$LOGDIR/mkfs-xfs.log" 2>&1 || { tail -5 "$LOGDIR/mkfs-xfs.log"; die "The new XFS file system for $what could not be made with the options$opts (see mkfs-xfs.log)."; }
     mnt "$to" "$MNT/d" rw,nouuid xfs || die "The new XFS file system for $what could not be opened (see mount.log)."
-    if has xfsdump && has xfsrestore; then
-      ( xfsdump -J -l 0 -L pbs -M pbs - "$MNT/s" | xfsrestore -J - "$MNT/d" ) >"$log" 2>&1
-    else
-      ( cd "$MNT/s" && tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner --sparse -cpf - . | tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner -xpf - -C "$MNT/d" ) >"$log" 2>&1
-    fi || { tail -5 "$log"; die "Copying the files of $what failed (see copy-$(itemtag $x).log)."; }
+    total=$(( $(mb_used "$MNT/s") - $(mb_used "$MNT/d") ))
+    copier=copy_tar; has xfsdump && has xfsrestore && copier=copy_xfsdump
+    progress_run "$head" "Copying files" "$total" "$total" mb_used "$MNT/d" - "$log" $copier "$MNT/s" "$MNT/d" ||
+      { tail -5 "$log"; die "Copying the files of $what failed (see copy-$(itemtag $x).log)."; }
     unmnt "$MNT/d"; unmnt "$MNT/s"
     say "  done in $(( $(date +%s) - t0 )) s"
     return
@@ -838,7 +1025,16 @@ copy_item() {
   esac
   has $tool || tool=partclone.dd
   has $tool || tool=dd
-  step "Step 3 of 4: copying $what (${FS[$x]:-no file system}, $(human "${NSIZE[$x]}")) ..."
+  fsname="$(fsname "${FS[$x]}")"; [ -n "$fsname" ] || fsname="no file system"
+  if [ $tool != dd ] && [ $TTY = 1 ]; then
+    # partclone's own screen comes next; its header reads "Starting to back
+    # up device (...) to device (...)", so this box says what is copied and
+    # stays a moment to be read before that screen covers it.
+    step "Step 3 of 4: copying $what ($fsname, $(human "${NSIZE[$x]}")) from the backup onto the new disk.\n\nThe next screen is the copy program's own progress (it calls this a backup of one device to another)."
+    sleep 3
+  else
+    step "Step 3 of 4: copying $what ($fsname, $(human "${NSIZE[$x]}")) from the backup onto the new disk ..."
+  fi
   if [ $tool = dd ]; then
     dd if="$from" of="$to" bs=4M status=none conv=fsync >"$log" 2>&1
   else

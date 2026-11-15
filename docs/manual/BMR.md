@@ -86,7 +86,7 @@ Four screens, each checked before moving on:
 | Password | | The user's password. Must not be empty |
 | PBS datastore | `backup` or `backup/clients` | Text after the first `/` is the namespace |
 
-Screenshots: [the URL](../screenshots/bmr-02-url.png) and [the password](../screenshots/bmr-03-password.png) (the address and the password length in them are placeholders). These are remembered for the rest of the boot session (in `/tmp/pbsnbd-credentials`, readable by root only), so a second attempt starts with them filled in.
+Screenshots: [the URL](../screenshots/bmr-02-url.png) and [the password](../screenshots/bmr-03-password.png) (the address and the password length in them are placeholders). While the wizard runs they are kept in `/tmp/pbsnbd-credentials` (readable by root only); the file is removed when the wizard stops, and **Start again** starts with the server, user name and datastore filled in (the password is always asked for).
 
 ### 4.4 Encryption key
 
