@@ -348,6 +348,12 @@ oldest first. Each is a `BackupProgress` as above.
 Run IDs start with `backup-` for a run the app asked for and `scheduled-` for one the
 service started.
 
+`after_backup` (left out when empty, and by an older service) lists what the service is
+waiting to do to the computer after a Backup Set's run: `id`, `set`, `action` (`sleep`,
+`hibernate` or `shutdown`), `at` (RFC 3339, when the set's wait ends) and
+`waiting_for_others` once the wait is over and other backups or restores still run. The
+app shows each with Cancel, which sends `POST /call/CancelAfterBackup` with `["<id>"]`.
+
 ### POST /backup/pause, POST /backup/resume, POST /backup/stop
 
 Act on the backup the service is running, whoever started it. No request body.

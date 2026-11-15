@@ -120,7 +120,8 @@ type Config struct {
 	// "disk-read-limit" in MB/s; a flag overrides the file.
 	clientcommon.SpeedLimits
 
-	// "shutdown-after": turn the computer off once the backup has run.
+	// "then" and "then-after" (or the older "shutdown-after"): what the
+	// computer does once the backup has run.
 	clientcommon.AfterRun
 }
 
@@ -169,6 +170,9 @@ func (c *Config) problems() []string {
 	}
 	if problem := c.SpeedLimitProblem(); problem != "" {
 		p = append(p, problem)
+	}
+	if err := c.AfterRun.Validate(); err != nil {
+		p = append(p, err.Error())
 	}
 	if !pbscommon.ValidCompressionLevel(c.Compression) {
 		p = append(p, fmt.Sprintf("-compression is %q: use none, fastest, default, better or best", c.Compression))
@@ -307,7 +311,7 @@ func loadConfig() *Config {
 	configFile := flag.String("config", "", "Path to JSON config file. If this flag is provided all the others will override the loaded config file")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
 	applySpeedLimitFlags := clientcommon.SpeedLimitFlags(flag.CommandLine)
-	applyShutdownAfterFlag := clientcommon.ShutdownAfterFlag(flag.CommandLine)
+	applyAfterRunFlags := clientcommon.AfterRunFlags(flag.CommandLine)
 
 	// A stray argument, an unknown option or (on Windows) a quote in a path
 	// stops here with what is wrong; -help prints the usage.
@@ -404,7 +408,8 @@ func loadConfig() *Config {
 		}
 	})
 	applySpeedLimitFlags(&config.SpeedLimits)
-	applyShutdownAfterFlag(&config.AfterRun)
+	// A wrong -then or -then-after is reported with the other problems.
+	_ = applyAfterRunFlags(&config.AfterRun)
 
 	initSmtpConfigIfNeeded := func() {
 		if config.SMTP == nil {

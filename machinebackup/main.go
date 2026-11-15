@@ -50,7 +50,7 @@ func (i *arrayFlags) Set(value string) error {
 }
 
 // loadConfig reads the command line and the -config file. The speed limits
-// and -shutdown-after come back on their own: machinebackuplib.Config is the
+// and -then (with -then-after, -shutdown-after) come back on their own: machinebackuplib.Config is the
 // app's too, which sets those from its own settings. So does whether
 // encrypted chunks are compressed (the last result, true unless
 // -no-compress-encrypted): the app hands over a key that is already set the
@@ -94,7 +94,7 @@ func loadConfig() (*machinebackuplib.Config, clientcommon.SpeedLimits, clientcom
 	configFile := flag.String("config", "", "Path to JSON config file. If this flag is provided all the others will override the loaded config file")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
 	applySpeedLimitFlags := clientcommon.SpeedLimitFlags(flag.CommandLine)
-	applyShutdownAfterFlag := clientcommon.ShutdownAfterFlag(flag.CommandLine)
+	applyAfterRunFlags := clientcommon.AfterRunFlags(flag.CommandLine)
 
 	// A stray argument, an unknown option or (on Windows) a quote in a path
 	// stops here with what is wrong; -help prints the usage.
@@ -135,7 +135,8 @@ func loadConfig() (*machinebackuplib.Config, clientcommon.SpeedLimits, clientcom
 		}
 	}
 	applySpeedLimitFlags(&limits)
-	applyShutdownAfterFlag(&after)
+	// A wrong -then or -then-after is reported with the other problems (Main).
+	_ = applyAfterRunFlags(&after)
 
 	if *baseURLFlag != "" {
 		config.BaseURL = *baseURLFlag
@@ -397,6 +398,9 @@ func Main() {
 	if problem := limits.SpeedLimitProblem(); problem != "" {
 		p = append(p, problem)
 	}
+	if err := after.Validate(); err != nil {
+		p = append(p, err.Error())
+	}
 	if len(p) > 0 {
 		for _, line := range p {
 			fmt.Fprintln(os.Stderr, line)
@@ -619,8 +623,8 @@ func Main() {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Fatal error: backup: %v\n", err)
-		// -shutdown-after: the backup has run, and failed; exit 1 still says so.
-		clientcommon.ShutdownAfterRun(after)
+		// -then: the backup has run, and failed; exit 1 still says so.
+		clientcommon.ActAfterRun(after)
 		os.Exit(1)
 	}
 	// A failed backup has no snapshot to note it on; a good one gets the mail
@@ -647,8 +651,8 @@ func Main() {
 			fmt.Fprintf(os.Stderr, "  %s at byte %d (%d bytes)\n", r.Disk, r.Offset, r.Length)
 		}
 	}
-	// -shutdown-after: the backup has run and the mail has gone.
-	clientcommon.ShutdownAfterRun(after)
+	// -then: the backup has run and the mail has gone.
+	clientcommon.ActAfterRun(after)
 	if len(bad) > 0 {
 		os.Exit(3)
 	}

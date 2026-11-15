@@ -512,6 +512,15 @@ var apiCalls = map[string]func(a *App, args []json.RawMessage) (interface{}, err
 		}
 		return nil, a.RunScheduledJobNowRead(id, read)
 	},
+	// The Cancel of the window's notice of what the computer is about to do
+	// after a run (sleep, hibernate, shut down: after_backup.go).
+	"CancelAfterBackup": func(a *App, args []json.RawMessage) (interface{}, error) {
+		var id string
+		if err := arg(args, 0, &id); err != nil {
+			return nil, err
+		}
+		return nil, cancelAfterBackup(id)
+	},
 	// Keys in the service's own folder only (keyInService): the service
 	// runs as SYSTEM or root, and must not read, create or describe a file
 	// anywhere else for whoever holds the token.

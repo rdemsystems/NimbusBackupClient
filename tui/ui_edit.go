@@ -11,6 +11,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"pbscommon"
 )
 
 var (
@@ -50,6 +51,13 @@ type editor struct {
 	exclude  *tview.TextArea
 	mailFail *tview.Checkbox
 	mailTo   *tview.InputField
+	// what the computer does after the backup (the app's Alerts tab): stays
+	// as it is, sleeps, hibernates or shuts down, after a wait, and maybe only
+	// after a run it was woken for
+	after        *tview.DropDown
+	afterWait    *tview.InputField
+	afterWoken   *tview.Checkbox
+	canHibernate bool
 
 	// a machine (disk image) set
 	sel        machineSel
@@ -64,6 +72,26 @@ type editor struct {
 }
 
 var vmStyles = []string{"9000000 + number", "000 + number"}
+
+// What the computer does after the backup, as the set stores it ("" stays as
+// it is) and as the form lists it.
+var (
+	afterModes   = []string{"", "sleep", "hibernate", "shutdown"}
+	afterChoices = []string{"Stays as it is (its own sleep settings apply)", "Goes to sleep", "Hibernates", "Shuts down"}
+)
+
+// afterChoiceOf is a set's choice. shutdownAfter, the older form, decides
+// whether it shuts down, as the app and service read it.
+func afterChoiceOf(doc map[string]interface{}) string {
+	if boolean(doc, "shutdownAfter") {
+		return "shutdown"
+	}
+	switch c := str(doc, "afterBackup"); c {
+	case "sleep", "hibernate":
+		return c
+	}
+	return ""
+}
 
 // The On battery choices, as the set stores them ("" is start anyway) and as
 // the form lists them.
@@ -296,6 +324,7 @@ func (e *editor) build() {
 		f3.AddFormItem(e.imgFolders)
 	}
 	f3.AddFormItem(e.vss).AddFormItem(e.mailFail).AddFormItem(e.mailTo)
+	e.buildAfterBackup(f3)
 	f3.SetTitle(" Options ")
 
 	forms := []*tview.Form{f1, f2, f3}
@@ -346,6 +375,61 @@ func (e *editor) build() {
 		})
 		e.pages.AddPage(fmt.Sprint(i), f, true, i == 0)
 	}
+}
+
+// buildAfterBackup adds to f what the computer does after the backup. This
+// computer's hibernation is read here: the form runs on the computer whose
+// service runs the set.
+func (e *editor) buildAfterBackup(f *tview.Form) {
+	choice := afterChoiceOf(e.orig)
+	var why string
+	e.canHibernate, why = pbscommon.CanHibernate()
+	choices := append([]string{}, afterChoices...)
+	if !e.canHibernate {
+		if why == pbscommon.HibernateOff {
+			choices[2] += " (turned off on this computer)"
+		} else {
+			choices[2] += " (not on this computer)"
+		}
+	}
+	wait := int(num(e.orig, "afterBackupWait"))
+	if choice == "" {
+		wait = 0
+	}
+	// Ticked to begin with: it counts only while the set wakes the computer.
+	woken := choice == "" || boolean(e.orig, "afterBackupOnlyIfWoken")
+	e.after = tview.NewDropDown().SetLabel("When the backup finishes, the computer ").SetOptions(choices, nil).SetCurrentOption(indexOf(afterModes, choice))
+	e.afterWait = tview.NewInputField().SetLabel("  After (0 to 240 minutes, 0 at once) ").SetText(strconv.Itoa(wait)).SetFieldWidth(4)
+	e.afterWoken = tview.NewCheckbox().SetLabel("  Only if this backup woke the computer (needs Wake, on Schedule) ").SetChecked(woken)
+	f.AddFormItem(e.after).AddFormItem(e.afterWait).AddFormItem(e.afterWoken)
+	f.AddTextView("", tag(colDim)+"It waits for any other backup still running; the app shows a notice with Cancel.\nShutting down closes every program, with any unsaved work, and a computer\nthat is shut down cannot be woken for the next backup.", 78, 3, true, false)
+}
+
+// applyAfterBackup puts what the computer does after the backup in doc. Call
+// it after the schedule: "only if woken" counts only for a set that wakes the
+// computer. shutdownAfter is written too, for an older service.
+func (e *editor) applyAfterBackup(doc map[string]interface{}) error {
+	ai, _ := e.after.GetCurrentOption()
+	if ai < 0 || ai >= len(afterModes) {
+		ai = 0
+	}
+	choice := afterModes[ai]
+	wait, err := strconv.Atoi(strings.TrimSpace(e.afterWait.GetText()))
+	if err != nil || wait < 0 || wait > 240 {
+		return fmt.Errorf("the wait after the backup must be a whole number of minutes from 0 to 240 (0 at once)")
+	}
+	if choice == "hibernate" && !e.canHibernate && afterChoiceOf(e.orig) != "hibernate" {
+		return fmt.Errorf("this computer cannot hibernate: choose another thing for it to do after the backup")
+	}
+	if choice == "" {
+		wait = 0
+	}
+	wakes, _ := doc["wakeToRun"].(bool)
+	doc["afterBackup"] = choice
+	doc["afterBackupWait"] = float64(wait)
+	doc["afterBackupOnlyIfWoken"] = choice != "" && wakes && e.afterWoken.IsChecked()
+	doc["shutdownAfter"] = choice == "shutdown"
+	return nil
 }
 
 // chooseDisks opens the disk picker on top of the form.
@@ -518,6 +602,9 @@ func (e *editor) document() (map[string]interface{}, error) {
 			list = []interface{}{sc}
 		}
 		doc["schedules"] = list
+	}
+	if err := e.applyAfterBackup(doc); err != nil {
+		return nil, err
 	}
 	return doc, nil
 }

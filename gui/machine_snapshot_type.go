@@ -38,6 +38,9 @@ func validateScheduledJob(job ScheduledJob) error {
 	if err := job.batteryRuleAsSaved().Validate(); err != nil {
 		return err
 	}
+	if err := validateAfterBackup(job); err != nil {
+		return err
+	}
 	if job.BackupType != "machine" || !job.MachineAsVM {
 		return nil
 	}

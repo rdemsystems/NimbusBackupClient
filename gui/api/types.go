@@ -122,6 +122,30 @@ type BackupProgress struct {
 // finished in the last few minutes (their final state).
 type RunsResponse struct {
 	Runs []BackupProgress `json:"runs"`
+	// AfterBackup lists what the service is waiting to do to the computer
+	// after a Backup Set's run (sleep, hibernate, shut down), so an open
+	// window can show it with Cancel. Absent from an older service.
+	AfterBackup []AfterBackupPending `json:"after_backup,omitempty"`
+}
+
+// AfterBackupPending is one action on the computer waiting to be carried out
+// after a Backup Set's run.
+type AfterBackupPending struct {
+	// ID names it for POST /call/CancelAfterBackup.
+	ID string `json:"id"`
+	// Set is the Backup Set's name; Action "sleep", "hibernate" or "shutdown".
+	Set    string `json:"set"`
+	Action string `json:"action"`
+	// At is when the set's wait ends (RFC 3339). WaitingForOthers: the wait
+	// is over and it waits for other backups and restores to finish.
+	At               string `json:"at"`
+	WaitingForOthers bool   `json:"waiting_for_others,omitempty"`
+}
+
+// AfterBackupAPI is optionally implemented by the BackupHandler: the actions
+// waiting after a run, for GET /runs.
+type AfterBackupAPI interface {
+	AfterBackupPendingForAPI() []AfterBackupPending
 }
 
 // RunControlResponse answers Pause, Resume and Stop: the pause state after

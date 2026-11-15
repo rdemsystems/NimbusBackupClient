@@ -1185,7 +1185,7 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 			// for a scheduled job (nil for a genuine one-off backup). The
 			// entry's message is the run's, or a battery cancel's.
 			if postActionsEntry != nil {
-				a.runPostBackupActions(*postActionsEntry.job, success, historyEntry.Message, postActionsEntry.snapshotNoter())
+				a.runPostBackupActions(*postActionsEntry.job, success, historyEntry.Message, postActionsEntry.snapshotNoter(), postActionsEntry.batteryInfo())
 			}
 
 			if success {
@@ -1511,7 +1511,7 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 			// OnComplete's matching comment above (startBackupDirect) for the
 			// full reasoning.
 			if postActionsEntry != nil {
-				a.runPostBackupActions(*postActionsEntry.job, success, historyEntry.Message, postActionsEntry.snapshotNoter())
+				a.runPostBackupActions(*postActionsEntry.job, success, historyEntry.Message, postActionsEntry.snapshotNoter(), postActionsEntry.batteryInfo())
 			}
 
 			if success {

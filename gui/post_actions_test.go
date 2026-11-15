@@ -20,17 +20,17 @@ func TestMailFailureNotedOnSnapshot(t *testing.T) {
 	job := ScheduledJob{Name: "t", EmailOnSuccess: true, EmailOnSuccessTo: "someone@example.com"}
 
 	n := &fakeNoter{}
-	a.runPostBackupActions(job, true, "done", n)
+	a.runPostBackupActions(job, true, "done", n, nil)
 	if len(n.notes) != 1 || n.notes[0] != clientcommon.MailFailedNote {
 		t.Fatalf("notes %q, want the mail warning once", n.notes)
 	}
 
 	quiet := &fakeNoter{}
-	a.runPostBackupActions(ScheduledJob{Name: "t"}, true, "done", quiet)
+	a.runPostBackupActions(ScheduledJob{Name: "t"}, true, "done", quiet, nil)
 	if len(quiet.notes) != 0 {
 		t.Fatalf("noted %q with no e-mail due", quiet.notes)
 	}
-	a.runPostBackupActions(job, true, "done", nil) // no snapshot: nothing to note, no panic
+	a.runPostBackupActions(job, true, "done", nil, nil) // no snapshot: nothing to note, no panic
 }
 
 // The service runs scheduled sets too and has no window: a set that
@@ -38,9 +38,9 @@ func TestMailFailureNotedOnSnapshot(t *testing.T) {
 // context there.
 func TestMinimizeAfterWithoutWindow(t *testing.T) {
 	a := &App{}
-	a.runPostBackupActions(ScheduledJob{Name: "t", MinimizeAfter: true}, true, "done", nil)
+	a.runPostBackupActions(ScheduledJob{Name: "t", MinimizeAfter: true}, true, "done", nil, nil)
 	a.isServiceProcess = true
-	a.runPostBackupActions(ScheduledJob{Name: "t", MinimizeAfter: true}, false, "failed", nil)
+	a.runPostBackupActions(ScheduledJob{Name: "t", MinimizeAfter: true}, false, "failed", nil, nil)
 }
 
 // A set that closes the app when it finishes must not stop the service.
@@ -51,10 +51,10 @@ func TestExitAfterIgnoredInService(t *testing.T) {
 	defer func() { exitAppAfterBackup = old }()
 
 	svc := &App{isServiceProcess: true}
-	svc.runPostBackupActions(ScheduledJob{Name: "t", ExitAppAfter: true}, true, "done", nil)
+	svc.runPostBackupActions(ScheduledJob{Name: "t", ExitAppAfter: true}, true, "done", nil, nil)
 
 	app := &App{}
-	app.runPostBackupActions(ScheduledJob{Name: "t", ExitAppAfter: true}, true, "done", nil)
+	app.runPostBackupActions(ScheduledJob{Name: "t", ExitAppAfter: true}, true, "done", nil, nil)
 
 	<-exits // the app's exit (it runs in a goroutine)
 	select {

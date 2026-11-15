@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"clientcommon"
-	"pbscommon"
 )
 
 // SetSMTPSettings persists the Preferences > Advanced global SMTP account
@@ -157,11 +156,13 @@ func runPostBackupApp(command, jobName, when string) {
 
 // runPostBackupActions runs everything a finished Backup Set is configured
 // to do after it completes: email notification, an application, then exiting
-// the app and/or shutting down the computer — deliberately in that order,
-// since a shutdown is irreversible and must be the very last thing attempted.
-// noter is the run's snapshot (nil when there is none): an e-mail that could
-// not be sent is noted in its PBS comment.
-func (a *App) runPostBackupActions(job ScheduledJob, success bool, message string, noter snapshotNoter) {
+// the app and what the computer does (sleep, hibernate, shut down:
+// after_backup.go), deliberately in that order, since a shutdown is
+// irreversible and must be the very last thing attempted. noter is the run's
+// snapshot (nil when there is none): an e-mail that could not be sent is
+// noted in its PBS comment. run is what the battery did around the run (nil
+// when not known): it says whether the computer was woken for it.
+func (a *App) runPostBackupActions(job ScheduledJob, success bool, message string, noter snapshotNoter, run *batteryRunInfo) {
 	if a.sendJobNotificationEmail(job, success, message) {
 		noteMailFailed(job.Name, noter)
 	}
@@ -172,6 +173,9 @@ func (a *App) runPostBackupActions(job ScheduledJob, success bool, message strin
 		writeDebugLog(fmt.Sprintf("[PostBackup] job %q configured to minimise to the tray after backup", job.Name))
 		a.MinimizeToTray()
 	}
+	// Sleep, hibernate or shut down, once its wait and the other backups are
+	// over (after_backup.go). Set off before the exit below, which waits for it.
+	a.startAfterBackup(job, run)
 	// Exiting is for the app only: in the service it would stop every
 	// schedule until Windows or systemd restarts it.
 	if job.ExitAppAfter && a.isServiceProcess {
@@ -180,20 +184,16 @@ func (a *App) runPostBackupActions(job ScheduledJob, success bool, message strin
 		writeDebugLog(fmt.Sprintf("[PostBackup] job %q configured to exit the app after backup — exiting", job.Name))
 		go func() {
 			waitForOtherBackups(job.Name, "exiting the app")
+			// The app would take with it what the computer is still to do
+			// after this run (it runs the schedules when there is no
+			// service): that goes first.
+			waitForAfterBackup(job.ID)
 			exitAppAfterBackup()
-		}()
-	}
-	if job.ShutdownAfter {
-		writeDebugLog(fmt.Sprintf("[PostBackup] job %q configured to shut down the computer after backup — shutting down", job.Name))
-		go func() {
-			waitForOtherBackups(job.Name, "shutting down")
-			time.Sleep(2 * time.Second)
-			shutdownComputer()
 		}()
 	}
 }
 
-// waitForOtherBackups holds an exit or shutdown until the backups and
+// waitForOtherBackups holds an exit until the backups and
 // restores already running or queued beside this set's run have ended (it
 // would cut them short), this run's own included. Ones that start later are
 // not waited for.
@@ -209,18 +209,4 @@ func waitForOtherBackups(jobName, what string) {
 var exitAppAfterBackup = func() {
 	time.Sleep(2 * time.Second) // give the history write and any event emit a moment to land
 	os.Exit(0)
-}
-
-// shutdownComputer requests an OS shutdown (pbscommon.ShutdownComputer: the
-// Windows API, with shutdown.exe to fall back on; shutdown -h on Linux).
-// Best-effort: logged on failure, there is nothing more a running backup
-// client can do if the OS itself refuses the request (e.g. insufficient
-// privilege).
-func shutdownComputer() {
-	method, err := pbscommon.ShutdownComputer("Shutting down after a backup, as its Backup Set asks.")
-	if err != nil {
-		writeDebugLog(fmt.Sprintf("[PostBackup] shutdown failed: %v", err))
-		return
-	}
-	writeDebugLog("[PostBackup] shutdown requested through " + method)
 }

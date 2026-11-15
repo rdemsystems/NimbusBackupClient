@@ -636,9 +636,9 @@ func Main() {
 		}
 	}
 
-	// -shutdown-after: the backup has run, worked or not, and the mail has
-	// gone; the exit code below still says how it went.
-	clientcommon.ShutdownAfterRun(cfg.AfterRun)
+	// -then (sleep, hibernate, shut down): the backup has run, worked or not,
+	// and the mail has gone; the exit code below still says how it went.
+	clientcommon.ActAfterRun(cfg.AfterRun)
 
 	// Exit non-zero so schedulers never read a failed or incomplete backup as
 	// success. mailCtx.Error is the fatal error; ReadErrors means the snapshot

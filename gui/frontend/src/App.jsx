@@ -49,6 +49,8 @@ let ExportSettings, ImportSettings
 let SetSMTPSettings, SendTestEmail
 let GetLogsFolder, OpenLogsFolder, SaveLogs, GetServiceLogsStatus, OpenServiceLogsFolder
 let GetWakeTimerInfo, GetBatteryInfo
+// What the computer does after a set's backup (gui/after_backup.go)
+let GetPowerActionsInfo, GetAfterBackupPending, CancelAfterBackup
 // Encryption key management
 let InspectEncryptionKeyFile, GenerateEncryptionKeyFile, OpenEncryptionKeyDialog, OpenEncryptionKeySaveDialog
 // Undelete, Roll back, Run as Service
@@ -138,6 +140,9 @@ if (window.go) {
   OpenServiceLogsFolder = window.go.main.App.OpenServiceLogsFolder
   GetWakeTimerInfo = window.go.main.App.GetWakeTimerInfo
   GetBatteryInfo = window.go.main.App.GetBatteryInfo
+  GetPowerActionsInfo = window.go.main.App.GetPowerActionsInfo
+  GetAfterBackupPending = window.go.main.App.GetAfterBackupPending
+  CancelAfterBackup = window.go.main.App.CancelAfterBackup
   SetSMTPSettings = window.go.main.App.SetSMTPSettings
   SendTestEmail = window.go.main.App.SendTestEmail
   // Encryption key management
@@ -880,7 +885,40 @@ function App() {
   const [runAppAfter, setRunAppAfter] = useState('')
   const [exitAppAfter, setExitAppAfter] = useState(false)
   const [minimizeAfter, setMinimizeAfter] = useState(false)
-  const [shutdownAfter, setShutdownAfter] = useState(false)
+  // What the computer does when the set's backup finishes (gui/after_backup.go):
+  // '' stays as it is, 'sleep', 'hibernate' or 'shutdown'; after
+  // afterBackupWait minutes; and with afterBackupOnlyIfWoken only after a run
+  // the set's Wake option woke the computer for (so it counts only while Wake
+  // is ticked). powerInfo is App.GetPowerActionsInfo: whether this computer
+  // can hibernate.
+  const [afterBackup, setAfterBackup] = useState('')
+  const [afterBackupWait, setAfterBackupWait] = useState(0)
+  const [afterBackupOnlyIfWoken, setAfterBackupOnlyIfWoken] = useState(true)
+  const [powerInfo, setPowerInfo] = useState(null)
+  useEffect(() => {
+    if (!GetPowerActionsInfo) return
+    GetPowerActionsInfo().then(setPowerInfo).catch(() => setPowerInfo(null))
+  }, [])
+  // presetAfterBackup fills the choice from a set, or with a new set's
+  // defaults for null. A set saved with the older "Turn off the computer
+  // after the backup" shuts down at once, after any run.
+  const presetAfterBackup = (job) => {
+    const choice = job && ['sleep', 'hibernate', 'shutdown'].includes(job.afterBackup) ? job.afterBackup : (job && job.shutdownAfter ? 'shutdown' : '')
+    setAfterBackup(choice)
+    setAfterBackupWait(choice && job ? (job.afterBackupWait || 0) : 0)
+    setAfterBackupOnlyIfWoken(choice && job ? !!job.afterBackupOnlyIfWoken : true)
+  }
+  // Actions waiting after a backup, here or in the service, each shown as a
+  // notice with Cancel while the window is open (polled every 5 s).
+  const [afterBackupPending, setAfterBackupPending] = useState([])
+  useEffect(() => {
+    if (!GetAfterBackupPending) return undefined
+    let live = true
+    const poll = () => GetAfterBackupPending().then(list => { if (live) setAfterBackupPending(list || []) }).catch(() => {})
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => { live = false; clearInterval(id) }
+  }, [])
   const [jobName, setJobName] = useState('') // User-facing name for the backup set being created/edited
   // The set's Enabled switch under its name (the More menu's Enable/Disable).
   const [jobEnabled, setJobEnabled] = useState(true)
@@ -3232,7 +3270,12 @@ function App() {
         runAppAfter: runAppAfter.trim(),
         exitAppAfter: exitAppAfter,
         minimizeAfter: minimizeAfter && !exitAppAfter,
-        shutdownAfter: shutdownAfter,
+        // What the computer does after the backup; shutdownAfter is still
+        // sent, for an older service reading the set.
+        afterBackup: afterBackup,
+        afterBackupWait: afterBackup ? Math.min(240, Math.max(0, parseInt(afterBackupWait, 10) || 0)) : 0,
+        afterBackupOnlyIfWoken: !!afterBackup && scheduleMode !== 'manual' && wakeToRun && afterBackupOnlyIfWoken,
+        shutdownAfter: afterBackup === 'shutdown',
         // Folder sets only: machine sets back up disk images.
         changeDetectionMode: backupType === 'directory' && changeDetectionMode !== 'legacy' ? changeDetectionMode : '',
         fullReadEvery: backupType === 'directory' && changeDetectionMode === 'metadata' ? fullReadEvery : 0
@@ -3293,7 +3336,7 @@ function App() {
         setEmailOnSuccess(false); setEmailOnSuccessTo('')
         setEmailOnFailure(false); setEmailOnFailureTo('')
         setRunAppBefore(''); setRunAppAfter('')
-        setExitAppAfter(false); setMinimizeAfter(false); setShutdownAfter(false)
+        setExitAppAfter(false); setMinimizeAfter(false); presetAfterBackup(null)
         setChangeDetectionMode(NEW_SET_CHANGE_DETECTION); setFullReadEvery(NEW_SET_FULL_READ_EVERY)
         setShowBackupForm(false)
       } catch (err) {
@@ -4334,6 +4377,26 @@ function App() {
         </div>
 
       <div className="container">
+        {afterBackupPending.map(n => {
+          const key = { sleep: 'msgAfterBackupSleep', hibernate: 'msgAfterBackupHibernate', shutdown: 'msgAfterBackupShutdown' }[n.action]
+          if (!key) return null
+          const at = new Date(n.at)
+          const when = n.waitingForOthers || isNaN(at.getTime()) || at.getTime() <= Date.now()
+            ? t('afterBackupNoticeOthers')
+            : t('afterBackupNoticeAt', { time: at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })
+          return (
+            <div key={n.id} className="info-box banner-warning after-backup-banner" style={{marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', backgroundColor: '#fff3cd', borderLeft: '4px solid #ffc107'}}>
+              <span style={{flex: '1 1 320px'}}>⏳ {n.set}: {t(key)} {when}</span>
+              <button className="btn" onClick={() => {
+                if (!CancelAfterBackup) return
+                CancelAfterBackup(n.id)
+                  .then(() => showStatus(`✅ ${t('afterBackupCancelled')}`, 'success'))
+                  .catch(err => showStatus(`❌ ${String(err?.message || err)}`, 'error'))
+                  .finally(() => GetAfterBackupPending && GetAfterBackupPending().then(list => setAfterBackupPending(list || [])).catch(() => {}))
+              }}>{t('afterBackupCancelBtn')}</button>
+            </div>
+          )
+        })}
         {serviceNotRunning && (
           <div className="info-box banner-warning service-stopped-banner">
             <span className="banner-text">⚠️ {t('serviceNotRunningBanner')}</span>
@@ -5390,7 +5453,7 @@ function App() {
                     setEmailOnSuccess(false); setEmailOnSuccessTo('')
                     setEmailOnFailure(false); setEmailOnFailureTo('')
                     setRunAppBefore(''); setRunAppAfter('')
-                    setExitAppAfter(false); setMinimizeAfter(false); setShutdownAfter(false)
+                    setExitAppAfter(false); setMinimizeAfter(false); presetAfterBackup(null)
                     setChangeDetectionMode(NEW_SET_CHANGE_DETECTION); setFullReadEvery(NEW_SET_FULL_READ_EVERY)
                     setBackupFormTab('source'); setShowBackupForm(true)
                   }}
@@ -5660,7 +5723,7 @@ function App() {
                               setEmailOnSuccess(!!job.emailOnSuccess); setEmailOnSuccessTo(job.emailOnSuccessTo || '')
                               setEmailOnFailure(!!job.emailOnFailure); setEmailOnFailureTo(job.emailOnFailureTo || '')
                               setRunAppBefore(job.runAppBefore || ''); setRunAppAfter(job.runAppAfter || '')
-                              setExitAppAfter(!!job.exitAppAfter); setMinimizeAfter(!!job.minimizeAfter); setShutdownAfter(!!job.shutdownAfter)
+                              setExitAppAfter(!!job.exitAppAfter); setMinimizeAfter(!!job.minimizeAfter); presetAfterBackup(job)
                               setChangeDetectionMode(job.changeDetectionMode || 'legacy'); setFullReadEvery(job.fullReadEvery || 0)
                               setBackupFormTab('source'); setShowBackupForm(true)
                             }}
@@ -5738,7 +5801,7 @@ function App() {
                                     setEmailOnSuccess(!!job.emailOnSuccess); setEmailOnSuccessTo(job.emailOnSuccessTo || '')
                                     setEmailOnFailure(!!job.emailOnFailure); setEmailOnFailureTo(job.emailOnFailureTo || '')
                                     setRunAppBefore(job.runAppBefore || ''); setRunAppAfter(job.runAppAfter || '')
-                                    setExitAppAfter(!!job.exitAppAfter); setMinimizeAfter(!!job.minimizeAfter); setShutdownAfter(!!job.shutdownAfter)
+                                    setExitAppAfter(!!job.exitAppAfter); setMinimizeAfter(!!job.minimizeAfter); presetAfterBackup(job)
                                     setChangeDetectionMode(job.changeDetectionMode || 'legacy'); setFullReadEvery(job.fullReadEvery || 0)
                                     setBackupFormTab('source'); setShowBackupForm(true)
                                   }}
@@ -6359,17 +6422,65 @@ function App() {
               </label>
             ))}
           </div>
-          <div className="form-group">
-            <label style={{display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer'}}>
-              <input type="checkbox" checked={shutdownAfter} onChange={(e) => setShutdownAfter(e.target.checked)} />
-              <span>{t('shutdownAfterLabel')}</span>
-            </label>
-            {shutdownAfter && (
-              <div className="info-box" style={{marginTop: '10px', backgroundColor: '#fff3cd', borderColor: '#ffc107'}}>
-                ⚠️ {t('shutdownAfterWarning')}
+          {/* What the computer does when the backup finishes (gui/after_backup.go): one choice. */}
+          {(() => {
+            const wakeOn = scheduleMode !== 'manual' && wakeToRun
+            const noHibernate = !!powerInfo && !powerInfo.hibernate
+            const [waitBefore, waitAfter = ''] = t('afterBackupWaitMinutes').split('{n}')
+            return (
+              <div className="form-group" id="after-backup">
+                <label id="after-backup-label">{t('afterBackupComputerLabel')}</label>
+                <div role="radiogroup" aria-labelledby="after-backup-label">
+                  {[
+                    ['', t('afterBackupComputerStay')],
+                    ['sleep', t('afterBackupComputerSleep')],
+                    ['hibernate', t('afterBackupComputerHibernate')],
+                    ['shutdown', t('afterBackupComputerShutdown')],
+                  ].map(([v, label]) => {
+                    const off = v === 'hibernate' && noHibernate
+                    return (
+                      <label key={v || 'stay'} style={{display: 'flex', alignItems: 'center', gap: '8px', cursor: off ? 'not-allowed' : 'pointer', fontWeight: 'normal', marginTop: '4px', opacity: off ? 0.55 : 1}}>
+                        <input type="radio" name="afterBackupComputer" value={v} id={`after-backup-${v || 'stay'}`}
+                          checked={afterBackup === v} disabled={off} onChange={() => setAfterBackup(v)} />
+                        <span>{label}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+                {noHibernate && (
+                  <p className="sched-hint" id="after-backup-no-hibernate">
+                    {powerInfo.hibernateWhy === 'off' ? t('afterBackupHibernateOff') : t('afterBackupHibernateNone')}
+                  </p>
+                )}
+                {afterBackup && (
+                  <div style={{marginTop: '8px', marginLeft: '24px'}} id="after-backup-options">
+                    <div className="sched-row">
+                      <span>{waitBefore}</span>
+                      <input id="after-backup-wait" type="number" min={0} max={240} value={afterBackupWait} className="sched-field narrow"
+                        onChange={e => setAfterBackupWait(Math.max(0, Math.min(999, parseInt(e.target.value, 10) || 0)))}
+                        onBlur={e => setAfterBackupWait(Math.min(240, Math.max(0, parseInt(e.target.value, 10) || 0)))} />
+                      <span>{waitAfter}</span>
+                    </div>
+                    <div className="sched-row">
+                      <label className="sched-startup" style={wakeOn ? undefined : {opacity: 0.55, cursor: 'not-allowed'}}>
+                        <input type="checkbox" id="after-backup-only-woken" disabled={!wakeOn}
+                          checked={wakeOn && afterBackupOnlyIfWoken} onChange={e => setAfterBackupOnlyIfWoken(e.target.checked)} />
+                        <span>{t('afterBackupOnlyIfWoken')}</span>
+                      </label>
+                    </div>
+                    {!wakeOn && <p className="sched-hint" id="after-backup-needs-wake">{t('afterBackupNeedsWake')}</p>}
+                    <p className="sched-hint" id="after-backup-wait-note">{t('afterBackupWaitNote')}</p>
+                    {afterBackup === 'shutdown' && (
+                      <div className="info-box" id="after-backup-shutdown-warning" style={{marginTop: '10px', backgroundColor: '#fff3cd', borderColor: '#ffc107'}}>
+                        ⚠️ {t('afterBackupShutdownWarning')}
+                        {wakeOn && <><br />{t('afterBackupShutdownWake')}</>}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            )
+          })()}
           </>
           )}
 

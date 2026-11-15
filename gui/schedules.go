@@ -119,6 +119,9 @@ func normalizeJobSchedules(job *ScheduledJob) {
 		}
 	}
 	mirrorLegacyTrigger(job)
+	// Every path that loads or saves a set comes through here, so the
+	// choice of what the computer does after the backup is put in order too.
+	normalizeAfterBackup(job)
 }
 
 // mirrorLegacyTrigger writes TriggerMode and its fields from the set's first

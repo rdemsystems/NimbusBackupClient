@@ -505,7 +505,11 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	for i := range runs {
 		runs[i] = s.withPause(runs[i])
 	}
-	s.writeJSON(w, RunsResponse{Runs: runs}, http.StatusOK)
+	resp := RunsResponse{Runs: runs}
+	if ab, ok := s.app.(AfterBackupAPI); ok {
+		resp.AfterBackup = ab.AfterBackupPendingForAPI()
+	}
+	s.writeJSON(w, resp, http.StatusOK)
 }
 
 // handleRunControl serves POST /backup/pause, /backup/resume and

@@ -180,13 +180,25 @@ type ScheduledJob struct {
 	// logged, never blocks or fails the backup itself.
 	RunAppBefore string `json:"runAppBefore,omitempty"`
 	RunAppAfter  string `json:"runAppAfter,omitempty"`
-	// ExitAppAfter/ShutdownAfter fire after RunAppAfter and the notification
-	// email, in that order — a shutdown is irreversible, so it is always the
+	// ExitAppAfter and AfterBackup fire after RunAppAfter and the notification
+	// email, in that order: a shutdown is irreversible, so it is always the
 	// last thing attempted.
-	ExitAppAfter  bool `json:"exitAppAfter,omitempty"`
+	ExitAppAfter bool `json:"exitAppAfter,omitempty"`
+	// AfterBackup is what the computer does once a run of the set has ended
+	// (after_backup.go): "" stays as it is, "sleep", "hibernate" or
+	// "shutdown"; after AfterBackupWait minutes, and with
+	// AfterBackupOnlyIfWoken only after a run the set's wake timer woke the
+	// computer for.
+	AfterBackup            string `json:"afterBackup,omitempty"`
+	AfterBackupWait        int    `json:"afterBackupWait,omitempty"`
+	AfterBackupOnlyIfWoken bool   `json:"afterBackupOnlyIfWoken,omitempty"`
+	// ShutdownAfter is the older form of AfterBackup "shutdown" (at once,
+	// after any run). It is still written, true exactly when AfterBackup is
+	// "shutdown", so an older app or service reading the file shuts down
+	// when it should and at no other time (normalizeAfterBackup).
 	ShutdownAfter bool `json:"shutdownAfter,omitempty"`
 	// MinimizeAfter hides the window to the tray when the backup finishes
-	// (ignored when ExitAppAfter is set; a shutdown still follows).
+	// (ignored when ExitAppAfter is set; AfterBackup still follows).
 	MinimizeAfter bool `json:"minimizeAfter,omitempty"`
 }
 
@@ -1384,7 +1396,7 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 		// pendingPostActions map entry doesn't leak for this run's lifetime
 		// (`job` is this function's own local variable throughout, so the
 		// discarded value itself isn't needed — only the cleanup is).
-		a.runPostBackupActions(job, err == nil, historyEntry.Message, noter)
+		a.runPostBackupActions(job, err == nil, historyEntry.Message, noter, battery)
 		a.takePendingPostActions(postActionsKey)
 	} else if err != nil {
 		// Standalone mode: err here is only ever non-nil for an immediate,
@@ -1417,7 +1429,7 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 		}); herr != nil {
 			writeDebugLog(fmt.Sprintf("Warning: Failed to add job history: %v", herr))
 		}
-		a.runPostBackupActions(job, false, err.Error(), nil)
+		a.runPostBackupActions(job, false, err.Error(), nil, battery)
 		a.takePendingPostActions(postActionsKey)
 	}
 

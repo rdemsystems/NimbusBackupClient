@@ -81,6 +81,14 @@ const (
 	MsgLogBatteryCancelled      MessageKey = "msgBatteryCancelled"      // {min}, {pct}
 	MsgLogBatteryCancelledTwice MessageKey = "msgBatteryCancelledTwice" // {min}, {pct}
 
+	// What the computer does after a Backup Set's run (gui/after_backup.go).
+	// Message Log lines (after the set's name):
+	MsgLogAfterBackupSleep     MessageKey = "msgAfterBackupSleep"     // (none)
+	MsgLogAfterBackupHibernate MessageKey = "msgAfterBackupHibernate" // (none)
+	MsgLogAfterBackupShutdown  MessageKey = "msgAfterBackupShutdown"  // (none)
+	MsgLogAfterBackupCancelled MessageKey = "msgAfterBackupCancelled" // (none)
+	MsgLogAfterBackupFailed    MessageKey = "msgAfterBackupFailed"    // {error}
+
 	// Restore (gui/main.go, RestoreSnapshot's goroutine).
 	MsgRestoreCompleted MessageKey = "logRestoreCompleted" // (none)
 	MsgRestoreFailed    MessageKey = "logRestoreFailed"    // {error}

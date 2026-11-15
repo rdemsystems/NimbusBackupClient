@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"clientcommon"
+	"pbscommon"
 )
 
 // A Backup Set's "On battery" rule. On a laptop running on its battery a
@@ -26,8 +27,9 @@ import (
 // stand in for the system.
 var readBattery = clientcommon.ReadBattery
 
-// sleepComputer puts the computer to sleep (suspend_*.go); tests replace it.
-var sleepComputer = platformSleepComputer
+// sleepComputer puts the computer to sleep (pbscommon's suspend_*.go); tests
+// replace it.
+var sleepComputer = pbscommon.SleepComputer
 
 // batteryCheckEvery is how often a running backup's cancel level is checked.
 var batteryCheckEvery = 30 * time.Second
