@@ -58,6 +58,29 @@ const (
 	MsgJobAbandoned           MessageKey = "logJobAbandoned"           // (none)
 	MsgBackupCompletedGeneric MessageKey = "logBackupCompletedGeneric" // (none) — scheduler's own placeholder before the detailed OnComplete entry lands (standalone mode)
 
+	// A Backup Set's "On battery" rule (gui/battery_rule.go). Reports entries:
+	MsgBatterySkippedWoken        MessageKey = "logBatterySkippedWoken"        // {time}, {pct}, {min}
+	MsgBatterySkippedWokenPlugged MessageKey = "logBatterySkippedWokenPlugged" // {time}
+	MsgBatteryHeld                MessageKey = "logBatteryHeld"                // {time}, {pct}, {min}
+	MsgBatteryHeldPlugged         MessageKey = "logBatteryHeldPlugged"         // {time}
+	MsgBatteryCancelledWoken      MessageKey = "logBatteryCancelledWoken"      // {start}, {startPct}, {end}, {min}
+	MsgBatteryCancelled           MessageKey = "logBatteryCancelled"           // {start}, {startPct}, {end}, {min}
+	MsgBatteryCancelledMains      MessageKey = "logBatteryCancelledMains"      // {start}, {end}, {min}
+	// Extra lines (JobHistory.Notes):
+	NoteBatteryRanLate  MessageKey = "noteBatteryRanLate"  // {time}, {pct}, {start}
+	NoteBatteryStartEnd MessageKey = "noteBatteryStartEnd" // {startPct}, {endPct}
+	NoteBatteryTwice    MessageKey = "noteBatteryTwice"    // (none)
+	// Message Log lines (after the set's name):
+	MsgLogBatteryHeld           MessageKey = "msgBatteryHeld"           // {pct}, {min}
+	MsgLogBatteryHeldPlugged    MessageKey = "msgBatteryHeldPlugged"    // (none)
+	MsgLogBatteryPluggedIn      MessageKey = "msgBatteryPluggedIn"      // {pct}, {time}
+	MsgLogBatteryWokenLow       MessageKey = "msgBatteryWokenLow"       // {pct}, {min}
+	MsgLogBatteryWokenPlugged   MessageKey = "msgBatteryWokenPlugged"   // (none)
+	MsgLogBatteryStartedWoken   MessageKey = "msgBatteryStartedWoken"   // {pct}, {time}
+	MsgLogBatteryStarted        MessageKey = "msgBatteryStarted"        // {pct}
+	MsgLogBatteryCancelled      MessageKey = "msgBatteryCancelled"      // {min}, {pct}
+	MsgLogBatteryCancelledTwice MessageKey = "msgBatteryCancelledTwice" // {min}, {pct}
+
 	// Restore (gui/main.go, RestoreSnapshot's goroutine).
 	MsgRestoreCompleted MessageKey = "logRestoreCompleted" // (none)
 	MsgRestoreFailed    MessageKey = "logRestoreFailed"    // {error}

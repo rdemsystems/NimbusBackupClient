@@ -805,7 +805,7 @@ func statusColour(s string) tcell.Color {
 		return colOK
 	case "failed", "error":
 		return colErr
-	case "partial", "warning", "cancelled", "canceled":
+	case "partial", "warning", "cancelled", "canceled", "held", "skipped": // held and skipped: for the battery
 		return colWarn
 	}
 	return colDim
@@ -817,6 +817,8 @@ func statusWord(s string) string {
 		return "OK"
 	case "failed":
 		return "Failed"
+	case "held":
+		return "Held back"
 	case "":
 		return "-"
 	}

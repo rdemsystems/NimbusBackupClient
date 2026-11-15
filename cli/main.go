@@ -10,6 +10,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -75,6 +76,9 @@ func main() {
 		if len(os.Args) > 2 {
 			if c, ok := byName(os.Args[2]); ok {
 				os.Args = []string{"salvanza-cli " + c.name, "-help"}
+				if c.name == "backup-folder" || c.name == "backup-disk" {
+					defineBatteryFlags(flag.CommandLine)
+				}
 				c.run()
 				return
 			}
@@ -96,10 +100,20 @@ func main() {
 
 // start runs a subcommand. The two backups remove their snapshots when they
 // are stopped with Ctrl+C or a signal (Linux; attach-nbd has its own
-// handling, and install-snapshot-module takes none).
+// handling, and install-snapshot-module takes none), and follow
+// -on-battery and -cancel-below (battery.go).
 func start(c command) {
 	if c.name == "backup-folder" || c.name == "backup-disk" {
 		snapshot.CleanupOnSignal()
+		rule, info, err := batteryRuleFromArgs(os.Args[1:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		defineBatteryFlags(flag.CommandLine)
+		if !info {
+			startBatteryRule(rule)
+		}
 	}
 	c.run()
 }

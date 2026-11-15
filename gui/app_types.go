@@ -149,6 +149,10 @@ type pendingPostActionsEntry struct {
 	// a goroutine) has ended, so the scheduler can hold the set as running
 	// until then: the set is not started again while it runs or queues.
 	runDone chan struct{}
+	// battery is what the battery did around this run of a Backup Set (its
+	// "On battery" rule, battery_rule.go), for its history entry; set by the
+	// scheduler before the run starts, nil for a one-off backup.
+	battery *batteryRunInfo
 }
 
 // setID is the ID of the Backup Set this run is of, for its history entry

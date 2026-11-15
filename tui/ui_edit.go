@@ -39,6 +39,11 @@ type editor struct {
 	unit                *tview.DropDown
 	every, at, weekdayF *tview.InputField
 	wake                *tview.Checkbox // wakeToRun: wake the computer from sleep for its runs (#140)
+	// the set's On battery rule: start anyway, only at a charge of at least
+	// a level, or wait for mains; and cancel a running backup below a level
+	battery                    *tview.DropDown
+	batteryStart, batteryBelow *tview.InputField
+	batteryCancel              *tview.Checkbox
 	// step 3
 	detect   *tview.DropDown
 	vss      *tview.Checkbox
@@ -59,6 +64,13 @@ type editor struct {
 }
 
 var vmStyles = []string{"9000000 + number", "000 + number"}
+
+// The On battery choices, as the set stores them ("" is start anyway) and as
+// the form lists them.
+var (
+	batteryModes   = []string{"", "above", "plugged"}
+	batteryChoices = []string{"Start backup anyway", "Start only if the charge is at least the start level", "Wait for the computer to be plugged in"}
+)
 
 // vmBackupID is the numeric PBS vm/<id> a machine set backs up as: 9000000+N
 // cannot collide with a real VM's ID, 000N is the other style.
@@ -135,6 +147,9 @@ func (a *App) newSetDoc(machine bool) map[string]interface{} {
 		"id": strconv.FormatInt(time.Now().UnixMilli(), 10), "backupType": "directory", "enabled": true,
 		"scheduleMode": "scheduled", "useVSS": true, "changeDetectionMode": "legacy", "excludeList": []interface{}{},
 		"schedules": []interface{}{map[string]interface{}{"id": "s1", "enabled": true, "unit": "days", "every": 1.0, "at": "02:00"}},
+		// A new set on a laptop's battery starts at 30% or more and is
+		// cancelled below 10%, as in the app.
+		"onBattery": "above", "batteryStartPercent": 30.0, "batteryCancel": true, "batteryCancelBelow": 10.0,
 	}
 	if machine {
 		host, _ := os.Hostname()
@@ -229,8 +244,24 @@ func (e *editor) build() {
 	e.at = tview.NewInputField().SetLabel("At (HH:MM) ").SetText(str(sc, "at")).SetFieldWidth(8)
 	e.weekdayF = tview.NewInputField().SetLabel("Only on days ").SetText(strings.Join(strList(sc, "weekdays"), ",")).SetFieldWidth(32)
 	e.wake = tview.NewCheckbox().SetLabel("Wake the computer from sleep to run it ").SetChecked(boolean(e.orig, "wakeToRun"))
-	f2 := styleForm(tview.NewForm()).AddFormItem(e.mode).AddFormItem(e.unit).AddFormItem(e.every).AddFormItem(e.at).AddFormItem(e.weekdayF).AddFormItem(e.wake)
-	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept.\nWaking works from sleep (usually hibernate too), not from shut down.", 70, 4, true, false)
+	// A set saved before the rule existed has none of its fields: start
+	// anyway, never cancel.
+	e.battery = tview.NewDropDown().SetLabel("On battery ").SetOptions(batteryChoices, nil).
+		SetCurrentOption(indexOf(batteryModes, str(e.orig, "onBattery")))
+	start := int(num(e.orig, "batteryStartPercent"))
+	if start == 0 {
+		start = 30
+	}
+	below := int(num(e.orig, "batteryCancelBelow"))
+	if _, set := e.orig["batteryCancelBelow"]; !set {
+		below = 10
+	}
+	e.batteryStart = tview.NewInputField().SetLabel("  Start level (5 to 95 %) ").SetText(strconv.Itoa(start)).SetFieldWidth(4)
+	e.batteryCancel = tview.NewCheckbox().SetLabel("Cancel a running backup on battery below a charge ").SetChecked(boolean(e.orig, "batteryCancel"))
+	e.batteryBelow = tview.NewInputField().SetLabel("  Cancel level (0 to 99 %, 0 never) ").SetText(strconv.Itoa(below)).SetFieldWidth(4)
+	f2 := styleForm(tview.NewForm()).AddFormItem(e.mode).AddFormItem(e.unit).AddFormItem(e.every).AddFormItem(e.at).AddFormItem(e.weekdayF).AddFormItem(e.wake).
+		AddFormItem(e.battery).AddFormItem(e.batteryStart).AddFormItem(e.batteryCancel).AddFormItem(e.batteryBelow)
+	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept.\nWaking works from sleep (usually hibernate too), not from shut down.\nOn battery: laptops only; on mains the set always runs. A cancelled backup is not saved.", 70, 5, true, false)
 	f2.SetTitle(" Schedule ")
 
 	// ---- step 3: options
@@ -444,6 +475,9 @@ func (e *editor) document() (map[string]interface{}, error) {
 	if e.mailFail.IsChecked() && !strings.Contains(e.mailTo.GetText(), "@") {
 		return nil, fmt.Errorf("give an e-mail address to send the failure message to")
 	}
+	if err := e.applyBattery(doc); err != nil {
+		return nil, err
+	}
 
 	// schedule
 	if mi, _ := e.mode.GetCurrentOption(); mi == 1 {
@@ -486,6 +520,31 @@ func (e *editor) document() (map[string]interface{}, error) {
 		doc["schedules"] = list
 	}
 	return doc, nil
+}
+
+// applyBattery puts the form's On battery rule in doc. It applies to a set
+// run manually too (its cancel level), so it is kept whatever the mode.
+func (e *editor) applyBattery(doc map[string]interface{}) error {
+	bi, _ := e.battery.GetCurrentOption()
+	if bi < 0 || bi >= len(batteryModes) {
+		bi = 0
+	}
+	start, err := strconv.Atoi(strings.TrimSpace(e.batteryStart.GetText()))
+	if err != nil || start < 5 || start > 95 {
+		return fmt.Errorf("the battery start level must be a whole number from 5 to 95")
+	}
+	below, err := strconv.Atoi(strings.TrimSpace(e.batteryBelow.GetText()))
+	if err != nil || below < 0 || below > 99 {
+		return fmt.Errorf("the battery cancel level must be a whole number from 0 to 99 (0 never cancels)")
+	}
+	if batteryModes[bi] == "above" && e.batteryCancel.IsChecked() && below > 0 && below >= start {
+		return fmt.Errorf("the battery cancel level (%d%%) must be lower than the start level (%d%%)", below, start)
+	}
+	doc["onBattery"] = batteryModes[bi]
+	doc["batteryStartPercent"] = float64(start)
+	doc["batteryCancel"] = e.batteryCancel.IsChecked()
+	doc["batteryCancelBelow"] = float64(below)
+	return nil
 }
 
 func (e *editor) save() {

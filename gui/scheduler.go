@@ -20,13 +20,23 @@ var runningJobsMutex sync.Mutex
 
 // ScheduledJob represents a scheduled backup job
 type ScheduledJob struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	ScheduleTime string   `json:"scheduleTime"` // HH:MM format, used when TriggerMode == "daily"
-	RunAtStartup bool     `json:"runAtStartup"`
-	WakeToRun    bool     `json:"wakeToRun,omitempty"` // wake the computer from sleep for the set's scheduled runs (wake_timer.go)
-	BackupDirs   []string `json:"backupDirs"`
-	DriveLetters []string `json:"driveLetters"` // physical disks for machine backups
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ScheduleTime string `json:"scheduleTime"` // HH:MM format, used when TriggerMode == "daily"
+	RunAtStartup bool   `json:"runAtStartup"`
+	WakeToRun    bool   `json:"wakeToRun,omitempty"` // wake the computer from sleep for the set's scheduled runs (wake_timer.go)
+	// The set's "On battery" rule (battery_rule.go). OnBattery is "" (or
+	// "anyway"): start whatever the charge, which every set saved before the
+	// rule existed does; "above": start only at BatteryStartPercent or more
+	// (0 means 30); "plugged": wait for mains power. BatteryCancel with
+	// BatteryCancelBelow over 0 cancels a running backup below that charge.
+	// The zero values are the behaviour before the rule: start, never cancel.
+	OnBattery           string   `json:"onBattery,omitempty"`
+	BatteryStartPercent int      `json:"batteryStartPercent,omitempty"`
+	BatteryCancel       bool     `json:"batteryCancel,omitempty"`
+	BatteryCancelBelow  int      `json:"batteryCancelBelow,omitempty"`
+	BackupDirs          []string `json:"backupDirs"`
+	DriveLetters        []string `json:"driveLetters"` // physical disks for machine backups
 	// DiskIDs is the identity of each disk in DriveLetters, at the same index
 	// ("" where none could be read), so a run backs up the same disks after
 	// the system numbers them differently (diskpin.go). Empty for a set saved
@@ -237,6 +247,15 @@ type JobHistory struct {
 	// Message for those.
 	MessageKey    MessageKey `json:"message_key,omitempty"`
 	MessageParams msgParams  `json:"message_params,omitempty"`
+
+	// Notes are further lines Reports shows with the run, each translated
+	// like the message (a run held back for the battery that ran late, the
+	// charge at its start and end). Empty for most runs and older entries.
+	Notes []HistoryNote `json:"notes,omitempty"`
+	// logLine, when set, is what AddJobHistory writes to the Message Log in
+	// place of the entry's own message (a short line for a long Reports
+	// text). Never stored.
+	logLine *MessageLogEntry
 
 	// NameKey/NameParams let Reports show a restore's Name ("Restore of ...",
 	// "Undelete: ...", "Roll back: ...") in the user's language. Name stays
@@ -714,6 +733,10 @@ func useRunSummary(entry *JobHistory, outcome *serviceRunOutcome, succeeded bool
 // place to also feed the Message Log — no need to touch the backup control
 // flow itself at each of its several completion sites.
 func (a *App) AddJobHistory(entry JobHistory) error {
+	if l := entry.logLine; l != nil {
+		LogMessage("Backup", l.Level, fmt.Sprintf("%s: %s", entry.Name, l.Message), entry.Name, l.MessageKey, l.MessageParams)
+		return a.appendJobHistory(entry)
+	}
 	level := "info"
 	if entry.Status == "failed" {
 		level = "error"
@@ -889,10 +912,16 @@ func (a *App) StartScheduler() {
 		// Only a running scheduler starts the backup a wake is for.
 		a.refreshWakeTimer()
 		defer dropWakeTimer()
+		// The tick before, so a tick after a long gap tells that the computer
+		// slept, and woke for a set's run (battery_rule.go).
+		lastTick := time.Now()
 
 		for {
 			select {
 			case <-ticker.C:
+				now := time.Now()
+				noteSchedulerTick(lastTick, now)
+				lastTick = now
 				a.checkAndRunScheduledJobs()
 				a.RefreshIdleTooltip()
 				a.refreshWakeTimer()
@@ -1013,6 +1042,7 @@ func (a *App) checkAndRunScheduledJobs() {
 	schedulerTickCount++
 	// Log status every 15 minutes (15 ticks at 1 tick/min) instead of every minute
 	verbose := schedulerTickCount%15 == 1
+	dropStaleBatteryHolds(jobs, time.Now())
 
 	if len(jobs) == 0 {
 		if verbose {
@@ -1033,12 +1063,14 @@ func (a *App) checkAndRunScheduledJobs() {
 
 		// Parse next run time
 		if job.NextRun == "" {
+			a.retryHeldStartupRun(job)
 			continue
 		}
 
 		nextRun, err := time.Parse(time.RFC3339, job.NextRun)
 		if err != nil {
 			writeDebugLog(fmt.Sprintf("[Scheduler] Error parsing next run time for %s: %v", job.Name, err))
+			a.retryHeldStartupRun(job)
 			continue
 		}
 
@@ -1057,9 +1089,25 @@ func (a *App) checkAndRunScheduledJobs() {
 		}
 
 		if shouldRun {
-			writeDebugLog(fmt.Sprintf("[Scheduler] Executing scheduled job: %s", job.Name))
+			// A run held back for the battery is due on every tick until the
+			// computer is plugged in: said once a quarter of an hour, not
+			// every minute.
+			if _, held := batteryHeld(job.ID); !held || verbose {
+				writeDebugLog(fmt.Sprintf("[Scheduler] Executing scheduled job: %s", job.Name))
+			}
 			go a.executeScheduledJob(job, "scheduled")
+			continue
 		}
+		a.retryHeldStartupRun(job)
+	}
+}
+
+// retryHeldStartupRun tries a run at startup held back for the battery
+// again, as a due run is on every tick, so it starts when the computer is
+// plugged in. (A set's due scheduled run takes the hold instead.)
+func (a *App) retryHeldStartupRun(job ScheduledJob) {
+	if trigger, held := batteryHeld(job.ID); held && trigger == "startup" {
+		go a.executeScheduledJob(job, "startup")
 	}
 }
 
@@ -1090,6 +1138,14 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 		delete(runningJobs, job.ID)
 		runningJobsMutex.Unlock()
 	}()
+
+	// The set's "On battery" rule: a scheduled or startup run on battery may
+	// be held back until the computer is plugged in (battery_rule.go). Its
+	// next run is left as it is, so the run is not lost.
+	battery, mayStart := a.batteryGate(job, trigger, time.Now())
+	if !mayStart {
+		return
+	}
 
 	writeDebugLog(fmt.Sprintf("Executing scheduled job: %s", job.Name))
 
@@ -1164,6 +1220,12 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 	// removed) but had no one-off use case at all, so a per-run key replaces
 	// them outright instead of just moving where a shared value gets read.
 	postActionsKey := a.registerPendingPostActions(job, trigger)
+	// What the battery did, for the history entry; and its cancel level,
+	// checked while the run goes on. This function lasts as long as the run
+	// (it waits for it below), so the watch ends with it.
+	a.setRunBattery(postActionsKey, battery)
+	stopBatteryWatch := a.watchBatteryCancel(job, battery)
+	defer stopBatteryWatch()
 	// A run this app does itself goes on in a goroutine (startBackupDirect)
 	// and writes its own history and post-backup actions; this closes when
 	// it has ended. Taken now: the run drops its entry when it completes.
@@ -1309,6 +1371,7 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 			historyEntry.Encryption = encryptionLabel(pbsCfg.EncryptionKeyFile != "")
 		}
 		useRunSummary(&historyEntry, outcome, err == nil)
+		a.applyBatteryToHistory(&historyEntry, battery)
 
 		if err := a.AddJobHistory(historyEntry); err != nil {
 			writeDebugLog(fmt.Sprintf("Warning: Failed to add job history: %v", err))

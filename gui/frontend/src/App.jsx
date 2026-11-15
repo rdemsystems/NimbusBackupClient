@@ -48,7 +48,7 @@ let GetJobPolicy, SetRequireAdminForJobs, RequestElevation, SnapshotSupport, Run
 let ExportSettings, ImportSettings
 let SetSMTPSettings, SendTestEmail
 let GetLogsFolder, OpenLogsFolder, SaveLogs, GetServiceLogsStatus, OpenServiceLogsFolder
-let GetWakeTimerInfo
+let GetWakeTimerInfo, GetBatteryInfo
 // Encryption key management
 let InspectEncryptionKeyFile, GenerateEncryptionKeyFile, OpenEncryptionKeyDialog, OpenEncryptionKeySaveDialog
 // Undelete, Roll back, Run as Service
@@ -137,6 +137,7 @@ if (window.go) {
   GetServiceLogsStatus = window.go.main.App.GetServiceLogsStatus
   OpenServiceLogsFolder = window.go.main.App.OpenServiceLogsFolder
   GetWakeTimerInfo = window.go.main.App.GetWakeTimerInfo
+  GetBatteryInfo = window.go.main.App.GetBatteryInfo
   SetSMTPSettings = window.go.main.App.SetSMTPSettings
   SendTestEmail = window.go.main.App.SendTestEmail
   // Encryption key management
@@ -363,6 +364,14 @@ function renderLocalizedMessage(entry, t, lang) {
     const withNote = { ...params }
     for (const [k, v] of Object.entries(params)) {
       if (Number.isInteger(v)) withNote[k] = fmtNum(v, lang)
+      // A time (RFC 3339, as the battery rule's messages give it) in the
+      // language's own hours and minutes.
+      if (typeof v === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(v)) {
+        const d = new Date(v)
+        if (!Number.isNaN(d.getTime())) {
+          try { withNote[k] = d.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }) } catch { /* keep as sent */ }
+        }
+      }
     }
     // Sizes come pre-formatted ("1284.6"); give them the language's separators.
     if (typeof params.mb === 'string' && /^\d+(\.\d+)?$/.test(params.mb)) {
@@ -586,7 +595,11 @@ function App() {
   const statusLabel = (s) => ({
     success: t('reportStatusSuccess'), failed: t('reportStatusFailed'),
     cancelled: t('reportStatusCancelled'), running: t('reportStatusRunning'),
+    // A run held back, or skipped and the computer put back to sleep, for
+    // the set's On battery rule.
+    held: t('reportStatusHeld'), skipped: t('reportStatusSkipped'),
   }[s] || s)
+  const statusIcon = (s) => ({ success: '✅', failed: '❌', cancelled: '⏹️', held: '🔌', skipped: '💤' }[s] || '⏳')
   // Backup ID for the "vm" machine backup: a numeric PBS vm/<id>.
   // 'range' offsets into a high block so it cannot collide with a real VM's ID.
   const computeVmBackupId = (n, style) => {
@@ -725,6 +738,32 @@ function App() {
     if (!GetWakeTimerInfo) return
     GetWakeTimerInfo().then(setWakeInfo).catch(() => setWakeInfo(null))
   }, [])
+  // The set's "On battery" rule (gui/battery_rule.go): start anyway, only
+  // at a charge of at least batteryStart %, or wait for mains; and cancel a
+  // running backup below batteryCancelBelow %. batteryInfo is
+  // App.GetBatteryInfo: a computer with no battery shows the section greyed.
+  const [onBattery, setOnBattery] = useState('above')
+  const [batteryStart, setBatteryStart] = useState(30)
+  const [batteryCancel, setBatteryCancel] = useState(true)
+  const [batteryCancelBelow, setBatteryCancelBelow] = useState(10)
+  const [batteryInfo, setBatteryInfo] = useState(null)
+  useEffect(() => {
+    if (!GetBatteryInfo) return
+    GetBatteryInfo().then(setBatteryInfo).catch(() => setBatteryInfo(null))
+  }, [])
+  // presetBattery fills the rule from a set, or with a new set's defaults
+  // (at least 30 %, cancel below 10 %) for null. A set saved before the rule
+  // existed has none of its fields: it starts anyway and never cancels.
+  const presetBattery = (job) => {
+    if (!job) {
+      setOnBattery('above'); setBatteryStart(30); setBatteryCancel(true); setBatteryCancelBelow(10)
+      return
+    }
+    setOnBattery(job.onBattery === 'above' || job.onBattery === 'plugged' ? job.onBattery : 'anyway')
+    setBatteryStart(job.batteryStartPercent || 30)
+    setBatteryCancel(!!job.batteryCancel)
+    setBatteryCancelBelow(job.batteryCancelBelow ?? 10)
+  }
   // The set's schedules (gui/schedules.go): 'scheduled' runs on the list,
   // 'manual' only on Run Now (the list is kept).
   const [scheduleMode, setScheduleMode] = useState('scheduled')
@@ -3017,7 +3056,7 @@ function App() {
     setJobName('')
     setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
     setChangeDetectionMode(NEW_SET_CHANGE_DETECTION); setFullReadEvery(NEW_SET_FULL_READ_EVERY)
-    setRunAtStartup(false); setWakeToRun(false)
+    setRunAtStartup(false); setWakeToRun(false); presetBattery(null)
     setScheduleMode('scheduled'); setSchedules([newSchedule('days', 's1')])
     setBackupDirs('')
     setExcludeList('')
@@ -3103,6 +3142,13 @@ function App() {
         return
       }
 
+      // The On battery rule: the cancel level must be under the start level.
+      if (onBattery === 'above' && batteryCancel && batteryCancelBelow > 0 && batteryCancelBelow >= batteryStart) {
+        showStatus(`❌ ${t('batteryCancelTooHigh', { n: batteryStart })}`, 'error')
+        setBackupFormTab('schedule')
+        return
+      }
+
       // Anything that would stop the set running as saved: say so before
       // saving, with Save anyway or Go back.
       const linuxMachineSet = backupType === 'machine' && systemInfo.os === 'linux'
@@ -3154,6 +3200,12 @@ function App() {
         name: jobName.trim() || `Backup ${config['backup-id'] || hostname}`,
         runAtStartup: scheduleMode === 'manual' ? false : runAtStartup,
         wakeToRun: scheduleMode === 'manual' ? false : wakeToRun,
+        // On battery: '' starts anyway (as every set saved before the rule);
+        // the levels are kept when not in use, for when they are again.
+        onBattery: onBattery === 'anyway' ? '' : onBattery,
+        batteryStartPercent: batteryStart,
+        batteryCancel: batteryCancel,
+        batteryCancelBelow: batteryCancelBelow,
         scheduleMode,
         schedules,
         backupDirs: backupType === 'directory' ? dirList : [],
@@ -3235,7 +3287,7 @@ function App() {
         // Reset form after save
         setJobName('')
         setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
-        setRunAtStartup(false); setWakeToRun(false)
+        setRunAtStartup(false); setWakeToRun(false); presetBattery(null)
         setScheduleMode('scheduled'); setSchedules([newSchedule('days', 's1')])
         setBackupDirs('')
         setEmailOnSuccess(false); setEmailOnSuccessTo('')
@@ -5324,7 +5376,7 @@ function App() {
                     setJobName('')
                     setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
                     setBackupMode('scheduled')
-                    setRunAtStartup(false); setWakeToRun(false)
+                    setRunAtStartup(false); setWakeToRun(false); presetBattery(null)
                     setScheduleMode('scheduled'); setSchedules([newSchedule('days', 's1')])
                     setBackupDirs('')
                     setExcludeList('')
@@ -5516,14 +5568,17 @@ function App() {
                                 const last = mine[0]
                                 if (!last || last.status === 'success' || last.status === 'running') return null
                                 const ok = mine.find(h => h.status === 'success')
-                                const why = shortRunError(last.message)
-                                const line = (last.status === 'cancelled' ? tl('lastRunStopped', 'Stopped') : tl('lastRunFailedWord', 'Failed'))
+                                // Held back or skipped for the battery: said in the user's language.
+                                const heldBack = last.status === 'held' || last.status === 'skipped'
+                                const batteryText = heldBack || String(last.message_key || '').startsWith('logBattery')
+                                const why = shortRunError(batteryText ? renderLocalizedMessage(last, t, language).text : last.message)
+                                const line = (heldBack ? statusLabel(last.status) : last.status === 'cancelled' ? tl('lastRunStopped', 'Stopped') : tl('lastRunFailedWord', 'Failed'))
                                   + (why ? `: ${why}` : '')
                                 return (
                                   <div style={{marginTop: '2px'}}>
                                     <div style={{display: 'flex', alignItems: 'baseline', gap: '8px'}}>
                                       <span
-                                        style={{color: last.status === 'cancelled' ? '#c9a227' : '#d9534f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0}}
+                                        style={{color: last.status === 'cancelled' || heldBack ? '#c9a227' : '#d9534f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0}}
                                         title={line}
                                       >
                                         {line}
@@ -5584,7 +5639,7 @@ function App() {
                               setEditingJobId(job.id)
                               setJobName(job.name || '')
                               setBackupMode('scheduled')
-                              setRunAtStartup(job.runAtStartup); setWakeToRun(!!job.wakeToRun)
+                              setRunAtStartup(job.runAtStartup); setWakeToRun(!!job.wakeToRun); presetBattery(job)
                               { const js = jobScheduling(job); setScheduleMode(js.mode); setSchedules(js.schedules.map(sc => ({ ...sc, weekdays: [...(sc.weekdays || [])] }))) }
                               setBackupDirs((job.backupDirs || []).join('\n'))
                               // Machine-type jobs keep their selected disks in driveLetters, not
@@ -5663,7 +5718,7 @@ function App() {
                                     setEditingJobId(null)
                                     setJobName(t('cloneNameSuffix').replace('{name}', job.name || ''))
                                     setBackupMode('scheduled')
-                                    setRunAtStartup(job.runAtStartup); setWakeToRun(!!job.wakeToRun)
+                                    setRunAtStartup(job.runAtStartup); setWakeToRun(!!job.wakeToRun); presetBattery(job)
                                     { const js = jobScheduling(job); setScheduleMode(js.mode); setSchedules(js.schedules.map(sc => ({ ...sc, weekdays: [...(sc.weekdays || [])] }))) }
                                     setBackupDirs((job.backupDirs || []).join('\n'))
                                     setSelectedDrives(job.driveLetters || [])
@@ -5878,6 +5933,14 @@ function App() {
                 schedules={schedules} setSchedules={setSchedules}
                 runAtStartup={runAtStartup} setRunAtStartup={setRunAtStartup}
                 wakeToRun={wakeToRun} setWakeToRun={setWakeToRun} wakeInfo={wakeInfo}
+                battery={{ mode: onBattery, start: batteryStart, cancel: batteryCancel, cancelBelow: batteryCancelBelow }}
+                setBattery={(p) => {
+                  if (p.mode !== undefined) setOnBattery(p.mode)
+                  if (p.start !== undefined) setBatteryStart(p.start)
+                  if (p.cancel !== undefined) setBatteryCancel(p.cancel)
+                  if (p.cancelBelow !== undefined) setBatteryCancelBelow(p.cancelBelow)
+                }}
+                batteryInfo={batteryInfo}
               />
             </div>
           )}
@@ -7278,7 +7341,7 @@ function App() {
                         }}
                       >
                         <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-                          <span>{job.status === 'success' ? '✅' : job.status === 'failed' ? '❌' : job.status === 'cancelled' ? '⏹️' : '⏳'}</span>
+                          <span>{statusIcon(job.status)}</span>
                           <strong style={{fontSize: '14px'}}>{historyName(job, t, language)}</strong>
                         </div>
                         <div style={{fontSize: '12px', color: '#718096', marginTop: '4px'}}>
@@ -7312,7 +7375,7 @@ function App() {
                         fontSize: '14px',
                       }}>
                         <strong>{t('status')}</strong>
-                        <span>{selected.status === 'success' ? '✅' : selected.status === 'failed' ? '❌' : selected.status === 'cancelled' ? '⏹️' : '⏳'} {statusLabel(selected.status)}</span>
+                        <span>{statusIcon(selected.status)} {statusLabel(selected.status)}</span>
                         <strong>{t('msgColDateTime')}</strong>
                         <span>{new Date(selected.timestamp).toLocaleString()}</span>
                         {selected.trigger && (
@@ -7381,6 +7444,14 @@ function App() {
                           <>
                             <strong>{t('msgColMessage')}</strong>
                             <span style={{whiteSpace: 'pre-wrap'}}>{renderLocalizedMessage(selected, t, language).text}</span>
+                          </>
+                        )}
+                        {selected.notes && selected.notes.length > 0 && (
+                          <>
+                            <strong>{t('reportsNotes')}</strong>
+                            <span style={{whiteSpace: 'pre-wrap'}}>
+                              {selected.notes.map(n => renderLocalizedMessage({ message_key: n.key, message_params: n.params, message: n.text }, t, language).text).join('\n')}
+                            </span>
                           </>
                         )}
                         {selected.backupId && (

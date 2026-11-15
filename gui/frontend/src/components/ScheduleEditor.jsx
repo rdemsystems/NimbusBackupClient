@@ -11,8 +11,32 @@ import {
 // unit needs and its next 3 runs.
 // wakeToRun: wake the computer from sleep for the set's runs (#140); wakeInfo
 // is App.GetWakeTimerInfo, what this computer allows (null while unknown).
-export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedules, setSchedules, runAtStartup, setRunAtStartup, wakeToRun = false, setWakeToRun = () => {}, wakeInfo = null }) {
+// battery is the set's On battery rule ({ mode: 'anyway' | 'above' | 'plugged',
+// start, cancel, cancelBelow }), setBattery changes part of it, and
+// batteryInfo is App.GetBatteryInfo: with no battery the section is greyed.
+export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedules, setSchedules, runAtStartup, setRunAtStartup, wakeToRun = false, setWakeToRun = () => {}, wakeInfo = null,
+  battery = null, setBattery = () => {}, batteryInfo = null }) {
   const { t, language } = useTranslation()
+  const noBattery = !!batteryInfo && !batteryInfo.hasBattery
+  const cancelTooHigh = !!battery && battery.mode === 'above' && battery.cancel && battery.cancelBelow > 0 && battery.cancelBelow >= battery.start
+  // A sentence with a number box in it: the text before and after {n} or {m}.
+  const around = (key, p) => {
+    const [before, after = ''] = t(key).split(`{${p}}`)
+    return [before, after]
+  }
+  const numberBox = (id, value, min, max, disabled, onChange) => (
+    <input id={id} type="number" min={min} max={max} value={value} disabled={disabled} className="sched-field narrow"
+      onChange={e => onChange(Math.max(0, Math.min(999, parseInt(e.target.value, 10) || 0)))}
+      onBlur={e => onChange(Math.min(max, Math.max(min, parseInt(e.target.value, 10) || min)))} />
+  )
+  const batterySummary = () => {
+    if (!battery || noBattery) return null
+    const cancel = battery.cancel && battery.cancelBelow > 0 ? t('batterySummaryCancel', { m: battery.cancelBelow }) : ''
+    if (battery.mode === 'above') return t('batterySummaryAbove', { n: battery.start, cancel })
+    if (battery.mode === 'plugged') return t('batterySummaryPlugged', { cancel })
+    return t('batterySummaryAnyway', { cancel })
+  }
+  const batteryLine = batterySummary()
   const [editingId, setEditingId] = useState(null)
   const editing = schedules.find(s => s.id === editingId)
 
@@ -264,6 +288,54 @@ export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedule
         </>
       )}
 
+      {battery && (() => {
+        const [aboveBefore, aboveAfter] = around('batteryAbove', 'n')
+        const [cancelBefore, cancelAfter] = around('batteryCancel', 'm')
+        return (
+          <div className={noBattery ? 'form-group sched-battery off' : 'form-group sched-battery'} id="sched-battery"
+            style={noBattery ? { opacity: 0.55 } : undefined}>
+            <label id="sched-battery-label">
+              {t('batteryHeading')} <span className="sched-hint" style={{ fontWeight: 'normal' }}>{t('batteryHeadingNote')}</span>
+            </label>
+            <div role="radiogroup" aria-labelledby="sched-battery-label">
+              <div className="sched-row">
+                <label className="sched-radio">
+                  <input type="radio" name="sched-battery" id="sched-battery-anyway" disabled={noBattery}
+                    checked={battery.mode === 'anyway'} onChange={() => setBattery({ mode: 'anyway' })} /> {t('batteryAnyway')}
+                </label>
+              </div>
+              <div className="sched-row">
+                <label className="sched-radio">
+                  <input type="radio" name="sched-battery" id="sched-battery-above" disabled={noBattery}
+                    checked={battery.mode === 'above'} onChange={() => setBattery({ mode: 'above' })} /> {aboveBefore}
+                </label>
+                {numberBox('sched-battery-start', battery.start, 5, 95, noBattery || battery.mode !== 'above', v => setBattery({ start: v }))}
+                <span>{aboveAfter}</span>
+              </div>
+              <div className="sched-row">
+                <label className="sched-radio">
+                  <input type="radio" name="sched-battery" id="sched-battery-plugged" disabled={noBattery}
+                    checked={battery.mode === 'plugged'} onChange={() => setBattery({ mode: 'plugged' })} /> {t('batteryPlugged')}
+                </label>
+              </div>
+            </div>
+            <hr style={{ border: 0, borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
+            <div className="sched-row">
+              <label className="sched-startup">
+                <input type="checkbox" id="sched-battery-cancel" disabled={noBattery} checked={battery.cancel}
+                  onChange={e => setBattery({ cancel: e.target.checked })} />
+                <span>{cancelBefore}</span>
+              </label>
+              {numberBox('sched-battery-cancel-below', battery.cancelBelow, 0, 99, noBattery || !battery.cancel, v => setBattery({ cancelBelow: v }))}
+              <span>{cancelAfter}</span>
+            </div>
+            <p className="sched-hint" id="sched-battery-hint">{t('batteryCancelHint')}</p>
+            {cancelTooHigh && !noBattery && <div className="sched-warn" id="sched-battery-warn">{t('batteryCancelTooHigh', { n: battery.start })}</div>}
+            {noBattery && <p className="sched-hint" id="sched-battery-none">{t('batteryNone')}</p>}
+          </div>
+        )
+      })()}
+
       <div className="info-box schedule-summary" id="schedule-summary">
         {scheduleMode === 'manual'
           ? <>{t('schedulingInfoManual')}{schedules.length > 0 && <><br />{t('schedManualKept')}</>}</>
@@ -272,8 +344,10 @@ export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedule
                 {enabledCount > 1 && <><br />{tp(t, language, 'schedCountOn', enabledCount)}</>}
                 {runAtStartup && <><br />{t('andAtStartup')}</>}
                 {wakeToRun && <><br />{t('andWakes')}</>}
+                {batteryLine && <><br /><span id="schedule-summary-battery">{batteryLine}</span></>}
                 <br />{t('schedCatchUp')}</>
-            : <>{t('schedNoneOn')}{runAtStartup && <><br />{t('andAtStartup')}</>}</>}
+            : <>{t('schedNoneOn')}{runAtStartup && <><br />{t('andAtStartup')}</>}
+                {batteryLine && <><br /><span id="schedule-summary-battery">{batteryLine}</span></>}</>}
       </div>
     </div>
   )

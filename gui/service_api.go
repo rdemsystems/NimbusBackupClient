@@ -157,7 +157,8 @@ func (a *App) LastRunOutcomeForAPI() (failed bool, ended string) {
 func lastRunOutcome(jobs []ScheduledJob, hist []JobHistory) (failed bool, ended string) {
 	seen := make([]bool, len(jobs))
 	for _, h := range hist {
-		if h.Kind == "restore" || h.Status == "running" {
+		// A run held back or skipped for the battery is not a backup.
+		if h.Kind == "restore" || h.Status == "running" || h.Status == "held" || h.Status == "skipped" {
 			continue
 		}
 		if ended == "" {

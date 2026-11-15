@@ -26,20 +26,27 @@ func CleanupOnSignal() {
 	go func() {
 		s := <-ch
 		fmt.Fprintf(os.Stderr, "\nStopped (%v): removing the backup's snapshots\n", s)
-		// The backup still has files open on the snapshot (or the
-		// snapshot device itself, for a disk): while it does, the
-		// snapshot can only be detached, not destroyed. It is stopping
-		// anyway, so its files are closed first.
-		closeFilesOnSnapshots()
-		if err := VSSCleanup(); err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
-		}
 		code := 1
 		if sig, ok := s.(syscall.Signal); ok {
 			code = 128 + int(sig)
 		}
-		os.Exit(code)
+		ExitWithCleanup(code)
 	}()
+}
+
+// ExitWithCleanup removes this process's snapshots, as a Ctrl+C does, and
+// ends it with code: for a command-line backup that stops itself (its
+// battery charge dropped below -cancel-below).
+func ExitWithCleanup(code int) {
+	// The backup still has files open on the snapshot (or the snapshot
+	// device itself, for a disk): while it does, the snapshot can only be
+	// detached, not destroyed. It is stopping anyway, so its files are
+	// closed first.
+	closeFilesOnSnapshots()
+	if err := VSSCleanup(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+	}
+	os.Exit(code)
 }
 
 // closeFilesOnSnapshots closes this process's open files that are on one of

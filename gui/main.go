@@ -1164,6 +1164,9 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 				readEveryFile, _ := msgP["readEveryFile"].(bool)
 				a.recordChangeDetectionOutcome(postActionsEntry.job.ID, success, readEveryFile)
 			}
+			// A Backup Set's "On battery" rule: a battery cancel in its own
+			// words, a held run that ran late, the charge (battery_rule.go).
+			a.applyBatteryToHistory(&historyEntry, postActionsEntry.batteryInfo())
 			if err := a.AddJobHistory(historyEntry); err != nil {
 				writeDebugLog(fmt.Sprintf("Warning: Failed to add manual backup to history: %v", err))
 			}
@@ -1179,9 +1182,10 @@ func (a *App) startBackupDirect(backupType string, backupDirs []string, driveLet
 			}
 
 			// Standalone-mode post-backup actions (email/run-app/exit/shutdown)
-			// for a scheduled job — nil for a genuine one-off backup.
+			// for a scheduled job (nil for a genuine one-off backup). The
+			// entry's message is the run's, or a battery cancel's.
 			if postActionsEntry != nil {
-				a.runPostBackupActions(*postActionsEntry.job, success, message, postActionsEntry.snapshotNoter())
+				a.runPostBackupActions(*postActionsEntry.job, success, historyEntry.Message, postActionsEntry.snapshotNoter())
 			}
 
 			if success {
@@ -1497,6 +1501,8 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 					historyEntry.Status = "cancelled"
 				}
 			}
+			// The set's "On battery" rule, as for a folder backup above.
+			a.applyBatteryToHistory(&historyEntry, postActionsEntry.batteryInfo())
 			if err := a.AddJobHistory(historyEntry); err != nil {
 				writeDebugLog(fmt.Sprintf("Warning: Failed to add manual backup to history: %v", err))
 			}
@@ -1505,7 +1511,7 @@ func (a *App) startMachineBackupDirect(backupType string, backupDevices []string
 			// OnComplete's matching comment above (startBackupDirect) for the
 			// full reasoning.
 			if postActionsEntry != nil {
-				a.runPostBackupActions(*postActionsEntry.job, success, message, postActionsEntry.snapshotNoter())
+				a.runPostBackupActions(*postActionsEntry.job, success, historyEntry.Message, postActionsEntry.snapshotNoter())
 			}
 
 			if success {
