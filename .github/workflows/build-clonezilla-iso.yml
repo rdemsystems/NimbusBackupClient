@@ -105,7 +105,8 @@ jobs:
             clonezilla-live.iso \
             nbd/pbsnbd \
             "${{ github.event.inputs.patch_dir }}/ocs-pbs-nbd" \
-            "${{ github.event.inputs.patch_dir }}/ocs-pbs-bare-metal-restore"
+            "${{ github.event.inputs.patch_dir }}/ocs-pbs-bare-metal-restore" \
+            "${{ github.event.inputs.patch_dir }}/pbs-shrink-restore"
 
       - name: Verify output ISO
         run: |

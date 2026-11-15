@@ -591,16 +591,97 @@ SRC_SIZE="$(disk_size "$NBDDEV")"
 TGT_SIZE="$(disk_size "$TARGET")"
 
 # A target smaller than the source cannot take the source's partition table
-# (-k0 below), and -icds turns off Clonezilla's own disk size check, so the
-# restore would only fail part way through. Stop before anything is written.
-# A larger target is fine.
+# (-k0 below), so Clonezilla cannot restore onto it. pbs-shrink-restore can
+# when the data fits (issue #153): it shrinks the partition with the most
+# room, moves the ones after it, and copies used blocks only. Its plan is
+# shown first; nothing is written until the confirmation below. A larger
+# target goes through Clonezilla as before.
+SHRINK_TOOL="/usr/local/sbin/pbs-shrink-restore"
+SHRINK=0
+# The plan is a table: keep its spaces. Only dialog has --no-collapse; whiptail
+# (what $DIA is on the 3.3.3 live system) keeps them anyway and refuses the option.
+NOCOLLAPSE=""
+case "$(basename "$DIA")" in dialog) NOCOLLAPSE="--no-collapse" ;; esac
+# The plan dialogs: about 100 columns, less on a narrow screen, so the box
+# keeps a margin instead of filling the screen edge to edge.
+PLANW=$(( $(tput cols 2>/dev/null || echo 108) - 8 ))
+[ "$PLANW" -gt 100 ] && PLANW=100
+[ "$PLANW" -lt 72 ] && PLANW=72
+# plan_h TEXT: rows for a box PLANW wide holding TEXT. whiptail re-sizes a
+# box whose height is 0 to fit its longest line, which overrides the width,
+# so the height is worked out here.
+plan_h() {
+  local n h max
+  n=$(printf '%b\n' "$1" | awk -v w=$((PLANW - 6)) '{ l = length($0); n += (l > w) ? int((l + w - 1) / w) + 1 : 1 } END { print n }')
+  h=$(( n + 5 ))
+  max=$(( $(tput lines 2>/dev/null || echo 40) - 2 ))
+  [ "$h" -gt "$max" ] && h=$max
+  echo "$h"
+}
+SCRATCH="/tmp/pbs-shrink"     # RAM; a partition on another disk when that is too small
+SCRATCH_MNT=""
 SRC_BYTES="$(blockdev --getsize64 "$NBDDEV" 2>/dev/null)"
 TGT_BYTES="$(blockdev --getsize64 "$TARGET" 2>/dev/null)"
+
+# Lets the user pick scratch space for a big cut: a partition on a disk that
+# is not the target (a USB stick will do). It is mounted, a folder is made on
+# it for the restore and removed afterwards; nothing else there is touched.
+pick_scratch() {
+  local menu=() devs=() i=1 n fs pk c dev
+  while read -r n fs pk; do
+    [ -n "$fs" ] || continue
+    case "$fs" in ext2|ext3|ext4|xfs|btrfs|ntfs|exfat|vfat) ;; *) continue ;; esac
+    case "$pk" in "$TARGET"|/dev/nbd*|/dev/loop*|/dev/sr*|/dev/zram*|"") continue ;; esac
+    devs+=("$n"); menu+=("$i" "$n  ($fs, $(lsblk -dno SIZE "$n" | tr -d ' ')$(case "$VENTOY_DISKS" in *" $pk "*) echo ', boot stick' ;; esac))")
+    i=$((i+1))
+  done < <(lsblk -lnpo NAME,FSTYPE,PKNAME 2>/dev/null)
+  if [ "${#devs[@]}" -eq 0 ]; then
+    $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
+    --msgbox "No partition on another disk was found for scratch space.\n\nPlug in a USB stick or disk with enough free space (exFAT, NTFS or ext4) and start the restore again.\n\nNothing has been written to ${TARGET}.\n\n$msg_program_stop" 0 0 $DIA_ESC
+    return 1
+  fi
+  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore - scratch space" \
+  --menu "Choose a partition for scratch space. A folder pbs-shrink-scratch is made on it for the restore and removed afterwards; nothing else on it is touched." 0 0 10 \
+  "${menu[@]}" $DIA_ESC 2> "$DIA_TMP"
+  c="$(cat "$DIA_TMP")"
+  [ -n "$c" ] || return 1
+  dev="${devs[$((c-1))]}"
+  mkdir -p /mnt/pbs-scratch
+  [ -n "$SCRATCH_MNT" ] && umount "$SCRATCH_MNT" >/dev/null 2>&1
+  if ! mount "$dev" /mnt/pbs-scratch >/tmp/pbs-scratch-mount.log 2>&1; then
+    $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
+    --msgbox "${dev} could not be mounted:\n\n$(tail -2 /tmp/pbs-scratch-mount.log)" 0 0 $DIA_ESC
+    return 1
+  fi
+  SCRATCH_MNT=/mnt/pbs-scratch
+  SCRATCH=/mnt/pbs-scratch/pbs-shrink-scratch
+  return 0
+}
+
 if [ -n "$SRC_BYTES" ] && [ -n "$TGT_BYTES" ] && [ "$SRC_BYTES" -gt "$TGT_BYTES" ]; then
-  echo "Target ${TARGET} (${TGT_BYTES} bytes) is smaller than the source ${NBDDEV} (${SRC_BYTES} bytes)"
-  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
-  --msgbox "The target disk is smaller than the backed up disk.\n\nSource (PBS snapshot) : ${NBDDEV}  (${SRC_SIZE:-unknown size}, ${SRC_BYTES} bytes)\nTarget (THIS MACHINE)  : ${TARGET}  (${TGT_SIZE:-unknown size}, ${TGT_BYTES} bytes)\n\nRestore onto a disk of at least ${SRC_BYTES} bytes. Nothing has been written to ${TARGET}.\n\n$msg_program_stop" 0 0 $DIA_ESC
-  exit 1
+  echo "Target ${TARGET} (${TGT_BYTES} bytes) is smaller than the source ${NBDDEV} (${SRC_BYTES} bytes): planning a restore that shrinks"
+  while true; do
+    $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
+    --infobox "The target disk ${TARGET} is smaller than the backed up disk.\n\nChecking whether the backup's data fits on it. This reads the backup's file systems and takes about a minute ..." 10 78
+    PLAN="$("$SHRINK_TOOL" -n -c "$SCRATCH" "$NBDDEV" "$TARGET" 2>&1)"
+    PRC=$?
+    echo "$PLAN" >> "${ocs_log_dir}/pbs-shrink-plan.log"
+    # For the dialogs: the tool's own "plan only" line and STOP prefix go.
+    PLAN="$(sed -e '/^Plan only/d' -e 's/^STOP: //' <<<"$PLAN")"
+    [ "$PRC" = "3" ] || break
+    T="The target disk is smaller than the backed up disk. The data fits, but while a partition shrinks, the data that has to move is held in scratch space, and there is not enough here:\n\n${PLAN}\n\nChoose scratch space on another disk (a USB stick will do)?"
+    $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore - scratch space needed" $NOCOLLAPSE \
+    --yesno "$T" "$(plan_h "$T")" "$PLANW"
+    [ "$?" = "0" ] || { echo "$msg_program_stop!"; exit 1; }
+    pick_scratch || { echo "$msg_program_stop!"; exit 1; }
+  done
+  if [ "$PRC" != "0" ]; then
+    T="The target disk is smaller than the backed up disk, and the backup's data does not fit on it.\n\nSource (PBS snapshot) : ${NBDDEV}  (${SRC_BYTES} bytes)\nTarget (THIS MACHINE)  : ${TARGET}  (${TGT_BYTES} bytes)\n\n${PLAN}\n\nNothing has been written to ${TARGET}.\n\n$msg_program_stop"
+    $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" $NOCOLLAPSE \
+    --msgbox "$T" "$(plan_h "$T")" "$PLANW" $DIA_ESC
+    exit 1
+  fi
+  SHRINK=1
 fi
 
 # 9. confirmation before the destructive write: shows source+target+sizes.
@@ -611,8 +692,16 @@ fi
 # rather than real extra safety. Mick's call, 2026-09-24, after the first
 # real timed run: this was the slowest manual step other than the
 # mandatory PBS server details.
+if [ "$SHRINK" = "1" ]; then
+  # The plan is the confirmation: Clonezilla, and its own two questions, are
+  # not used for a restore that shrinks.
+  T="The target disk is smaller than the backed up disk. The data fits; this is how:\n\n${PLAN}\n\nThe backup on the PBS is only read. EVERYTHING on ${TARGET} will be PERMANENTLY OVERWRITTEN.\n\nContinue?"
+  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore - CONFIRM (smaller disk)" $NOCOLLAPSE \
+  --yesno "$T" "$(plan_h "$T")" "$PLANW"
+else
 $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore - CONFIRM" \
 --yesno "Source (PBS snapshot) : ${NBDDEV}  (${SRC_SIZE:-unknown size})\nTarget (THIS MACHINE)  : ${TARGET}  (${TGT_SIZE:-unknown size})${NOT_ELIGIBLE_BLOCK}\n\nEVERYTHING on ${TARGET} will be PERMANENTLY OVERWRITTEN.\n\nContinue?" 0 0
+fi
 if [ "$?" != "0" ]; then
   echo "$msg_program_stop!"
   exit 1
@@ -666,11 +755,33 @@ remove_snapshot_stores() {
   rmdir "$mnt" 2>/dev/null
 }
 
-echo "> Starting restore: ${NBDDEV} -> ${TARGET} ..."
-ocs-onthefly -icds -k0 -sfsck -j2 -irhr -f "$NBDDEV" -d "$TARGET"
-RC=$?
+if [ "$SHRINK" = "1" ]; then
+  # Blue boxes only from here: nothing on the terminal behind them.
+  echo "> Starting restore (smaller disk): ${NBDDEV} -> ${TARGET} ..." >> "${ocs_log_dir}/pbs-shrink-plan.log"
+  clear
+  # On the terminal itself, not through tee: with -b the tool shows each step
+  # in a blue box, the shrink as a gauge and each copy in partclone's progress
+  # screen, as a normal restore does. Its record is
+  # /tmp/pbs-shrink-logs/run.log, copied to the log folder.
+  mkdir -p /tmp/pbs-shrink-logs
+  DIA="$DIA" "$SHRINK_TOOL" -y -b -c "$SCRATCH" "$NBDDEV" "$TARGET" 2>>/tmp/pbs-shrink-logs/stderr.log
+  RC=$?
+  cp -a /tmp/pbs-shrink-logs "${ocs_log_dir}/" 2>/dev/null
+  if [ -n "$SCRATCH_MNT" ]; then
+    rm -rf "$SCRATCH"
+    umount "$SCRATCH_MNT" >/dev/null 2>&1
+  fi
+else
+  echo "> Starting restore: ${NBDDEV} -> ${TARGET} ..."
+  ocs-onthefly -icds -k0 -sfsck -j2 -irhr -f "$NBDDEV" -d "$TARGET"
+  RC=$?
+fi
 [ "$RC" = "0" ] && remove_snapshot_stores
-if [ "$RC" != "0" ]; then
+if [ "$RC" != "0" ] && [ "$SHRINK" = "1" ]; then
+  T="The restore onto the smaller disk stopped (exit code $RC):\n\n$(tail -n 8 /tmp/pbs-shrink-logs/run.log 2>/dev/null | cut -c1-150)\n\nThe backup on the PBS was only read. ${TARGET} may be partly written: restore again before using it.\n\nLogs: ${ocs_log_dir}/pbs-shrink-logs\n\n$msg_press_enter_to_continue"
+  $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
+  --msgbox "$T" "$(plan_h "$T")" "$PLANW" $DIA_ESC
+elif [ "$RC" != "0" ]; then
   $DIA --backtitle "$msg_nchc_free_software_labs" --title "PBS Bare Metal Restore" \
   --msgbox "Restore finished with a non-zero exit code ($RC).\nCheck ${ocs_log_dir} for details.\n\n$msg_press_enter_to_continue" 0 0 $DIA_ESC
 else

@@ -1,0 +1,821 @@
+#!/bin/bash
+# pbs-shrink-restore: restore a whole-disk backup onto a SMALLER disk when the
+# data fits (issue #153).
+#
+#   pbs-shrink-restore [-n] [-y] [-b] [-c COWDIR] SOURCE TARGET
+#     SOURCE  the backup's disk, read-only (/dev/nbd0 from pbsnbd)
+#     TARGET  the new disk; everything on it is overwritten
+#     -n      check and show the plan only; nothing is written
+#     -y      do not ask before writing
+#     -b      the restore wizard: each step in a blue box ($DIA), no text
+#     -c DIR  scratch folder for the data that has to move while a file
+#             system shrinks (default /tmp/pbs-shrink, in RAM on the live
+#             system); a folder on another disk or a USB stick for big cuts
+#
+# Exit: 0 done (or plan fits), 1 refused or failed, 2 usage, 3 the scratch
+# folder has too little room (choose another with -c).
+#
+# How: the partitions in front of the one that shrinks keep their places; the
+# one with the most room gets just small enough (the shortfall rounded up to a
+# whole MiB, keeping some free space in it); the ones after it move down. Its
+# file system is shrunk in a temporary writable layer over the read-only
+# backup (a device-mapper snapshot whose changes go to COWDIR), so the backup
+# is never written. The new disk gets the same partition table type, disk ID
+# and partition IDs, and each partition is copied used blocks only.
+#
+#   NTFS, ext2/3/4  shrunk (ntfsresize, resize2fs), then copied (partclone)
+#   btrfs           shrunk (btrfs filesystem resize on a mount), then copied
+#   XFS             cannot shrink: a new XFS with the same UUID, label and
+#                   features is made, and the files are copied into it
+#   FAT, exFAT,     made again smaller with the same serial or UUID and label
+#   f2fs            (f2fs: features too), and the files are copied into it
+#   swap            made again, smaller, with the same UUID and label
+#   LVM             one physical volume (a partition) holding linear logical
+#                   volumes: the volume group is written to the new disk again
+#                   with the same UUIDs and names, the logical volumes packed
+#                   together, one of them made smaller as above if need be,
+#                   and each copied as above
+#   anything else   (encrypted, RAID, thin or RAID LVM, unknown) kept at its size
+#
+# The backup's partitions are read through read-only loop devices at their
+# offsets on SOURCE, never through /dev/nbd0pN: opening an nbd device makes the
+# kernel re-read its partition table, which pulls partitions out from under
+# whatever is using them (seen 14/11/2026 on Debian 13, kernel 6.12). Logical
+# volumes are read through read-only device-mapper views made here from their
+# extents; the backup's volume group is never activated, so its UUIDs never
+# meet the new disk's copy.
+
+set -u
+PLAN_ONLY=0; YES=0; COWDIR=/tmp/pbs-shrink; BLUE=0
+while getopts "nybc:" o; do
+  case "$o" in
+    n) PLAN_ONLY=1 ;;
+    y) YES=1 ;;
+    b) BLUE=1 ;;
+    c) COWDIR="$OPTARG" ;;
+    *) echo "usage: $0 [-n] [-y] [-b] [-c COWDIR] SOURCE TARGET" >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ $# -eq 2 ] || { echo "usage: $0 [-n] [-y] [-b] [-c COWDIR] SOURCE TARGET" >&2; exit 2; }
+SRC="$1"; TGT="$2"
+[ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 2; }
+
+MIB=2048                         # sectors in 1 MiB (512 byte sectors)
+HEADROOM=$((1024 * MIB))         # free space left in a shrunk file system: at most 1 GiB (headroom())
+SWAPMIN=$((256 * MIB))           # the smallest swap made again
+DM=pbsshrink
+MNT=/run/pbs-shrink-mnt
+LOGDIR=/tmp/pbs-shrink-logs
+LOOPS=(); MOUNTS=(); DMS=()
+TVG=""; TCONF=""
+mkdir -p "$LOGDIR" "$MNT"
+
+# On a terminal the long steps show their progress: partclone's own progress
+# screen, as in a normal restore, and the shrink tools' progress lines. With
+# -b (the wizard) the rest is shown in blue boxes too, and text goes to the
+# log only. Piped or redirected, everything goes to the logs.
+TTY=0; [ -t 1 ] && TTY=1
+[ $TTY = 1 ] || BLUE=0
+DIAB="${DIA:-whiptail}"
+BOXTITLE="PBS Bare Metal Restore - onto a smaller disk"
+say() { [ $BLUE = 1 ] || echo "$*"; echo "$*" >>"$LOGDIR/run.log"; }
+# step TEXT: a stage of the restore, in a blue box with -b.
+step() {
+  say "> $1"
+  [ $BLUE = 1 ] && "$DIAB" --title "$BOXTITLE" --infobox "$1" 10 78
+}
+die() { echo "STOP: $1" >&2; echo "STOP: $1" >>"$LOGDIR/run.log" 2>/dev/null; exit "${2:-1}"; }
+cleanup() {
+  local i
+  for ((i = ${#MOUNTS[@]} - 1; i >= 0; i--)); do umount "${MOUNTS[$i]}" >/dev/null 2>&1; done
+  MOUNTS=()
+  # The new disk's volume group may have been activated by udev: off again.
+  [ -n "$TVG" ] && lvm vgchange -an --config "$TCONF" "$TVG" >/dev/null 2>&1
+  # Newest first: the loop over the writable layer, then the layer and the
+  # logical volume views, then the loops under them (a loop still in use is
+  # only marked to go when freed).
+  for ((i = ${#LOOPS[@]} - 1; i >= 0; i--)); do losetup -d "${LOOPS[$i]}" >/dev/null 2>&1; done
+  dmsetup remove "$DM" >/dev/null 2>&1
+  for ((i = ${#DMS[@]} - 1; i >= 0; i--)); do dmsetup remove "${DMS[$i]}" >/dev/null 2>&1; done
+  for ((i = ${#LOOPS[@]} - 1; i >= 0; i--)); do losetup -d "${LOOPS[$i]}" >/dev/null 2>&1; done
+  LOOPS=(); DMS=()
+  rm -f "$COWDIR/cow" 2>/dev/null
+  rmdir "$COWDIR" 2>/dev/null
+}
+trap 'cleanup' EXIT
+human() { numfmt --to=iec-i --suffix=B --format=%.1f "$(( $1 * 512 ))" | sed -E 's/\.0([KMGTP]iB)$/\1/'; }
+# loop DEV START SIZE [-r]: a loop device over DEV's sectors START to
+# START+SIZE-1, read-only with -r; its name in LOOP (not echoed: a $(...)
+# subshell would lose it from LOOPS, and a die inside it would not stop us).
+loop() {
+  LOOP="$(losetup -f --show ${4:-} -o $(( $2 * 512 )) --sizelimit $(( $3 * 512 )) "$1")" || die "losetup over $1 failed"
+  LOOPS+=("$LOOP")
+}
+unloop() { losetup -d "$1" >/dev/null 2>&1; local a=() l; for l in "${LOOPS[@]}"; do [ "$l" != "$1" ] && a+=("$l"); done; LOOPS=("${a[@]}"); }
+# dmmap NAME [--readonly]: a device-mapper device from the table on stdin.
+dmmap() {
+  dmsetup create ${2:-} --noudevsync "$1" >>"$LOGDIR/dm.log" 2>&1 || die "could not map $1 (see dm.log)"
+  dmsetup mknodes "$1"
+  DMS+=("$1")
+}
+dmunmap() { dmsetup remove "$1" >/dev/null 2>&1; local a=() d; for d in "${DMS[@]}"; do [ "$d" != "$1" ] && a+=("$d"); done; DMS=("${a[@]}"); }
+mnt() { # mnt DEV DIR OPTIONS [TYPE]
+  mkdir -p "$2"
+  mount ${4:+-t "$4"} -o "$3" "$1" "$2" >>"$LOGDIR/mount.log" 2>&1 || return 1
+  MOUNTS+=("$2")
+}
+unmnt() { umount "$1" >/dev/null 2>&1; local a=() m; for m in "${MOUNTS[@]}"; do [ "$m" != "$1" ] && a+=("$m"); done; MOUNTS=("${a[@]}"); }
+has() { command -v "$1" >/dev/null 2>&1; }
+partdev() { if [[ "$TGT" =~ [0-9]$ ]]; then echo "${TGT}p$1"; else echo "${TGT}$1"; fi; }
+# LVM sees only the device named here (and nothing activates by itself).
+lvmconf() { echo "devices { filter=[\"a|^$1\$|\",\"r|.*|\"] global_filter=[\"a|^$1\$|\",\"r|.*|\"] use_devicesfile=0 obtain_device_list_from_udev=0 } global { event_activation=0 }"; }
+
+for t in sfdisk losetup dmsetup blockdev blkid numfmt dd mount; do has "$t" || die "missing tool: $t"; done
+# Views left by a run that was stopped short.
+for d in $(dmsetup ls 2>/dev/null | awk '$1 ~ /^(pbsshrink|pbslv[0-9]+|pbstlv[0-9]+)$/ {print $1}'); do dmsetup remove "$d" >/dev/null 2>&1; done
+[ -b "$SRC" ] || die "$SRC is not a block device"
+[ -b "$TGT" ] || die "$TGT is not a block device"
+[ "$(blockdev --getss "$SRC")" = "$(blockdev --getss "$TGT")" ] || die "the disks have different sector sizes"
+[ "$(blockdev --getss "$SRC")" = 512 ] || die "only 512 byte sectors are handled"
+
+# ---- 1. the backup's partition table
+DUMP="$(sfdisk -d "$SRC" 2>/dev/null)" || die "cannot read the partition table of $SRC"
+LABEL="$(sed -n 's/^label: *//p' <<<"$DUMP")"
+case "$LABEL" in gpt|dos) ;; *) die "partition table type '$LABEL' not handled" ;; esac
+mapfile -t PLINES < <(grep -E '^/dev/[^ ]+ *:' <<<"$DUMP")
+N=${#PLINES[@]}
+[ "$N" -gt 0 ] || die "no partitions on $SRC"
+# Items: partitions are 0..N-1; the logical volumes of an LVM partition are
+# 100 and up. Each has SIZE, FS, MIN, HOW, WHY and NSIZE.
+declare -a NUM START SIZE REST PTYPE CONT FS FSUUID FSLABEL MIN HOW WHY NSTART NSIZE USEDB F2FEAT FATVER
+declare -a LVN LVEXT LVSEGS LVNEWSTART LVNEWEXT LVMSPARE
+for ((i = 0; i < N; i++)); do
+  l="${PLINES[$i]}"
+  dev="${l%% *}"
+  NUM[$i]="$(grep -oE '[0-9]+$' <<<"$dev")"
+  START[$i]="$(grep -oE 'start= *[0-9]+' <<<"$l" | grep -oE '[0-9]+')"
+  SIZE[$i]="$(grep -oE 'size= *[0-9]+' <<<"$l" | grep -oE '[0-9]+')"
+  REST[$i]="$(sed -E 's/^[^:]+: *start= *[0-9]+, *size= *[0-9]+, *//' <<<"$l")"
+  PTYPE[$i]="$(grep -oE 'type=[^,]+' <<<"$l" | cut -d= -f2)"
+  CONT[$i]=0
+  [ "$LABEL" = dos ] && [[ "${PTYPE[$i]}" =~ ^(5|f|85)$ ]] && CONT[$i]=1
+done
+itemname() { if [ "$1" -lt 100 ]; then echo "partition ${NUM[$1]}"; else echo "logical volume ${LVN[$1]}"; fi; }
+itemtag() { if [ "$1" -lt 100 ]; then echo "${NUM[$1]}"; else echo "lv-${LVN[$1]}"; fi; }
+# srcdev X: the backup's device for item X in SDEV (a loop for a partition,
+# its read-only view for a logical volume); srcdone X DEV frees a loop.
+srcdev() { if [ "$1" -lt 100 ]; then loop "$SRC" "${START[$1]}" "${SIZE[$1]}" -r; SDEV="$LOOP"; else SDEV="/dev/mapper/pbslv$(( $1 - 100 ))"; fi; }
+srcdone() { [ "$1" -lt 100 ] && unloop "$2"; return 0; }
+
+# ---- 2. what is in each partition (and logical volume), and how small it can get
+# probe X DEV: sets FS, FSUUID, FSLABEL, MIN, HOW and WHY of item X.
+probe() {
+  local x=$1 lp=$2 out b bs blocks cowk used extra lo mo
+  MIN[$x]="${SIZE[$x]}"; HOW[$x]=keep
+  FS[$x]="$(blkid -p -o value -s TYPE "$lp" 2>/dev/null)"
+  FSUUID[$x]="$(blkid -p -o value -s UUID "$lp" 2>/dev/null)"
+  FSLABEL[$x]="$(blkid -p -o value -s LABEL "$lp" 2>/dev/null)"
+  WHY[$x]="kept"
+  case "${FS[$x]}" in
+    ntfs)
+      if has ntfsresize; then
+        out="$(ntfsresize --info --force --no-progress-bar "$lp" 2>&1)"
+        b="$(grep -oE 'resize at [0-9]+ bytes' <<<"$out" | grep -oE '[0-9]+')"
+        if [ -n "$b" ]; then MIN[$x]=$(( (b + 511) / 512 )); HOW[$x]=ntfs; WHY[$x]="can shrink"
+        else WHY[$x]="kept: $(grep -m1 -iE 'error|hibernat|bitlocker|dirty|unclean' <<<"$out" | cut -c1-60)"; fi
+      fi ;;
+    ext2|ext3|ext4)
+      bs="$(dumpe2fs -h "$lp" 2>/dev/null | sed -n 's/^Block size: *//p')"
+      # -f: a backup of a running system is not "checked" since its last
+      # mount, and -P alone then refuses. The real shrink runs e2fsck -f first.
+      blocks="$(resize2fs -f -P "$lp" 2>/dev/null | grep -oE 'minimum size of the filesystem: [0-9]+' | grep -oE '[0-9]+$')"
+      if [ -n "$bs" ] && [ -n "$blocks" ]; then
+        MIN[$x]=$(( blocks * bs / 512 )); HOW[$x]=ext; WHY[$x]="can shrink"
+        # A Salvanza Linux machine backup leaves its snapshot store
+        # (/.pbs_snapshot_N.cow, a tenth of the file system, zeros in the
+        # backup) in the file system: it is removed before the shrink.
+        if mnt "$lp" "$MNT/p" ro,noload; then
+          cowk="$(du -sk "$MNT"/p/.pbs_snapshot_*.cow 2>/dev/null | awk '{s+=$1} END{print s+0}')"
+          unmnt "$MNT/p"
+          if [ "${cowk:-0}" -gt 0 ]; then
+            MIN[$x]=$(( MIN[x] - cowk * 2 )); [ ${MIN[$x]} -lt $(( SIZE[x] / 100 )) ] && MIN[$x]=$(( SIZE[x] / 100 ))
+            WHY[$x]="can shrink (its $((cowk / 1024)) MiB snapshot store goes)"
+          fi
+        fi
+      else WHY[$x]="kept: resize2fs gave no minimum"; fi ;;
+    btrfs)
+      if has btrfs && mnt "$lp" "$MNT/p" ro,rescue=nologreplay btrfs; then
+        b="$(btrfs inspect-internal min-dev-size "$MNT/p" 2>/dev/null | grep -oE '^[0-9]+')"
+        USEDB[$x]="$(df -B1 --output=used "$MNT/p" | tail -1 | tr -d ' ')"
+        unmnt "$MNT/p"; btrfs device scan --forget "$lp" >/dev/null 2>&1
+        if [ -n "$b" ]; then MIN[$x]=$(( (b + 511) / 512 )); HOW[$x]=btrfs; WHY[$x]="can shrink"
+        else WHY[$x]="kept: btrfs gave no minimum size"; fi
+      else WHY[$x]="kept: could not read the btrfs file system"; fi ;;
+    xfs)
+      if has mkfs.xfs && mnt "$lp" "$MNT/p" ro,norecovery xfs; then
+        used="$(df -B512 --output=used "$MNT/p" | tail -1 | tr -d ' ')"
+        unmnt "$MNT/p"
+        # A copy needs the data, the log and room for the metadata: +10%, at least 512 MiB.
+        extra=$(( used / 10 )); [ $extra -lt $(( 512 * MIB )) ] && extra=$(( 512 * MIB ))
+        MIN[$x]=$(( used + extra )); HOW[$x]=xfscopy; WHY[$x]="its files are copied (XFS cannot shrink)"
+      else WHY[$x]="kept: could not read the XFS file system"; fi ;;
+    vfat|exfat|f2fs)
+      # Not shrunk in place: a new, smaller one of the same type with the same
+      # serial or UUID and label is made, and the files are copied into it.
+      mo=ro; [ "${FS[$x]}" = f2fs ] && mo=ro,norecovery
+      if has "mkfs.${FS[$x]}" && mnt "$lp" "$MNT/p" "$mo" "${FS[$x]}"; then
+        used="$(df -B512 --output=used "$MNT/p" | tail -1 | tr -d ' ')"
+        [ "${FS[$x]}" = f2fs ] && F2FEAT[$x]="$(cat "/sys/fs/f2fs/$(basename "$(readlink -f "$lp")")/features" 2>/dev/null)"
+        unmnt "$MNT/p"
+        # Room for the file system's own structures: f2fs keeps 5 to 10% back.
+        if [ "${FS[$x]}" = f2fs ]; then extra=$(( used * 15 / 100 )); lo=$(( 256 * MIB ))
+        else extra=$(( used / 20 )); lo=$(( 32 * MIB )); fi
+        [ $extra -lt $lo ] && extra=$lo
+        MIN[$x]=$(( used + extra )); HOW[$x]=filecopy
+        FATVER[$x]="$(blkid -p -o value -s VERSION "$lp" 2>/dev/null)"
+        WHY[$x]="its files are copied ($( [ "${FS[$x]}" = vfat ] && echo FAT || echo "${FS[$x]}") is made again, smaller)"
+      else WHY[$x]="kept: could not read the ${FS[$x]} file system"; fi ;;
+    swap) MIN[$x]=$SWAPMIN; HOW[$x]=swap; WHY[$x]="made again, smaller if need be" ;;
+    "") WHY[$x]="kept (no file system)" ;;
+    LVM2_member) WHY[$x]="kept: LVM" ;;   # lvm_probe looks inside
+    crypto_LUKS|BitLocker) WHY[$x]="kept: encrypted, its contents cannot be read" ;;
+    linux_raid_member|isw_raid_member|ddf_raid_member) WHY[$x]="kept: RAID member" ;;
+    *) WHY[$x]="kept (${FS[$x]} is not shrunk)" ;;
+  esac
+}
+# Free space kept in an item that shrinks: a tenth of it, at least 64 MiB and
+# at most 1 GiB (HEADROOM), so small partitions are not ruled out.
+headroom() { local h=$(( SIZE[$1] / 10 )); [ $h -gt $HEADROOM ] && h=$HEADROOM; [ $h -lt $(( 64 * MIB )) ] && h=$(( 64 * MIB )); echo $h; }
+spare() { # what item $1 can give up, in sectors (not rounded)
+  case "${HOW[$1]}" in
+    swap) echo $(( SIZE[$1] - MIN[$1] )) ;;
+    ntfs|ext|btrfs|xfscopy|filecopy) echo $(( SIZE[$1] - MIN[$1] - $(headroom $1) )) ;;
+    lvm) echo "${LVMSPARE[$1]}" ;;
+    *) echo 0 ;;
+  esac
+}
+
+# lvm_probe I: the volume group in partition I (an LVM physical volume). Only
+# a volume group on this one physical volume, with linear logical volumes, is
+# handled; each logical volume gets a read-only view (pbslvJ) and is probed.
+LVPART=-1; LVITEMS=()
+lvm_probe() {
+  local i=$1 vg pvuuid pestart pecount ext pvc lvc line name uuid segtype lstart ranges a b x j off len ord
+  has lvm || { WHY[$i]="kept: no LVM tools"; return; }
+  [ $LVPART -ge 0 ] && { WHY[$i]="kept: only one LVM physical volume is handled"; return; }
+  loop "$SRC" "${START[$i]}" "${SIZE[$i]}" -r; LVLOOP="$LOOP"
+  LVC="$(lvmconf "$LVLOOP")"
+  read -r vg pvuuid pestart pecount <<<"$(lvm pvs --readonly --config "$LVC" --noheadings --nosuffix --units s -o vg_name,pv_uuid,pe_start,pv_pe_count 2>/dev/null | head -1)"
+  [ -n "$vg" ] || { WHY[$i]="kept: its LVM metadata could not be read"; return; }
+  read -r ext pvc lvc <<<"$(lvm vgs --readonly --config "$LVC" --noheadings --nosuffix --units s -o vg_extent_size,pv_count,lv_count "$vg" 2>/dev/null | head -1)"
+  [ "$pvc" = 1 ] || { WHY[$i]="kept: volume group $vg spans $pvc disks"; return; }
+  declare -A first segs
+  local -a names=()
+  while IFS='|' read -r name uuid segtype lstart ranges; do
+    name="${name// /}"; segtype="${segtype// /}"; ranges="${ranges// /}"
+    [ -n "$name" ] || continue
+    [[ "$name" == \[* ]] && { WHY[$i]="kept: volume group $vg has hidden logical volumes ($name)"; return; }
+    [ "$segtype" = linear ] || { WHY[$i]="kept: logical volume $name in $vg is $segtype, not linear"; return; }
+    a="${ranges##*:}"; b="${a#*-}"; a="${a%-*}"
+    [ -z "${segs[$name]+x}" ] && { names+=("$name"); first[$name]=$a; }
+    segs[$name]+="$a-$b "
+  done < <(lvm lvs --readonly --config "$LVC" -a --noheadings --nosuffix --units s --separator '|' --sort lv_name,seg_start_pe -o lv_name,lv_uuid,segtype,seg_start_pe,seg_pe_ranges "$vg" 2>/dev/null)
+  [ ${#names[@]} -gt 0 ] || { WHY[$i]="kept: volume group $vg has no logical volumes"; return; }
+  LVPART=$i; LVVG="$vg"; LVPVUUID="$pvuuid"; LVPESTART="$pestart"; LVEXTS="$ext"; LVUSED=0
+  # In the order they lie on the disk (their first extent).
+  j=0
+  for name in $(for n in "${names[@]}"; do echo "${first[$n]} $n"; done | sort -n | awk '{print $2}'); do
+    x=$(( 100 + j ))
+    LVN[$x]="$name"; LVSEGS[$x]="${segs[$name]}"; LVEXT[$x]=0
+    # The table is built here and handed over without a pipe: a pipe would
+    # run the loop in a subshell and lose LVEXT and the DMS record.
+    off=0; table=""
+    for r in ${segs[$name]}; do
+      a="${r%-*}"; b="${r#*-}"; len=$(( (b - a + 1) * ext ))
+      table+="$off $len linear $LVLOOP $(( pestart + a * ext ))"$'\n'
+      off=$(( off + len )); LVEXT[$x]=$(( LVEXT[x] + b - a + 1 ))
+    done
+    dmmap "pbslv$j" --readonly <<<"$table"
+    SIZE[$x]=$(( LVEXT[x] * ext )); NSIZE[$x]=${SIZE[$x]}
+    LVUSED=$(( LVUSED + LVEXT[x] ))
+    probe $x "/dev/mapper/pbslv$j"
+    LVITEMS+=($x); j=$(( j + 1 ))
+  done
+  # What the partition can give up: the volume group's free space (the
+  # logical volumes are packed together on the new disk) and the most one
+  # logical volume can give up, in whole extents.
+  local best=0 s
+  for x in "${LVITEMS[@]}"; do s=$(( $(spare $x) / ext * ext )); [ $s -gt $best ] && best=$s; done
+  s=$(( SIZE[i] - pestart - LVUSED * ext + best )); [ $s -lt 0 ] && s=0
+  LVMSPARE[$i]=$s
+  MIN[$i]=$(( SIZE[i] - s )); HOW[$i]=lvm
+  WHY[$i]="LVM: volume group $vg, ${#LVITEMS[@]} logical volume(s)"
+}
+
+for ((i = 0; i < N; i++)); do
+  MIN[$i]="${SIZE[$i]}"; HOW[$i]=keep; FS[$i]=""; FSUUID[$i]=""; FSLABEL[$i]=""
+  if [ "${CONT[$i]}" = 1 ]; then FS[$i]="(ext.)"; WHY[$i]="holds the logical partitions"; continue; fi
+  loop "$SRC" "${START[$i]}" "${SIZE[$i]}" -r; lp="$LOOP"
+  probe $i "$lp"
+  unloop "$lp"
+  [ "${FS[$i]}" = LVM2_member ] && lvm_probe $i
+done
+
+# ---- 3. the plan
+SRC_SECT="$(blockdev --getsz "$SRC")"
+TGT_SECT="$(blockdev --getsz "$TGT")"
+if [ "$LABEL" = gpt ]; then TAIL=34; else TAIL=1; fi
+TGT_LAST=$(( TGT_SECT - TAIL ))
+END=0; for ((i = 0; i < N; i++)); do e=$(( START[i] + SIZE[i] - 1 )); [ $e -gt $END ] && END=$e; done
+SHORT=$(( END - TGT_LAST ))
+# The smallest disk: the most any one partition can give up, in whole MiB.
+MAXSPARE=0
+for ((i = 0; i < N; i++)); do s=$(( $(spare $i) / MIB * MIB )); [ $s -gt $MAXSPARE ] && MAXSPARE=$s; done
+SMALLEST=$(( END + 1 - MAXSPARE + TAIL - 1 ))
+K=-1; CUT=0
+if [ $SHORT -gt 0 ]; then
+  CUT=$(( (SHORT + MIB - 1) / MIB * MIB ))
+  # The data partition with the most room; swap only when no data partition can.
+  best=0
+  for ((i = 0; i < N; i++)); do
+    [ "${HOW[$i]}" = swap ] && continue
+    s=$(spare $i); if [ $s -ge $CUT ] && [ $s -gt $best ]; then best=$s; K=$i; fi
+  done
+  if [ $K -lt 0 ]; then
+    for ((i = 0; i < N; i++)); do
+      [ "${HOW[$i]}" = swap ] || continue
+      s=$(spare $i); if [ $s -ge $CUT ] && [ $s -gt $best ]; then best=$s; K=$i; fi
+    done
+  fi
+fi
+for ((i = 0; i < N; i++)); do
+  NSTART[$i]=${START[$i]}; NSIZE[$i]=${SIZE[$i]}
+  [ $K -ge 0 ] || continue
+  if [ $i -eq $K ]; then NSIZE[$i]=$(( SIZE[i] - CUT ))
+  elif [ "${CONT[$i]}" = 1 ] && [ "${START[$i]}" -le "${START[$K]}" ] && [ $(( START[i] + SIZE[i] )) -ge $(( START[K] + SIZE[K] )) ]; then
+    NSIZE[$i]=$(( SIZE[i] - CUT ))       # the extended partition around a logical one that shrinks
+  elif [ "${START[$i]}" -gt "${START[$K]}" ]; then
+    NSTART[$i]=$(( START[i] - CUT ))
+  fi
+done
+# SK: the item whose file system shrinks: the partition K, or, when K is the
+# LVM partition, the logical volume that gives up extents (none when the
+# volume group's free space covers the cut).
+SK=$K
+if [ $K -ge 0 ] && [ "${HOW[$K]}" = lvm ]; then
+  SK=-1
+  NEWPE=$(( (NSIZE[K] - LVPESTART) / LVEXTS ))
+  NEED=$(( LVUSED - NEWPE ))
+  if [ $NEED -gt 0 ]; then
+    best=0
+    for pass in data swap; do
+      for x in "${LVITEMS[@]}"; do
+        if [ $pass = data ]; then [ "${HOW[$x]}" = swap ] && continue; else [ "${HOW[$x]}" = swap ] || continue; fi
+        s=$(( $(spare $x) / LVEXTS )); if [ $s -ge $NEED ] && [ $s -gt $best ]; then best=$s; SK=$x; fi
+      done
+      [ $SK -ge 0 ] && break
+    done
+    [ $SK -ge 0 ] || die "no logical volume in $LVVG can give up $NEED extents"
+  fi
+  pos=0
+  for x in "${LVITEMS[@]}"; do
+    c=${LVEXT[$x]}; [ $x -eq $SK ] && c=$(( c - NEED ))
+    LVNEWSTART[$x]=$pos; LVNEWEXT[$x]=$c; NSIZE[$x]=$(( c * LVEXTS )); pos=$(( pos + c ))
+  done
+fi
+
+# note X: what happens to item X, for the plan.
+note() {
+  local x=$1 n="${WHY[$1]}" fsn="${FS[$1]}"
+  [ "$fsn" = vfat ] && fsn=FAT
+  if [ $x -eq $SK ]; then
+    case "${HOW[$x]}" in
+      filecopy|xfscopy) n="SHRINKS: a new, smaller $fsn, its files copied" ;;
+      swap) n="SHRINKS: made again, smaller" ;;
+      *) n="SHRINKS$(grep -oE ' \(.*\)$' <<<"${WHY[$x]}")" ;;
+    esac
+  elif [ $x -eq $K ] && [ "${HOW[$x]}" = lvm ]; then
+    n="SHRINKS: volume group $LVVG written again, its logical volumes packed"
+  elif [ "${HOW[$x]}" = filecopy ] || [ "${HOW[$x]}" = xfscopy ]; then
+    n="can shrink (by copying its files)"
+  elif [ "${HOW[$x]}" = swap ]; then
+    n="can shrink (made again)"
+  fi
+  [ $x -lt 100 ] && [ "${NSTART[$x]}" != "${START[$x]}" ] && n="moves; $n"
+  echo "$n"
+}
+say "Backup disk: $(human "$SRC_SECT") ($( [ "$LABEL" = dos ] && echo MBR || echo GPT )), $SRC"
+say "New disk   : $(human "$TGT_SECT"), $TGT"
+say ""
+say "$(printf '%-3s %-7s %9s %9s %9s  %s' "No" "Type" "Size" "Needs" "New size" "What happens")"
+for ((i = 0; i < N; i++)); do
+  needs="$(human "${MIN[$i]}")"; [ "${HOW[$i]}" = keep ] && needs="-"
+  t="${FS[$i]:--}"; [ "${HOW[$i]}" = lvm ] && t=LVM
+  say "$(printf '%-3s %-7s %9s %9s %9s  %s' "${NUM[$i]}" "$t" "$(human "${SIZE[$i]}")" "$needs" "$(human "${NSIZE[$i]}")" "$(note $i)")"
+  if [ $i -eq $LVPART ]; then
+    for x in "${LVITEMS[@]}"; do
+      needs="$(human "${MIN[$x]}")"; [ "${HOW[$x]}" = keep ] && needs="-"
+      say "$(printf '%-3s %-7s %9s %9s %9s  %s' " lv" "${FS[$x]:--}" "$(human "${SIZE[$x]}")" "$needs" "$(human "${NSIZE[$x]}")" "${LVN[$x]}: $(note $x)")"
+    done
+  fi
+done
+say ""
+REL=0   # data to move, in MB: held in the scratch folder while it moves
+if [ $SHORT -le 0 ]; then
+  say "Everything fits as it is."
+elif [ $K -lt 0 ]; then
+  die "the new disk is too small: this backup needs a disk of at least $(human $SMALLEST) ($(( SMALLEST * 512 )) bytes)."
+else
+  if [ "${HOW[$K]}" = lvm ]; then
+    say "Partition ${NUM[$K]} (LVM volume group $LVVG) goes from $(human "${SIZE[$K]}") to $(human "${NSIZE[$K]}")."
+    [ $SK -ge 0 ] && say "Logical volume ${LVN[$SK]} (${FS[$SK]}) goes from $(human "${SIZE[$SK]}") to $(human "${NSIZE[$SK]}"); its data needs $(human "${MIN[$SK]}")."
+    [ $SK -lt 0 ] && say "The volume group's free space covers it: no logical volume shrinks."
+  else
+    say "Partition ${NUM[$K]} (${FS[$K]}) goes from $(human "${SIZE[$K]}") to $(human "${NSIZE[$K]}"); its data needs $(human "${MIN[$K]}")."
+  fi
+  say "The smallest disk this backup fits: $(human $SMALLEST) ($(( SMALLEST * 512 )) bytes)."
+  if [ $SK -ge 0 ]; then
+    case "${HOW[$SK]}" in
+      ntfs)
+        srcdev $SK; lp="$SDEV"
+        REL="$(ntfsresize --no-action --force --force --no-progress-bar -s $(( NSIZE[SK] * 512 )) "$lp" 2>&1 | grep -oE 'Needed relocations : [0-9]+ \([0-9]+ MB\)' | grep -oE '[0-9]+ MB' | grep -oE '[0-9]+')"
+        srcdone $SK "$lp" ;;
+      ext)
+        # Blocks in use in the block groups past the new end (an upper bound).
+        srcdev $SK; lp="$SDEV"
+        bs="$(dumpe2fs -h "$lp" 2>/dev/null | sed -n 's/^Block size: *//p')"
+        newblocks=$(( NSIZE[SK] * 512 / bs ))
+        REL="$(dumpe2fs "$lp" 2>/dev/null | awk -v nb="$newblocks" -v bs="$bs" '
+          /^Group [0-9]+: \(Blocks [0-9]+-[0-9]+\)/ { split($4, r, "-"); a = r[1] + 0; sub(/\)/, "", r[2]); b = r[2] + 0; next }
+          /free blocks, / && a >= nb { n = $1 + 0; used += (b - a + 1) - n }
+          END { printf "%d", used * bs / 1048576 }')"
+        # Less the snapshot store's blocks past the new end: it is deleted first.
+        if has debugfs; then
+          for f in $(debugfs -R "ls -p /" "$lp" 2>/dev/null | awk -F/ '$6 ~ /^\.pbs_snapshot_[0-9]+\.cow$/ {print $6}'); do
+            gone="$(debugfs -R "ex /$f" "$lp" 2>/dev/null | awk -v nb="$newblocks" -v bs="$bs" '
+              { n = 0; for (k = 1; k <= NF - 2; k++) if ($(k+1) == "-") { n++; if (n == 2) { a = $k + 0; b = $(k+2) + 0 } } }
+              n == 2 { if (b >= nb) { s = (a > nb ? a : nb); t += b - s + 1 } }
+              END { printf "%d", t * bs / 1048576 }')"
+            REL=$(( REL - ${gone:-0} ))
+          done
+          [ "$REL" -lt 0 ] && REL=0
+        fi
+        srcdone $SK "$lp" ;;
+      btrfs)
+        # Chunks past the new end are moved; at most all the data, at most the cut.
+        u=$(( ${USEDB[$SK]:-0} / 1048576 )); c=$(( (SIZE[SK] - NSIZE[SK]) / MIB )); REL=$(( u < c ? u : c )) ;;
+      xfscopy) REL=256 ;;   # the log replays into the writable layer
+      filecopy) REL=0 ;;    # read straight from the backup, nothing moves
+      swap) REL=0 ;;
+    esac
+  fi
+  REL=${REL:-0}
+  if [ "$REL" -gt 0 ]; then
+    mkdir -p "$COWDIR" 2>/dev/null
+    free="$(df -Pk "$COWDIR" 2>/dev/null | awk 'NR==2{print int($4/1024)}')"
+    say "Data to move while it shrinks: about ${REL} MB, held in $COWDIR (${free:-?} MB free there)."
+    need=$(( REL + REL / 10 + 256 ))
+    if [ -z "$free" ] || [ "$free" -lt "$need" ]; then
+      die "Not enough scratch space: $need MB is needed in the scratch folder, $COWDIR has ${free:-no} MB free. Choose a folder on another disk or a USB stick." 3
+    fi
+    if [ "$(stat -f -c %T "$COWDIR" 2>/dev/null)" = msdos ] && [ "$need" -ge 4095 ]; then
+      die "the scratch folder is on FAT, whose files stop at 4 GB, and $need MB is needed. Choose an exFAT, NTFS or ext4 one." 3
+    fi
+  fi
+fi
+[ $PLAN_ONLY = 1 ] && { say "Plan only: nothing written."; exit 0; }
+if [ $YES != 1 ]; then
+  read -r -p "EVERYTHING on $TGT will be overwritten. Type yes to go on: " a
+  [ "$a" = yes ] || die "not confirmed"
+fi
+
+# ---- 4. shrink the file system in a writable layer over the backup
+SHR=""; SHRDM=""
+if [ $SK -ge 0 ] && [ "${HOW[$SK]}" != swap ] && [ "${HOW[$SK]}" != filecopy ]; then
+  mkdir -p "$COWDIR" || die "cannot make $COWDIR"
+  srcdev $SK; base="$SDEV"
+  # The layer only needs room for what changes: the data that moves and the
+  # file system's own updates, so it is sized from that, not the partition.
+  free="$(df -Pk "$COWDIR" | awk 'NR==2{print int($4/1024)}')"
+  cowmb=$(( REL * 2 + 1024 )); [ $cowmb -gt $(( free - 64 )) ] && cowmb=$(( free - 64 ))
+  [ $cowmb -gt $(( SIZE[SK] / 2048 )) ] && cowmb=$(( SIZE[SK] / 2048 ))
+  [ "$(stat -f -c %T "$COWDIR")" = msdos ] && [ $cowmb -gt 4095 ] && cowmb=4095
+  truncate -s "${cowmb}M" "$COWDIR/cow" || die "cannot make the scratch file in $COWDIR"
+  loop "$COWDIR/cow" 0 $(( cowmb * MIB )); cow="$LOOP"
+  dmsetup create --noudevsync "$DM" --table "0 ${SIZE[$SK]} snapshot $base $cow N 8" || die "could not make the writable layer"
+  dmsetup mknodes "$DM"
+  SHRDM="/dev/mapper/$DM"
+  newbytes=$(( NSIZE[SK] * 512 ))
+  SHRHEAD="Step 1: $(itemname $SK) (${FS[$SK]}) $( [ "${HOW[$SK]}" = xfscopy ] && echo "is prepared for copying (its log is replayed)" || echo "shrinks from $(human "${SIZE[$SK]}") to $(human "${NSIZE[$SK]}")")"
+  case "${HOW[$SK]}" in
+    ntfs)
+      step "$SHRHEAD\n\nChecking that it can shrink ..."
+      ntfsresize --no-action --force --force -s "$newbytes" "$SHRDM" >"$LOGDIR/ntfsresize-test.log" 2>&1 || { tail -5 "$LOGDIR/ntfsresize-test.log"; die "ntfsresize test run failed"; }
+      if [ $BLUE = 1 ]; then
+        # A gauge fed by ntfsresize's own "NN.NN percent completed" lines, one
+        # per stage (check, move the data past the new end, update).
+        TR="tr"; has stdbuf && TR="stdbuf -o0 tr"
+        { echo y | ntfsresize --force --force -s "$newbytes" "$SHRDM" 2>&1; echo "RC=$?"; } | tee "$LOGDIR/ntfsresize.log" | $TR '\r' '\n' |
+          awk -v head="$SHRHEAD" -v mv="${REL:-0}" '
+            /Checking filesystem consistency/ { stage = "Checking the file system" }
+            /Accounting clusters/            { stage = "Counting the clusters in use" }
+            /Relocating needed data/         { stage = "Moving the data that is past the new end (about " mv " MB)" }
+            /Updating/                       { stage = "Updating the file system" }
+            / percent completed/ { for (i = 1; i < NF; i++) if ($(i+1) == "percent") p = int($i)
+                                   printf "XXX\n%d\n%s\n\n%s\nXXX\n", p, head, stage; fflush() }' |
+          "$DIAB" --title "$BOXTITLE" --gauge "$SHRHEAD\n\nStarting ..." 11 78 0
+        # (whiptail sizes the gauge's text area from this first text: three
+        # lines, so the stage line of each update shows.)
+        grep -q '^RC=0$' "$LOGDIR/ntfsresize.log" || die "ntfsresize failed: $(grep -iE 'error|fail' "$LOGDIR/ntfsresize.log" | tail -1)"
+      elif [ $TTY = 1 ]; then
+        echo y | ntfsresize --force --force -s "$newbytes" "$SHRDM" 2>&1 | tee "$LOGDIR/ntfsresize.log"
+        [ "${PIPESTATUS[1]}" = 0 ] || die "ntfsresize failed"
+      else
+        echo y | ntfsresize --force --force --no-progress-bar -s "$newbytes" "$SHRDM" >"$LOGDIR/ntfsresize.log" 2>&1 || { tail -5 "$LOGDIR/ntfsresize.log"; die "ntfsresize failed"; }
+      fi ;;
+    ext)
+      step "$SHRHEAD\n\nChecking the file system (e2fsck) ..."
+      e2fsck -f -y "$SHRDM" >"$LOGDIR/e2fsck.log" 2>&1
+      [ $? -le 1 ] || { tail -5 "$LOGDIR/e2fsck.log"; die "e2fsck found errors it could not fix"; }
+      if mnt "$SHRDM" "$MNT/s" rw; then
+        for f in "$MNT"/s/.pbs_snapshot_*.cow; do [ -f "$f" ] && rm -f "$f" && say "  removed the backup's snapshot store $(basename "$f")"; done
+        unmnt "$MNT/s"
+        # Mounted, so resize2fs wants it checked again.
+        e2fsck -f -y "$SHRDM" >>"$LOGDIR/e2fsck.log" 2>&1
+        [ $? -le 1 ] || { tail -5 "$LOGDIR/e2fsck.log"; die "e2fsck found errors it could not fix"; }
+      fi
+      if [ $BLUE = 1 ]; then
+        step "$SHRHEAD\n\nShrinking (resize2fs), moving about ${REL:-0} MB of data.\nThis gives no percentage; it can take several minutes."
+        resize2fs "$SHRDM" "$(( newbytes / 1024 ))K" >"$LOGDIR/resize2fs.log" 2>&1 || die "resize2fs failed: $(tail -1 "$LOGDIR/resize2fs.log")"
+      elif [ $TTY = 1 ]; then
+        resize2fs -p "$SHRDM" "$(( newbytes / 1024 ))K" 2>&1 | tee "$LOGDIR/resize2fs.log"
+        [ "${PIPESTATUS[0]}" = 0 ] || die "resize2fs failed"
+      else
+        resize2fs "$SHRDM" "$(( newbytes / 1024 ))K" >"$LOGDIR/resize2fs.log" 2>&1 || { tail -5 "$LOGDIR/resize2fs.log"; die "resize2fs failed"; }
+      fi ;;
+    btrfs)
+      step "$SHRHEAD\n\nShrinking (btrfs filesystem resize). This gives no percentage."
+      mnt "$SHRDM" "$MNT/s" rw btrfs || { tail -3 "$LOGDIR/mount.log"; die "could not mount the btrfs file system"; }
+      for f in "$MNT"/s/.pbs_snapshot_*.cow; do [ -f "$f" ] && rm -f "$f" && say "  removed the backup's snapshot store $(basename "$f")"; done
+      btrfs filesystem resize "1:$newbytes" "$MNT/s" >"$LOGDIR/btrfs-resize.log" 2>&1 || { tail -5 "$LOGDIR/btrfs-resize.log"; die "btrfs resize failed"; }
+      unmnt "$MNT/s"; btrfs device scan --forget "$SHRDM" >/dev/null 2>&1 ;;
+    xfscopy) step "$SHRHEAD" ;;   # mounted (log replay into the layer) when it is copied
+  esac
+  say "  scratch used: $(du -h "$COWDIR/cow" | cut -f1); $(dmsetup status "$DM" | awk '{print "layer " $4}')"
+  if [ "${HOW[$SK]}" != xfscopy ]; then
+    # partclone compares device sizes, not file system sizes: read the
+    # shrunk file system through a device of the new size.
+    loop "$SHRDM" 0 "${NSIZE[$SK]}" -r; SHR="$LOOP"
+  fi
+fi
+
+# ---- 5. the new disk's partition table: same IDs, new places
+SCRIPT="$LOGDIR/table.sfdisk"
+{
+  grep -E '^(label|label-id|unit|first-lba|sector-size):' <<<"$DUMP"
+  echo
+  for ((i = 0; i < N; i++)); do
+    echo "$(partdev "${NUM[$i]}") : start=${NSTART[$i]}, size=${NSIZE[$i]}, ${REST[$i]}"
+  done
+} > "$SCRIPT"
+step "Step 2: writing the new partition table and boot code to $TGT ..."
+sfdisk -q --wipe always --no-reread --no-tell-kernel "$TGT" < "$SCRIPT" >"$LOGDIR/sfdisk.log" 2>&1 || { cat "$LOGDIR/sfdisk.log"; die "sfdisk could not write the table"; }
+# Boot code in the first sector (not the table), then the gap before the
+# first partition (GRUB's core image on a BIOS/MBR disk).
+dd if="$SRC" of="$TGT" bs=440 count=1 conv=notrunc status=none
+FIRST=${START[0]}; for ((i = 0; i < N; i++)); do [ "${START[$i]}" -lt $FIRST ] && FIRST=${START[$i]}; done
+if [ "$LABEL" = gpt ]; then GAP0=34; else GAP0=1; fi
+[ $FIRST -gt $GAP0 ] && dd if="$SRC" of="$TGT" bs=512 skip=$GAP0 seek=$GAP0 count=$(( FIRST - GAP0 )) conv=notrunc status=none
+
+# ---- 6. each partition (and logical volume)
+xfs_like() { # mkfs.xfs options that give a new XFS the features of the one mounted at $1
+  local info o m="" i="" k v
+  info="$(xfs_info "$1" 2>/dev/null)"
+  for k in crc finobt rmapbt reflink bigtime inobtcount; do
+    v="$(grep -oE "\b$k=[01]" <<<"$info" | head -1 | cut -d= -f2)"
+    [ -n "$v" ] && m+="${m:+,}$k=$v"
+  done
+  for k in sparse nrext64; do
+    v="$(grep -oE "\b$k=[01]" <<<"$info" | head -1 | cut -d= -f2)"
+    [ -n "$v" ] && i+="${i:+,}$k=$v"
+  done
+  o=""; [ -n "$m" ] && o+=" -m $m"; [ -n "$i" ] && o+=" -i $i"
+  v="$(grep -oE 'ftype=[01]' <<<"$info" | head -1)"; [ -n "$v" ] && o+=" -n $v"
+  v="$(grep -oE 'bsize=[0-9]+' <<<"$info" | head -1 | cut -d= -f2)"; [ -n "$v" ] && o+=" -b size=$v"
+  echo "$o"
+}
+# copy_item X FROM TO: item X from the backup's device FROM onto TO (the new
+# partition or logical volume, NSIZE[X] sectors). The item that shrank is
+# read from the writable layer instead.
+copy_item() {
+  local x=$1 from=$2 to=$3 t0 what log tool popts fs fsname ml mo id fopt feats cf f opts
+  what="$(itemname $x)"; log="$LOGDIR/copy-$(itemtag $x).log"; t0=$(date +%s)
+  if [ "${HOW[$x]}" = swap ]; then
+    step "Step 3: $what (swap, $(human "${NSIZE[$x]}")) is made again ..."
+    mkswap ${FSUUID[$x]:+-U "${FSUUID[$x]}"} ${FSLABEL[$x]:+-L "${FSLABEL[$x]}"} "$to" >"$log" 2>&1 || die "mkswap failed"
+    return
+  fi
+  if [ $x -eq $SK ] && [ "${HOW[$x]}" = filecopy ]; then
+    fs="${FS[$x]}"; fsname="$fs"; [ "$fs" = vfat ] && fsname=FAT
+    step "Step 3: $what ($fsname, $(human "${NSIZE[$x]}")): a new, smaller $fsname is made and $(human "${MIN[$x]}") of files are copied into it.\nThis gives no percentage; it can take several minutes."
+    mo=ro; [ "$fs" = f2fs ] && mo=ro,norecovery
+    mnt "$from" "$MNT/s" "$mo" "$fs" || { tail -3 "$LOGDIR/mount.log"; die "could not mount the $fsname file system of $what"; }
+    ml="$LOGDIR/mkfs-$(itemtag $x).log"
+    case "$fs" in
+      vfat)
+        id="${FSUUID[$x]//-/}"; fopt=""
+        case "${FATVER[$x]}" in FAT32) fopt="-F 32" ;; FAT16) fopt="-F 16" ;; FAT12) fopt="-F 12" ;; esac
+        # The same FAT size if it fits the new size, else what mkfs chooses;
+        # -h records the partition's start, as Windows expects.
+        mkfs.vfat $fopt ${id:+-i "$id"} ${FSLABEL[$x]:+-n "${FSLABEL[$x]}"} -h "${NSTART[$x]:-0}" "$to" >"$ml" 2>&1 ||
+          mkfs.vfat ${id:+-i "$id"} ${FSLABEL[$x]:+-n "${FSLABEL[$x]}"} -h "${NSTART[$x]:-0}" "$to" >>"$ml" 2>&1 ||
+          { tail -3 "$ml"; die "mkfs.vfat failed"; } ;;
+      exfat)
+        mkfs.exfat ${FSLABEL[$x]:+-L "${FSLABEL[$x]}"} "$to" >"$ml" 2>&1 || { tail -3 "$ml"; die "mkfs.exfat failed"; }
+        if [ -n "${FSUUID[$x]}" ] && has tune.exfat; then
+          tune.exfat -I "0x${FSUUID[$x]//-/}" "$to" >>"$ml" 2>&1 || say "  (the exFAT volume serial could not be set)"
+        fi ;;
+      f2fs)
+        # The features the backed up f2fs had (from its sysfs list), by the
+        # names mkfs.f2fs uses.
+        feats=""; cf=""
+        for f in $(tr ',' ' ' <<<"${F2FEAT[$x]:-}"); do
+          case "$f" in
+            encryption) f=encrypt ;; projquota) f=project_quota ;; quota_ino) f=quota ;;
+            casefold) cf="-C utf8" ;;
+            extra_attr|inode_checksum|flexible_inline_xattr|inode_crtime|lost_found|verity|sb_checksum|compression) ;;
+            *) continue ;;
+          esac
+          feats+="${feats:+,}$f"
+        done
+        mkfs.f2fs -f -q ${feats:+-O "$feats"} $cf ${FSUUID[$x]:+-U "${FSUUID[$x]}"} ${FSLABEL[$x]:+-l "${FSLABEL[$x]}"} "$to" >"$ml" 2>&1 ||
+          { tail -3 "$ml"; die "mkfs.f2fs failed (features: $feats)"; } ;;
+    esac
+    mnt "$to" "$MNT/d" rw "$fs" || { tail -3 "$LOGDIR/mount.log"; die "could not mount the new $fsname file system"; }
+    if [ "$fs" = f2fs ]; then
+      ( cd "$MNT/s" && tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner --sparse -cpf - . | tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner -xpf - -C "$MNT/d" ) >"$log" 2>&1
+    else
+      # FAT and exFAT keep no owners or permissions: the files and their times.
+      cp -r --preserve=timestamps "$MNT/s/." "$MNT/d/" >"$log" 2>&1
+    fi || { tail -5 "$log"; die "copying the files of $what failed"; }
+    unmnt "$MNT/d"; unmnt "$MNT/s"
+    say "  done in $(( $(date +%s) - t0 )) s"
+    return
+  fi
+  if [ $x -eq $SK ] && [ "${HOW[$x]}" = xfscopy ]; then
+    step "Step 3: $what (XFS, $(human "${NSIZE[$x]}")): a new XFS is made and $(human "${MIN[$x]}") of files are copied into it.\nThis gives no percentage; it can take several minutes."
+    mnt "$SHRDM" "$MNT/s" rw,nouuid xfs || { tail -3 "$LOGDIR/mount.log"; die "could not mount the XFS file system"; }
+    opts="$(xfs_like "$MNT/s")"
+    mkfs.xfs -f -q $opts -m uuid="${FSUUID[$x]}" ${FSLABEL[$x]:+-L "${FSLABEL[$x]}"} "$to" >"$LOGDIR/mkfs-xfs.log" 2>&1 || { tail -5 "$LOGDIR/mkfs-xfs.log"; die "mkfs.xfs failed (options:$opts)"; }
+    mnt "$to" "$MNT/d" rw,nouuid xfs || die "could not mount the new XFS file system"
+    if has xfsdump && has xfsrestore; then
+      ( xfsdump -J -l 0 -L pbs -M pbs - "$MNT/s" | xfsrestore -J - "$MNT/d" ) >"$log" 2>&1
+    else
+      ( cd "$MNT/s" && tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner --sparse -cpf - . | tar --xattrs --xattrs-include='*' --acls --selinux --numeric-owner -xpf - -C "$MNT/d" ) >"$log" 2>&1
+    fi || { tail -5 "$log"; die "copying the files of $what failed"; }
+    unmnt "$MNT/d"; unmnt "$MNT/s"
+    say "  done in $(( $(date +%s) - t0 )) s"
+    return
+  fi
+  [ $x -eq $SK ] && from="$SHR"
+  case "${FS[$x]}" in
+    ntfs) tool=partclone.ntfs ;;
+    ext2|ext3|ext4) tool=partclone.extfs ;;
+    vfat) tool=partclone.fat ;;
+    exfat) tool=partclone.exfat ;;
+    xfs) tool=partclone.xfs ;;
+    btrfs) tool=partclone.btrfs ;;
+    f2fs) tool=partclone.f2fs ;;
+    *) tool=partclone.dd ;;   # as Clonezilla: every partition with the same progress screen
+  esac
+  has $tool || tool=partclone.dd
+  has $tool || tool=dd
+  step "Step 3: copying $what (${FS[$x]:-no file system}, $(human "${NSIZE[$x]}")) ..."
+  if [ $tool = dd ]; then
+    dd if="$from" of="$to" bs=4M status=none conv=fsync >"$log" 2>&1
+  else
+    # Device to device, file system check skipped; partclone.dd copies
+    # sectors and takes neither option.
+    popts="-b -I"; [ $tool = partclone.dd ] && popts=""
+    if [ $TTY = 1 ]; then
+      # partclone draws its progress screen on stderr (stdout is for image
+      # data), and the wizard sends this tool's stderr to a log: the terminal.
+      $tool $popts -N -L "$log" -s "$from" -o "$to" 2>/dev/tty
+    else
+      $tool $popts -s "$from" -o "$to" >"$log" 2>&1
+    fi
+  fi || { tail -5 "$log"; die "copying $what failed"; }
+  say "  done in $(( $(date +%s) - t0 )) s"
+  if [ "${FS[$x]}" = ntfs ]; then
+    # The backup boot sector is in the last sector, outside the volume that
+    # partclone copies.
+    dd if="$from" of="$to" bs=512 skip=$(( NSIZE[x] - 1 )) seek=$(( NSIZE[x] - 1 )) count=1 conv=notrunc status=none
+  fi
+}
+# lvm_rebuild I TO: the volume group of partition I written again on TO (the
+# new, smaller partition) with the same UUIDs and names, its logical volumes
+# packed in their order, then each one copied into its new place.
+lvm_rebuild() {
+  local i=$1 tpv=$2 ct tpes map x j
+  ct="$(lvmconf "$tpv")"
+  step "Step 3: partition ${NUM[$i]}: LVM volume group $LVVG is written again, $(human "${NSIZE[$i]}"), the same names and UUIDs ..."
+  lvm vgcfgbackup --config "$LVC" -f "$LOGDIR/vg.old" "$LVVG" >"$LOGDIR/lvm.log" 2>&1 || { tail -3 "$LOGDIR/lvm.log"; die "could not read volume group $LVVG"; }
+  map=""
+  for x in "${LVITEMS[@]}"; do map+="${LVN[$x]}:${LVNEWSTART[$x]}:${LVNEWEXT[$x]};"; done
+  # The physical volume gets the new size and extent count; each logical
+  # volume gets one segment at its new place (it was linear, on this PV).
+  awk -v devsize="${NSIZE[$i]}" -v pecount="$NEWPE" -v map="$map" '
+    BEGIN { n = split(map, m, ";"); for (k = 1; k <= n; k++) if (m[k] != "") { split(m[k], f, ":"); NS[f[1]] = f[2]; NC[f[1]] = f[3] } }
+    function ind(d,   s) { s = ""; while (d-- > 0) s = s "\t"; return s }
+    {
+      line = $0; t = line; sub(/^[ \t]+/, "", t)
+      if (t ~ /\{[ \t]*$/) {                 # a block opens
+        name = t; sub(/[ \t]*\{.*$/, "", name)
+        depth++; blk[depth] = name
+        if (depth == 2) sect = name
+        if (depth == 4 && sect == "logical_volumes" && name ~ /^segment[0-9]+$/) { skip = 1 }
+        if (!skip) print line
+        next
+      }
+      if (t ~ /^\}/) {                       # a block closes
+        if (skip && depth == 4) { skip = 0; depth--; next }
+        if (depth == 3 && sect == "logical_volumes" && (blk[3] in NS)) {
+          lv = blk[3]
+          print ind(3) "segment1 {"
+          print ind(4) "start_extent = 0"
+          print ind(4) "extent_count = " NC[lv]
+          print ""
+          print ind(4) "type = \"striped\""
+          print ind(4) "stripe_count = 1"
+          print ""
+          print ind(4) "stripes = ["
+          print ind(5) "\"pv0\", " NS[lv]
+          print ind(4) "]"
+          print ind(3) "}"
+        }
+        if (!skip) print line
+        depth--
+        next
+      }
+      if (skip) next
+      if (depth == 3 && sect == "physical_volumes" && t ~ /^dev_size = /) { print ind(3) "dev_size = " devsize; next }
+      if (depth == 3 && sect == "physical_volumes" && t ~ /^pe_count = /) { print ind(3) "pe_count = " pecount; next }
+      if (depth == 3 && sect == "logical_volumes" && t ~ /^segment_count = /) { print ind(3) "segment_count = 1"; next }
+      print line
+    }' "$LOGDIR/vg.old" > "$LOGDIR/vg.new"
+  # On the live system udev activates a volume group as soon as its physical
+  # volume appears (seen 15/11/2026), and vgcfgrestore then asks before
+  # restoring over active volumes. So: deactivate first, answer yes, and never
+  # read the terminal (a question would wait unseen behind the blue box).
+  TVG="$LVVG"; TCONF="$ct"
+  lvm pvcreate --config "$ct" -ff -y --uuid "$LVPVUUID" --restorefile "$LOGDIR/vg.new" "$tpv" </dev/null >>"$LOGDIR/lvm.log" 2>&1 || { tail -3 "$LOGDIR/lvm.log"; die "pvcreate on the new disk failed"; }
+  udevadm settle --timeout=10 >/dev/null 2>&1
+  lvm vgchange -an --config "$ct" "$LVVG" </dev/null >>"$LOGDIR/lvm.log" 2>&1
+  lvm vgcfgrestore --config "$ct" --yes -f "$LOGDIR/vg.new" "$LVVG" </dev/null >>"$LOGDIR/lvm.log" 2>&1 || { tail -3 "$LOGDIR/lvm.log"; die "vgcfgrestore on the new disk failed"; }
+  udevadm settle --timeout=10 >/dev/null 2>&1
+  lvm vgchange -an --config "$ct" "$LVVG" </dev/null >>"$LOGDIR/lvm.log" 2>&1
+  tpes="$(lvm pvs --config "$ct" --noheadings --nosuffix --units s -o pe_start "$tpv" 2>/dev/null | tr -d ' ')"
+  [ -n "$tpes" ] || die "the new physical volume cannot be read back"
+  say "  volume group $LVVG written: $(lvm lvs --config "$ct" --noheadings --units m -o lv_name,lv_size "$LVVG" 2>/dev/null | tr -s ' ' | tr '\n' ';')"
+  j=0
+  for x in "${LVITEMS[@]}"; do
+    dmmap "pbstlv$j" <<<"0 ${NSIZE[$x]} linear $tpv $(( tpes + LVNEWSTART[x] * LVEXTS ))"
+    copy_item $x "/dev/mapper/pbslv$(( x - 100 ))" "/dev/mapper/pbstlv$j"
+    dmunmap "pbstlv$j"
+    j=$(( j + 1 ))
+  done
+}
+for ((i = 0; i < N; i++)); do
+  [ "${CONT[$i]}" = 1 ] && continue
+  loop "$TGT" "${NSTART[$i]}" "${NSIZE[$i]}"; to="$LOOP"
+  if [ $i -eq $K ] && [ "${HOW[$i]}" = lvm ]; then
+    lvm_rebuild $i "$to"
+    unloop "$to"
+    continue
+  fi
+  srcdev $i; from="$SDEV"
+  copy_item $i "$from" "$to"
+  if [ "${NSTART[$i]}" != "${START[$i]}" ] && { [ "${FS[$i]}" = ntfs ] || [ "${FS[$i]}" = vfat ]; } && [ "${HOW[$i]}" != filecopy -o $i -ne $SK ]; then
+    # NTFS and FAT keep the partition's start ("hidden sectors", offset 0x1C)
+    # in the boot sector; set the new one where the old one was recorded.
+    old="$(od -An -tu4 -j28 -N4 "$to" | tr -d ' ')"
+    if [ "$old" = "${START[$i]}" ]; then
+      printf "$(printf '%08x' "${NSTART[$i]}" | sed -E 's/(..)(..)(..)(..)/\\x\4\\x\3\\x\2\\x\1/')" | dd of="$to" bs=1 seek=28 count=4 conv=notrunc status=none
+      say "  its boot sector now records the new start"
+    fi
+  fi
+  srcdone $i "$from"
+  unloop "$to"
+done
+step "Step 4: finishing (writing everything out to $TGT) ..."
+sync
+blockdev --rereadpt "$TGT" >/dev/null 2>&1 || partx -u "$TGT" >/dev/null 2>&1
+# A UEFI computer needs a boot entry for the new disk in its firmware. Windows
+# and most Linux systems also boot without one (through \EFI\BOOT\BOOTX64.EFI),
+# but Clonezilla adds one after a restore, and so does this, with its tool.
+if [ "$LABEL" = gpt ] && [ -d /sys/firmware/efi ] && has update-efi-nvram-boot-entry; then
+  udevadm settle --timeout=10 >/dev/null 2>&1
+  update-efi-nvram-boot-entry "$TGT" >"$LOGDIR/efi-nvram.log" 2>&1 && say "  UEFI boot entry updated" || say "  UEFI boot entry not updated (see efi-nvram.log)"
+fi
+say "Done."
