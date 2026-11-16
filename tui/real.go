@@ -232,6 +232,11 @@ func (b *serviceBackend) SavePrefs(old, now Prefs) error {
 			return err
 		}
 	}
+	if now.LogWeeks != old.LogWeeks {
+		if err := b.c.Call("SetLogRetention", nil, now.LogWeeks); err != nil {
+			return err
+		}
+	}
 	if now.Compression != old.Compression {
 		level := now.Compression
 		if level == "default" {

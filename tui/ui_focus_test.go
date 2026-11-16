@@ -158,7 +158,7 @@ func TestQQuitsFromAButton(t *testing.T) {
 		h := newHarness(t, 130, 40)
 		h.sim.InjectKey(tcell.KeyF9, 0, tcell.ModNone)
 		h.waitFor("Upload limit")
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 11; i++ { // the page's 11 fields, then its first button
 			h.key(tcell.KeyTab, 0)
 		}
 		var onButton bool
@@ -207,7 +207,7 @@ func TestDigitsTypeInFieldsAndSwitchScreensOnButtons(t *testing.T) {
 	if !strings.Contains(field, "7") {
 		t.Errorf("the digit was not typed into the Upload limit field: %q", field)
 	}
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 11; i++ { // the page's 11 fields, then its first button
 		h.key(tcell.KeyTab, 0)
 	}
 	h.typ('2')

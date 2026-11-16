@@ -41,7 +41,7 @@ func TestRunLogsFoldIntoWeekFilesAndReadAsBefore(t *testing.T) {
 	}
 	writeLogLines(t, filepath.Join(dir, "backup-20261118-130000-photos.log"), []string{"[BACKUP] [2026-11-18 13:00:00] running"}, false)
 
-	foldRunLogs(dir, "", 0)
+	foldRunLogs(dir, "")
 
 	left, _ := os.ReadDir(dir)
 	var names []string
@@ -102,11 +102,11 @@ func TestFoldingTwiceAddsARunOnce(t *testing.T) {
 	name := "backup-20261116-040100-docs.log.gz"
 	writeLogLines(t, filepath.Join(dir, name), []string{"[BACKUP] [2026-11-16 04:01:00] once"}, true)
 	data, _ := os.ReadFile(filepath.Join(dir, name))
-	foldRunLogs(dir, "", 0)
+	foldRunLogs(dir, "")
 	if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil { // as if not removed
 		t.Fatal(err)
 	}
-	foldRunLogs(dir, "", 0)
+	foldRunLogs(dir, "")
 	scan, err := scanWeeklyLog(filepath.Join(dir, "backup-logs-20261116.log.gz"))
 	if err != nil || len(scan.members) != 1 {
 		t.Fatalf("the week holds %d runs, %v; want 1", len(scan.members), err)
@@ -122,7 +122,7 @@ func TestFoldingTwiceAddsARunOnce(t *testing.T) {
 func TestACutOffEndIsDroppedBeforeTheNextRun(t *testing.T) {
 	dir := withLogFolder(t)
 	writeLogLines(t, filepath.Join(dir, "backup-20261116-040100-docs.log.gz"), []string{"[BACKUP] [2026-11-16 04:01:00] first"}, true)
-	foldRunLogs(dir, "", 0)
+	foldRunLogs(dir, "")
 	week := filepath.Join(dir, "backup-logs-20261116.log.gz")
 	whole, _ := os.Stat(week)
 	f, err := os.OpenFile(week, os.O_WRONLY|os.O_APPEND, 0)
@@ -132,7 +132,7 @@ func TestACutOffEndIsDroppedBeforeTheNextRun(t *testing.T) {
 	_, _ = f.Write([]byte{0x1f, 0x8b, 8, 0, 0, 0}) // the start of a part, and no more
 	_ = f.Close()
 	writeLogLines(t, filepath.Join(dir, "backup-20261117-040100-docs.log.gz"), []string{"[BACKUP] [2026-11-17 04:01:00] second"}, true)
-	foldRunLogs(dir, "", 0)
+	foldRunLogs(dir, "")
 	scan, err := scanWeeklyLog(week)
 	if err != nil || len(scan.members) != 2 || scan.goodEnd != scan.size || scan.members[1].Offset != whole.Size() {
 		t.Fatalf("after the cut-off end: %+v, %v", scan, err)
@@ -168,7 +168,7 @@ func TestAnUnfinishedRunLogIsLeft(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, name), data[:len(data)-8], 0o600); err != nil {
 		t.Fatal(err)
 	}
-	foldRunLogs(dir, "", 0)
+	foldRunLogs(dir, "")
 	if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 		t.Errorf("the unfinished file was taken: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestFoldOneRun(t *testing.T) {
 	writeLogLines(t, filepath.Join(dir, "backup-20261116-040100-docs.log.gz"), []string{"a"}, true)
 	writeLogLines(t, filepath.Join(dir, "backup-20261116-040100-docs.log.20261116-050000.gz"), []string{"b"}, true)
 	writeLogLines(t, filepath.Join(dir, "backup-20261116-040100-docs2.log.gz"), []string{"c"}, true)
-	foldRunLogs(dir, "backup-20261116-040100-docs.log", 0)
+	foldRunLogs(dir, "backup-20261116-040100-docs.log")
 	if _, err := os.Stat(filepath.Join(dir, "backup-20261116-040100-docs2.log.gz")); err != nil {
 		t.Errorf("another run's file was folded: %v", err)
 	}

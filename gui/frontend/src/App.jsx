@@ -62,6 +62,8 @@ let GetBackupRuns, PauseBackupRun, ResumeBackupRun, CancelBackupRun, SetMaxConcu
 // Preferences > Backup Options: speed limits shared by every run, and the
 // compression level every backup uses, and how many chunks go up at a time
 let SetSpeedLimits, SetCompressionLevel, SetUploadThreads, SetChunkTimeout
+// Preferences > Message Log: how many weeks of backup run logs are kept
+let SetLogRetention
 // The background service's settings (upstream's strict model)
 let ConnectService, IsServiceConnected, UseOwnSettings, OwnSetsCount, ConnectServiceCopyingOwn
 // Own settings: the computer's PBS servers, without their logins
@@ -177,6 +179,7 @@ if (window.go) {
   SetCompressionLevel = window.go.main.App.SetCompressionLevel
   SetUploadThreads = window.go.main.App.SetUploadThreads
   SetChunkTimeout = window.go.main.App.SetChunkTimeout
+  SetLogRetention = window.go.main.App.SetLogRetention
 }
 
 // Wails events + runtime (open external URLs in the system browser)
@@ -5164,6 +5167,43 @@ function App() {
                         </>
                       )}
                     </div>
+                    {SetLogRetention && (
+                      <div className="form-group" style={{marginTop: '24px'}}>
+                        <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                          <label htmlFor="logRetention">{t('logRetentionLabel')}</label>
+                          <select
+                            id="logRetention"
+                            style={{width: '200px'}}
+                            value={config.log_retention_weeks ?? 52}
+                            onChange={async (e) => {
+                              const w = parseInt(e.target.value) || 0
+                              const before = config.log_retention_weeks ?? 52
+                              setConfig({...config, log_retention_weeks: w})
+                              try {
+                                await SetLogRetention(w)
+                                showStatus(`✅ ${t('statusConfigSaved')}`, 'success')
+                              } catch (err) {
+                                showStatus(`❌ ${err}`, 'error')
+                                setConfig({...config, log_retention_weeks: before})
+                              }
+                            }}
+                          >
+                            {/* A value set in config.json that is not in the list still shows. */}
+                            {[4, 13, 26, 52, 104, 260].concat(
+                              [4, 13, 26, 52, 104, 260, 0].includes(config.log_retention_weeks ?? 52) ? [] : [config.log_retention_weeks]
+                            ).map(w => (
+                              <option key={w} value={w}>
+                                {`${w} ${t('logRetentionWeeks')}`}{w === 52 ? ` (${t('logRetentionDefault')})` : ''}
+                              </option>
+                            ))}
+                            <option value={0}>{t('logRetentionAll')}</option>
+                          </select>
+                        </div>
+                        <div className="info-box" style={{marginTop: '10px'}}>
+                          ℹ️ {t('logRetentionHint')}
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

@@ -65,7 +65,7 @@ func init() {
 	// into their week files, and weeks past those kept are removed. No run
 	// has started yet. In the background: the first time there may be
 	// hundreds.
-	go foldRunLogs(logDir, "", DefaultLogRetentionWeeks)
+	go foldRunLogs(logDir, "")
 }
 
 // GetServiceLogPath returns the path to the service log file
@@ -114,7 +114,7 @@ func EndBackupRunLog(logger *RotatingLogger) {
 		fmt.Fprintf(os.Stderr, "Failed to compress backup run log %s: %v\n", path, err)
 	}
 	// Then into its week's file (log_weekly.go).
-	foldRunLogs(filepath.Dir(path), filepath.Base(path), DefaultLogRetentionWeeks)
+	foldRunLogs(filepath.Dir(path), filepath.Base(path))
 }
 
 // writeDebugLog writes to service log (scheduler, general operations)

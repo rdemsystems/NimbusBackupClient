@@ -15,6 +15,7 @@ type Prefs struct {
 	ParallelRead                           bool
 	ReadWorkers                            int
 	MaxRuns                                int // 0 = default
+	LogWeeks                               int // weeks of backup run logs kept, 0 = all
 
 	SMTPHost, SMTPPort, SMTPUser string
 	SMTPPasswordSet              bool
@@ -36,7 +37,14 @@ func (p Prefs) mailChanged(o Prefs) bool {
 func toInt(m map[string]interface{}, k string) int { return int(num(m, k)) }
 
 func prefsFromConfig(doc map[string]interface{}) Prefs {
+	// A service from before the setting does not send it: it keeps 52 weeks
+	// (as one with it does unless told otherwise).
+	logWeeks := 52
+	if _, ok := doc["log_retention_weeks"]; ok {
+		logWeeks = toInt(doc, "log_retention_weeks")
+	}
 	return Prefs{
+		LogWeeks:   logWeeks,
 		UploadMBps: toInt(doc, "upload_limit_mbps"), DownloadMBps: toInt(doc, "download_limit_mbps"),
 		DiskReadMBps: toInt(doc, "disk_read_limit_mbps"), UploadThreads: toInt(doc, "upload_threads"),
 		ChunkTimeout: toInt(doc, "chunk_timeout_seconds"), Compression: firstNonEmpty(str(doc, "compression_level"), "default"),

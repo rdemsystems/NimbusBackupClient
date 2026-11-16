@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,12 +32,64 @@ import (
 // as they did when it was a file of its own. Nothing else had to change for
 // them.
 //
-// Retention is by whole weeks: a week file older than the weeks kept is
-// removed at start-up and after a run.
+// Retention is by whole weeks: a week file older than the weeks kept
+// (Preferences > Message Log, 52 unless set, 0 for all) is removed when the
+// settings are read or changed and after a run.
 
-// DefaultLogRetentionWeeks is how many weeks of run logs are kept: this week
-// and the 51 before it.
+// DefaultLogRetentionWeeks is how many weeks of run logs are kept unless the
+// settings say otherwise (Preferences > Message Log): this week and the 51
+// before it. 0 in the settings keeps them all.
 const DefaultLogRetentionWeeks = 52
+
+// MaxLogRetentionWeeks is the most the setting may be (ten years).
+const MaxLogRetentionWeeks = 520
+
+// logRetention is the weeks of run logs kept, from the settings: -1 until
+// the settings are read, and then nothing is removed (a week file is never
+// removed on the default when the settings say keep all).
+var logRetention atomic.Int64
+
+func init() { logRetention.Store(-1) }
+
+// logRetentionSetting is the setting as the app shows it: 52 when unset.
+func logRetentionSetting(c *Config) int {
+	if c == nil || c.LogRetentionWeeks == nil {
+		return DefaultLogRetentionWeeks
+	}
+	w := *c.LogRetentionWeeks
+	if w < 0 || w > MaxLogRetentionWeeks { // hand-edited: the default
+		return DefaultLogRetentionWeeks
+	}
+	return w
+}
+
+// applyLogRetention takes the setting from c (applySpeedLimits, whenever the
+// settings are loaded or changed). When it changes, the week files past it
+// are removed at once.
+func applyLogRetention(c *Config) {
+	w := int64(logRetentionSetting(c))
+	if logRetention.Swap(w) != w && logDir != "" {
+		go foldRunLogs(logDir, "")
+	}
+}
+
+// SetLogRetention saves Preferences > Message Log "Keep backup run logs": how
+// many weeks, 1 to MaxLogRetentionWeeks, or 0 to keep them all.
+func (a *App) SetLogRetention(weeks int) error {
+	if weeks < 0 || weeks > MaxLogRetentionWeeks {
+		return fmt.Errorf("run logs are kept for 1 to %d weeks, or 0 for all", MaxLogRetentionWeeks)
+	}
+	if a.delegated() {
+		return a.serviceCall("SetLogRetention", weeks)
+	}
+	a.config.LogRetentionWeeks = &weeks
+	if err := a.config.Save(); err != nil {
+		return fmt.Errorf("failed to save how long run logs are kept: %w", err)
+	}
+	applyLogRetention(a.config)
+	writeDebugLog(fmt.Sprintf("Run logs kept for %d weeks (0 = all)", weeks))
+	return nil
+}
 
 // weeklyLogName matches a week's file of run logs.
 var weeklyLogName = regexp.MustCompile(`^backup-logs-(\d{8})\.log\.gz$`)
@@ -291,9 +344,10 @@ func removeFolded(path string) error {
 
 // foldRunLogs adds the compressed run logs in dir to their week files: all of
 // them, or, with prefix, those of the one run whose log file is called prefix
-// (its main file and its rotated parts). Then it removes week files older than
-// keepWeeks (none when keepWeeks <= 0).
-func foldRunLogs(dir, prefix string, keepWeeks int) {
+// (its main file and its rotated parts). Then it removes the week files older
+// than the setting keeps (none before the settings are read, or when they
+// keep all).
+func foldRunLogs(dir, prefix string) {
 	weeklyMu.Lock()
 	defer weeklyMu.Unlock()
 	entries, err := os.ReadDir(dir)
@@ -312,7 +366,11 @@ func foldRunLogs(dir, prefix string, keepWeeks int) {
 			fmt.Fprintf(os.Stderr, "weekly logs: %v\n", err)
 		}
 	}
-	pruneWeeklyLogs(dir, entries, keepWeeks, time.Now())
+	if keep := int(logRetention.Load()); keep > 0 {
+		if entries, err = os.ReadDir(dir); err == nil {
+			pruneWeeklyLogs(dir, entries, keep, time.Now())
+		}
+	}
 }
 
 // pruneWeeklyLogs removes the week files of weeks that started more than

@@ -21,6 +21,7 @@ type prefsView struct {
 	old   Prefs
 
 	upload, download, disk, threads, chunk, workers, runs *tview.InputField
+	logWeeks                                              *tview.InputField
 	compression                                           *tview.DropDown
 	parRestore, parRead                                   *tview.Checkbox
 
@@ -46,6 +47,7 @@ func (a *App) buildPrefs() tview.Primitive {
 	p.chunk = num("Chunk timeout, seconds (0 = 90) ", 6)
 	p.runs = num("Backups at once (0 = default) ", 4)
 	p.workers = num("Read-ahead workers (0 = default) ", 4)
+	p.logWeeks = num("Keep run logs, weeks (0 = all) ", 4)
 	p.compression = tview.NewDropDown().SetLabel("Compression ").SetOptions(compressionLevels, nil)
 	p.parRestore = tview.NewCheckbox().SetLabel("Restore files in parallel ")
 	p.parRead = tview.NewCheckbox().SetLabel("Read folders ahead while backing up ")
@@ -60,7 +62,7 @@ func (a *App) buildPrefs() tview.Primitive {
 
 	f1 := styleForm(tview.NewForm()).AddFormItem(p.upload).AddFormItem(p.download).AddFormItem(p.disk).AddFormItem(p.threads).
 		AddFormItem(p.chunk).AddFormItem(p.compression).AddFormItem(p.runs).AddFormItem(p.parRestore).
-		AddFormItem(p.parRead).AddFormItem(p.workers)
+		AddFormItem(p.parRead).AddFormItem(p.workers).AddFormItem(p.logWeeks)
 	f1.SetTitle(" Backup options ")
 	f2 := styleForm(tview.NewForm()).AddFormItem(p.host).AddFormItem(p.port).AddFormItem(p.user).AddFormItem(p.pass).
 		AddFormItem(p.insecure).AddFormItem(p.from).AddFormItem(p.testTo)
@@ -182,6 +184,7 @@ func (p *prefsView) fill(v Prefs) {
 	set(p.chunk, v.ChunkTimeout)
 	set(p.runs, v.MaxRuns)
 	set(p.workers, v.ReadWorkers)
+	set(p.logWeeks, v.LogWeeks)
 	idx := 0
 	for i, c := range compressionLevels {
 		if c == v.Compression {
@@ -223,6 +226,7 @@ func (p *prefsView) values() Prefs {
 	v := p.old
 	v.UploadMBps, v.DownloadMBps, v.DiskReadMBps = atoi(p.upload), atoi(p.download), atoi(p.disk)
 	v.UploadThreads, v.ChunkTimeout, v.MaxRuns, v.ReadWorkers = atoi(p.threads), atoi(p.chunk), atoi(p.runs), atoi(p.workers)
+	v.LogWeeks = atoi(p.logWeeks)
 	v.Compression = comp
 	v.ParallelRestore, v.ParallelRead = p.parRestore.IsChecked(), p.parRead.IsChecked()
 	v.SMTPHost, v.SMTPPort, v.SMTPUser = strings.TrimSpace(p.host.GetText()), strings.TrimSpace(p.port.GetText()), strings.TrimSpace(p.user.GetText())

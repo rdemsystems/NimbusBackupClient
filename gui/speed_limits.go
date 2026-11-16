@@ -36,6 +36,8 @@ func applySpeedLimits(c *Config) {
 	// Out of range (hand-edited): auto, and the default chunk timeout.
 	pbscommon.SetUploadThreads(threads)
 	pbscommon.SetChunkStallTimeout(time.Duration(chunk) * time.Second)
+	// And how many weeks of run logs are kept (log_weekly.go).
+	applyLogRetention(c)
 }
 
 // mbpsToBytes turns a setting in MB/s into bytes per second; anything out of

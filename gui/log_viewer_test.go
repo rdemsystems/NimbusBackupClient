@@ -16,6 +16,10 @@ func withLogFolder(t *testing.T) string {
 	old := logDir
 	logDir = t.TempDir()
 	t.Cleanup(func() { logDir = old })
+	// Keep every week while the test runs: the test logs are of a fixed date,
+	// which a retention set by another test would one day find too old.
+	keep := logRetention.Swap(0)
+	t.Cleanup(func() { logRetention.Store(keep) })
 	return logDir
 }
 

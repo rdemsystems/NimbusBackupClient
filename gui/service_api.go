@@ -470,6 +470,13 @@ var apiCalls = map[string]func(a *App, args []json.RawMessage) (interface{}, err
 		}
 		return nil, a.SetChunkTimeout(seconds)
 	},
+	"SetLogRetention": func(a *App, args []json.RawMessage) (interface{}, error) {
+		var weeks int
+		if err := arg(args, 0, &weeks); err != nil {
+			return nil, err
+		}
+		return nil, a.SetLogRetention(weeks)
+	},
 	"SetCompressionLevel": func(a *App, args []json.RawMessage) (interface{}, error) {
 		var level string
 		if err := arg(args, 0, &level); err != nil {

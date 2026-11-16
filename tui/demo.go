@@ -556,7 +556,7 @@ func (d *demoBackend) Prefs() (Prefs, error) {
 	defer d.mu.Unlock()
 	if !d.prefsSet {
 		d.prefs = Prefs{Compression: "default", SMTPHost: "smtp.example.com", SMTPPort: "587", SMTPUser: "alerts@example.com",
-			SMTPPasswordSet: true, MailFrom: "backup@example.com", MaxRuns: 2}
+			SMTPPasswordSet: true, MailFrom: "backup@example.com", MaxRuns: 2, LogWeeks: 52}
 		d.prefsSet = true
 	}
 	return d.prefs, nil
@@ -568,6 +568,9 @@ func (d *demoBackend) SavePrefs(old, now Prefs) error {
 	}
 	if now.ChunkTimeout != 0 && (now.ChunkTimeout < 30 || now.ChunkTimeout > 1800) {
 		return fmt.Errorf("the chunk timeout must be the default (0) or between 30 and 1800 seconds")
+	}
+	if now.LogWeeks < 0 || now.LogWeeks > 520 {
+		return fmt.Errorf("run logs are kept for 1 to 520 weeks, or 0 for all")
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()

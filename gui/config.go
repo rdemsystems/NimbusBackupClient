@@ -164,6 +164,10 @@ type Config struct {
 	// default of 90 (pbscommon/upload_stall.go).
 	ChunkTimeoutSeconds int `json:"chunk_timeout_seconds,omitempty"`
 
+	// LogRetentionWeeks is how many weeks of backup run logs are kept
+	// (log_weekly.go): nil for the default of 52, 0 to keep them all.
+	LogRetentionWeeks *int `json:"log_retention_weeks,omitempty"`
+
 	// ShareLogins are the logins for network shares, by server in lower
 	// case (share_logins.go): what the service connects to a share with.
 	ShareLogins map[string]*ShareLogin `json:"share_logins,omitempty"`
