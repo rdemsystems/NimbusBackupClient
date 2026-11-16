@@ -258,11 +258,15 @@ func TestSettingsFileExportImport(t *testing.T) {
 	h.key(tcell.KeyEnter, 0)
 	h.waitFor("Settings written to")
 	h.key(tcell.KeyEnter, 0)
+	// wait for the box to close, or the next Enter can land while focus is
+	// still moving back and press the wrong button (seen once on a slow runner)
+	h.waitGone("Settings written to")
 
 	// never over an existing file
 	h.key(tcell.KeyEnter, 0)
 	h.waitFor("already exists")
 	h.key(tcell.KeyEnter, 0)
+	h.waitGone("already exists")
 
 	// import asks first, then reports
 	h.key(tcell.KeyTab, 0)

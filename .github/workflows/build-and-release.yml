@@ -679,10 +679,12 @@ jobs:
           fi
           : > vt-section.md
           emitted=0
+          # The tag is v2.1.0 but the MSI file names carry 2.1.0 (no v).
           VER="${{ steps.version.outputs.VERSION }}"
+          VER="${VER#v}"
           # Every branded MSI in this release (the .exe is no longer published).
           # Not the ISO: at about 500 MB it is far over the free API's limit.
-           for f in release/*-${VER}-x64.msi; do
+          for f in release/*-${VER}-x64.msi; do
             [ -f "$f" ] || continue
             name=$(basename "$f")
             sha=$(sha256sum "$f" | awk '{print $1}')
