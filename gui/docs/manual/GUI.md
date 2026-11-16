@@ -1079,12 +1079,15 @@ Because every user can read them, the service's logs never hold a secret: passwo
 
 | File | Contents |
 |---|---|
-| `backup-YYYYMMDD-HHMMSS-<backup id>.log.gz` | One per backup run, compressed when the run ends. Open with 7-Zip or `zcat` |
+| `backup-logs-YYYYMMDD.log.gz` | The logs of a week's backup runs, the date being the Monday the week starts on. Open with 7-Zip or `zcat` |
+| `backup-YYYYMMDD-HHMMSS-<backup id>.log` | The log of a run under way |
 | `backup-gui.log` | General backup and restore log of the GUI |
 | `service-gui.log` | Scheduler and general operations of the GUI |
 | `backup-service.log`, `service-service.log` | The same for the background service |
 
-Logs rotate at 10 MB, keeping 5 old files.
+Each run writes its own log. When the run ends it is compressed and added to the end of its week's file, so there is one file a week however often a Backup Set runs, instead of one per run. **View Full Logs** still lists every run under its own name (`backup-YYYYMMDD-HHMMSS-<backup id>.log.gz`) and shows only that run's lines, and **View this run** in Reports opens it the same way; the week's file can also be opened as a whole. The runs of the last 52 weeks are kept: an older week's file is removed when the app or the service starts and after a run. Run logs left by an earlier version as files of their own are added to their weeks the first time this version starts.
+
+The other logs rotate at 10 MB, keeping 5 old files.
 
 Every run log ends with a `[RESULT]` line, for example:
 

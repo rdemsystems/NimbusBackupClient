@@ -185,6 +185,23 @@ func listLogFilesIn(dirs []string) ([]LogFileInfo, error) {
 				Service:    i > 0 || strings.Contains(e.Name(), "-service.log"),
 			})
 		}
+		// The run logs in the week files, each listed as the file it was
+		// (log_weekly.go). A name also on disk (not yet folded) is listed once.
+		onDisk := map[string]bool{}
+		for _, e := range entries {
+			onDisk[e.Name()] = true
+		}
+		for _, m := range weeklyRunLogs(dir, entries) {
+			kind, id, started, ok := classifyLog(m.Name)
+			if !ok || onDisk[m.Name] || !safeLogName.MatchString(m.Name) {
+				continue
+			}
+			out = append(out, LogFileInfo{
+				Folder: i, Name: m.Name, Kind: kind, BackupID: id, Started: started,
+				Size: m.Length, Modified: m.Modified.UnixMilli(), Compressed: true,
+				Service: i > 0,
+			})
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Modified > out[j].Modified })
 	return out, nil
@@ -228,6 +245,12 @@ func openLog(folder int, name string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("no such log file")
 	}
 	f, err := os.Open(filepath.Join(dirs[folder], name))
+	if errors.Is(err, fs.ErrNotExist) {
+		// A run log added to its week file (log_weekly.go).
+		if r, ok := openWeeklyRunLog(dirs[folder], name); ok {
+			return r, nil
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

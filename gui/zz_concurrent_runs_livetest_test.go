@@ -4,7 +4,6 @@ package main
 
 import (
 	"bufio"
-	"compress/gzip"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -378,26 +377,23 @@ func liveMachineOpts(disk, backupID string, vss bool) BackupOptions {
 func checkRunLogs(t *testing.T, longID, smallID, smallSrc, bigSrc string) {
 	t.Helper()
 	read := func(id string) []string {
-		files, _ := filepath.Glob(filepath.Join(logDir, "backup-*-"+sanitizeForFilename(id)+".log*"))
+		// As the log viewer lists and opens them: the run logs are in the
+		// week file by now (log_weekly.go).
+		files, err := listLogFilesIn([]string{logDir})
+		if err != nil {
+			t.Fatalf("list logs: %v", err)
+		}
 		var texts []string
 		for _, f := range files {
-			fh, err := os.Open(f)
-			if err != nil {
-				t.Errorf("open %s: %v", f, err)
+			if f.Kind != "run" || f.BackupID != sanitizeForFilename(id) {
 				continue
 			}
-			var sc *bufio.Scanner
-			if strings.HasSuffix(f, ".gz") {
-				gz, err := gzip.NewReader(fh)
-				if err != nil {
-					_ = fh.Close()
-					t.Errorf("gunzip %s: %v", f, err)
-					continue
-				}
-				sc = bufio.NewScanner(gz)
-			} else {
-				sc = bufio.NewScanner(fh)
+			fh, err := openLog(0, f.Name)
+			if err != nil {
+				t.Errorf("open %s: %v", f.Name, err)
+				continue
 			}
+			sc := bufio.NewScanner(fh)
 			sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 			var b strings.Builder
 			for sc.Scan() {

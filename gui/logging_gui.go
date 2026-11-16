@@ -85,6 +85,11 @@ func init() {
 	// Compress any per-run or rotated log files left behind by a previous
 	// crash/kill so operators get a full, inspectable .gz.
 	RecoverOrphanLogs(logDir)
+	// Run logs of earlier runs (also those from before the week files) go
+	// into their week files, and weeks past those kept are removed. No run
+	// has started yet. In the background: the first time there may be
+	// hundreds.
+	go foldRunLogs(logDir, "", DefaultLogRetentionWeeks)
 }
 
 // GetServiceLogPath returns the path to the service log file
@@ -132,6 +137,8 @@ func EndBackupRunLog(logger *RotatingLogger) {
 	if err := compressLogFile(path); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to compress backup run log %s: %v\n", path, err)
 	}
+	// Then into its week's file (log_weekly.go).
+	foldRunLogs(filepath.Dir(path), filepath.Base(path), DefaultLogRetentionWeeks)
 }
 
 // writeDebugLog writes to service log (scheduler, general operations)
