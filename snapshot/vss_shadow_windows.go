@@ -49,12 +49,14 @@ const (
 func initCOM() (func(), error) {
 	err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED)
 	if err == nil {
+		comSecurityOnce.Do(setCOMSecurity)
 		return ole.CoUninitialize, nil
 	}
 	var oe *ole.OleError
 	if errors.As(err, &oe) {
 		switch oe.Code() {
 		case comSFalse:
+			comSecurityOnce.Do(setCOMSecurity)
 			return ole.CoUninitialize, nil
 		case comRPCEChangedMode:
 			fmt.Println("VSS: COM is already single-threaded on this thread; using it as it is")
