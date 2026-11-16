@@ -1715,138 +1715,178 @@ func (pbs *PBSClient) Connect(reader bool, backuptype string) {
 					close(firstDialDone)
 				}()
 
-				//This is one of the trickiest parts, GO http2 library does not support starting with http1 and upgrading to 2 after
-				//So to achieve that the function to create SSL socket has been hijacked here
-				//Here an http 1.1 request to authenticate, start the backup and require upgrade to HTTP2 is done then the socket is passed to
-				// http2.Transport handler
-				tlsConn, err := tls.Dial(network, addr, &pbs.TLSConfig)
-				if err != nil {
-					return nil, err
-				}
-				// Everything the session sends and receives is charged to
-				// the upload and download speed limits (ratelimit.go).
-				conn := newLimitedConn(tlsConn)
-				// Stash the raw socket so Close() can force-terminate the
-				// session on shutdown even while an H2 stream is in flight.
-				pbs.activeConnMu.Lock()
-				pbs.activeConn = conn
-				pbs.activeConnMu.Unlock()
-				q := &url.Values{}
-				q.Add("backup-time", fmt.Sprintf("%d", pbs.Manifest.BackupTime))
-				q.Add("backup-type", pbs.Manifest.BackupType)
-				q.Add("store", pbs.Datastore)
-				if pbs.Namespace != "" {
-					q.Add("ns", pbs.Namespace)
-				}
-
-				q.Add("backup-id", pbs.Manifest.BackupID)
-				fmt.Println(q.Encode())
-				//q.Add("debug", "1")
-
-				// Build and log the full HTTP request
-				var requestLines []string
-				if !reader {
-					requestLines = append(requestLines, "GET /api2/json/backup?"+q.Encode()+" HTTP/1.1")
-				} else {
-					requestLines = append(requestLines, "GET /api2/json/reader?"+q.Encode()+" HTTP/1.1")
-				}
-				requestLines = append(requestLines, "Host: "+upgradeHostHeader(pbs.BaseURL, addr))
-				requestLines = append(requestLines, pbs.authHeaderLines()...)
-				if !reader {
-					requestLines = append(requestLines, "Upgrade: proxmox-backup-protocol-v1")
-				} else {
-					requestLines = append(requestLines, "Upgrade: proxmox-backup-reader-protocol-v1")
-				}
-				requestLines = append(requestLines, "Connection: Upgrade")
-
-				fullRequest := strings.Join(requestLines, "\r\n") + "\r\n\r\n"
-				// Redact the credential before logging the raw request —
-				// fullRequest carries the API token or the PBSAuthCookie ticket.
-				redactedRequest := pbs.redactRequest(fullRequest)
-				fmt.Printf("=== SENDING HTTP REQUEST TO PBS ===\n%s=== END REQUEST ===\n", redactedRequest)
-
-				// Send the request
-				conn.Write([]byte(fullRequest))
-				fmt.Print("Reading response to upgrade...\n")
-				buf := make([]byte, 0)
-				for !strings.HasSuffix(string(buf), "\r\n\r\n") && !strings.HasSuffix(string(buf), "\n\n") {
-					//fmt.Println(buf)
-					b2 := make([]byte, 1)
-					nbytes, err := conn.Read(b2)
-					if err != nil || nbytes == 0 {
-						fmt.Println("Connection unexpectedly closed")
-						return nil, err
-					}
-					buf = append(buf, b2[:nbytes]...)
-
-					//fmt.Println(string(b2))
-				}
-				fmt.Printf("=== RECEIVED HTTP RESPONSE FROM PBS ===\n%s\n=== END RESPONSE ===\n", string(buf))
-
-				lines := strings.Split(string(buf), "\n")
-
-				if len(lines) > 0 {
-					toks := strings.Split(lines[0], " ")
-					if len(toks) > 1 && toks[1] != "101" {
-						statusCode := strings.Join(toks[1:], " ")
-						fmt.Printf("ERROR: PBS rejected upgrade with status: %s\n", statusCode)
-						fmt.Printf("Response headers:\n%s\n", string(buf))
-
-						// Read the response body (JSON error details) based on Content-Length
-						var contentLength int
-						for _, line := range lines {
-							line = strings.TrimSpace(line)
-							if strings.HasPrefix(strings.ToLower(line), "content-length:") {
-								fmt.Sscanf(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), "%d", &contentLength)
-							}
-						}
-						var responseBody string
-						if contentLength > 0 && contentLength < 4096 {
-							bodyBuf := make([]byte, contentLength)
-							totalRead := 0
-							for totalRead < contentLength {
-								n, readErr := conn.Read(bodyBuf[totalRead:])
-								if readErr != nil || n == 0 {
-									break
-								}
-								totalRead += n
-							}
-							responseBody = string(bodyBuf[:totalRead])
-							fmt.Printf("PBS error body: %s\n", responseBody)
-						}
-
-						errBody := string(buf)
-						if responseBody != "" {
-							errBody = errBody + "\nBody: " + responseBody
-						}
-						// A missing namespace is reported as HTTP 404 on
-						// the upgrade handshake, which would otherwise
-						// surface as an AuthErr and look like bad
-						// credentials.
-						if pbs.Namespace != "" && namespaceNotFound(errBody) {
-							return nil, &NamespaceNotFoundErr{
-								Namespace: pbs.Namespace,
-								Datastore: pbs.Datastore,
-							}
-						}
-						if strings.Contains(responseBody, backupTimeTakenText) {
-							return nil, &BackupTimeTakenErr{BackupTime: pbs.Manifest.BackupTime}
-						}
-						return nil, &AuthErr{
-							StatusCode:   statusCode,
-							ResponseBody: errBody,
-						}
-					}
-				}
-
-				fmt.Printf("Upgraderesp: %s\n", string(buf))
-				fmt.Println("Successfully upgraded to HTTP/2.")
-				return conn, nil
+				return pbs.openSession(network, addr, reader)
 			},
 		},
 	}
 
 	registerActive(pbs)
+}
+
+// ticketRefused reports whether err is PBS refusing the login (HTTP 401) on
+// the upgrade that opens a backup or reader session.
+func ticketRefused(err error) bool {
+	var ae *AuthErr
+	return errors.As(err, &ae) && strings.HasPrefix(strings.TrimSpace(ae.StatusCode), "401")
+}
+
+// openSession opens the backup (or reader) session. A username/password
+// login's ticket lasts 2 hours, and a backup that starts again later (a retry
+// after a lost connection, a run that waited for the network) may still hold
+// the old one, which PBS refuses with HTTP 401: then it gets a new ticket and
+// opens the session once more. An API token does not expire, so its 401 is
+// returned as it is.
+func (pbs *PBSClient) openSession(network, addr string, reader bool) (net.Conn, error) {
+	nc, err := pbs.upgrade(network, addr, reader)
+	if err == nil || pbs.Ticket == "" || !ticketRefused(err) {
+		return nc, err
+	}
+	if rerr := pbs.renewTicket(); rerr != nil {
+		return nil, fmt.Errorf("%w (a login ticket lasts 2 hours, and a new one could not be had: %v)", err, rerr)
+	}
+	return pbs.upgrade(network, addr, reader)
+}
+
+// upgrade opens a TLS connection to PBS and asks it, over HTTP/1.1, to start
+// a backup (or reader) session and switch the connection to HTTP/2.
+func (pbs *PBSClient) upgrade(network, addr string, reader bool) (_ net.Conn, upErr error) {
+	//This is one of the trickiest parts, GO http2 library does not support starting with http1 and upgrading to 2 after
+	//So to achieve that the function to create SSL socket has been hijacked here
+	//Here an http 1.1 request to authenticate, start the backup and require upgrade to HTTP2 is done then the socket is passed to
+	// http2.Transport handler
+	tlsConn, err := tls.Dial(network, addr, &pbs.TLSConfig)
+	if err != nil {
+		return nil, err
+	}
+	// Everything the session sends and receives is charged to
+	// the upload and download speed limits (ratelimit.go).
+	conn := newLimitedConn(tlsConn)
+	// A connection PBS refused is closed here: nothing else holds it, and a
+	// refused ticket is followed by a second upgrade on a new one.
+	defer func() {
+		if upErr != nil {
+			_ = conn.Close()
+		}
+	}()
+	// Stash the raw socket so Close() can force-terminate the
+	// session on shutdown even while an H2 stream is in flight.
+	pbs.activeConnMu.Lock()
+	pbs.activeConn = conn
+	pbs.activeConnMu.Unlock()
+	q := &url.Values{}
+	q.Add("backup-time", fmt.Sprintf("%d", pbs.Manifest.BackupTime))
+	q.Add("backup-type", pbs.Manifest.BackupType)
+	q.Add("store", pbs.Datastore)
+	if pbs.Namespace != "" {
+		q.Add("ns", pbs.Namespace)
+	}
+
+	q.Add("backup-id", pbs.Manifest.BackupID)
+	fmt.Println(q.Encode())
+	//q.Add("debug", "1")
+
+	// Build and log the full HTTP request
+	var requestLines []string
+	if !reader {
+		requestLines = append(requestLines, "GET /api2/json/backup?"+q.Encode()+" HTTP/1.1")
+	} else {
+		requestLines = append(requestLines, "GET /api2/json/reader?"+q.Encode()+" HTTP/1.1")
+	}
+	requestLines = append(requestLines, "Host: "+upgradeHostHeader(pbs.BaseURL, addr))
+	requestLines = append(requestLines, pbs.authHeaderLines()...)
+	if !reader {
+		requestLines = append(requestLines, "Upgrade: proxmox-backup-protocol-v1")
+	} else {
+		requestLines = append(requestLines, "Upgrade: proxmox-backup-reader-protocol-v1")
+	}
+	requestLines = append(requestLines, "Connection: Upgrade")
+
+	fullRequest := strings.Join(requestLines, "\r\n") + "\r\n\r\n"
+	// Redact the credential before logging the raw request —
+	// fullRequest carries the API token or the PBSAuthCookie ticket.
+	redactedRequest := pbs.redactRequest(fullRequest)
+	fmt.Printf("=== SENDING HTTP REQUEST TO PBS ===\n%s=== END REQUEST ===\n", redactedRequest)
+
+	// Send the request
+	conn.Write([]byte(fullRequest))
+	fmt.Print("Reading response to upgrade...\n")
+	buf := make([]byte, 0)
+	for !strings.HasSuffix(string(buf), "\r\n\r\n") && !strings.HasSuffix(string(buf), "\n\n") {
+		//fmt.Println(buf)
+		b2 := make([]byte, 1)
+		nbytes, err := conn.Read(b2)
+		if err != nil || nbytes == 0 {
+			fmt.Println("Connection unexpectedly closed")
+			if err == nil {
+				err = io.ErrUnexpectedEOF
+			}
+			return nil, err
+		}
+		buf = append(buf, b2[:nbytes]...)
+
+		//fmt.Println(string(b2))
+	}
+	fmt.Printf("=== RECEIVED HTTP RESPONSE FROM PBS ===\n%s\n=== END RESPONSE ===\n", string(buf))
+
+	lines := strings.Split(string(buf), "\n")
+
+	if len(lines) > 0 {
+		toks := strings.Split(lines[0], " ")
+		if len(toks) > 1 && toks[1] != "101" {
+			statusCode := strings.Join(toks[1:], " ")
+			fmt.Printf("ERROR: PBS rejected upgrade with status: %s\n", statusCode)
+			fmt.Printf("Response headers:\n%s\n", string(buf))
+
+			// Read the response body (JSON error details) based on Content-Length
+			var contentLength int
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(strings.ToLower(line), "content-length:") {
+					fmt.Sscanf(strings.TrimSpace(strings.SplitN(line, ":", 2)[1]), "%d", &contentLength)
+				}
+			}
+			var responseBody string
+			if contentLength > 0 && contentLength < 4096 {
+				bodyBuf := make([]byte, contentLength)
+				totalRead := 0
+				for totalRead < contentLength {
+					n, readErr := conn.Read(bodyBuf[totalRead:])
+					if readErr != nil || n == 0 {
+						break
+					}
+					totalRead += n
+				}
+				responseBody = string(bodyBuf[:totalRead])
+				fmt.Printf("PBS error body: %s\n", responseBody)
+			}
+
+			errBody := string(buf)
+			if responseBody != "" {
+				errBody = errBody + "\nBody: " + responseBody
+			}
+			// A missing namespace is reported as HTTP 404 on
+			// the upgrade handshake, which would otherwise
+			// surface as an AuthErr and look like bad
+			// credentials.
+			if pbs.Namespace != "" && namespaceNotFound(errBody) {
+				return nil, &NamespaceNotFoundErr{
+					Namespace: pbs.Namespace,
+					Datastore: pbs.Datastore,
+				}
+			}
+			if strings.Contains(responseBody, backupTimeTakenText) {
+				return nil, &BackupTimeTakenErr{BackupTime: pbs.Manifest.BackupTime}
+			}
+			return nil, &AuthErr{
+				StatusCode:   statusCode,
+				ResponseBody: errBody,
+			}
+		}
+	}
+
+	fmt.Printf("Upgraderesp: %s\n", string(buf))
+	fmt.Println("Successfully upgraded to HTTP/2.")
+	return conn, nil
 }
 
 // Close force-terminates the HTTP/2 session so PBS releases the backup
