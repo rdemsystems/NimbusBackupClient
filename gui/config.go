@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +15,21 @@ import (
 )
 
 // configSaveMu keeps two saves of config.json in this process from
-// interleaving.
+// interleaving. It also guards each Config's disk field (configDiskState).
 var configSaveMu sync.Mutex
 
+// configDiskState is what config.json held when a Config last read it or
+// wrote it, so changedOnDisk can tell whether another program has written the
+// file since (#158).
+type configDiskState struct {
+	known  bool // the Config came from the file or was saved to it
+	absent bool // there was no file when it was read
+	sum    [sha256.Size]byte
+}
+
 type Config struct {
+	// disk is config.json as this Config last read or wrote it. Not saved.
+	disk configDiskState
 	// ==================== MULTI-PBS SUPPORT ====================
 	// New: Map of PBS servers (key = server ID, value = server config)
 	PBSServers map[string]*PBSServer `json:"pbs_servers,omitempty"`
@@ -416,6 +428,7 @@ func LoadConfig() *Config {
 			// Nothing an earlier version left: the servers added from here
 			// start with "Compress encrypted backups" on.
 			config.CompressEncryptedDecided = true
+			config.disk = configDiskState{known: true, absent: true}
 		} else {
 			writeDebugLog(fmt.Sprintf("config: could not read %s: %v", configPath, err))
 		}
@@ -425,6 +438,8 @@ func LoadConfig() *Config {
 	if err := json.Unmarshal(stripUTF8BOM(data), config); err != nil {
 		return config
 	}
+	// Before the saves below, which record what they write instead.
+	config.disk = configDiskState{known: true, sum: sha256.Sum256(data)}
 	if config.openSecrets() {
 		sealOnLoadOnce.Do(func() {
 			if err := config.Save(); err != nil {
@@ -517,7 +532,34 @@ func (c *Config) Save() error {
 		return err
 	}
 
-	return atomicWriteFile(configPath, data, 0600)
+	if err := atomicWriteFile(configPath, data, 0600); err != nil {
+		return err
+	}
+	c.disk = configDiskState{known: true, sum: sha256.Sum256(data)}
+	return nil
+}
+
+// changedOnDisk reports whether config.json no longer holds what this Config
+// last read from it or wrote to it: another program has written it since,
+// such as the installer merging a settings file (-apply-settings, #158).
+// A Config that never came from the file (one built in memory) is never out
+// of date, and neither is one whose file has gone or cannot be read: a
+// reload would only lose the settings this program has.
+func (c *Config) changedOnDisk() bool {
+	configSaveMu.Lock()
+	defer configSaveMu.Unlock()
+	if !c.disk.known {
+		return false
+	}
+	configPath, err := getConfigPath()
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(configPath) // #nosec G304 -- the settings folder's own config.json
+	if err != nil {
+		return false
+	}
+	return c.disk.absent || sha256.Sum256(data) != c.disk.sum
 }
 
 func (c *Config) Validate() error {

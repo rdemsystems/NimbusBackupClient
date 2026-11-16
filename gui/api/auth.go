@@ -231,7 +231,8 @@ func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // (public_status.go), GET /servers/public, the computer's servers without
 // their logins (public_servers.go), and the service's logs (public_logs.go).
 // A request let through without the token must name this computer as its
-// Host (loopbackHost).
+// Host (loopbackHost). A request let through first has the service reload its
+// settings if another program has changed them (syncConfig).
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
@@ -250,6 +251,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				s.writeError(w, "forbidden", http.StatusForbidden)
 				return
 			}
+			s.syncConfig()
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -258,6 +260,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			s.writeError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// The settings as they are on disk, not a copy another program has
+		// since replaced (#158).
+		s.syncConfig()
 		next.ServeHTTP(w, r)
 	})
 }

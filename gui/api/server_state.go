@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,22 @@ import (
 // markers instead). Changes go through CallAPI, one setting at a time.
 type ConfigAPI interface {
 	GetFullConfigForAPI() map[string]interface{}
+}
+
+// ConfigSyncer reloads the service's settings when another program has
+// written them on disk since the service read them, such as the installer
+// merging a settings file (#158). The server asks it before every request, so
+// no request reads a stale copy, or saves one over the newer settings.
+type ConfigSyncer interface {
+	SyncConfigFromDisk() bool
+}
+
+// syncConfig asks the service to reload its settings if they changed on disk
+// (ConfigSyncer).
+func (s *Server) syncConfig() {
+	if c, ok := s.app.(ConfigSyncer); ok && c.SyncConfigFromDisk() {
+		log.Printf("[API] Settings reloaded: config.json was changed by another program")
+	}
 }
 
 // CallAPI runs one of the app's own methods in the service (POST

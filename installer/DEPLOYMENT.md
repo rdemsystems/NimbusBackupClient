@@ -93,8 +93,9 @@ back (exit code 1603). The program and service are then removed again, but a mer
 had already happened stays.
 
 Running the command again on a computer that has the same version installed merges the
-file again (to send a changed file); the service uses the new settings from its next
-backup on.
+file again (to send a changed file); the running service picks the new settings up at its
+next backup or the next request from the app, whichever comes first, and a setting it
+changes later (a pinned fingerprint, say) no longer undoes the merge.
 
 ### Checking it worked
 
