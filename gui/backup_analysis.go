@@ -132,7 +132,7 @@ func AnalyzeBackupDirs(backupDirs []string, excludes []string, onProgress func(d
 	// First pass (cheap — only ReadDir): enumerate the top-level folders to size,
 	// so we know the total up front and can report "done/total" progress while the
 	// expensive recursive sizing runs in the second pass.
-	type pendingFolder struct{ path, name string }
+	type pendingFolder struct{ path, name, root string }
 	var toSize []pendingFolder
 	for _, dir := range backupDirs {
 		info, err := os.Stat(dir)
@@ -163,7 +163,7 @@ func AnalyzeBackupDirs(backupDirs []string, excludes []string, onProgress func(d
 			if excludeSet[cleanKey(folderPath)] {
 				continue // excluded folder: don't size it or make a job for it
 			}
-			toSize = append(toSize, pendingFolder{path: folderPath, name: entry.Name()})
+			toSize = append(toSize, pendingFolder{path: folderPath, name: entry.Name(), root: dir})
 		}
 		if hasDirectFiles {
 			analysis.RootsWithFiles = append(analysis.RootsWithFiles, dir)
@@ -178,7 +178,9 @@ func AnalyzeBackupDirs(backupDirs []string, excludes []string, onProgress func(d
 	// Second pass: size each folder (the expensive recursive walk), bounded by the
 	// shared deadline, reporting progress after each one.
 	for i, p := range toSize {
-		size, err := calculateDirSizeCtx(ctx, p.path)
+		// Without what the exclusions leave out inside the folder, anchored to
+		// the folder the user chose (#159).
+		size, err := calculateDirSizeCtx(ctx, p.path, excludes, p.root)
 
 		folderInfo := FolderInfo{
 			Path: p.path,

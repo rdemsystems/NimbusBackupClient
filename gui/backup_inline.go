@@ -215,18 +215,29 @@ const cardRefresh = 100 * time.Millisecond
 //     antivirus scans every file open) can't stall the caller indefinitely; on
 //     deadline it returns the partial size gathered so far.
 //
+// It leaves out what the backup leaves out (#159): what the exclusion patterns
+// excludes match, anchored to excludeRoot as the archive writer anchors them
+// (its ExcludeList and ExcludeRoot; "" means path), and the system folders and
+// files every backup skips. An excluded folder is not looked into, as the
+// archive writer does not look into it either, so a ! pattern cannot bring
+// back anything inside it in either.
+//
 // Returns size and error if access was denied at the root (needs VSS) or if ctx
 // fired (partial size is still returned alongside the context error).
-func calculateDirSizeCtx(ctx context.Context, path string) (uint64, error) {
-	size, _, err := calculateDirSizeFilesCtx(ctx, path)
+func calculateDirSizeCtx(ctx context.Context, path string, excludes []string, excludeRoot string) (uint64, error) {
+	size, _, err := calculateDirSizeFilesCtx(ctx, path, excludes, excludeRoot)
 	return size, err
 }
 
 // calculateDirSizeFilesCtx is calculateDirSizeCtx that also counts the files,
 // for the backup card's "Files: done / total".
-func calculateDirSizeFilesCtx(ctx context.Context, path string) (uint64, uint64, error) {
+func calculateDirSizeFilesCtx(ctx context.Context, path string, excludes []string, excludeRoot string) (uint64, uint64, error) {
 	var totalSize, totalFiles uint64
 	var accessDenied bool
+	if excludeRoot == "" {
+		excludeRoot = path
+	}
+	volumeRoot := pbscommon.IsVolumeRoot(excludeRoot)
 
 	err := filepath.WalkDir(path, func(filePath string, d os.DirEntry, err error) error {
 		if ctx.Err() != nil {
@@ -246,6 +257,13 @@ func calculateDirSizeFilesCtx(ctx context.Context, path string) (uint64, uint64,
 				return filepath.SkipDir
 			}
 			return nil // Skip other errors
+		}
+		// What the backup leaves out (#159); a folder is not looked into.
+		if filePath != path && leftOutOfBackup(filePath, d, excludes, excludeRoot, volumeRoot) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		// Never follow junctions / symlinks (see doc comment): on Windows
 		// ReadDir reports mount points with ModeSymlink, so skip the whole
@@ -276,6 +294,29 @@ func calculateDirSizeFilesCtx(ctx context.Context, path string) (uint64, uint64,
 	}
 
 	return totalSize, totalFiles, err
+}
+
+// leftOutOfBackup reports whether a folder backup leaves the entry at
+// filePath out, so its size estimate leaves it out too. The checks and their
+// order are the archive writer's (pbscommon PXARArchive.WriteDir): the
+// exclusion patterns first, with the entry's path relative to the backed-up
+// folder excludeRoot, then the system folders (Recovery only at the root of a
+// volume, volumeRoot) and the system files.
+func leftOutOfBackup(filePath string, d os.DirEntry, excludes []string, excludeRoot string, volumeRoot bool) bool {
+	name := d.Name()
+	isDir := d.IsDir()
+	rel, err := filepath.Rel(excludeRoot, filePath)
+	if err != nil {
+		rel = filePath
+	}
+	if len(excludes) > 0 && pbscommon.IsExcludedByPatterns(rel, name, excludeRoot, excludes, isDir) {
+		return true
+	}
+	if isDir {
+		atRoot := volumeRoot && !strings.Contains(filepath.ToSlash(rel), "/")
+		return pbscommon.IsAutoExcludedFolderAt(name, atRoot)
+	}
+	return pbscommon.IsAutoExcludedFile(name)
 }
 
 // chunkUploadWorkers bounds how many chunk uploads for one archive run
@@ -1311,7 +1352,9 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 				// The run's context: the scan ends with the run (or its Stop).
 				ctx, cancel := context.WithTimeout(opts.Ctx, analysisSizeBudget)
 				defer cancel()
-				size, files, err := calculateDirSizeFilesCtx(ctx, dir)
+				// The exclusions as the archive writer applies them
+				// (backupDirectory: ExcludeList, and the folder as ExcludeRoot).
+				size, files, err := calculateDirSizeFilesCtx(ctx, dir, opts.ExcludeList, dir)
 				if err != nil {
 					runLog(opts.Ctx, fmt.Sprintf("WARNING: Size calculation had errors for %s: %v", dir, err))
 				}
