@@ -450,7 +450,8 @@ jobs:
           PBS_ARCH: ${{ matrix.arch }}
         run: |
           # A tag gives the version (v2.0.0-rc.1 -> 2.0.0~rc.1, which sorts
-          # before 2.0.0); a branch build is <productVersion>~dev.<sha>.
+          # before 2.0.0); a branch build is <productVersion>~dev.<commit
+          # time>.<sha>, which sorts by time (build-linux-package.sh).
           if [ "${{ github.ref_type }}" = tag ]; then
             PBS_VERSION=$(echo "${GITHUB_REF_NAME#v}" | tr '-' '~')
             export PBS_VERSION

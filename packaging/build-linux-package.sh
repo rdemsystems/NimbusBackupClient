@@ -17,7 +17,11 @@
 #                several times slower; GitHub builds arm64 on arm64 runners.
 #   PBS_VERSION  package version. Default: from a v* tag on HEAD (v2.0.0 gives
 #                2.0.0, v2.0.0-rc.1 gives 2.0.0~rc.1, which sorts before 2.0.0),
-#                else gui/wails.json productVersion with ~dev.<short sha>.
+#                else gui/wails.json productVersion with ~dev.<commit time>.<short
+#                sha>, the time as YYYYMMDDHHMMSS in UTC, so that a newer dev
+#                build sorts after an older one (apt and dnf compare the digits
+#                as a number; the hash alone sorted by chance) and before the
+#                release (2.1.0~dev... < 2.1.0~rc.1 < 2.1.0).
 #                The Arch pkgver is always productVersion (the PKGBUILD checks
 #                it); a build that is not productVersion itself gets the rest
 #                in its file name instead (salvanza-2.0.0-1-x86_64-rc.1...).
@@ -69,7 +73,8 @@ if [ -z "$VERSION" ]; then
     if [ -n "$TAG" ]; then
         VERSION=$(echo "${TAG#v}" | tr '-' '~')
     elif [ -n "$SHA" ]; then
-        VERSION="$BASE~dev.$SHA"
+        WHEN=$(TZ=UTC0 git -C "$ROOT" log -1 --format=%cd --date=format-local:%Y%m%d%H%M%S HEAD 2>/dev/null || echo "")
+        VERSION="$BASE~dev.${WHEN:+$WHEN.}$SHA"
     else
         VERSION=$BASE
     fi
