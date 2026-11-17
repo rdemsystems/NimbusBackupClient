@@ -436,10 +436,16 @@ type ChunkState struct {
 	// fills in (or the walk, for a chunk reused without its data). The index
 	// list and its checksum are made from it once every worker has finished
 	// (EOF), so they come out as if the walk had hashed each chunk.
-	entries            []*chunkEntry
-	pos                uint64
-	wrid               uint64
-	chunkcount         uint64
+	entries    []*chunkEntry
+	pos        uint64
+	wrid       uint64
+	chunkcount uint64
+	// open: the index was created on PBS (create). assigned: how many of
+	// entries PBS has been given (EOF), closed: PBS closed the index. A
+	// folder that fails gives its indexes up with these (abandon, #161).
+	open               bool
+	assigned           int
+	closed             bool
 	currentChunk       []byte
 	C                  pbscommon.Chunker
 	newchunk           *atomic.Uint64
@@ -815,9 +821,15 @@ func (c *ChunkState) InjectKnownChunk(digest [32]byte, size uint64) error {
 // chunk's end offset (u64 little endian) and digest. Call it only once every
 // worker has finished.
 func (c *ChunkState) indexList() (digests []string, offsets []uint64, csum string) {
+	return c.indexListN(len(c.entries))
+}
+
+// indexListN is indexList over the first n entries: what PBS holds of an
+// index once n of them were assigned.
+func (c *ChunkState) indexListN(n int) (digests []string, offsets []uint64, csum string) {
 	h := sha256.New()
 	var end [8]byte
-	for _, e := range c.entries {
+	for _, e := range c.entries[:n] {
 		binary.LittleEndian.PutUint64(end[:], e.offset+e.size)
 		h.Write(end[:])
 		h.Write(e.digest[:])
@@ -867,6 +879,7 @@ func (c *ChunkState) EOF(client *pbscommon.PBSClient) error {
 		if err != nil {
 			return fmt.Errorf("failed to assign chunks (batch %d-%d) after retries: %w", batchStart, batchEnd, err)
 		}
+		c.assigned = batchEnd
 	}
 
 	// Close index with retry
@@ -876,8 +889,96 @@ func (c *ChunkState) EOF(client *pbscommon.PBSClient) error {
 	if err != nil {
 		return fmt.Errorf("failed to close dynamic index after retries: %w", err)
 	}
+	c.closed = true
 	return nil
 }
+
+// create opens the index on PBS under name.
+func (c *ChunkState) create(client *pbscommon.PBSClient, name string) error {
+	wrid, err := client.CreateDynamicIndex(name)
+	if err != nil {
+		return err
+	}
+	c.wrid, c.open = wrid, true
+	return nil
+}
+
+// errFolderGivenUp stops the upload workers of a folder that failed.
+var errFolderGivenUp = errors.New("the folder failed: nothing more is sent for it")
+
+// abandon gives up the index of a folder that failed part way, so the other
+// folders' archives are kept (#161). PBS finishes no snapshot with an index
+// left open, and refuses a manifest that lists one with no checksum, so it is
+// closed with what PBS was given of it and taken out of the manifest. Chunks
+// are assigned only at EOF, so PBS usually holds none, and it closes no index
+// with none (chunk-count and size have a minimum of 1): it is then given one
+// placeholder chunk of one byte first. The closed index stays in the
+// snapshot's folder on PBS, listed nowhere; it goes when the snapshot does.
+func (c *ChunkState) abandon(client *pbscommon.PBSClient) error {
+	if !c.open {
+		return nil
+	}
+	c.latchFatal(errFolderGivenUp)
+	c.closeUploads()
+	c.uploadWG.Wait()
+	if !c.closed {
+		cfg := retry.DefaultConfig()
+		cfg.MaxAttempts = 5
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if c.assigned == 0 {
+			if err := c.placeholder(ctx, cfg, client); err != nil {
+				return err
+			}
+		}
+		_, _, csum := c.indexListN(c.assigned)
+		last := c.entries[c.assigned-1]
+		size := last.offset + last.size
+		if err := retry.DoWithJitter(ctx, cfg, retry.DefaultRetryable, func() error {
+			return client.CloseDynamicIndex(c.wrid, csum, size, uint64(c.assigned))
+		}); err != nil {
+			return err
+		}
+		c.closed = true
+	}
+	client.DropManifestFile(c.wrid)
+	c.open = false
+	return nil
+}
+
+// placeholder gives an index PBS holds no chunk of one chunk of one byte, so
+// it can be closed: uploaded in this session (PBS appends only chunks it
+// knows) and assigned at offset 0. The index then lists that chunk alone.
+func (c *ChunkState) placeholder(ctx context.Context, cfg retry.Config, client *pbscommon.PBSClient) error {
+	data := []byte{0}
+	digest := client.ChunkDigest(data)
+	hexDigest := hex.EncodeToString(digest[:])
+	if err := retry.DoWithJitter(ctx, cfg, retry.DefaultRetryable, func() error {
+		return client.UploadDynamicCompressedChunk(c.wrid, hexDigest, data)
+	}); err != nil {
+		return fmt.Errorf("placeholder chunk: %w", err)
+	}
+	if err := retry.DoWithJitter(ctx, cfg, retry.DefaultRetryable, func() error {
+		return client.AssignDynamicChunks(c.wrid, []string{hexDigest}, []uint64{0})
+	}); err != nil {
+		return fmt.Errorf("placeholder chunk: %w", err)
+	}
+	c.entries = []*chunkEntry{{offset: 0, size: 1, digest: digest}}
+	c.assigned = 1
+	return nil
+}
+
+// archiveLeftOpenError is a folder that failed and whose archive could not be
+// given up on PBS either: the session can then keep no snapshot at all.
+type archiveLeftOpenError struct {
+	cause, close error
+}
+
+func (e *archiveLeftOpenError) Error() string {
+	return fmt.Sprintf("%v; its archive could not be closed on PBS either (%v), so no snapshot can be kept", e.cause, e.close)
+}
+
+func (e *archiveLeftOpenError) Unwrap() error { return e.cause }
 
 // formatDuration formats a duration in a human-readable format
 func formatDuration(d time.Duration) string {
@@ -1281,10 +1382,13 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 	//     "produced 0 bytes") does NOT affect the shared H2 connection — the
 	//     session is still healthy, only that one directory's archive failed to
 	//     write. Best-effort: skip it, log it, keep going with the remaining
-	//     directories in the SAME session. The final manifest simply omits the
-	//     failed directory's archive; the run is reported OutcomePartial via the
-	//     existing outcome machinery below — exactly what the old per-directory
-	//     model already did for one bad folder.
+	//     directories in the SAME session. backupReal gives the failed
+	//     directory's indexes up (ChunkState.abandon: closed on PBS with what it
+	//     was given, taken out of the manifest; until #161 they were left open
+	//     and PBS refused the whole snapshot), so the final manifest omits its
+	//     archive; the run is reported OutcomePartial via the existing outcome
+	//     machinery below — exactly what the old per-directory model already
+	//     did for one bad folder.
 	//
 	//   - A SESSION-FATAL error (retry.SessionLost — the underlying HTTP/2
 	//     connection itself died) is different in kind. The OLD per-directory
@@ -1451,6 +1555,13 @@ func runBackupInlineInternal(opts BackupOptions) (returnErr error) {
 				}
 				errMsg := fmt.Sprintf("Backup failed for %s: %v", dir, err)
 				runLog(opts.Ctx, errMsg)
+				// Its archive is still open on PBS: no snapshot can be
+				// finished in this session, so stop here and say why (#161).
+				var leftOpen *archiveLeftOpenError
+				if errors.As(err, &leftOpen) {
+					client.Close()
+					return failRun(errMsg, MsgSessionFinalizeFailed, msgParams{"error": errMsg})
+				}
 				dirErrors = append(dirErrors, errMsg)
 				dirResults = append(dirResults, DirResult{Path: dir, OK: false, Error: err.Error()})
 				continue // directory-local error — best-effort, keep going
@@ -2119,6 +2230,11 @@ type sharedCatalogCoordinator struct {
 	chunk   *ChunkState
 	pos     uint64
 	entries []pbscommon.CatalogDir
+	// started: the stream has its magic header, written by the first
+	// archive to write anything, whether it then succeeded or failed.
+	started bool
+	// last is the archive the last entry was recorded for.
+	last *pbscommon.PXARArchive
 }
 
 // prepare configures dir's PXARArchive for its place in the shared catalog
@@ -2131,7 +2247,7 @@ func (s *sharedCatalogCoordinator) prepare(archive *pbscommon.PXARArchive, clien
 		return s.chunk.HandleData(b, client)
 	}
 	archive.DeferCatalogRoot = true
-	if len(s.entries) > 0 {
+	if s.started {
 		archive.SkipCatalogMagic = true
 		archive.InitialCatalogPos = s.pos
 	}
@@ -2144,6 +2260,25 @@ func (s *sharedCatalogCoordinator) prepare(archive *pbscommon.PXARArchive, clien
 func (s *sharedCatalogCoordinator) record(dir pbscommon.CatalogDir, archive *pbscommon.PXARArchive) {
 	s.entries = append(s.entries, dir)
 	s.pos = archive.CatalogPos()
+	s.started = true
+	s.last = archive
+}
+
+// abandon is record for an archive whose folder failed (#161). The catalog
+// tables it wrote before it failed stay in the stream, listed by nothing,
+// but the position moves past them, so the next archive's tables are found
+// where they are; and the stream keeps the magic header the archive wrote,
+// if it was the first. An entry already recorded for it is taken out: its
+// archive is not in the snapshot.
+func (s *sharedCatalogCoordinator) abandon(archive *pbscommon.PXARArchive) {
+	if s.last == archive && len(s.entries) > 0 {
+		s.entries = s.entries[:len(s.entries)-1]
+		s.last = nil
+	}
+	if p := archive.CatalogPos(); p > s.pos {
+		s.pos = p
+		s.started = true
+	}
 }
 
 // writeCB returns the callback WriteSharedCatalogRoot writes the final
@@ -2218,6 +2353,11 @@ func backupDirectory(ctx context.Context, client *pbscommon.PBSClient, newchunk,
 // reuseStatsHook, when set (tests only), receives each archive's metadata
 // change detection statistics.
 var reuseStatsHook func(archiveName string, st pbscommon.ReuseStats)
+
+// folderFailHook, when set (tests only), is asked before each write to a
+// folder's archive, with how much was written so far; an error fails the
+// folder there, as a source that went away does.
+var folderFailHook func(folder string, written uint64) error
 
 // openableDir reports why dir cannot be opened and listed, or nil.
 func openableDir(dir string) error {
@@ -2357,15 +2497,35 @@ func backupReal(ctx context.Context, client *pbscommon.PBSClient, newchunk, reus
 	// progress (its position is the archived data); pxarChunk is then the
 	// small metadata stream and reports no progress of its own.
 	var payloadChunk *ChunkState
-	// A run that ends with an error (a Stop, a failed walk) never reaches
-	// EOF: let the upload workers go, the caller drops the session.
+	// A run that ends with an error never reaches EOF. After a Stop or a lost
+	// connection the caller drops the session: just let the upload workers
+	// go. Any other error fails this folder only, and the session goes on to
+	// the next one: give its indexes up, so the snapshot keeps the folders
+	// that backed up (#161), and the shared catalog its place.
 	defer func() {
-		if returnErr != nil {
+		if returnErr == nil {
+			return
+		}
+		if errors.Is(returnErr, context.Canceled) || errors.Is(returnErr, pbscommon.ErrWriteCancelled) ||
+			(ctx != nil && ctx.Err() != nil) || retry.SessionLost(returnErr) {
 			pxarChunk.closeUploads()
 			if payloadChunk != nil {
 				payloadChunk.closeUploads()
 			}
+			return
 		}
+		catalog.abandon(archive)
+		for _, c := range []*ChunkState{&pxarChunk, payloadChunk} {
+			if c == nil {
+				continue
+			}
+			if err := c.abandon(client); err != nil {
+				runLog(ctx, fmt.Sprintf("Could not close the archive of %s on PBS after it failed: %v", originalPath, err))
+				returnErr = &archiveLeftOpenError{cause: returnErr, close: err}
+				return
+			}
+		}
+		runLog(ctx, fmt.Sprintf("Archive of %s given up: closed on PBS and left out of the snapshot", originalPath))
 	}()
 	if split {
 		pxarChunk.Init(client, newchunk, reusechunk, failedchunk, knownChunks, nil, jobProg, nil, "")
@@ -2381,8 +2541,7 @@ func backupReal(ctx context.Context, client *pbscommon.PBSClient, newchunk, reus
 		runLog(ctx, fmt.Sprintf("Known payload chunks: %d", payloadKnown.Len()))
 		payloadChunk = &ChunkState{cancelCtx: ctx}
 		payloadChunk.Init(client, newchunk, reusechunk, failedchunk, payloadKnown, progress, jobProg, onStats, backupdir)
-		payloadChunk.wrid, err = client.CreateDynamicIndex(payloadName)
-		if err != nil {
+		if err = payloadChunk.create(client, payloadName); err != nil {
 			return 0, nil, nil, nil, nil, err
 		}
 		archive.PayloadWriteCB = func(b []byte) error {
@@ -2423,12 +2582,16 @@ func backupReal(ctx context.Context, client *pbscommon.PBSClient, newchunk, reus
 		pxarChunk.Init(client, newchunk, reusechunk, failedchunk, knownChunks, progress, jobProg, onStats, backupdir)
 	}
 
-	pxarChunk.wrid, err = client.CreateDynamicIndex(archive.ArchiveName)
-	if err != nil {
+	if err = pxarChunk.create(client, archive.ArchiveName); err != nil {
 		return 0, nil, nil, nil, nil, err
 	}
 
 	archive.WriteCB = func(b []byte) error {
+		if folderFailHook != nil {
+			if err := folderFailHook(originalPath, pxarChunk.pos+uint64(len(pxarChunk.currentChunk))); err != nil {
+				return err
+			}
+		}
 		return pxarChunk.HandleData(b, client)
 	}
 

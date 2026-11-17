@@ -249,8 +249,8 @@ func TestUploadManifestSignedWhenEncrypted(t *testing.T) {
 	client.Manifest.BackupID = "e2ehost"
 	client.Manifest.BackupTime = 1593179765
 	client.Manifest.Files = []File{
-		{CryptMode: CryptModeNone, Filename: "backup.pxar.didx", Size: 1},
-		{CryptMode: CryptModeNone, Filename: "catalog.pcat1.didx", Size: 2},
+		{CryptMode: CryptModeNone, Filename: "backup.pxar.didx", Size: 1, Csum: testCsum},
+		{CryptMode: CryptModeNone, Filename: "catalog.pcat1.didx", Size: 2, Csum: testCsum},
 	}
 
 	if err := client.UploadManifest(); err != nil {
@@ -319,7 +319,7 @@ func TestUploadManifestUnencryptedHasNoSignature(t *testing.T) {
 
 	client.Manifest.BackupType = "host"
 	client.Manifest.BackupID = "plainhost"
-	client.Manifest.Files = []File{{CryptMode: CryptModeNone, Filename: "backup.pxar.didx"}}
+	client.Manifest.Files = []File{{CryptMode: CryptModeNone, Filename: "backup.pxar.didx", Csum: testCsum}}
 
 	if err := client.UploadManifest(); err != nil {
 		t.Fatalf("UploadManifest: %v", err)

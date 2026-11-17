@@ -19,7 +19,7 @@ func storedManifest(t *testing.T, crypt *CryptConfig) ([]byte, map[string]any) {
 	client.Manifest.BackupType = "host"
 	client.Manifest.BackupID = "writer"
 	client.Manifest.BackupTime = 1593179765
-	client.Manifest.Files = []File{{CryptMode: CryptModeNone, Filename: "backup.pxar.didx", Size: 1}}
+	client.Manifest.Files = []File{{CryptMode: CryptModeNone, Filename: "backup.pxar.didx", Size: 1, Csum: testCsum}}
 	if err := client.UploadManifest(); err != nil {
 		t.Fatalf("UploadManifest: %v", err)
 	}

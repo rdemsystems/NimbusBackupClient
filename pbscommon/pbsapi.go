@@ -679,6 +679,20 @@ func (pbs *PBSClient) listSnapshots(params url.Values) ([]BackupManifest, error)
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		return ret, err
 	}
+	// PBS lists, after the manifest's files, any other file in the
+	// snapshot's folder, with no crypt-mode and no size: an index closed but
+	// not in the manifest, such as the archive of a folder given up part way
+	// (#161). Such a file is not part of the snapshot; only the manifest's
+	// files, which always have a crypt-mode, are kept.
+	for i := range r.Data {
+		files := r.Data[i].Files[:0]
+		for _, f := range r.Data[i].Files {
+			if f.CryptMode != "" {
+				files = append(files, f)
+			}
+		}
+		r.Data[i].Files = files
+	}
 	// sort snapshots by date, newest first (then backup id/type) so -list is
 	// deterministic
 	slices.SortFunc(r.Data, func(a, b BackupManifest) int {
@@ -1289,6 +1303,26 @@ func (pbs *PBSClient) CloseDynamicIndex(writerid uint64, checksum string, totals
 	return nil
 }
 
+// DropManifestFile takes the archive of writer writerid out of the manifest,
+// for an archive given up on (a folder that failed part way, #161). PBS
+// finishes a snapshot whose manifest leaves out an archive it was sent, but
+// not one that lists an archive with no checksum: that is refused with
+// "Invalid string length" and the whole snapshot is removed. The writer must
+// still be closed on PBS, which finishes nothing with a writer left open.
+func (pbs *PBSClient) DropManifestFile(writerid uint64) {
+	i, ok := pbs.WritersManifest[writerid]
+	if !ok || i < 0 || i >= len(pbs.Manifest.Files) {
+		return
+	}
+	pbs.Manifest.Files = append(pbs.Manifest.Files[:i], pbs.Manifest.Files[i+1:]...)
+	delete(pbs.WritersManifest, writerid)
+	for w, j := range pbs.WritersManifest {
+		if j > i {
+			pbs.WritersManifest[w] = j - 1
+		}
+	}
+}
+
 // UploadBlob uploads a top-level blob, encrypting it when the client has a
 // CryptConfig (index.json.blob excepted — see UploadManifest).
 func (pbs *PBSClient) UploadBlob(name string, data []byte) error {
@@ -1408,6 +1442,14 @@ func (pbs *PBSClient) DownloadBlob(name string) ([]byte, error) {
 // "signature" and "unprotected" removed — byte-for-byte what
 // proxmox-backup's json_signature() feeds to its auth tag.
 func (pbs *PBSClient) UploadManifest() error {
+	// An archive whose index was never closed has no checksum yet. PBS
+	// refuses such a manifest ("Invalid string length") and removes the
+	// whole snapshot; say which archive instead (#161).
+	for _, f := range pbs.Manifest.Files {
+		if f.Csum == "" {
+			return fmt.Errorf("the archive %s was never closed, so PBS would refuse the snapshot", f.Filename)
+		}
+	}
 	if pbs.Crypt != nil {
 		for i := range pbs.Manifest.Files {
 			// index.json.blob's own entry is appended by uploadBlob below,
