@@ -6530,6 +6530,13 @@ function App() {
                     </div>
                     {!wakeOn && <p className="sched-hint" id="after-backup-needs-wake">{t('afterBackupNeedsWake')}</p>}
                     <p className="sched-hint" id="after-backup-wait-note">{t('afterBackupWaitNote')}</p>
+                    {/* Sleep on Modern Standby is best effort too (#142): the same statement as under Wake. */}
+                    {afterBackup === 'sleep' && wakeInfo && wakeInfo.modernStandby && (
+                      <div className="sched-warn" id="after-backup-modern-standby" role="note" style={{marginTop: '10px'}}>
+                        <strong>{t('wakeModernStandbyTitle')}</strong>
+                        <div>{t('wakeModernStandby')}</div>
+                      </div>
+                    )}
                     {afterBackup === 'shutdown' && (
                       <div className="info-box" id="after-backup-shutdown-warning" style={{marginTop: '10px', backgroundColor: '#fff3cd', borderColor: '#ffc107'}}>
                         ⚠️ {t('afterBackupShutdownWarning')}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +144,21 @@ func TestARunThatFailsBeforeItStartsGetsItsOwnLog(t *testing.T) {
 	}
 	if text := strings.Join(view.Lines, "\n"); !strings.Contains(text, "failed before the backup started") {
 		t.Errorf("the run's log does not say what stopped it:\n%s", text)
+	}
+}
+
+// On a Modern Standby computer the service log says once, not at every wake
+// timer, that waking is best effort.
+func TestModernStandbyIsNotedOnce(t *testing.T) {
+	calls := 0
+	old := readWakeTimerInfo
+	readWakeTimerInfo = func() WakeTimerInfo { calls++; return WakeTimerInfo{Supported: true, ModernStandby: true} }
+	modernStandbyNoted = sync.Once{}
+	t.Cleanup(func() { readWakeTimerInfo = old; modernStandbyNoted = sync.Once{} })
+	noteModernStandby()
+	noteModernStandby()
+	if calls != 1 {
+		t.Errorf("the power capabilities were read %d times, want once", calls)
 	}
 }
 

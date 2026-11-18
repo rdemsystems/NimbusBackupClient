@@ -54,6 +54,29 @@ func TestEditorOffersToEnableWakeTimers(t *testing.T) {
 	}
 }
 
+// On a Modern Standby computer the Schedule step says, while Wake is ticked,
+// that waking is best effort and that hibernate is the reliable way (#142);
+// there is nothing to turn on, so no button.
+func TestEditorSaysWakingIsBestEffortOnModernStandby(t *testing.T) {
+	be := newDemoBackend()
+	be.wake = WakeInfo{OnMains: true, OnBattery: true, ModernStandby: true}
+	h := newHarnessWith(t, be, 130, 60)
+	openScheduleStep(h)
+	if strings.Contains(h.screen(), "best effort") {
+		t.Errorf("the statement shows while Wake is not ticked:\n%s", h.screen())
+	}
+	if strings.Contains(h.screen(), "Enable wake timers") {
+		t.Errorf("a wake timer button with nothing to enable:\n%s", h.screen())
+	}
+	for i := 0; i < 5; i++ {
+		h.key(tcell.KeyTab, 0)
+	}
+	h.typ(' ')
+	h.waitFor("Modern Standby: waking for a") // the text wraps beside the labels
+	h.waitFor("backup is best effort")
+	h.waitFor("hibernate, which wakes on any")
+}
+
 // No alert where the power plan lets timers wake the computer.
 func TestEditorHasNoWakeAlertWhenTimersMayWake(t *testing.T) {
 	h := newHarness(t, 130, 44)

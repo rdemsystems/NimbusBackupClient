@@ -397,16 +397,28 @@ func (e *editor) build() {
 // button leaves the plan as it is.
 func (e *editor) addWakeAlert(f *tview.Form) {
 	info, err := e.a.be.WakeTimers()
+	if err != nil {
+		return
+	}
 	text, button := wakeAlertText(info.Alert)
-	if err != nil || text == "" {
+	// On Modern Standby the app's best effort statement goes under it (#142).
+	rest, rows := "", 5
+	if info.ModernStandby {
+		rest, rows = modernStandbyText, 11
+		if text != "" {
+			rows = 16
+		}
+	}
+	if text == "" && rest == "" {
 		return
 	}
 	// As wide as the form allows (0), and tall enough for the text wrapped
 	// beside the form's longest label.
-	note := tview.NewTextView().SetLabel("").SetSize(5, 0).SetDynamicColors(true).SetScrollable(false)
+	note := tview.NewTextView().SetLabel("").SetSize(rows, 0).SetDynamicColors(true).SetScrollable(false)
+	full := strings.TrimSpace(text + "\n\n" + rest)
 	show := func(on bool) {
 		if on {
-			note.SetText(tag(colWarn) + text)
+			note.SetText(tag(colWarn) + full)
 		} else {
 			note.SetText("")
 		}
@@ -414,12 +426,15 @@ func (e *editor) addWakeAlert(f *tview.Form) {
 	show(e.wake.IsChecked())
 	e.wake.SetChangedFunc(show)
 	f.AddFormItem(note)
-	f.AddButton(button, func() { e.enableWake(f, note, info.Alert, button) })
+	if button != "" {
+		f.AddButton(button, func() { e.enableWake(f, note, info.Alert, button, rest) })
+	}
 }
 
 // enableWake has the service turn wake timers on, the user having pressed
-// the alert's button: scope as the alert, "battery" or "all".
-func (e *editor) enableWake(f *tview.Form, note *tview.TextView, scope, button string) {
+// the alert's button: scope as the alert, "battery" or "all". rest is the
+// text that stays under Wake afterwards (the Modern Standby statement).
+func (e *editor) enableWake(f *tview.Form, note *tview.TextView, scope, button, rest string) {
 	e.a.setFlash("turning on wake timers...")
 	go func() {
 		_, err := e.a.be.EnableWakeTimers(scope)
@@ -429,8 +444,19 @@ func (e *editor) enableWake(f *tview.Form, note *tview.TextView, scope, button s
 				e.a.errorBox("The power plan was not changed: " + describeErr(err))
 				return
 			}
-			e.wake.SetChangedFunc(nil)
-			note.SetText("")
+			if rest == "" {
+				e.wake.SetChangedFunc(nil)
+				note.SetText("")
+			} else {
+				e.wake.SetChangedFunc(func(on bool) {
+					if on {
+						note.SetText(tag(colWarn) + rest)
+					} else {
+						note.SetText("")
+					}
+				})
+				note.SetText(tag(colWarn) + rest)
+			}
 			if i := f.GetButtonIndex(button); i >= 0 {
 				f.RemoveButton(i)
 			}

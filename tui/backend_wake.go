@@ -10,7 +10,18 @@ type WakeInfo struct {
 	OnMains   bool   `json:"onMains"`
 	OnBattery bool   `json:"onBattery"`
 	Alert     string `json:"alert"`
+	// ModernStandby: Windows on a computer with Modern Standby (S0 low power
+	// idle), where waking for a backup is best effort (modernStandbyText).
+	ModernStandby bool `json:"modernStandby"`
 }
+
+// modernStandbyText is the app's statement under Wake on a Modern Standby
+// computer (wakeModernStandbyTitle, wakeModernStandby), shortened to fit
+// beside the form's labels.
+const modernStandbyText = "Modern Standby: waking for a backup is best effort. " +
+	"Salvanza sends the wake, keep awake and sleep requests a backup needs, but Windows decides whether to honour them, " +
+	"and often does not. The only reliable way is to turn Modern Standby off and use hibernate, which wakes on any computer " +
+	"(manual: \"Waking the computer\")."
 
 // wakeAlertText is the alert's text and the label of the button that turns
 // wake timers on, as the app words them; "" for no alert.

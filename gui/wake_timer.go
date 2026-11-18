@@ -113,6 +113,24 @@ func updateWakeTimer(jobs []ScheduledJob, now time.Time) {
 	}
 	wakeState.cancel, wakeState.target, wakeState.armed, wakeState.lastErr = cancel, w, true, ""
 	writeDebugLog(fmt.Sprintf("[Wake] wake timer set for %s, for %q at %s", w.At.Format(time.RFC3339), w.Set, w.Run.Format(time.RFC3339)))
+	noteModernStandby()
+}
+
+// modernStandbyNoted: the service log has said once, since the start, that
+// waking is best effort on this computer.
+var modernStandbyNoted sync.Once
+
+// noteModernStandby says once in the service log, the first time a wake timer
+// is set, when the computer uses Modern Standby: whoever reads the log of a
+// run that started late or not at all then knows why (#142).
+func noteModernStandby() {
+	modernStandbyNoted.Do(func() {
+		if readWakeTimerInfo().ModernStandby {
+			writeDebugLog("[Wake] this computer uses Modern Standby (S0 low power idle): Windows decides whether to honour the wake timer, " +
+				"the request to keep the computer awake and the request to sleep, so waking for a backup is best effort here. " +
+				"The reliable way is to turn Modern Standby off and hibernate the computer (see Waking the computer in the manual)")
+		}
+	})
 }
 
 // dropWakeTimer cancels the wake timer, if one is set (the scheduler stops).

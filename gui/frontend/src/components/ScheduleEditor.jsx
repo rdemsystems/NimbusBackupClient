@@ -329,8 +329,15 @@ export default function ScheduleEditor({ scheduleMode, setScheduleMode, schedule
                 {/* The short notes say what the alert above already asks about: shown once it is left. */}
                 {wakeInfo && wakeInfo.supported && !wakeInfo.onMains && wakeAlert !== 'all' && <><br />{t('wakeBlocked')}</>}
                 {wakeInfo && wakeInfo.supported && wakeInfo.onMains && !wakeInfo.onBattery && wakeAlert !== 'battery' && <><br />{t('wakeMainsOnly')}</>}
-                {wakeInfo && wakeInfo.supported && wakeInfo.modernStandby && <><br />{t('wakeModernStandby')}</>}
               </p>
+            )}
+            {/* Modern Standby (S0 low power idle): Windows may ignore the wake,
+                keep awake and sleep requests, so waking is best effort (#142). */}
+            {wakeToRun && wakeInfo && wakeInfo.supported && wakeInfo.modernStandby && (
+              <div className="sched-warn" id="sched-wake-modern" role="note" style={{ marginTop: '6px' }}>
+                <strong>{t('wakeModernStandbyTitle')}</strong>
+                <div>{t('wakeModernStandby')}</div>
+              </div>
             )}
           </div>
         </>
