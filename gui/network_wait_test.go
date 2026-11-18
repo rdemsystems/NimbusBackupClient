@@ -99,7 +99,9 @@ func TestNetworkNoWaitWhenTheServerAnswersAtOnce(t *testing.T) {
 	start := time.Date(2020, 3, 1, 7, 40, 0, 0, time.Local)
 	f := newFakeNet(t, start, 0)
 	noteResume(start, "after the service started")
-	appWithServer().waitForServerAfterWake(batterySet("", 0, 0), "startup")
+	if err := appWithServer().waitForServerAfterWake(batterySet("", 0, 0), "startup"); err != nil {
+		t.Fatalf("a server that answered stopped the run: %v", err)
+	}
 	if len(f.dials) != 1 || !f.now.Equal(start) {
 		t.Fatalf("tries %v, clock moved %s", f.dials, f.now.Sub(start))
 	}
