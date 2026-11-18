@@ -113,12 +113,18 @@ func TestNetworkNoWaitForRunNowOrLongAfterAWake(t *testing.T) {
 	job := batterySet("", 0, 0)
 	a := appWithServer()
 
-	a.waitForServerAfterWake(job, "scheduled") // nothing woke or started yet
+	goesOn := func(what string, err error) {
+		t.Helper()
+		if err != nil {
+			t.Errorf("%s: the run was stopped: %v", what, err)
+		}
+	}
+	goesOn("nothing woke or started yet", a.waitForServerAfterWake(job, "scheduled"))
 	noteResume(woke, "after the computer woke")
-	a.waitForServerAfterWake(job, "manual")
-	(&App{}).waitForServerAfterWake(job, "scheduled") // no server to try
+	goesOn("Run now", a.waitForServerAfterWake(job, "manual"))
+	goesOn("no server to try", (&App{}).waitForServerAfterWake(job, "scheduled"))
 	f.now = woke.Add(networkWaitWindow + time.Second)
-	a.waitForServerAfterWake(job, "scheduled")
+	goesOn("long after the wake", a.waitForServerAfterWake(job, "scheduled"))
 	if len(f.dials) != 0 {
 		t.Fatalf("tried the server %d times", len(f.dials))
 	}
