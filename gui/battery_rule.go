@@ -54,6 +54,9 @@ const (
 	// computer (Modern Standby ignored it, or it was hibernated or off) and
 	// someone woke it by hand: it must never be put back to sleep under them.
 	wokenLate = 5 * time.Minute
+	// wakeEarly: a wake this long before the wake timer was due still counts
+	// as the timer's (noteSchedulerTick).
+	wakeEarly = time.Minute
 )
 
 // batteryRuleAsSaved is the set's rule as stored, for checking it.
@@ -288,7 +291,16 @@ func noteSchedulerTick(prev, now time.Time) {
 	wakeState.mu.Lock()
 	t, armed := wakeState.target, wakeState.armed
 	wakeState.mu.Unlock()
-	if !armed || !t.At.After(p) || t.At.After(n) {
+	// The first tick after a resume comes the moment the computer wakes,
+	// when the timer has only just fired: the computer may wake a moment
+	// before it was due, or read its clock before it is set again from the
+	// hardware clock. Found on a laptop: a wake at the timer's second was
+	// missed, as the tick read just before it, and the ticks after it were
+	// too close together to show a wake (#142).
+	if !armed || !t.At.After(p) || t.At.After(n.Add(wakeEarly)) {
+		if armed {
+			writeDebugLog(fmt.Sprintf("[Wake] the computer woke at about %s; the wake timer is for %q at %s: not woken by it", n.Format(time.RFC3339), t.Set, t.At.Format(time.RFC3339)))
+		}
 		return
 	}
 	if n.Sub(t.At) > wokenLate {

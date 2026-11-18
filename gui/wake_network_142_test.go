@@ -147,6 +147,34 @@ func TestARunThatFailsBeforeItStartsGetsItsOwnLog(t *testing.T) {
 	}
 }
 
+// Found on a laptop 2026-11-18: woken by the timer at its very second, the
+// first tick after the resume read the clock a moment before the timer was
+// due, so the wake was missed (no hold, and the set's "only if woken" after
+// action did nothing). A tick just before the timer still counts; one well
+// before it does not.
+func TestATickJustBeforeTheTimerStillCountsAsItsWake(t *testing.T) {
+	newBatteryTest(t)
+	var held []string
+	old := holdAwakeAfterWake
+	holdAwakeAfterWake = func(setID, _ string) { held = append(held, setID) }
+	t.Cleanup(func() { holdAwakeAfterWake = old })
+	run := time.Date(2026, 11, 18, 11, 6, 0, 0, time.Local)
+	wakeState.mu.Lock()
+	wakeState.target = wakeTarget{At: run.Add(-wakeLead), Run: run, SetID: "b", Set: "wake-142-b"}
+	wakeState.armed = true
+	wakeState.mu.Unlock()
+	asleep := time.Date(2026, 11, 18, 10, 56, 42, 0, time.Local)
+
+	noteSchedulerTick(asleep, run.Add(-wakeLead-2*wakeEarly)) // woke by hand minutes before
+	if len(held) != 0 {
+		t.Fatalf("a wake well before the timer took the hold: %v", held)
+	}
+	noteSchedulerTick(asleep, run.Add(-wakeLead-50*time.Millisecond))
+	if len(held) != 1 || held[0] != "b" {
+		t.Fatalf("the wake a moment before the timer was missed: %v", held)
+	}
+}
+
 // On a Modern Standby computer the service log says once, not at every wake
 // timer, that waking is best effort.
 func TestModernStandbyIsNotedOnce(t *testing.T) {
