@@ -22,10 +22,14 @@ import (
 // So an automatic run (scheduled, startup, or a held run released) that
 // starts soon after a wake or a start first waits until its PBS server can be
 // reached, for at most networkWaitMax. A server still out of reach then is
-// down or the network is not coming back: the run starts anyway and fails
-// with its own error, as it would have. Run now never waits: the user is
-// there and can see whether the network is up. The wait is in the run's own
-// goroutine, so other sets' runs and the scheduler's ticks carry on.
+// down or the network is not coming back: the run is not started, and fails
+// saying so (#142: started anyway, it failed at its login with an error that
+// did not say the server was never reached, ran the set's "before"
+// application for nothing and wrote no log of its own). Run now never waits:
+// the user is there and can see whether the network is up. The wait is in the
+// run's own goroutine, so other sets' runs and the scheduler's ticks carry on.
+// The computer is kept awake while it waits (executeScheduledJob): left
+// alone, a computer woken by a timer sleeps again within minutes.
 
 var (
 	// networkWaitWindow: a run starting within this long of a wake or a
@@ -148,27 +152,33 @@ func (a *App) jobServerAddress(job ScheduledJob) (name, addr string) {
 // waitForServerAfterWake holds an automatic run of job, about to start soon
 // after the computer woke or this program started, until its PBS server can
 // be reached (waitForServer). Run now, and runs at other times, go straight
-// on.
-func (a *App) waitForServerAfterWake(job ScheduledJob, trigger string) {
+// on. It returns why the run must not start when the server could not be
+// reached in that time, nil otherwise.
+func (a *App) waitForServerAfterWake(job ScheduledJob, trigger string) error {
 	if trigger == "manual" {
-		return
+		return nil
 	}
 	why := resumedRecently(netNow())
 	if why == "" {
-		return
+		return nil
 	}
 	name, addr := a.jobServerAddress(job)
 	if addr == "" {
-		return
+		return nil
 	}
-	waitForServer(name, addr, why)
+	reachable, waited, err := waitForServer(name, addr, why)
+	if reachable {
+		return nil
+	}
+	return fmt.Errorf("the backup did not start: %s could not be reached in the %s %s (%v)", name, formatDuration(waited.Round(time.Second)), why, err)
 }
 
 // waitForServer tries addr every networkRetryEvery until it answers or
-// networkWaitMax has gone by, and reports whether it answered and how long
-// that took. A server that answers at once is not logged; one that does not
-// is logged once when the wait begins and once when it ends.
-func waitForServer(name, addr, why string) (reachable bool, waited time.Duration) {
+// networkWaitMax has gone by, and reports whether it answered, how long that
+// took and, when it did not, the last try's error. A server that answers at
+// once is not logged; one that does not is logged once when the wait begins
+// and once when it ends.
+func waitForServer(name, addr, why string) (reachable bool, waited time.Duration, lastErr error) {
 	start := netNow()
 	logged := false
 	for {
@@ -180,15 +190,15 @@ func waitForServer(name, addr, why string) (reachable bool, waited time.Duration
 			if logged {
 				writeDebugLog(fmt.Sprintf("[Network] %s reachable after %ds", name, int(waited.Round(time.Second)/time.Second)))
 			}
-			return true, waited
+			return true, waited, nil
 		}
 		if !logged {
 			writeDebugLog(fmt.Sprintf("[Network] waiting for %s %s (%v)", name, why, err))
 			logged = true
 		}
 		if waited >= networkWaitMax {
-			writeDebugLog(fmt.Sprintf("[Network] %s still not reachable after %s: starting the run anyway (%v)", name, waited.Round(time.Second), err))
-			return false, waited
+			writeDebugLog(fmt.Sprintf("[Network] %s still not reachable after %s: the run is not started (%v)", name, waited.Round(time.Second), err))
+			return false, waited, err
 		}
 		netSleep(networkRetryEvery)
 	}

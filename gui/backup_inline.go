@@ -999,16 +999,12 @@ func formatDuration(d time.Duration) string {
 func RunBackupInline(opts BackupOptions) (returnErr error) {
 	// Per-run log file: each backup run gets its own dedicated log file.
 	// Must be set up BEFORE any writeBackupLog call so logs land in the right place.
-	runLogID := opts.BackupID
-	if runLogID == "" {
-		if h, err := os.Hostname(); err == nil {
-			runLogID = h
-		} else {
-			runLogID = "backup"
-		}
-	}
+	runLogID := runLogIDFor(opts.BackupID)
 	runLogger := StartBackupRunLog(runLogID)
 	defer EndBackupRunLog(runLogger)
+	if runLogger != nil {
+		noteRunLogStarted(runLogID)
+	}
 
 	// The run's own Stop and Pause (the caller registered it before it
 	// queued; a caller without one gets one here). Its context carries the

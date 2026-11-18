@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,7 +49,9 @@ func TestNetworkWaitAfterWakeUntilTheServerAnswers(t *testing.T) {
 	start := woke.Add(time.Second)
 	f := newFakeNet(t, start, 3)
 	noteSchedulerTick(woke.Add(-8*time.Hour), woke) // asleep overnight
-	appWithServer().waitForServerAfterWake(batterySet("plugged", 0, 0), "scheduled")
+	if err := appWithServer().waitForServerAfterWake(batterySet("plugged", 0, 0), "scheduled"); err != nil {
+		t.Fatalf("the server answered, yet the run is not to start: %v", err)
+	}
 	if len(f.dials) != 4 || f.dials[0] != "192.168.0.242:8007" {
 		t.Fatalf("tries %v, want four to 192.168.0.242:8007", f.dials)
 	}
@@ -57,20 +60,38 @@ func TestNetworkWaitAfterWakeUntilTheServerAnswers(t *testing.T) {
 	}
 }
 
-// A server still out of reach after two minutes: the run starts anyway and
-// fails with its own error.
+// A server still out of reach after two minutes: the wait ends with the last
+// try's error.
 func TestNetworkWaitGivesUpAfterTwoMinutes(t *testing.T) {
 	start := time.Date(2020, 3, 1, 7, 40, 0, 0, time.Local)
 	f := newFakeNet(t, start, 1000)
-	reachable, waited := waitForServer("192.168.0.242:8007", "192.168.0.242:8007", "after the computer woke")
-	if reachable {
-		t.Fatal("an unreachable server was reported reachable")
+	reachable, waited, err := waitForServer("192.168.0.242:8007", "192.168.0.242:8007", "after the computer woke")
+	if reachable || err == nil {
+		t.Fatalf("an unreachable server was reported reachable (err %v)", err)
 	}
 	if waited != networkWaitMax || f.now.Sub(start) != networkWaitMax {
 		t.Errorf("waited %s (clock moved %s), want %s", waited, f.now.Sub(start), networkWaitMax)
 	}
 	if want := int(networkWaitMax/networkRetryEvery) + 1; len(f.dials) != want {
 		t.Errorf("%d tries, want %d", len(f.dials), want)
+	}
+}
+
+// #142: a run woken for whose server is still out of reach after the wait is
+// not started, and says why: it used to start anyway and fail at its login
+// with "no such host", which did not say the server was never reached.
+func TestNetworkWaitUnreachableAfterWakeStopsTheRun(t *testing.T) {
+	woke := time.Date(2020, 3, 1, 16, 1, 39, 0, time.Local)
+	newFakeNet(t, woke, 1000)
+	noteSchedulerTick(woke.Add(-2*time.Hour), woke)
+	err := appWithServer().waitForServerAfterWake(batterySet("", 0, 0), "scheduled")
+	if err == nil {
+		t.Fatal("the run was let start with its server out of reach")
+	}
+	for _, want := range []string{"did not start", "192.168.0.242:8007", "2m 0s after the computer woke", "unreachable host"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q does not say %q", err, want)
+		}
 	}
 }
 

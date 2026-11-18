@@ -22,6 +22,9 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	isolateSettings(scratch)
+	// A test that wakes a fake computer must not take the real system's
+	// sleep request; wake_hold_test.go tests the hold itself.
+	holdAwakeAfterWake = func(string, string) {}
 
 	code := m.Run()
 

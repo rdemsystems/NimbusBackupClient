@@ -1165,10 +1165,33 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 	if !mayStart {
 		return
 	}
+	// Keep the computer awake until the run has started (#142): a computer
+	// woken by a timer goes back to sleep within minutes when left alone, and
+	// a run waiting for its server, or for its turn, then waited until
+	// something next woke the computer. Found 2026-11-17: a 2 minute wait for
+	// the server took 93 minutes. The run takes its own hold once it starts
+	// (RunBackupInline); this one ends when the run has been started, and
+	// before anything this run does afterwards (put the computer to sleep).
+	endAwake, awakeErr := preventSleep(sleepReason())
+	defer endAwake()
+	if awakeErr != nil {
+		writeDebugLog(fmt.Sprintf("Backup Set %s: %v", job.Name, awakeErr))
+	}
+	// This hold takes over from the one the wake took for this set's run
+	// (wake_hold.go).
+	releaseWakeHold(job.ID)
+
 	// Just after the computer woke or this program started, the network may
 	// not be back yet: an automatic run waits for its server first, here in
-	// its own goroutine (network_wait.go).
-	a.waitForServerAfterWake(job, trigger)
+	// its own goroutine (network_wait.go). A server still out of reach then:
+	// the run is not started.
+	if err := a.waitForServerAfterWake(job, trigger); err != nil {
+		writeDebugLog(fmt.Sprintf("Backup Set %s: %v", job.Name, err))
+		endAwake()
+		a.recordRunNotStarted(job, trigger, battery, err)
+		a.recordJobRan(job)
+		return
+	}
 
 	writeDebugLog(fmt.Sprintf("Executing scheduled job: %s", job.Name))
 
@@ -1290,6 +1313,10 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 			postActionsKey,
 		)
 	}
+	// Started (or failed to): the run holds the computer awake itself while
+	// it goes on, and what this set does afterwards must not find this hold
+	// still standing (a Linux sleep inhibitor blocks the sleep it asks for).
+	endAwake()
 	// The app handed the run to the background service: the call above only
 	// started it. Wait for its real outcome, so the history entry and the
 	// post-backup actions (an e-mail saying it completed, the "after"
@@ -1300,11 +1327,13 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 	// How the run ended in its own words, for Reports: from the service's
 	// API entry here, or from the backup's completion in the service.
 	outcome := a.runOutcome(postActionsKey)
+	ranInService := false
 	if err == nil && !a.isServiceProcess {
 		if ch := a.serviceRunDone(postActionsKey); ch != nil {
 			writeDebugLog(fmt.Sprintf("Backup Set %s: waiting for the service to finish the run", job.Name))
 			o := <-ch
 			outcome = &o
+			ranInService = true
 			if !o.success {
 				err = fmt.Errorf("%s", o.message)
 			} else {
@@ -1319,6 +1348,14 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 			// and Last run says when the run finished.
 			<-localDone
 		}
+	}
+	// A run that failed here before the backup started (its login refused, a
+	// disk or the key not found) has no log of its own: it gets one, so its
+	// "View log" does not open the run before it (run_log_not_started.go).
+	// A run the service did keeps its logs there.
+	if err != nil && !ranInService && !a.delegated() && !isCancelledRun(err.Error(), "") &&
+		!runLogStartedSince(runLogIDFor(job.BackupID), startTime) {
+		writeNotStartedRunLog(job.BackupID, job.Name, trigger, err)
 	}
 	// Close the API entry if the backup ended before its own completion
 	// reported (a failure before it started); otherwise this changes nothing.
@@ -1444,7 +1481,41 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 		a.takePendingPostActions(postActionsKey)
 	}
 
-	// Update job's last run and calculate next run.
+	a.recordJobRan(job)
+}
+
+// recordRunNotStarted records a run of job that was not started because its
+// PBS server could not be reached after the computer woke (network_wait.go):
+// its own log, a failed Reports entry, and what the set does after a run (an
+// e-mail, putting a computer woken for it back to sleep). The set's "before"
+// application has not run: there was no backup for it to come before.
+func (a *App) recordRunNotStarted(job ScheduledJob, trigger string, battery *batteryRunInfo, cause error) {
+	writeNotStartedRunLog(job.BackupID, job.Name, trigger, cause)
+	entry := JobHistory{
+		ID:            fmt.Sprintf("%d", time.Now().Unix()),
+		Name:          job.Name,
+		JobID:         job.ID,
+		Timestamp:     time.Now().Format(time.RFC3339),
+		Status:        "failed",
+		Message:       fmt.Sprintf("Error: %v", cause),
+		BackupDirs:    job.BackupDirs,
+		BackupID:      job.BackupID,
+		UseVSS:        job.UseVSS,
+		BackupType:    job.BackupType,
+		Trigger:       trigger,
+		MessageKey:    MsgScheduledJobError,
+		MessageParams: msgParams{"error": cause.Error()},
+	}
+	a.applyBatteryToHistory(&entry, battery)
+	if err := a.AddJobHistory(entry); err != nil {
+		writeDebugLog(fmt.Sprintf("Warning: Failed to add job history: %v", err))
+	}
+	a.runPostBackupActions(job, false, entry.Message, nil, battery)
+}
+
+// recordJobRan sets job's last run to now and works out its next run, once a
+// run of it has ended, however it ended.
+func (a *App) recordJobRan(job ScheduledJob) {
 	// Re-read from file to pick up any changes made by the GUI while backup was running.
 	// Never in an app working through the service: its sets are the
 	// service's, which records their runs itself.

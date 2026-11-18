@@ -299,6 +299,9 @@ func noteSchedulerTick(prev, now time.Time) {
 	wokenRun.setID, wokenRun.at, wokenRun.used = t.SetID, n, false
 	wokenRun.Unlock()
 	writeDebugLog(fmt.Sprintf("[Wake] the computer was woken at about %s for %q (run at %s)", n.Format(time.RFC3339), t.Set, t.Run.Format(time.RFC3339)))
+	// Left alone, a computer woken by a timer sleeps again within minutes,
+	// before the run has started (wake_hold.go).
+	holdAwakeAfterWake(t.SetID, t.Set)
 }
 
 // takeWoken returns when the computer was woken for this scheduled run of
