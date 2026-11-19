@@ -26,7 +26,7 @@ Nimbus Backup 是 RDEM Systems 对 [Proxmox Backup Client GO](https://github.com
 
 - **代码。** 新功能和修复以 pull request 的形式提交给 Salvanza。本仓库不再维护自己的补丁系列。
 - **签名构建。** 本仓库继续做 Salvanza 目前还做不到的事：将 Salvanza 的发布版构建为 **Nimbus Backup**，**由 RDEM SYSTEMS 代码签名**，并提供与现在相同的构建证明和校验和。
-- **现有安装。** 待下列 pull request 合并、且从 0.4.x 的升级经过测试后，切换将以普通 MSI 升级的方式发布。在此之前，0.4.x 继续受支持，仅提供关键修复。
+- **现有安装。** 待 Salvanza 发布包含下列 pull request（均已合并）的版本、且从 0.4.x 的升级经过测试后，切换将以普通 MSI 升级的方式发布。在此之前，0.4.x 继续受支持，仅提供关键修复。
 
 **切换前需要合并到 Salvanza 的 pull request：**
 

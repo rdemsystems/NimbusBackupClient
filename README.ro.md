@@ -26,7 +26,7 @@ Ce înseamnă asta:
 
 - **Codul.** Funcțiile noi și corecturile merg la Salvanza ca pull requests. Acest depozit nu mai întreține propria serie de patch-uri.
 - **Build-uri semnate.** Acest depozit continuă să facă ce Salvanza nu poate încă: construiește versiunile Salvanza ca **Nimbus Backup**, **semnate de RDEM SYSTEMS**, cu aceeași atestare și aceleași sume de control ca astăzi.
-- **Instalările existente.** Trecerea va veni ca o actualizare MSI obișnuită, după ce pull request-urile de mai jos sunt integrate și actualizarea de la 0.4.x este testată. Până atunci, 0.4.x rămâne suportată, doar cu corecturi critice.
+- **Instalările existente.** Trecerea va veni ca o actualizare MSI obișnuită, după ce o versiune Salvanza va include pull request-urile de mai jos, deja integrate, și actualizarea de la 0.4.x va fi testată. Până atunci, 0.4.x rămâne suportată, doar cu corecturi critice.
 
 **Pull requests către Salvanza necesare înainte de trecere:**
 
