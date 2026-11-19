@@ -381,6 +381,7 @@ func (a *App) SaveScheduledJob(job ScheduledJob) error {
 	}
 
 	writeDebugLog(fmt.Sprintf("Scheduled job saved: %s (next run: %s)", job.Name, job.NextRun))
+	a.wakeTimerAfterSetsChanged()
 
 	// Note: For automatic execution after reboot, use the MSI installer
 	// which installs the app's service as a Windows Service
@@ -544,6 +545,7 @@ func (a *App) UpdateScheduledJob(job ScheduledJob) error {
 	}
 
 	writeDebugLog(fmt.Sprintf("Scheduled job updated: %s (next run: %s)", job.Name, job.NextRun))
+	a.wakeTimerAfterSetsChanged()
 	return nil
 }
 
@@ -587,7 +589,11 @@ func (a *App) SetScheduledJobEnabled(jobID string, enabled bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal jobs: %w", err)
 	}
-	return atomicWriteFile(jobsPath, data, 0600)
+	if err := atomicWriteFile(jobsPath, data, 0600); err != nil {
+		return err
+	}
+	a.wakeTimerAfterSetsChanged()
+	return nil
 }
 
 // DeleteScheduledJob removes a scheduled job by ID
@@ -626,7 +632,11 @@ func (a *App) DeleteScheduledJob(jobID string) error {
 		return err
 	}
 
-	return atomicWriteFile(jobsPath, data, 0600)
+	if err := atomicWriteFile(jobsPath, data, 0600); err != nil {
+		return err
+	}
+	a.wakeTimerAfterSetsChanged()
+	return nil
 }
 
 // RunScheduledJobNow immediately runs the given backup set regardless of its

@@ -154,6 +154,22 @@ func runPostBackupApp(command, jobName, when string) {
 	}
 }
 
+// stoppedByHand: the run ended because someone pressed Stop, not because the
+// battery rule cancelled it.
+func stoppedByHand(success bool, message string, run *batteryRunInfo) bool {
+	if success || !isCancelledRun(message, "") {
+		return false
+	}
+	if run != nil {
+		run.mu.Lock()
+		defer run.mu.Unlock()
+		if run.cancelled {
+			return false
+		}
+	}
+	return true
+}
+
 // runPostBackupActions runs everything a finished Backup Set is configured
 // to do after it completes: email notification, an application, then exiting
 // the app and what the computer does (sleep, hibernate, shut down:
@@ -175,7 +191,15 @@ func (a *App) runPostBackupActions(job ScheduledJob, success bool, message strin
 	}
 	// Sleep, hibernate or shut down, once its wait and the other backups are
 	// over (after_backup.go). Set off before the exit below, which waits for it.
-	a.startAfterBackup(job, run)
+	// Not after a run someone stopped: they are at the computer. Found on a
+	// laptop 2026-11-19: Stop pressed during a run, and the computer
+	// hibernated under them. A run the battery rule stopped still goes on to
+	// it: no one stopped that one, and a woken computer should sleep again.
+	if stoppedByHand(success, message, run) {
+		writeDebugLog(fmt.Sprintf("[After backup] %s: the backup was stopped by hand, so someone is at the computer: it stays as it is", job.Name))
+	} else {
+		a.startAfterBackup(job, run)
+	}
 	// Exiting is for the app only: in the service it would stop every
 	// schedule until Windows or systemd restarts it.
 	if job.ExitAppAfter && a.isServiceProcess {

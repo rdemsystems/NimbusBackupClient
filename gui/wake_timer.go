@@ -160,6 +160,20 @@ func (a *App) refreshWakeTimer() {
 	updateWakeTimer(jobs, time.Now())
 }
 
+// wakeTimerAfterSetsChanged sets the wake timer again at once when Backup
+// Sets were saved, changed, turned on or off, deleted or imported, where the
+// scheduler runs in this process. Found on a laptop 2026-11-19: the timer was
+// moved only at the scheduler's next tick, up to a minute later, so a set
+// saved and the computer shut down at once kept the old wake time.
+func (a *App) wakeTimerAfterSetsChanged() {
+	schedulerMu.Lock()
+	running := schedulerRunning
+	schedulerMu.Unlock()
+	if running {
+		a.refreshWakeTimer()
+	}
+}
+
 // WakeTimerInfo is what the app shows under a set's Wake option.
 type WakeTimerInfo struct {
 	// Supported: this computer's system can set a wake timer at all.

@@ -307,6 +307,12 @@ func noteSchedulerTick(prev, now time.Time) {
 		writeDebugLog(fmt.Sprintf("[Wake] the computer woke at about %s, %s after the wake timer for %q was due: not woken by the timer", n.Format(time.RFC3339), n.Sub(t.At).Round(time.Second), t.Set))
 		return
 	}
+	// In the timer's window, but the system may say the power button woke it
+	// (wake_source.go).
+	if v := whatWokeTheComputer(p); v.known && !v.ours {
+		writeDebugLog(fmt.Sprintf("[Wake] the computer woke at about %s, around the wake timer for %q, but Windows says %s woke it: not woken by the timer", n.Format(time.RFC3339), t.Set, v.what))
+		return
+	}
 	wokenRun.Lock()
 	wokenRun.setID, wokenRun.at, wokenRun.used = t.SetID, n, false
 	wokenRun.Unlock()

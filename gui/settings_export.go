@@ -360,5 +360,6 @@ func (a *App) mergeSettingsBundle(bundle SettingsBundle, forDeployment bool) (se
 	if err := atomicWriteFile(jobsPath, jobsData, 0600); err != nil {
 		return serversImported, 0, fmt.Errorf("failed to write jobs file: %w", err)
 	}
+	a.wakeTimerAfterSetsChanged()
 	return serversImported, jobsImported, nil
 }
