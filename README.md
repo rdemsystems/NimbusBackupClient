@@ -23,7 +23,7 @@ What this means:
 
 - **Code.** New features and fixes go to Salvanza as pull requests. This repository stops carrying its own patch series.
 - **Signed builds.** This repository keeps doing what Salvanza cannot do yet: it builds Salvanza's releases as **Nimbus Backup**, **code-signed by RDEM SYSTEMS**, with the same attestation and checksums as today.
-- **Existing installs.** The switch will ship as a normal MSI upgrade once the pull requests below are merged and the upgrade from 0.4.x has been tested. Until then, 0.4.x stays supported, with critical fixes only.
+- **Existing installs.** The switch will ship as a normal MSI upgrade once a Salvanza release includes the pull requests below, which are already merged, and the upgrade from 0.4.x has been tested. Until then, 0.4.x stays supported, with critical fixes only.
 
 **Pull requests to Salvanza needed before the switch:**
 

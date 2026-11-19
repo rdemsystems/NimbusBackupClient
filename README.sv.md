@@ -26,7 +26,7 @@ Vad det innebär:
 
 - **Kod.** Nya funktioner och rättningar skickas till Salvanza som pull requests. Det här repot slutar bära en egen patchserie.
 - **Signerade byggen.** Det här repot fortsätter med det Salvanza ännu inte kan: det bygger Salvanzas releaser som **Nimbus Backup**, **kodsignerade av RDEM SYSTEMS**, med samma attestering och kontrollsummor som i dag.
-- **Befintliga installationer.** Bytet kommer som en vanlig MSI-uppgradering när pull requesterna nedan är sammanslagna och uppgraderingen från 0.4.x är testad. Till dess stöds 0.4.x fortsatt, med enbart kritiska rättningar.
+- **Befintliga installationer.** Bytet kommer som en vanlig MSI-uppgradering när en Salvanza-version innehåller pull requesterna nedan, som redan är sammanslagna, och uppgraderingen från 0.4.x är testad. Till dess stöds 0.4.x fortsatt, med enbart kritiska rättningar.
 
 **Pull requests till Salvanza som behövs före bytet:**
 

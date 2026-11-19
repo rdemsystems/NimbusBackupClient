@@ -26,7 +26,7 @@ Qué significa:
 
 - **Código.** Las nuevas funciones y correcciones van a Salvanza como pull requests. Este repositorio deja de mantener su propia serie de parches.
 - **Binarios firmados.** Este repositorio sigue haciendo lo que Salvanza aún no puede: compila las versiones de Salvanza como **Nimbus Backup**, **firmadas por RDEM SYSTEMS**, con la misma atestación y las mismas sumas de verificación que hoy.
-- **Instalaciones existentes.** El cambio llegará como una actualización MSI normal, cuando las pull requests de abajo estén integradas y la actualización desde 0.4.x esté probada. Hasta entonces, 0.4.x sigue soportada, solo con correcciones críticas.
+- **Instalaciones existentes.** El cambio llegará como una actualización MSI normal, cuando una versión de Salvanza incluya las pull requests de abajo, ya integradas, y la actualización desde 0.4.x esté probada. Hasta entonces, 0.4.x sigue soportada, solo con correcciones críticas.
 
 **Pull requests a Salvanza necesarias antes del cambio:**
 

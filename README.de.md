@@ -26,7 +26,7 @@ Was das bedeutet:
 
 - **Code.** Neue Funktionen und Korrekturen gehen als Pull Requests an Salvanza. Dieses Repository führt keine eigene Patch-Serie mehr.
 - **Signierte Builds.** Dieses Repository macht weiter, was Salvanza noch nicht kann: Es baut die Salvanza-Releases als **Nimbus Backup**, **von RDEM SYSTEMS code-signiert**, mit denselben Attestierungen und Prüfsummen wie heute.
-- **Bestehende Installationen.** Der Wechsel kommt als normales MSI-Upgrade, sobald die Pull Requests unten gemergt sind und das Upgrade von 0.4.x getestet ist. Bis dahin wird 0.4.x weiter unterstützt, nur mit kritischen Korrekturen.
+- **Bestehende Installationen.** Der Wechsel kommt als normales MSI-Upgrade, sobald eine Salvanza-Version die bereits gemergten Pull Requests unten enthält und das Upgrade von 0.4.x getestet ist. Bis dahin wird 0.4.x weiter unterstützt, nur mit kritischen Korrekturen.
 
 **Pull Requests an Salvanza, die vor dem Wechsel nötig sind:**
 

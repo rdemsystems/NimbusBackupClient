@@ -26,7 +26,7 @@ Nimbus Backup は [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxba
 
 - **コード。** 新機能と修正は pull request として Salvanza に送ります。このリポジトリは独自のパッチシリーズを持たなくなります。
 - **署名付きビルド。** このリポジトリは、Salvanza がまだできないことを続けます。Salvanza のリリースを **Nimbus Backup** としてビルドし、**RDEM SYSTEMS がコード署名**し、現在と同じ証明書（attestation）とチェックサムを付けます。
-- **既存のインストール。** 下記の pull request がマージされ、0.4.x からのアップグレードがテストされた後、通常の MSI アップグレードとして切り替えます。それまで 0.4.x は重大な修正のみでサポートを続けます。
+- **既存のインストール。** 下記の pull request（マージ済み）を含む Salvanza のリリースが出て、0.4.x からのアップグレードがテストされた後、通常の MSI アップグレードとして切り替えます。それまで 0.4.x は重大な修正のみでサポートを続けます。
 
 **切り替え前に必要な Salvanza への pull request：**
 
