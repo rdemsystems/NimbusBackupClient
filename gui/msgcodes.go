@@ -87,6 +87,8 @@ const (
 	MsgLogAfterBackupHibernate MessageKey = "msgAfterBackupHibernate" // (none)
 	MsgLogAfterBackupShutdown  MessageKey = "msgAfterBackupShutdown"  // (none)
 	MsgLogAfterBackupCancelled MessageKey = "msgAfterBackupCancelled" // (none)
+	MsgLogAfterBackupStopped   MessageKey = "msgAfterBackupStopped"   // (none)
+	MsgLogAfterBackupInUse     MessageKey = "msgAfterBackupInUse"     // (none)
 	MsgLogAfterBackupFailed    MessageKey = "msgAfterBackupFailed"    // {error}
 
 	// Wake timers turned on in the power plan at the user's request

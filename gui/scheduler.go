@@ -192,6 +192,13 @@ type ScheduledJob struct {
 	AfterBackup            string `json:"afterBackup,omitempty"`
 	AfterBackupWait        int    `json:"afterBackupWait,omitempty"`
 	AfterBackupOnlyIfWoken bool   `json:"afterBackupOnlyIfWoken,omitempty"`
+	// The two that keep the computer as it is when someone is at it, both on
+	// unless the set says otherwise, so a set saved before they existed keeps
+	// them: after a run stopped by hand (AfterBackupEvenIfStopped turns that
+	// off), and when someone used the computer after it woke or the run began
+	// (AfterBackupEvenIfInUse turns that off).
+	AfterBackupEvenIfStopped bool `json:"afterBackupEvenIfStopped,omitempty"`
+	AfterBackupEvenIfInUse   bool `json:"afterBackupEvenIfInUse,omitempty"`
 	// ShutdownAfter is the older form of AfterBackup "shutdown" (at once,
 	// after any run). It is still written, true exactly when AfterBackup is
 	// "shutdown", so an older app or service reading the file shuts down

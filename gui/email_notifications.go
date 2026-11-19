@@ -191,12 +191,16 @@ func (a *App) runPostBackupActions(job ScheduledJob, success bool, message strin
 	}
 	// Sleep, hibernate or shut down, once its wait and the other backups are
 	// over (after_backup.go). Set off before the exit below, which waits for it.
-	// Not after a run someone stopped: they are at the computer. Found on a
-	// laptop 2026-11-19: Stop pressed during a run, and the computer
-	// hibernated under them. A run the battery rule stopped still goes on to
-	// it: no one stopped that one, and a woken computer should sleep again.
-	if stoppedByHand(success, message, run) {
-		writeDebugLog(fmt.Sprintf("[After backup] %s: the backup was stopped by hand, so someone is at the computer: it stays as it is", job.Name))
+	// Not after a run someone stopped, unless the set says so: they are at the
+	// computer. Found on a laptop 2026-11-19: Stop pressed during a run, and
+	// the computer hibernated under them. A run the battery rule stopped still
+	// goes on to it: no one stopped that one, and a woken computer should
+	// sleep again.
+	if stoppedByHand(success, message, run) && !job.AfterBackupEvenIfStopped {
+		if action, _ := afterBackupFor(job, time.Now()); action != "" {
+			writeDebugLog(fmt.Sprintf("[After backup] %s: the backup was stopped by hand, so someone is at the computer: it stays as it is", job.Name))
+			LogMessage("Backup", "info", fmt.Sprintf("%s: the computer stays as it is: the backup was stopped by hand.", job.Name), job.Name, MsgLogAfterBackupStopped, nil)
+		}
 	} else {
 		a.startAfterBackup(job, run)
 	}

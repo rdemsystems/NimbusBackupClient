@@ -14,6 +14,9 @@ import (
 )
 
 func main() {
+	// -last-input: run by the service in a signed-in session, to ask when the
+	// computer was last used there (user_input.go). Before anything is logged.
+	runLastInputArg(os.Args)
 	// -apply-settings <file>: the installer's CONFIGFILE (settings_deploy.go).
 	if path, ok := applySettingsArg(os.Args[1:]); ok {
 		os.Exit(runApplySettings(path))

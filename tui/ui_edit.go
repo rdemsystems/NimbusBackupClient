@@ -57,6 +57,8 @@ type editor struct {
 	after        *tview.DropDown
 	afterWait    *tview.InputField
 	afterWoken   *tview.Checkbox
+	afterStopped *tview.Checkbox // not after a run stopped by hand
+	afterInUse   *tview.Checkbox // not when someone used the computer meanwhile
 	canHibernate bool
 	noHibernate  string // why not, in English, when !canHibernate
 
@@ -487,14 +489,19 @@ func (e *editor) buildAfterBackup(f *tview.Form) {
 	}
 	wait := int(num(e.orig, "afterBackupWait"))
 	if choice == "" {
-		wait = 0
+		// A minute to begin with, once one is chosen: time to cancel.
+		wait = 1
 	}
 	// Ticked to begin with: it counts only while the set wakes the computer.
 	woken := choice == "" || boolean(e.orig, "afterBackupOnlyIfWoken")
 	e.after = tview.NewDropDown().SetLabel("When the backup finishes, the computer ").SetOptions(choices, nil).SetCurrentOption(indexOf(afterModes, choice))
 	e.afterWait = tview.NewInputField().SetLabel("  After (0 to 240 minutes, 0 at once) ").SetText(strconv.Itoa(wait)).SetFieldWidth(4)
 	e.afterWoken = tview.NewCheckbox().SetLabel("  Only if this backup woke the computer (needs Wake, on Schedule) ").SetChecked(woken)
-	f.AddFormItem(e.after).AddFormItem(e.afterWait).AddFormItem(e.afterWoken)
+	// Ticked unless the set turned them off: they keep the computer as it is
+	// for someone at it.
+	e.afterStopped = tview.NewCheckbox().SetLabel("  Not if the backup was stopped by hand ").SetChecked(!boolean(e.orig, "afterBackupEvenIfStopped"))
+	e.afterInUse = tview.NewCheckbox().SetLabel("  Not if someone used the computer since it woke or the backup started ").SetChecked(!boolean(e.orig, "afterBackupEvenIfInUse"))
+	f.AddFormItem(e.after).AddFormItem(e.afterWait).AddFormItem(e.afterWoken).AddFormItem(e.afterStopped).AddFormItem(e.afterInUse)
 	f.AddTextView("", tag(colDim)+"It waits for any other backup still running; the app shows a notice with Cancel.\nShutting down closes every program, with any unsaved work, and a computer\nthat is shut down cannot be woken for the next backup.", 78, 3, true, false)
 }
 
@@ -521,6 +528,8 @@ func (e *editor) applyAfterBackup(doc map[string]interface{}) error {
 	doc["afterBackup"] = choice
 	doc["afterBackupWait"] = float64(wait)
 	doc["afterBackupOnlyIfWoken"] = choice != "" && wakes && e.afterWoken.IsChecked()
+	doc["afterBackupEvenIfStopped"] = choice != "" && !e.afterStopped.IsChecked()
+	doc["afterBackupEvenIfInUse"] = choice != "" && !e.afterInUse.IsChecked()
 	doc["shutdownAfter"] = choice == "shutdown"
 	return nil
 }

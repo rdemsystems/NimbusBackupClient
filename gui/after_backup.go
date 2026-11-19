@@ -120,6 +120,7 @@ func normalizeAfterBackup(job *ScheduledJob) {
 	}
 	if job.AfterBackup == afterBackupStay {
 		job.AfterBackupWait, job.AfterBackupOnlyIfWoken = 0, false
+		job.AfterBackupEvenIfStopped, job.AfterBackupEvenIfInUse = false, false
 	}
 	job.ShutdownAfter = job.AfterBackup == afterBackupShutdown
 }
@@ -145,9 +146,12 @@ func afterBackupFor(job ScheduledJob, woken time.Time) (action, why string) {
 type pendingAfterBackup struct {
 	id, setID, set, action string
 	at                     time.Time
-	waitingForOthers       atomic.Bool
-	stop                   chan struct{}
-	once                   sync.Once
+	// since is the wake the run was woken for, else the run's start: use of
+	// the computer after it keeps the computer as it is.
+	since            time.Time
+	waitingForOthers atomic.Bool
+	stop             chan struct{}
+	once             sync.Once
 }
 
 func (p *pendingAfterBackup) cancel() { p.once.Do(func() { close(p.stop) }) }
@@ -171,6 +175,48 @@ func (p *pendingAfterBackup) wait(d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
+}
+
+// afterBackupSleptGap: wall time this much longer than a wait means the
+// computer slept during it. afterBackupNow is the wall clock (tests move it).
+var (
+	afterBackupSleptGap = 2 * time.Minute
+	afterBackupNow      = time.Now
+)
+
+// waitAwake waits d in steps of poll, watching the clock; false when the
+// action was cancelled, or the computer slept meanwhile (slept is then set).
+// The computer is kept awake while an action waits, so it sleeps only when
+// someone puts it to sleep, or closes a laptop's lid: what was asked before
+// then is dropped, or a later wake would carry it out on whoever woke it.
+func (p *pendingAfterBackup) waitAwake(d, poll time.Duration, slept *bool) bool {
+	for d > 0 {
+		step := poll
+		if step <= 0 || step > d {
+			step = d
+		}
+		before := afterBackupNow().Round(0) // wall clock: it counts the time asleep
+		if !p.wait(step) {
+			return false
+		}
+		if afterBackupNow().Round(0).Sub(before) > step+afterBackupSleptGap {
+			*slept = true
+			return false
+		}
+		d -= step
+	}
+	return true
+}
+
+// keepAwakeForAfterBackup keeps the computer awake while an action waits; a
+// variable so the tests do not take the real system's request.
+var keepAwakeForAfterBackup = func(set, action string) func() {
+	end, err := preventSleep(product().Title + ": waiting to " + afterBackupInfinitive(action) + " after a backup")
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("[After backup] %s: %v: Windows may put the computer to sleep before it %s", set, err, afterBackupVerb(action)))
+		return func() {}
+	}
+	return end
 }
 
 // afterBackups are the actions waiting in this process, one per set: a set's
@@ -298,6 +344,14 @@ func (a *App) startAfterBackup(job ScheduledJob, run *batteryRunInfo) {
 	normalizeAfterBackup(&job)
 	wait := time.Duration(job.AfterBackupWait) * afterBackupMinute
 	p := registerAfterBackup(job, action, time.Now().Add(wait))
+	switch {
+	case run != nil && !run.wokenAt.IsZero():
+		p.since = run.wokenAt
+	case run != nil && !run.startedAt.IsZero():
+		p.since = run.startedAt
+	default:
+		p.since = time.Now()
+	}
 	if job.AfterBackupWait > 0 {
 		writeDebugLog(fmt.Sprintf("[After backup] %s: the computer %s in %d minute(s), at about %s, once no other backup or restore is running, unless cancelled",
 			job.Name, afterBackupVerb(action), job.AfterBackupWait, p.at.Format("15:04")))
@@ -320,13 +374,22 @@ func setIsRunning(setID string) bool {
 // cancelled first. poll is how often it looks again at the runs.
 func (a *App) runAfterBackup(job ScheduledJob, p *pendingAfterBackup, wait, poll time.Duration) {
 	defer forgetAfterBackup(p)
-	if wait > 0 && !p.wait(wait) {
+	// Awake while it waits: Windows puts a computer woken by a timer back to
+	// sleep after 2 minutes with no one at it, before a longer wait was over.
+	defer keepAwakeForAfterBackup(job.Name, p.action)()
+	slept := false
+	defer func() {
+		if slept {
+			writeDebugLog(fmt.Sprintf("[After backup] %s: the computer slept while it waited to %s: dropped, so it is not done when it next wakes", job.Name, afterBackupInfinitive(p.action)))
+		}
+	}()
+	if wait > 0 && !p.waitAwake(wait, poll, &slept) {
 		return
 	}
 	// This run first: its set is held as running until the run is recorded,
 	// a moment after these actions start.
 	for setIsRunning(job.ID) {
-		if !p.wait(poll) {
+		if !p.waitAwake(poll, poll, &slept) {
 			return
 		}
 	}
@@ -334,7 +397,16 @@ func (a *App) runAfterBackup(job ScheduledJob, p *pendingAfterBackup, wait, poll
 		if !p.waitingForOthers.Swap(true) {
 			writeDebugLog(fmt.Sprintf("[After backup] %s: waiting for the other backups and restores to finish before the computer %s", job.Name, afterBackupVerb(p.action)))
 		}
-		if !p.wait(poll) {
+		if !p.waitAwake(poll, poll, &slept) {
+			return
+		}
+	}
+	// Not when someone has used the computer since it woke or the run began,
+	// unless the set says so: they are at it.
+	if !job.AfterBackupEvenIfInUse {
+		if at, used := usedSince(p.since); used {
+			writeDebugLog(fmt.Sprintf("[After backup] %s: someone used the computer at %s, after %s: it stays as it is", job.Name, at.Format("15:04:05"), p.since.Format("15:04:05")))
+			LogMessage("Backup", "info", fmt.Sprintf("%s: the computer stays as it is: someone has used it since it woke or the backup started.", job.Name), job.Name, MsgLogAfterBackupInUse, nil)
 			return
 		}
 	}

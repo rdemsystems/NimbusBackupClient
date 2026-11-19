@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestMain keeps every test away from this computer's real settings folder
@@ -25,6 +26,12 @@ func TestMain(m *testing.M) {
 	// A test that wakes a fake computer must not take the real system's
 	// sleep request; wake_hold_test.go tests the hold itself.
 	holdAwakeAfterWake = func(string, string) {}
+	// Nor while an action waits after a backup, and no test reads this
+	// computer's own record of wakes or who is using it: each test that needs
+	// one sets its own (wake_source_test.go, user_input_test.go).
+	keepAwakeForAfterBackup = func(string, string) func() { return func() {} }
+	latestWakeEvent = func() (wakeEvent, error) { return wakeEvent{}, errNoWakeRecord }
+	lastUserInput = func() (time.Time, bool) { return time.Time{}, false }
 
 	code := m.Run()
 

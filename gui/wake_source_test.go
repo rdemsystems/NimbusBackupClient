@@ -6,12 +6,6 @@ import (
 	"time"
 )
 
-// Tests never read this computer's own event log: a wake there could be
-// anything. Each test that needs a record of a wake sets one.
-func init() {
-	latestWakeEvent = func() (wakeEvent, error) { return wakeEvent{}, errNoWakeRecord }
-}
-
 // fakeWakeRecords stands in for the system's record of wakes, and for the
 // clock while looking for one.
 func fakeWakeRecords(t *testing.T, events ...func() (wakeEvent, error)) *int {

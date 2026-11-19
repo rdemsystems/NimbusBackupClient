@@ -899,6 +899,11 @@ function App() {
   const [afterBackup, setAfterBackup] = useState('')
   const [afterBackupWait, setAfterBackupWait] = useState(0)
   const [afterBackupOnlyIfWoken, setAfterBackupOnlyIfWoken] = useState(true)
+  // Ticked unless the set turned them off (afterBackupEvenIfStopped,
+  // afterBackupEvenIfInUse): not after a run stopped by hand, not when
+  // someone used the computer since it woke or the run began.
+  const [afterBackupNotIfStopped, setAfterBackupNotIfStopped] = useState(true)
+  const [afterBackupNotIfInUse, setAfterBackupNotIfInUse] = useState(true)
   const [powerInfo, setPowerInfo] = useState(null)
   useEffect(() => {
     if (!GetPowerActionsInfo) return
@@ -910,8 +915,11 @@ function App() {
   const presetAfterBackup = (job) => {
     const choice = job && ['sleep', 'hibernate', 'shutdown'].includes(job.afterBackup) ? job.afterBackup : (job && job.shutdownAfter ? 'shutdown' : '')
     setAfterBackup(choice)
-    setAfterBackupWait(choice && job ? (job.afterBackupWait || 0) : 0)
+    // A minute to begin with, once one is chosen: time to cancel.
+    setAfterBackupWait(choice && job ? (job.afterBackupWait || 0) : 1)
     setAfterBackupOnlyIfWoken(choice && job ? !!job.afterBackupOnlyIfWoken : true)
+    setAfterBackupNotIfStopped(!(choice && job && job.afterBackupEvenIfStopped))
+    setAfterBackupNotIfInUse(!(choice && job && job.afterBackupEvenIfInUse))
   }
   // Actions waiting after a backup, here or in the service, each shown as a
   // notice with Cancel while the window is open (polled every 5 s).
@@ -3280,6 +3288,8 @@ function App() {
         afterBackup: afterBackup,
         afterBackupWait: afterBackup ? Math.min(240, Math.max(0, parseInt(afterBackupWait, 10) || 0)) : 0,
         afterBackupOnlyIfWoken: !!afterBackup && scheduleMode !== 'manual' && wakeToRun && afterBackupOnlyIfWoken,
+        afterBackupEvenIfStopped: !!afterBackup && !afterBackupNotIfStopped,
+        afterBackupEvenIfInUse: !!afterBackup && !afterBackupNotIfInUse,
         shutdownAfter: afterBackup === 'shutdown',
         // Folder sets only: machine sets back up disk images.
         changeDetectionMode: backupType === 'directory' && changeDetectionMode !== 'legacy' ? changeDetectionMode : '',
@@ -6512,23 +6522,38 @@ function App() {
                     {hibernateReason}
                   </p>
                 )}
-                {afterBackup && (
-                  <div style={{marginTop: '8px', marginLeft: '24px'}} id="after-backup-options">
+                {/* Shown greyed while the computer stays as it is: disable, don't hide. */}
+                {(
+                  <div style={{marginTop: '8px', marginLeft: '24px', opacity: afterBackup ? 1 : 0.55}} id="after-backup-options">
                     <div className="sched-row">
                       <span>{waitBefore}</span>
-                      <input id="after-backup-wait" type="number" min={0} max={240} value={afterBackupWait} className="sched-field narrow"
+                      <input id="after-backup-wait" type="number" min={0} max={240} value={afterBackupWait} className="sched-field narrow" disabled={!afterBackup}
                         onChange={e => setAfterBackupWait(Math.max(0, Math.min(999, parseInt(e.target.value, 10) || 0)))}
                         onBlur={e => setAfterBackupWait(Math.min(240, Math.max(0, parseInt(e.target.value, 10) || 0)))} />
                       <span>{waitAfter}</span>
                     </div>
                     <div className="sched-row">
-                      <label className="sched-startup" style={wakeOn ? undefined : {opacity: 0.55, cursor: 'not-allowed'}}>
-                        <input type="checkbox" id="after-backup-only-woken" disabled={!wakeOn}
+                      <label className="sched-startup" style={wakeOn && afterBackup ? undefined : {opacity: 0.55, cursor: 'not-allowed'}}>
+                        <input type="checkbox" id="after-backup-only-woken" disabled={!wakeOn || !afterBackup}
                           checked={wakeOn && afterBackupOnlyIfWoken} onChange={e => setAfterBackupOnlyIfWoken(e.target.checked)} />
                         <span>{t('afterBackupOnlyIfWoken')}</span>
                       </label>
                     </div>
-                    {!wakeOn && <p className="sched-hint" id="after-backup-needs-wake">{t('afterBackupNeedsWake')}</p>}
+                    <div className="sched-row">
+                      <label className="sched-startup" style={afterBackup ? undefined : {cursor: 'not-allowed'}}>
+                        <input type="checkbox" id="after-backup-not-if-stopped" disabled={!afterBackup}
+                          checked={afterBackupNotIfStopped} onChange={e => setAfterBackupNotIfStopped(e.target.checked)} />
+                        <span>{t('afterBackupNotIfStopped')}</span>
+                      </label>
+                    </div>
+                    <div className="sched-row">
+                      <label className="sched-startup" style={afterBackup ? undefined : {cursor: 'not-allowed'}}>
+                        <input type="checkbox" id="after-backup-not-if-in-use" disabled={!afterBackup}
+                          checked={afterBackupNotIfInUse} onChange={e => setAfterBackupNotIfInUse(e.target.checked)} />
+                        <span>{t('afterBackupNotIfInUse')}</span>
+                      </label>
+                    </div>
+                    {afterBackup && !wakeOn && <p className="sched-hint" id="after-backup-needs-wake">{t('afterBackupNeedsWake')}</p>}
                     <p className="sched-hint" id="after-backup-wait-note">{t('afterBackupWaitNote')}</p>
                     {/* Sleep on Modern Standby is best effort too (#142): the same statement as under Wake. */}
                     {afterBackup === 'sleep' && wakeInfo && wakeInfo.modernStandby && (
