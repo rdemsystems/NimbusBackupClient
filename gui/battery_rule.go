@@ -57,6 +57,10 @@ const (
 	// wakeEarly: a wake this long before the wake timer was due still counts
 	// as the timer's (noteSchedulerTick).
 	wakeEarly = time.Minute
+	// shortSleepGap: a tick this long after the one before (a minute
+	// apart while awake) may follow a short sleep; the system's record of a
+	// wake tells (noteSchedulerTick).
+	shortSleepGap = 75 * time.Second
 )
 
 // batteryRuleAsSaved is the set's rule as stored, for checking it.
@@ -273,7 +277,8 @@ var wokenRun struct {
 }
 
 // noteSchedulerTick is called on every scheduler tick with the tick before:
-// a gap of wokenGap or more means the computer slept, and when the wake
+// a gap of wokenGap or more means the computer slept (a shorter one, when the
+// system recorded a wake within it), and when the wake
 // timer armed then was due within the gap, it woke the computer for its set.
 // Wall clock times are compared (Round(0)): a monotonic clock may not count
 // the time asleep.
@@ -282,8 +287,21 @@ func noteSchedulerTick(prev, now time.Time) {
 		return
 	}
 	p, n := prev.Round(0), now.Round(0)
-	if n.Sub(p) < wokenGap {
-		return
+	// A gap shorter than wokenGap is a sleep only if the system recorded a
+	// wake within it: found on a laptop 2026-11-19, hibernated 2.5 minutes
+	// before its wake timer, the wake was not seen, so the run had no hold
+	// and no wait for its server and started before the Wi-Fi was back. A
+	// tick late by less than shortSleepGap is just late.
+	var short *wakeVerdict
+	if gap := n.Sub(p); gap < wokenGap {
+		if gap < shortSleepGap {
+			return
+		}
+		v := whatWokeTheComputer(p)
+		if !v.known {
+			return
+		}
+		short = &v
 	}
 	// However it was woken, runs starting now first wait for the network
 	// to come back (network_wait.go).
@@ -309,7 +327,12 @@ func noteSchedulerTick(prev, now time.Time) {
 	}
 	// In the timer's window, but the system may say the power button woke it
 	// (wake_source.go).
-	if v := whatWokeTheComputer(p); v.known && !v.ours {
+	v := short
+	if v == nil {
+		w := whatWokeTheComputer(p)
+		v = &w
+	}
+	if v.known && !v.ours {
 		writeDebugLog(fmt.Sprintf("[Wake] the computer woke at about %s, around the wake timer for %q, but Windows says %s woke it: not woken by the timer", n.Format(time.RFC3339), t.Set, v.what))
 		return
 	}

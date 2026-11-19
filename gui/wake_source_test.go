@@ -123,6 +123,43 @@ func TestNoRecordOfAWakeIsNotAVerdict(t *testing.T) {
 	}
 }
 
+// Found on a laptop 2026-11-19: hibernated 2.5 minutes before its wake timer,
+// the ticks either side were less than wokenGap apart, so the timer's wake
+// was not seen. Windows' record of a wake within the gap tells it; without
+// one a late tick is just late, and a tick a little late is not looked into.
+func TestAShortSleepIsSeenFromTheRecordOfItsWake(t *testing.T) {
+	newBatteryTest(t)
+	var held []string
+	old := holdAwakeAfterWake
+	holdAwakeAfterWake = func(setID, _ string) { held = append(held, setID) }
+	t.Cleanup(func() { holdAwakeAfterWake = old })
+	run := time.Date(2026, 11, 19, 23, 15, 0, 0, time.Local)
+	wakeState.mu.Lock()
+	wakeState.target = wakeTarget{At: run.Add(-wakeLead), Run: run, SetID: "nl", Set: "New Laptop"}
+	wakeState.armed = true
+	wakeState.mu.Unlock()
+	lastTick := time.Date(2026, 11, 19, 23, 10, 24, 0, time.Local)
+	woke := time.Date(2026, 11, 19, 23, 13, 12, 0, time.Local) // 2m48s after the tick before
+
+	calls := fakeWakeRecords(t, record(wakeEvent{WakeTime: lastTick.Add(-time.Hour), SourceType: 1}))
+	noteSchedulerTick(lastTick, woke)
+	if len(held) != 0 {
+		t.Fatalf("a late tick with no wake recorded in the gap was taken as a wake: %v", held)
+	}
+
+	*calls = 0
+	noteSchedulerTick(lastTick, lastTick.Add(65*time.Second))
+	if *calls != 0 {
+		t.Errorf("a tick 5 seconds late looked for a wake %d times", *calls)
+	}
+
+	fakeWakeRecords(t, record(wakeEvent{WakeTime: woke, SourceType: wakeSourceTimer, SourceText: ownExeName()}))
+	noteSchedulerTick(lastTick, woke)
+	if len(held) != 1 || held[0] != "nl" {
+		t.Fatalf("the timer's wake after a short hibernate was missed: %v", held)
+	}
+}
+
 // Found on a laptop 2026-11-19: it did not wake from a Fast Startup
 // shutdown, was switched on with the power button 2m50s after its wake timer
 // was due, and was taken as woken for the set. Windows' record says the
