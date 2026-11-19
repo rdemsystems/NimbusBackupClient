@@ -26,14 +26,14 @@ Vad det innebär:
 
 - **Kod.** Nya funktioner och rättningar skickas till Salvanza som pull requests. Det här repot slutar bära en egen patchserie.
 - **Signerade byggen.** Det här repot fortsätter med det Salvanza ännu inte kan: det bygger Salvanzas releaser som **Nimbus Backup**, **kodsignerade av RDEM SYSTEMS**, med samma attestering och kontrollsummor som i dag.
-- **Befintliga installationer.** Bytet kommer som en vanlig MSI-uppgradering när pull requesterna nedan är sammanslagna och uppgraderingen från 0.4.x är testad. Till dess stöds 0.4.x fortsatt, med enbart kritiska rättningar.
+- **Befintliga installationer.** Bytet kommer som en vanlig MSI-uppgradering när en Salvanza-version innehåller pull requesterna nedan, som redan är sammanslagna, och uppgraderingen från 0.4.x är testad. Till dess stöds 0.4.x fortsatt, med enbart kritiska rättningar.
 
 **Pull requests till Salvanza som behövs före bytet:**
 
 | Pull request | Varför det spelar roll för Nimbus Backup-användare | Status |
 |---|---|---|
-| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Utan den kan Salvanza 2.0 inte återställa krypterade säkerhetskopior gjorda av Nimbus Backup 0.4.1 eller senare eller av `proxmox-backup-client`. Dessutom komprimeras krypterade säkerhetskopior. | ⏳ Öppen |
-| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Utan den skulle en dator som ursprungligen installerades med Nimbus Backup ≤ 0.3 efter uppgraderingen få tillbaka sina 0.3-inställningar, utan krypteringsnyckel. | ⏳ Öppen |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Utan den kan Salvanza 2.0 inte återställa krypterade säkerhetskopior gjorda av Nimbus Backup 0.4.1 eller senare eller av `proxmox-backup-client`. Dessutom komprimeras krypterade säkerhetskopior. | ✅ Sammanslagen, ännu inte släppt |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Utan den skulle en dator som ursprungligen installerades med Nimbus Backup ≤ 0.3 efter uppgraderingen få tillbaka sina 0.3-inställningar, utan krypteringsnyckel. | ✅ Sammanslagen, ännu inte släppt |
 
 Redan sammanslaget uppströms från det här repot: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (nyckelbaserad digest för GUI:ts krypterade säkerhetskopior), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (Host-huvud i upgrade-förfrågan), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Stopp mitt i en mapp), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (aktivera eller inaktivera ett jobb), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (engelska som reserv för saknade översättningar).
 

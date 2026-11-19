@@ -26,14 +26,14 @@ Qué significa:
 
 - **Código.** Las nuevas funciones y correcciones van a Salvanza como pull requests. Este repositorio deja de mantener su propia serie de parches.
 - **Binarios firmados.** Este repositorio sigue haciendo lo que Salvanza aún no puede: compila las versiones de Salvanza como **Nimbus Backup**, **firmadas por RDEM SYSTEMS**, con la misma atestación y las mismas sumas de verificación que hoy.
-- **Instalaciones existentes.** El cambio llegará como una actualización MSI normal, cuando las pull requests de abajo estén integradas y la actualización desde 0.4.x esté probada. Hasta entonces, 0.4.x sigue soportada, solo con correcciones críticas.
+- **Instalaciones existentes.** El cambio llegará como una actualización MSI normal, cuando una versión de Salvanza incluya las pull requests de abajo, ya integradas, y la actualización desde 0.4.x esté probada. Hasta entonces, 0.4.x sigue soportada, solo con correcciones críticas.
 
 **Pull requests a Salvanza necesarias antes del cambio:**
 
 | Pull request | Por qué importa a los usuarios de Nimbus Backup | Estado |
 |---|---|---|
-| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Sin ella, Salvanza 2.0 no puede restaurar las copias cifradas hechas por Nimbus Backup 0.4.1 o posterior, ni por `proxmox-backup-client`. Además, las copias cifradas se comprimen. | ⏳ Abierta |
-| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Sin ella, un equipo instalado originalmente con Nimbus Backup ≤ 0.3 volvería tras la actualización con sus ajustes de la 0.3 y sin clave de cifrado. | ⏳ Abierta |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Sin ella, Salvanza 2.0 no puede restaurar las copias cifradas hechas por Nimbus Backup 0.4.1 o posterior, ni por `proxmox-backup-client`. Además, las copias cifradas se comprimen. | ✅ Integrada, aún no publicada |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Sin ella, un equipo instalado originalmente con Nimbus Backup ≤ 0.3 volvería tras la actualización con sus ajustes de la 0.3 y sin clave de cifrado. | ✅ Integrada, aún no publicada |
 
 Ya integradas upstream desde este repositorio: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (digest con clave para las copias cifradas de la GUI), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (cabecera Host de la petición de upgrade), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Detener en mitad de una carpeta), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (activar o desactivar una tarea), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (respaldo en inglés para traducciones que faltan).
 

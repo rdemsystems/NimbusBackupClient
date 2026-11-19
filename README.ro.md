@@ -26,14 +26,14 @@ Ce înseamnă asta:
 
 - **Codul.** Funcțiile noi și corecturile merg la Salvanza ca pull requests. Acest depozit nu mai întreține propria serie de patch-uri.
 - **Build-uri semnate.** Acest depozit continuă să facă ce Salvanza nu poate încă: construiește versiunile Salvanza ca **Nimbus Backup**, **semnate de RDEM SYSTEMS**, cu aceeași atestare și aceleași sume de control ca astăzi.
-- **Instalările existente.** Trecerea va veni ca o actualizare MSI obișnuită, după ce pull request-urile de mai jos sunt integrate și actualizarea de la 0.4.x este testată. Până atunci, 0.4.x rămâne suportată, doar cu corecturi critice.
+- **Instalările existente.** Trecerea va veni ca o actualizare MSI obișnuită, după ce o versiune Salvanza va include pull request-urile de mai jos, deja integrate, și actualizarea de la 0.4.x va fi testată. Până atunci, 0.4.x rămâne suportată, doar cu corecturi critice.
 
 **Pull requests către Salvanza necesare înainte de trecere:**
 
 | Pull request | De ce contează pentru utilizatorii Nimbus Backup | Stare |
 |---|---|---|
-| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Fără el, Salvanza 2.0 nu poate restaura copiile criptate făcute de Nimbus Backup 0.4.1 sau mai nou ori de `proxmox-backup-client`. În plus, copiile criptate sunt comprimate. | ⏳ Deschis |
-| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Fără el, un calculator instalat inițial cu Nimbus Backup ≤ 0.3 ar reveni după actualizare la setările din 0.3, fără cheie de criptare. | ⏳ Deschis |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Fără el, Salvanza 2.0 nu poate restaura copiile criptate făcute de Nimbus Backup 0.4.1 sau mai nou ori de `proxmox-backup-client`. În plus, copiile criptate sunt comprimate. | ✅ Integrat, încă nepublicat |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Fără el, un calculator instalat inițial cu Nimbus Backup ≤ 0.3 ar reveni după actualizare la setările din 0.3, fără cheie de criptare. | ✅ Integrat, încă nepublicat |
 
 Deja integrate upstream din acest depozit: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (digest cu cheie pentru copiile criptate din GUI), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (antetul Host al cererii de upgrade), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Oprire la mijlocul unui dosar), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (activarea sau dezactivarea unei sarcini), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (revenire la engleză pentru traducerile lipsă).
 

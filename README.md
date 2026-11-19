@@ -23,14 +23,14 @@ What this means:
 
 - **Code.** New features and fixes go to Salvanza as pull requests. This repository stops carrying its own patch series.
 - **Signed builds.** This repository keeps doing what Salvanza cannot do yet: it builds Salvanza's releases as **Nimbus Backup**, **code-signed by RDEM SYSTEMS**, with the same attestation and checksums as today.
-- **Existing installs.** The switch will ship as a normal MSI upgrade once the pull requests below are merged and the upgrade from 0.4.x has been tested. Until then, 0.4.x stays supported, with critical fixes only.
+- **Existing installs.** The switch will ship as a normal MSI upgrade once a Salvanza release includes the pull requests below, which are already merged, and the upgrade from 0.4.x has been tested. Until then, 0.4.x stays supported, with critical fixes only.
 
 **Pull requests to Salvanza needed before the switch:**
 
 | Pull request | Why it matters for Nimbus Backup users | Status |
 |---|---|---|
-| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Encrypted backups made since Nimbus Backup 0.4.1, or by `proxmox-backup-client`, cannot be restored by Salvanza 2.0 without it. Encrypted backups also get compressed. | ⏳ Open |
-| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Without it, a computer first installed with Nimbus Backup ≤ 0.3 would come back with its 0.3 settings and no encryption key after the upgrade. | ⏳ Open |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Encrypted backups made since Nimbus Backup 0.4.1, or by `proxmox-backup-client`, cannot be restored by Salvanza 2.0 without it. Encrypted backups also get compressed. | ✅ Merged, not yet released |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Without it, a computer first installed with Nimbus Backup ≤ 0.3 would come back with its 0.3 settings and no encryption key after the upgrade. | ✅ Merged, not yet released |
 
 Already merged upstream from this repository: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (keyed digest for encrypted GUI backups), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (upgrade request Host header), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Stop in the middle of a folder), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (enable or disable a job), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (English fallback for missing translations).
 

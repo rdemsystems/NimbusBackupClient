@@ -28,14 +28,14 @@ Nimbus Backup هو إصدار RDEM Systems من [Proxmox Backup Client GO](https
 
 - **الشيفرة.** تُرسل الميزات الجديدة والإصلاحات إلى Salvanza على شكل pull requests. يتوقف هذا المستودع عن حمل سلسلة تصحيحات خاصة به.
 - **إصدارات موقّعة.** يواصل هذا المستودع ما لا يستطيعه Salvanza بعد: يبني إصدارات Salvanza باسم **Nimbus Backup**، **موقّعة رقميًا من RDEM SYSTEMS**، مع شهادة المصدر وقيم التحقق نفسها كما اليوم.
-- **التثبيتات الحالية.** سيصل الانتقال كترقية MSI عادية بعد دمج طلبات السحب أدناه واختبار الترقية من 0.4.x. حتى ذلك الحين يبقى 0.4.x مدعومًا بالإصلاحات الحرجة فقط.
+- **التثبيتات الحالية.** سيصل الانتقال كترقية MSI عادية بعد صدور نسخة من Salvanza تتضمن طلبات السحب أدناه، وهي مدمجة بالفعل، واختبار الترقية من 0.4.x. حتى ذلك الحين يبقى 0.4.x مدعومًا بالإصلاحات الحرجة فقط.
 
 **طلبات السحب إلى Salvanza المطلوبة قبل الانتقال:**
 
 | طلب السحب | لماذا يهم مستخدمي Nimbus Backup | الحالة |
 |---|---|---|
-| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | بدونه لا يستطيع Salvanza 2.0 استعادة النسخ المشفّرة التي أنشأها Nimbus Backup 0.4.1 أو أحدث، أو `proxmox-backup-client`. كما تصبح النسخ المشفّرة مضغوطة. | ⏳ مفتوح |
-| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | بدونه، سيعود الحاسوب المثبَّت أصلًا بـ Nimbus Backup ≤ 0.3 بعد الترقية إلى إعدادات 0.3 ومن دون مفتاح التشفير. | ⏳ مفتوح |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | بدونه لا يستطيع Salvanza 2.0 استعادة النسخ المشفّرة التي أنشأها Nimbus Backup 0.4.1 أو أحدث، أو `proxmox-backup-client`. كما تصبح النسخ المشفّرة مضغوطة. | ✅ مدمج، لم يُصدر بعد |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | بدونه، سيعود الحاسوب المثبَّت أصلًا بـ Nimbus Backup ≤ 0.3 بعد الترقية إلى إعدادات 0.3 ومن دون مفتاح التشفير. | ✅ مدمج، لم يُصدر بعد |
 
 دُمجت سابقًا في المشروع الأصلي من هذا المستودع: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (بصمة بمفتاح للنسخ المشفّرة في الواجهة), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (ترويسة Host في طلب الترقية), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (الإيقاف في منتصف مجلد), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (تفعيل مهمة أو تعطيلها), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (الرجوع إلى الإنجليزية عند نقص الترجمة).
 

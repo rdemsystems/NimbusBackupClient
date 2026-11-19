@@ -28,14 +28,14 @@ Nimbus Backup نسخه‌ی RDEM Systems از [Proxmox Backup Client GO](https:/
 
 - **کد.** قابلیت‌ها و اصلاحات تازه به‌صورت pull request به Salvanza فرستاده می‌شوند. این مخزن دیگر مجموعهٔ وصله‌های خودش را نگه نمی‌دارد.
 - **نسخه‌های امضاشده.** این مخزن کاری را ادامه می‌دهد که Salvanza هنوز نمی‌تواند: نسخه‌های Salvanza را با نام **Nimbus Backup** می‌سازد، **با امضای کد RDEM SYSTEMS**، همراه با همان گواهی منشأ و چک‌سام‌های امروز.
-- **نصب‌های موجود.** جابه‌جایی پس از ادغام pull requestهای زیر و آزمودن ارتقا از 0.4.x، به‌صورت یک ارتقای معمولی MSI منتشر می‌شود. تا آن زمان 0.4.x فقط با اصلاحات حیاتی پشتیبانی می‌شود.
+- **نصب‌های موجود.** جابه‌جایی پس از انتشار نسخه‌ای از Salvanza که pull requestهای زیر را (که اکنون ادغام شده‌اند) در بر دارد و آزمودن ارتقا از 0.4.x، به‌صورت یک ارتقای معمولی MSI منتشر می‌شود. تا آن زمان 0.4.x فقط با اصلاحات حیاتی پشتیبانی می‌شود.
 
 **pull requestهایی به Salvanza که پیش از جابه‌جایی لازم‌اند:**
 
 | Pull request | چرا برای کاربران Nimbus Backup مهم است | وضعیت |
 |---|---|---|
-| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | بدون آن، Salvanza 2.0 نمی‌تواند پشتیبان‌های رمزنگاری‌شدهٔ Nimbus Backup 0.4.1 به بعد یا `proxmox-backup-client` را بازیابی کند. افزون بر این، پشتیبان‌های رمزنگاری‌شده فشرده هم می‌شوند. | ⏳ باز |
-| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | بدون آن، رایانه‌ای که در ابتدا با Nimbus Backup ≤ 0.3 نصب شده، پس از ارتقا به تنظیمات 0.3 و بدون کلید رمزنگاری بازمی‌گشت. | ⏳ باز |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | بدون آن، Salvanza 2.0 نمی‌تواند پشتیبان‌های رمزنگاری‌شدهٔ Nimbus Backup 0.4.1 به بعد یا `proxmox-backup-client` را بازیابی کند. افزون بر این، پشتیبان‌های رمزنگاری‌شده فشرده هم می‌شوند. | ✅ ادغام شده، هنوز منتشر نشده |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | بدون آن، رایانه‌ای که در ابتدا با Nimbus Backup ≤ 0.3 نصب شده، پس از ارتقا به تنظیمات 0.3 و بدون کلید رمزنگاری بازمی‌گشت. | ✅ ادغام شده، هنوز منتشر نشده |
 
 از این مخزن پیش‌تر در بالادست ادغام شده‌اند: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (چکیدهٔ کلیددار برای پشتیبان‌های رمزنگاری‌شدهٔ رابط گرافیکی), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (سرآیند Host در درخواست ارتقا), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (توقف در میانهٔ یک پوشه), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (فعال یا غیرفعال کردن یک کار), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (بازگشت به انگلیسی برای ترجمه‌های ناموجود).
 

@@ -26,14 +26,14 @@ Nimbus Backup 是 RDEM Systems 对 [Proxmox Backup Client GO](https://github.com
 
 - **代码。** 新功能和修复以 pull request 的形式提交给 Salvanza。本仓库不再维护自己的补丁系列。
 - **签名构建。** 本仓库继续做 Salvanza 目前还做不到的事：将 Salvanza 的发布版构建为 **Nimbus Backup**，**由 RDEM SYSTEMS 代码签名**，并提供与现在相同的构建证明和校验和。
-- **现有安装。** 待下列 pull request 合并、且从 0.4.x 的升级经过测试后，切换将以普通 MSI 升级的方式发布。在此之前，0.4.x 继续受支持，仅提供关键修复。
+- **现有安装。** 待 Salvanza 发布包含下列 pull request（均已合并）的版本、且从 0.4.x 的升级经过测试后，切换将以普通 MSI 升级的方式发布。在此之前，0.4.x 继续受支持，仅提供关键修复。
 
 **切换前需要合并到 Salvanza 的 pull request：**
 
 | Pull request | 对 Nimbus Backup 用户的意义 | 状态 |
 |---|---|---|
-| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | 没有它，Salvanza 2.0 无法恢复 Nimbus Backup 0.4.1 及以后版本或 `proxmox-backup-client` 制作的加密备份。此外，加密备份也会被压缩。 | ⏳ 待合并 |
-| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | 没有它，最初以 Nimbus Backup ≤ 0.3 安装的电脑在升级后会回到 0.3 时期的设置，且没有加密密钥。 | ⏳ 待合并 |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | 没有它，Salvanza 2.0 无法恢复 Nimbus Backup 0.4.1 及以后版本或 `proxmox-backup-client` 制作的加密备份。此外，加密备份也会被压缩。 | ✅ 已合并（尚未发布） |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | 没有它，最初以 Nimbus Backup ≤ 0.3 安装的电脑在升级后会回到 0.3 时期的设置，且没有加密密钥。 | ✅ 已合并（尚未发布） |
 
 本仓库已被上游合并的 PR： [#115](https://github.com/Salvanza/salvanza_client/pull/115) (GUI 加密备份使用带密钥的摘要), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (升级请求的 Host 头), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (在文件夹中途停止), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (启用或禁用任务), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (缺失翻译时回退到英文).
 

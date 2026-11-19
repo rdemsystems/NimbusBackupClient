@@ -23,14 +23,14 @@ Concrètement :
 
 - **Le code.** Les nouvelles fonctions et les correctifs partent vers Salvanza sous forme de pull requests. Ce dépôt cesse de porter sa propre série de patchs.
 - **Les binaires signés.** Ce dépôt continue de faire ce que Salvanza ne fait pas encore : il compile les versions de Salvanza en **Nimbus Backup**, **signées par RDEM SYSTEMS**, avec la même attestation et les mêmes sommes de contrôle qu'aujourd'hui.
-- **Les installations existantes.** Le passage se fera par une mise à jour MSI classique, une fois les pull requests ci-dessous intégrées et la mise à jour depuis la 0.4.x testée. D'ici là, la 0.4.x reste supportée, pour les correctifs critiques uniquement.
+- **Les installations existantes.** Le passage se fera par une mise à jour MSI classique, une fois qu'une version de Salvanza contiendra les pull requests ci-dessous, déjà intégrées, et que la mise à jour depuis la 0.4.x aura été testée. D'ici là, la 0.4.x reste supportée, pour les correctifs critiques uniquement.
 
 **Pull requests à intégrer dans Salvanza avant le passage :**
 
 | Pull request | Pourquoi c'est important pour les utilisateurs de Nimbus Backup | État |
 |---|---|---|
-| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Sans elle, Salvanza 2.0 ne peut pas restaurer les sauvegardes chiffrées faites depuis Nimbus Backup 0.4.1 ou par `proxmox-backup-client`. Les sauvegardes chiffrées sont en outre compressées. | ⏳ Ouverte |
-| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Sans elle, un poste installé à l'origine avec Nimbus Backup ≤ 0.3 retrouverait après la mise à jour ses réglages de la 0.3, sans clé de chiffrement. | ⏳ Ouverte |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Sans elle, Salvanza 2.0 ne peut pas restaurer les sauvegardes chiffrées faites depuis Nimbus Backup 0.4.1 ou par `proxmox-backup-client`. Les sauvegardes chiffrées sont en outre compressées. | ✅ Intégrée, pas encore publiée |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Sans elle, un poste installé à l'origine avec Nimbus Backup ≤ 0.3 retrouverait après la mise à jour ses réglages de la 0.3, sans clé de chiffrement. | ✅ Intégrée, pas encore publiée |
 
 Déjà intégrées en amont depuis ce dépôt : [#115](https://github.com/Salvanza/salvanza_client/pull/115) (empreinte avec clé pour les sauvegardes chiffrées de la GUI), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (en-tête Host de la requête d'upgrade), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Arrêt au milieu d'un dossier), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (activer ou désactiver une tâche), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (repli sur l'anglais pour les traductions manquantes).
 

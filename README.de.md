@@ -26,14 +26,14 @@ Was das bedeutet:
 
 - **Code.** Neue Funktionen und Korrekturen gehen als Pull Requests an Salvanza. Dieses Repository führt keine eigene Patch-Serie mehr.
 - **Signierte Builds.** Dieses Repository macht weiter, was Salvanza noch nicht kann: Es baut die Salvanza-Releases als **Nimbus Backup**, **von RDEM SYSTEMS code-signiert**, mit denselben Attestierungen und Prüfsummen wie heute.
-- **Bestehende Installationen.** Der Wechsel kommt als normales MSI-Upgrade, sobald die Pull Requests unten gemergt sind und das Upgrade von 0.4.x getestet ist. Bis dahin wird 0.4.x weiter unterstützt, nur mit kritischen Korrekturen.
+- **Bestehende Installationen.** Der Wechsel kommt als normales MSI-Upgrade, sobald eine Salvanza-Version die bereits gemergten Pull Requests unten enthält und das Upgrade von 0.4.x getestet ist. Bis dahin wird 0.4.x weiter unterstützt, nur mit kritischen Korrekturen.
 
 **Pull Requests an Salvanza, die vor dem Wechsel nötig sind:**
 
 | Pull Request | Warum es für Nimbus-Backup-Nutzer wichtig ist | Status |
 |---|---|---|
-| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Ohne ihn kann Salvanza 2.0 verschlüsselte Backups von Nimbus Backup ab 0.4.1 oder von `proxmox-backup-client` nicht wiederherstellen. Außerdem werden verschlüsselte Backups komprimiert. | ⏳ Offen |
-| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Ohne ihn käme ein Rechner, der ursprünglich mit Nimbus Backup ≤ 0.3 installiert wurde, nach dem Upgrade mit seinen 0.3-Einstellungen und ohne Verschlüsselungsschlüssel zurück. | ⏳ Offen |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | Ohne ihn kann Salvanza 2.0 verschlüsselte Backups von Nimbus Backup ab 0.4.1 oder von `proxmox-backup-client` nicht wiederherstellen. Außerdem werden verschlüsselte Backups komprimiert. | ✅ Gemergt, noch nicht veröffentlicht |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | Ohne ihn käme ein Rechner, der ursprünglich mit Nimbus Backup ≤ 0.3 installiert wurde, nach dem Upgrade mit seinen 0.3-Einstellungen und ohne Verschlüsselungsschlüssel zurück. | ✅ Gemergt, noch nicht veröffentlicht |
 
 Bereits upstream gemergt aus diesem Repository: [#115](https://github.com/Salvanza/salvanza_client/pull/115) (verschlüsselter Digest für GUI-Backups), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (Host-Header der Upgrade-Anfrage), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (Stopp mitten in einem Ordner), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (Job aktivieren oder deaktivieren), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (englischer Fallback für fehlende Übersetzungen).
 

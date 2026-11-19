@@ -26,14 +26,14 @@ Nimbus Backup は [Proxmox Backup Client GO](https://github.com/tizbac/proxmoxba
 
 - **コード。** 新機能と修正は pull request として Salvanza に送ります。このリポジトリは独自のパッチシリーズを持たなくなります。
 - **署名付きビルド。** このリポジトリは、Salvanza がまだできないことを続けます。Salvanza のリリースを **Nimbus Backup** としてビルドし、**RDEM SYSTEMS がコード署名**し、現在と同じ証明書（attestation）とチェックサムを付けます。
-- **既存のインストール。** 下記の pull request がマージされ、0.4.x からのアップグレードがテストされた後、通常の MSI アップグレードとして切り替えます。それまで 0.4.x は重大な修正のみでサポートを続けます。
+- **既存のインストール。** 下記の pull request（マージ済み）を含む Salvanza のリリースが出て、0.4.x からのアップグレードがテストされた後、通常の MSI アップグレードとして切り替えます。それまで 0.4.x は重大な修正のみでサポートを続けます。
 
 **切り替え前に必要な Salvanza への pull request：**
 
 | Pull request | Nimbus Backup ユーザーにとっての重要性 | 状態 |
 |---|---|---|
-| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | これがないと、Salvanza 2.0 は Nimbus Backup 0.4.1 以降または `proxmox-backup-client` で作成した暗号化バックアップを復元できません。また、暗号化バックアップも圧縮されるようになります。 | ⏳ レビュー待ち |
-| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | これがないと、最初に Nimbus Backup ≤ 0.3 でインストールしたコンピューターは、アップグレード後に 0.3 当時の設定に戻り、暗号化キーも失われます。 | ⏳ レビュー待ち |
+| [#148 — Compressed encrypted chunks: finish #145 with a None level, a snapshot format note and tests](https://github.com/Salvanza/salvanza_client/pull/148) | これがないと、Salvanza 2.0 は Nimbus Backup 0.4.1 以降または `proxmox-backup-client` で作成した暗号化バックアップを復元できません。また、暗号化バックアップも圧縮されるようになります。 | ✅ マージ済み（未リリース） |
+| [#146 — gui: take over Nimbus Backup 0.4's settings, not the 0.3 folder it copied](https://github.com/Salvanza/salvanza_client/pull/146) | これがないと、最初に Nimbus Backup ≤ 0.3 でインストールしたコンピューターは、アップグレード後に 0.3 当時の設定に戻り、暗号化キーも失われます。 | ✅ マージ済み（未リリース） |
 
 このリポジトリから上流にマージ済み： [#115](https://github.com/Salvanza/salvanza_client/pull/115) (GUI の暗号化バックアップに鍵付きダイジェスト), [#116](https://github.com/Salvanza/salvanza_client/pull/116) (アップグレード要求の Host ヘッダー), [#117](https://github.com/Salvanza/salvanza_client/pull/117) (フォルダーの途中での停止), [#118](https://github.com/Salvanza/salvanza_client/pull/118) (ジョブの有効化・無効化), [#119](https://github.com/Salvanza/salvanza_client/pull/119) (翻訳がない場合の英語フォールバック).
 
