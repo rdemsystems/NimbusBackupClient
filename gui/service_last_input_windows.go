@@ -8,11 +8,14 @@ import (
 	"strconv"
 )
 
+// isLastInputHelper: this program was started as the -last-input helper.
+func isLastInputHelper(args []string) bool { return len(args) == 2 && args[1] == lastInputArg }
+
 // runLastInputArg: -last-input is the service program run by the service
 // in a signed-in session (user_input_windows.go). It prints the milliseconds
 // since that session's last keyboard or mouse input and exits, 0 told, 1 not.
 func runLastInputArg(args []string) {
-	if len(args) != 2 || args[1] != lastInputArg {
+	if !isLastInputHelper(args) {
 		return
 	}
 	ms, err := sessionIdleMillis()

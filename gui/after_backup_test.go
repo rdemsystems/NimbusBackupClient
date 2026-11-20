@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"pbscommon"
 )
 
 // afterBackupTest stands in for sleeping, hibernating and shutting down (and
@@ -19,8 +21,9 @@ func newAfterBackupTest(t *testing.T) *afterBackupTest {
 	t.Helper()
 	at := &afterBackupTest{batteryTest: newBatteryTest(t), acted: make(chan string, 8)}
 	sleepComputer = func() error { at.acted <- afterBackupSleep; return nil }
-	oldHib, oldShut, oldMinute, oldPoll := hibernateComputer, shutdownComputerNow, afterBackupMinute, afterBackupPoll
+	oldHib, oldShut, oldMinute, oldPoll, oldCan := hibernateComputer, shutdownComputerNow, afterBackupMinute, afterBackupPoll, canHibernate
 	hibernateComputer = func() error { at.acted <- afterBackupHibernate; return nil }
+	canHibernate = func() pbscommon.HibernateCheck { return pbscommon.HibernateCheck{OK: true} }
 	shutdownComputerNow = func() (string, error) { at.acted <- afterBackupShutdown; return "a test", nil }
 	afterBackupMinute, afterBackupPoll = 20*time.Millisecond, 5*time.Millisecond
 	dropAll := func() {
@@ -34,7 +37,7 @@ func newAfterBackupTest(t *testing.T) *afterBackupTest {
 	dropAll()
 	t.Cleanup(func() {
 		dropAll()
-		hibernateComputer, shutdownComputerNow, afterBackupMinute, afterBackupPoll = oldHib, oldShut, oldMinute, oldPoll
+		hibernateComputer, shutdownComputerNow, afterBackupMinute, afterBackupPoll, canHibernate = oldHib, oldShut, oldMinute, oldPoll, oldCan
 	})
 	return at
 }

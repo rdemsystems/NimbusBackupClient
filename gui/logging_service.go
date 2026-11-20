@@ -19,6 +19,12 @@ var (
 )
 
 func init() {
+	// The -last-input helper runs as the signed-in user (user_input_windows.go)
+	// and writes no log: a standard user cannot open the service's, and an
+	// administrator would write it alongside the service.
+	if isLastInputHelper(os.Args) {
+		return
+	}
 	// Setup log directory for SERVICE
 	if testing.Testing() {
 		logDir = testLogDir()

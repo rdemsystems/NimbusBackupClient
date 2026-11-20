@@ -130,9 +130,17 @@ func idleMillisInSession(session uint32) (uint32, error) {
 	if err := windows.GetExitCodeProcess(pi.Process, &code); err == nil && code != 0 {
 		return 0, fmt.Errorf("it said: %s", strings.TrimSpace(string(data)))
 	}
-	ms, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 32)
+	return parseLastInputOutput(string(data))
+}
+
+// parseLastInputOutput reads the milliseconds from the helper's last line:
+// anything it printed before that (a warning) is left aside.
+func parseLastInputOutput(out string) (uint32, error) {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	ms, err := strconv.ParseUint(last, 10, 32)
 	if err != nil {
-		return 0, fmt.Errorf("it printed %q", strings.TrimSpace(string(data)))
+		return 0, fmt.Errorf("it printed %q", strings.TrimSpace(out))
 	}
 	return uint32(ms), nil
 }

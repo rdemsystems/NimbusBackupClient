@@ -1,9 +1,13 @@
 package main
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"pbscommon"
 )
 
 // Found on a laptop 2026-11-19: Stop pressed during a run the computer was
@@ -163,6 +167,35 @@ func TestAfterBackupDroppedWhenTheComputerSleptMeanwhile(t *testing.T) {
 	defer mu.Unlock()
 	if held != 1 || let != 1 {
 		t.Errorf("kept awake %d times, let go %d times, want once each", held, let)
+	}
+}
+
+// Found on a VM 2026-11-20 with hibernation off: a set told to hibernate
+// logged "hibernates now" and did nothing, without a word. It now says why,
+// and does not try.
+func TestAfterBackupHibernateThatCannotIsReported(t *testing.T) {
+	at := newAfterBackupTest(t)
+	a := &App{}
+	canHibernate = func() pbscommon.HibernateCheck { return pbscommon.HibernateCheck{Why: pbscommon.HibernateOff} }
+	a.carryOutAfterBackup(afterSet(afterBackupHibernate, 0, false), afterBackupHibernate)
+	if got := at.actedWithin(100 * time.Millisecond); got != "" {
+		t.Fatalf("it tried to %s anyway", got)
+	}
+	log, err := a.GetMessageLog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range log {
+		if e.MessageKey == MsgLogAfterBackupFailed && strings.Contains(fmt.Sprint(e.MessageParams["error"]), "hibernation is turned off") {
+			found = true
+		}
+		if e.MessageKey == MsgLogAfterBackupHibernate {
+			t.Error("the Message Log says it hibernates, though it cannot")
+		}
+	}
+	if !found {
+		t.Errorf("no line saying why it did not hibernate in %+v", log)
 	}
 }
 

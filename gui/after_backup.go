@@ -404,10 +404,16 @@ func (a *App) runAfterBackup(job ScheduledJob, p *pendingAfterBackup, wait, poll
 	// Not when someone has used the computer since it woke or the run began,
 	// unless the set says so: they are at it.
 	if !job.AfterBackupEvenIfInUse {
-		if at, used := usedSince(p.since); used {
+		at, used := usedSince(p.since)
+		if used {
 			writeDebugLog(fmt.Sprintf("[After backup] %s: someone used the computer at %s, after %s: it stays as it is", job.Name, at.Format("15:04:05"), p.since.Format("15:04:05")))
 			LogMessage("Backup", "info", fmt.Sprintf("%s: the computer stays as it is: someone has used it since it woke or the backup started.", job.Name), job.Name, MsgLogAfterBackupInUse, nil)
 			return
+		}
+		if at.IsZero() {
+			writeDebugLog(fmt.Sprintf("[After backup] %s: no one is known to be using the computer (no one signed in, or no way to tell)", job.Name))
+		} else {
+			writeDebugLog(fmt.Sprintf("[After backup] %s: the computer was last used at %s, before %s", job.Name, at.Format("2006-01-02 15:04:05"), p.since.Format("15:04:05")))
 		}
 	}
 	if !claimAfterBackup(p) {
@@ -421,6 +427,18 @@ func (a *App) runAfterBackup(job ScheduledJob, p *pendingAfterBackup, wait, poll
 // so a set that wakes the computer still runs on time, and the system's wake
 // alarm is checked to match it (syncWakeAlarm) before the call is made.
 func (a *App) carryOutAfterBackup(job ScheduledJob, action string) {
+	// The app offers Hibernate only where it works, but a set saved otherwise
+	// (a settings file, the API), or on a computer whose hibernation was
+	// turned off since, was found to log "hibernates now" and do nothing at
+	// all (a VM 2026-11-20): say why instead, and only that.
+	if action == afterBackupHibernate {
+		if c := canHibernate(); !c.OK {
+			writeDebugLog(fmt.Sprintf("[After backup] %s: not hibernated, it stays as it is: %s", job.Name, c.Reason()))
+			LogMessage("Backup", "warning", fmt.Sprintf("%s: the computer did not go to sleep, hibernate or shut down after the backup: %s", job.Name, c.Reason()),
+				job.Name, MsgLogAfterBackupFailed, msgParams{"error": c.Reason()})
+			return
+		}
+	}
 	writeDebugLog(fmt.Sprintf("[After backup] %s: the computer %s now", job.Name, afterBackupVerb(action)))
 	LogMessage("Backup", "info", fmt.Sprintf("%s: the computer %s after the backup, as this set is set to do.", job.Name, afterBackupVerb(action)),
 		job.Name, afterBackupLogKey[action], nil)
