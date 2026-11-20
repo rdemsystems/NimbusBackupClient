@@ -7,7 +7,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
-// openScheduleStep opens the first set (Documents) at its Schedule step.
+// openScheduleStep opens the first set (Documents) at its When to run step.
 func openScheduleStep(h *harness) {
 	h.key(tcell.KeyEnter, 0)
 	h.waitFor("Edit Backup Set")
@@ -16,12 +16,12 @@ func openScheduleStep(h *harness) {
 }
 
 // With a power plan that does not let timers wake a laptop on battery, the
-// Schedule step says so while Wake is ticked, and its button has the service
+// When to run step says so while Wake is ticked, and its button has the service
 // turn wake timers on.
 func TestEditorOffersToEnableWakeTimers(t *testing.T) {
 	be := newDemoBackend()
 	be.wake = WakeInfo{OnMains: true, Alert: "battery"}
-	h := newHarnessWith(t, be, 130, 44)
+	h := newHarnessWith(t, be, 130, 58)
 	openScheduleStep(h)
 	if !strings.Contains(h.screen(), "Enable wake timers on battery") {
 		t.Fatalf("no button to enable wake timers:\n%s", h.screen())
@@ -29,8 +29,9 @@ func TestEditorOffersToEnableWakeTimers(t *testing.T) {
 	if strings.Contains(h.screen(), "This computer's power") {
 		t.Errorf("the alert shows while Wake is not ticked:\n%s", h.screen())
 	}
-	// down to Wake: unit, every, at, days, wake
-	for i := 0; i < 5; i++ {
+	// down to Wake: unit, every, at, days, if unreachable, wait, startup,
+	// server, at most every, not metered, wake
+	for i := 0; i < 11; i++ {
 		h.key(tcell.KeyTab, 0)
 	}
 	h.typ(' ')
@@ -54,13 +55,13 @@ func TestEditorOffersToEnableWakeTimers(t *testing.T) {
 	}
 }
 
-// On a Modern Standby computer the Schedule step says, while Wake is ticked,
+// On a Modern Standby computer the When to run step says, while Wake is ticked,
 // that waking is best effort and that hibernate is the reliable way (#142);
 // there is nothing to turn on, so no button.
 func TestEditorSaysWakingIsBestEffortOnModernStandby(t *testing.T) {
 	be := newDemoBackend()
 	be.wake = WakeInfo{OnMains: true, OnBattery: true, ModernStandby: true}
-	h := newHarnessWith(t, be, 130, 60)
+	h := newHarnessWith(t, be, 130, 76)
 	openScheduleStep(h)
 	if strings.Contains(h.screen(), "best effort") {
 		t.Errorf("the statement shows while Wake is not ticked:\n%s", h.screen())
@@ -68,7 +69,7 @@ func TestEditorSaysWakingIsBestEffortOnModernStandby(t *testing.T) {
 	if strings.Contains(h.screen(), "Enable wake timers") {
 		t.Errorf("a wake timer button with nothing to enable:\n%s", h.screen())
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 11; i++ {
 		h.key(tcell.KeyTab, 0)
 	}
 	h.typ(' ')
@@ -79,7 +80,7 @@ func TestEditorSaysWakingIsBestEffortOnModernStandby(t *testing.T) {
 
 // No alert where the power plan lets timers wake the computer.
 func TestEditorHasNoWakeAlertWhenTimersMayWake(t *testing.T) {
-	h := newHarness(t, 130, 44)
+	h := newHarness(t, 130, 58)
 	openScheduleStep(h)
 	if strings.Contains(h.screen(), "Enable wake timers") {
 		t.Errorf("a wake timer button with nothing to enable:\n%s", h.screen())

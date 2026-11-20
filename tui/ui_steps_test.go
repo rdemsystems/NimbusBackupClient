@@ -55,7 +55,7 @@ func TestStepRowsOnTheScreens(t *testing.T) {
 	h.typ('n')
 	h.waitFor("What should the new")
 	h.key(tcell.KeyEnter, 0)
-	h.waitFor("General > Schedule > Options")
+	h.waitFor("General > When to run > Options")
 	h.key(tcell.KeyEscape, 0)
 
 	h.typ('5')

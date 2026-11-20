@@ -212,17 +212,33 @@ func scheduleText(m map[string]interface{}) string {
 		return "manual"
 	}
 	var parts []string
+	// "When the server can be reached" (gui/server_trigger.go).
+	server := ""
+	if st, ok := m["serverTrigger"].(map[string]interface{}); ok && boolean(st, "enabled") {
+		h := int(num(st, "everyHours"))
+		if h <= 0 {
+			h = 24
+		}
+		server = fmt.Sprintf("when the server answers, at most every %dh", h)
+	}
 	if arr, ok := m["schedules"].([]interface{}); ok {
 		for _, s := range arr {
 			sm, _ := s.(map[string]interface{})
 			if sm == nil || sm["enabled"] == false {
 				continue
 			}
-			parts = append(parts, oneSchedule(sm))
+			text := oneSchedule(sm)
+			if str(sm, "ifUnreachable") == "wait" {
+				text += " (waits for the server)"
+			}
+			parts = append(parts, text)
 		}
-		if len(arr) > 0 && len(parts) == 0 {
+		if len(arr) > 0 && len(parts) == 0 && server == "" {
 			return "all schedules off"
 		}
+	}
+	if server != "" {
+		parts = append(parts, server)
 	}
 	if len(parts) == 0 {
 		parts = append(parts, legacySchedule(m))

@@ -75,7 +75,7 @@ func TestFormPanelsAreNotNumbered(t *testing.T) {
 	h.waitFor("What should the new")
 	h.key(tcell.KeyEnter, 0)
 	h.waitFor("New Backup Set")
-	for _, bad := range []string{"1  General", "2  Schedule", "3  Options"} {
+	for _, bad := range []string{"1  General", "2  When to run", "3  Options"} {
 		if strings.Contains(h.screen(), bad) {
 			t.Errorf("the Backup Set form's panel still says %q", bad)
 		}

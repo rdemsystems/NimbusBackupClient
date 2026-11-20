@@ -40,6 +40,16 @@ type editor struct {
 	unit                *tview.DropDown
 	every, at, weekdayF *tview.InputField
 	wake                *tview.Checkbox // wakeToRun: wake the computer from sleep for its runs (#140)
+	// the first schedule's "If the server cannot be reached at the time":
+	// record the run as failed, or wait up to waitHours for the server
+	unreach   *tview.DropDown
+	waitHours *tview.InputField
+	// the other triggers: when the computer starts (runAtStartup), and when
+	// the server can be reached (serverTrigger), at most every N hours, not
+	// on metered connections
+	startup                    *tview.Checkbox
+	serverOn, serverNotMetered *tview.Checkbox
+	serverEvery                *tview.InputField
 	// the set's On battery rule: start anyway, only at a charge of at least
 	// a level, or wait for mains; and cancel a running backup below a level
 	battery                    *tview.DropDown
@@ -273,9 +283,9 @@ func (e *editor) build() {
 	f1.AddFormItem(e.server)
 	f1.SetTitle(" General ")
 
-	// ---- step 2: schedule
+	// ---- step 2: when to run
 	sc := e.firstSchedule()
-	e.mode = tview.NewDropDown().SetLabel("Run ").SetOptions([]string{"On a schedule", "Manually only"}, nil)
+	e.mode = tview.NewDropDown().SetLabel("Run ").SetOptions([]string{"On its triggers (below), and by hand", "Only by hand (Run Now)"}, nil)
 	if e.set.Manual {
 		e.mode.SetCurrentOption(1)
 	} else {
@@ -285,6 +295,27 @@ func (e *editor) build() {
 	e.every = tview.NewInputField().SetLabel("Every (number) ").SetText(strconv.Itoa(every(sc))).SetFieldWidth(6)
 	e.at = tview.NewInputField().SetLabel("At (HH:MM) ").SetText(str(sc, "at")).SetFieldWidth(8)
 	e.weekdayF = tview.NewInputField().SetLabel("Only on days ").SetText(strings.Join(strList(sc, "weekdays"), ",")).SetFieldWidth(32)
+	wait := int(num(sc, "waitHours"))
+	if wait <= 0 {
+		wait = 12
+	}
+	e.unreach = tview.NewDropDown().SetLabel("If the server cannot be reached at the time ").
+		SetOptions([]string{"Record the run as failed", "Wait, and run as soon as it can be reached"}, nil)
+	if str(sc, "ifUnreachable") == "wait" {
+		e.unreach.SetCurrentOption(1)
+	} else {
+		e.unreach.SetCurrentOption(0)
+	}
+	e.waitHours = tview.NewInputField().SetLabel("  Wait for up to (1 to 168 hours) ").SetText(strconv.Itoa(wait)).SetFieldWidth(4)
+	e.startup = tview.NewCheckbox().SetLabel("Also when the computer starts ").SetChecked(boolean(e.orig, "runAtStartup"))
+	st, _ := e.orig["serverTrigger"].(map[string]interface{})
+	everyH := int(num(st, "everyHours"))
+	if everyH <= 0 {
+		everyH = 24
+	}
+	e.serverOn = tview.NewCheckbox().SetLabel("Also when the server can be reached ").SetChecked(st != nil && boolean(st, "enabled"))
+	e.serverEvery = tview.NewInputField().SetLabel("  At most every (1 to 744 hours) ").SetText(strconv.Itoa(everyH)).SetFieldWidth(4)
+	e.serverNotMetered = tview.NewCheckbox().SetLabel("  Not on metered connections ").SetChecked(st != nil && boolean(st, "notMetered"))
 	e.wake = tview.NewCheckbox().SetLabel("Wake the computer from sleep or hibernate to run it ").SetChecked(boolean(e.orig, "wakeToRun"))
 	// A set saved before the rule existed has none of its fields: start
 	// anyway, never cancel.
@@ -301,11 +332,13 @@ func (e *editor) build() {
 	e.batteryStart = tview.NewInputField().SetLabel("  Start level (5 to 95 %) ").SetText(strconv.Itoa(start)).SetFieldWidth(4)
 	e.batteryCancel = tview.NewCheckbox().SetLabel("Cancel a running backup on battery below a charge ").SetChecked(boolean(e.orig, "batteryCancel"))
 	e.batteryBelow = tview.NewInputField().SetLabel("  Cancel level (0 to 99 %, 0 never) ").SetText(strconv.Itoa(below)).SetFieldWidth(4)
-	f2 := styleForm(tview.NewForm()).AddFormItem(e.mode).AddFormItem(e.unit).AddFormItem(e.every).AddFormItem(e.at).AddFormItem(e.weekdayF).AddFormItem(e.wake)
+	f2 := styleForm(tview.NewForm()).AddFormItem(e.mode).AddFormItem(e.unit).AddFormItem(e.every).AddFormItem(e.at).AddFormItem(e.weekdayF).
+		AddFormItem(e.unreach).AddFormItem(e.waitHours).AddFormItem(e.startup).
+		AddFormItem(e.serverOn).AddFormItem(e.serverEvery).AddFormItem(e.serverNotMetered).AddFormItem(e.wake)
 	e.addWakeAlert(f2)
 	f2.AddFormItem(e.battery).AddFormItem(e.batteryStart).AddFormItem(e.batteryCancel).AddFormItem(e.batteryBelow)
-	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept.\nWaking works from sleep (usually hibernate too), not from shut down.\nOn battery: laptops only; on mains the set always runs. A cancelled backup is not saved.", 70, 5, true, false)
-	f2.SetTitle(" Schedule ")
+	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept, as are network choices.\nThe server trigger counts from the last backup that worked.\nWaking works from sleep (usually hibernate too), not from shut down.\nOn battery: laptops only; on mains the set always runs. A cancelled backup is not saved.", 70, 6, true, false)
+	f2.SetTitle(" When to run ")
 
 	// ---- step 3: options
 	e.detect = tview.NewDropDown().SetLabel("Change detection ").SetOptions([]string{"legacy", "data", "metadata"}, nil).
@@ -496,7 +529,7 @@ func (e *editor) buildAfterBackup(f *tview.Form) {
 	woken := choice == "" || boolean(e.orig, "afterBackupOnlyIfWoken")
 	e.after = tview.NewDropDown().SetLabel("When the backup finishes, the computer ").SetOptions(choices, nil).SetCurrentOption(indexOf(afterModes, choice))
 	e.afterWait = tview.NewInputField().SetLabel("  After (0 to 240 minutes, 0 at once) ").SetText(strconv.Itoa(wait)).SetFieldWidth(4)
-	e.afterWoken = tview.NewCheckbox().SetLabel("  Only if this backup woke the computer (needs Wake, on Schedule) ").SetChecked(woken)
+	e.afterWoken = tview.NewCheckbox().SetLabel("  Only if this backup woke the computer (needs Wake, on When to run) ").SetChecked(woken)
 	// Ticked unless the set turned them off: they keep the computer as it is
 	// for someone at it.
 	e.afterStopped = tview.NewCheckbox().SetLabel("  Not if the backup was stopped by hand ").SetChecked(!boolean(e.orig, "afterBackupEvenIfStopped"))
@@ -560,7 +593,7 @@ func (e *editor) show(step int) {
 	e.step = step
 	e.pages.SwitchToPage(fmt.Sprint(step))
 	b := strings.Builder{}
-	b.WriteString(stepBar([]string{"General", "Schedule", "Options"}, step, false))
+	b.WriteString(stepBar([]string{"General", "When to run", "Options"}, step, false))
 	word := "Edit Backup Set"
 	if e.isNew {
 		word = "New Backup Set"
@@ -697,6 +730,17 @@ func (e *editor) document() (map[string]interface{}, error) {
 			delete(sc, "weekdays")
 		}
 		sc["enabled"] = true
+		if ui, _ := e.unreach.GetCurrentOption(); ui == 1 {
+			h, err := strconv.Atoi(strings.TrimSpace(e.waitHours.GetText()))
+			if err != nil || h < 1 || h > 168 {
+				return nil, fmt.Errorf("the wait for the server must be a whole number of hours from 1 to 168")
+			}
+			sc["ifUnreachable"] = "wait"
+			sc["waitHours"] = float64(h)
+		} else {
+			delete(sc, "ifUnreachable")
+			delete(sc, "waitHours")
+		}
 		var list []interface{}
 		if arr, ok := e.orig["schedules"].([]interface{}); ok && len(arr) > 0 {
 			list = append([]interface{}{sc}, arr[1:]...)
@@ -704,6 +748,24 @@ func (e *editor) document() (map[string]interface{}, error) {
 			list = []interface{}{sc}
 		}
 		doc["schedules"] = list
+	}
+	manual := doc["scheduleMode"] == "manual"
+	doc["runAtStartup"] = !manual && e.startup.IsChecked()
+	// The server trigger: kept (turned off) when unticked, so its networks
+	// and other choices come back with it.
+	st := copyMap(func() map[string]interface{} { m, _ := e.orig["serverTrigger"].(map[string]interface{}); return m }())
+	if e.serverOn.IsChecked() || st != nil {
+		if st == nil {
+			st = map[string]interface{}{}
+		}
+		h, err := strconv.Atoi(strings.TrimSpace(e.serverEvery.GetText()))
+		if err != nil || h < 1 || h > 744 {
+			return nil, fmt.Errorf("\"At most every\" for the server trigger must be a whole number of hours from 1 to 744")
+		}
+		st["enabled"] = e.serverOn.IsChecked()
+		st["everyHours"] = float64(h)
+		st["notMetered"] = e.serverNotMetered.IsChecked()
+		doc["serverTrigger"] = st
 	}
 	if err := e.applyAfterBackup(doc); err != nil {
 		return nil, err

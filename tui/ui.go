@@ -859,7 +859,7 @@ func (a *App) runOf(set Set) (api.BackupProgress, bool) {
 func (a *App) fillSets(t *tview.Table) {
 	keep, _ := t.GetSelection()
 	t.Clear()
-	header(t, "Name", "Type", "Schedule", "Next run", "Last run", "Result")
+	header(t, "Name", "Type", "When to run", "Next run", "Last run", "Result")
 	a.mu.Lock()
 	n := len(a.sets)
 	for i, s := range a.sets {
@@ -949,7 +949,7 @@ func (a *App) renderSetDetail() {
 		state = tag(colDim) + "disabled"
 	}
 	line("State", state)
-	line("Schedule", s.Schedule)
+	line("When to run", s.Schedule)
 	line("Next run", when(s.NextRun))
 	a.mu.Lock()
 	last, hasLast := a.lastResult(s)
