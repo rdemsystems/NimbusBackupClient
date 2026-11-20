@@ -38,6 +38,10 @@ var sleepComputer = pbscommon.SleepComputer
 // batteryCheckEvery is how often a running backup's cancel level is checked.
 var batteryCheckEvery = 30 * time.Second
 
+// ranLateAfter: a scheduled run starting this long after its time says so in
+// Reports.
+var ranLateAfter = 10 * time.Minute
+
 // sleepAfterHoldDelay gives the Reports entry and the logs a moment to be
 // written before the computer goes back to sleep.
 var sleepAfterHoldDelay = 5 * time.Second
@@ -370,6 +374,11 @@ type batteryRunInfo struct {
 	wokenAt   time.Time // zero unless the computer was woken for this run
 	heldAt    time.Time // zero unless the run was held back and ran late
 	heldPct   interface{}
+	// dueAt is when a scheduled run was due (zero for other runs), and
+	// notes say why it waited or ran late (server_trigger.go), for its
+	// Reports entry.
+	dueAt time.Time
+	notes []HistoryNote
 
 	mu        sync.Mutex
 	cancelled bool
@@ -633,6 +642,16 @@ func (a *App) applyBatteryToHistory(entry *JobHistory, info *batteryRunInfo) {
 		return
 	}
 	end := readBattery()
+	entry.Notes = append(entry.Notes, info.notes...)
+	// A scheduled run that started well after its time, with nothing else
+	// saying why (the computer was off or asleep, or another backup ran).
+	if !info.dueAt.IsZero() && info.heldAt.IsZero() && len(info.notes) == 0 && info.startedAt.Sub(info.dueAt) > ranLateAfter {
+		entry.Notes = append(entry.Notes, HistoryNote{
+			Key:    NoteRanLate,
+			Params: msgParams{"due": info.dueAt.Format(time.RFC3339), "start": info.startedAt.Format(time.RFC3339)},
+			Text:   fmt.Sprintf("Ran late: due at %s, started at %s.", info.dueAt.Format("Mon 15:04"), clock(info.startedAt)),
+		})
+	}
 	if !info.heldAt.IsZero() {
 		entry.Notes = append(entry.Notes, HistoryNote{
 			Key:    NoteBatteryRanLate,

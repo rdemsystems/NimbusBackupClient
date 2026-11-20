@@ -534,6 +534,19 @@ var apiCalls = map[string]func(a *App, args []json.RawMessage) (interface{}, err
 	"GetWakeTimerInfo": func(a *App, args []json.RawMessage) (interface{}, error) {
 		return wakeTimerInfoNow(), nil
 	},
+	// A set's "When to run" triggers (server_trigger.go): the networks the
+	// computer knows, and the server trigger's "Right now" panel, which needs
+	// the service's own copy of the servers and the run history.
+	"GetNetworkInfo": func(a *App, args []json.RawMessage) (interface{}, error) {
+		return a.GetNetworkInfo(), nil
+	},
+	"GetServerTriggerStatus": func(a *App, args []json.RawMessage) (interface{}, error) {
+		var j ScheduledJob
+		if err := arg(args, 0, &j); err != nil {
+			return nil, err
+		}
+		return a.GetServerTriggerStatus(j), nil
+	},
 	"EnableWakeTimers": func(a *App, args []json.RawMessage) (interface{}, error) {
 		var scope string
 		if err := arg(args, 0, &scope); err != nil {

@@ -149,28 +149,32 @@ func (a *App) jobServerAddress(job ScheduledJob) (name, addr string) {
 	return fmt.Sprintf("%s (%s)", name, addr), addr
 }
 
+// wokeWaitNoted: a run that waited this long for its server after a wake
+// says so in Reports.
+var wokeWaitNoted = 10 * time.Second
+
 // waitForServerAfterWake holds an automatic run of job, about to start soon
 // after the computer woke or this program started, until its PBS server can
 // be reached (waitForServer). Run now, and runs at other times, go straight
-// on. It returns why the run must not start when the server could not be
-// reached in that time, nil otherwise.
-func (a *App) waitForServerAfterWake(job ScheduledJob, trigger string) error {
+// on. It returns how long it waited, and why the run must not start when the
+// server could not be reached in that time (nil otherwise).
+func (a *App) waitForServerAfterWake(job ScheduledJob, trigger string) (time.Duration, error) {
 	if trigger == "manual" {
-		return nil
+		return 0, nil
 	}
 	why := resumedRecently(netNow())
 	if why == "" {
-		return nil
+		return 0, nil
 	}
 	name, addr := a.jobServerAddress(job)
 	if addr == "" {
-		return nil
+		return 0, nil
 	}
 	reachable, waited, err := waitForServer(name, addr, why)
 	if reachable {
-		return nil
+		return waited, nil
 	}
-	return fmt.Errorf("the backup did not start: %s could not be reached in the %s %s (%v)", name, formatDuration(waited.Round(time.Second)), why, err)
+	return waited, fmt.Errorf("the backup did not start: %s could not be reached in the %s %s (%v)", name, formatDuration(waited.Round(time.Second)), why, err)
 }
 
 // waitForServer tries addr every networkRetryEvery until it answers or

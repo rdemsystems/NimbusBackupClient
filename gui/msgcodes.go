@@ -81,6 +81,23 @@ const (
 	MsgLogBatteryCancelled      MessageKey = "msgBatteryCancelled"      // {min}, {pct}
 	MsgLogBatteryCancelledTwice MessageKey = "msgBatteryCancelledTwice" // {min}, {pct}
 
+	// A Backup Set's triggers and its schedules' server and network choices
+	// (gui/server_trigger.go). Reports entries:
+	MsgServerWaiting        MessageKey = "logServerWaiting"        // {time}, {until}
+	MsgServerWaitingNetwork MessageKey = "logServerWaitingNetwork" // {time}, {until}
+	MsgServerGaveUp         MessageKey = "logServerGaveUp"         // {name}, {since}, {until}
+	MsgNetworkSkipped       MessageKey = "logNetworkSkipped"       // {time}
+	MsgNetworkSkippedWoken  MessageKey = "logNetworkSkippedWoken"  // {time}
+	// Extra lines (JobHistory.Notes):
+	NoteServerWaited MessageKey = "noteServerWaited" // {due}, {start}
+	NoteWokeWaited   MessageKey = "noteWokeWaited"   // {secs}
+	NoteRanLate      MessageKey = "noteRanLate"      // {due}, {start}
+	// Message Log lines (after the set's name):
+	MsgLogServerWaiting      MessageKey = "msgServerWaiting"      // {until}
+	MsgLogServerGaveUp       MessageKey = "msgServerGaveUp"       // {since}
+	MsgLogNetworkSkipped     MessageKey = "msgNetworkSkipped"     // (none)
+	MsgLogServerTriggerStart MessageKey = "msgServerTriggerStart" // {hours}
+
 	// What the computer does after a Backup Set's run (gui/after_backup.go).
 	// Message Log lines (after the set's name):
 	MsgLogAfterBackupSleep     MessageKey = "msgAfterBackupSleep"     // (none)

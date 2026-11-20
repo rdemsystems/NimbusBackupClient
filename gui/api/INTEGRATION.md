@@ -361,6 +361,13 @@ button sends `POST /call/EnableWakeTimers` with `["battery"]` or `["all"]`: the 
 writes the plan, reads it back, notes the change in the Message Log and answers with the
 new state. Nothing changes without that call.
 
+A set's "When to run" tab reads the computer's networks with `POST /call/GetNetworkInfo`
+(`supported`, `current` [{`name`, `kind`}], `metered`, `meteredKnown`, `known` [{`name`,
+`kind`, `lastSeen`, `connected`}]; `kind` is `wired`, `wifi`, `vpn`, `mobile` or `other`), and
+its "When the server can be reached" trigger's Right now panel with
+`POST /call/GetServerTriggerStatus` and the set as edited (`checks` [{`ok`, `key`, `params`}],
+`verdict` `now`, `notYet` or `no`, `nextAt`). Neither changes anything.
+
 ### POST /backup/pause, POST /backup/resume, POST /backup/stop
 
 Act on the backup the service is running, whoever started it. No request body.

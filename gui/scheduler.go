@@ -118,6 +118,15 @@ type ScheduledJob struct {
 	// (normalizeJobSchedules). See schedules.go.
 	ScheduleMode string     `json:"scheduleMode,omitempty"`
 	Schedules    []Schedule `json:"schedules,omitempty"`
+	// ServerTrigger runs the set when its server can be reached, at most
+	// every so many hours (server_trigger.go). nil for a set without one,
+	// which is every set saved before it existed; an older app reading the
+	// file ignores it.
+	ServerTrigger *ServerTrigger `json:"serverTrigger,omitempty"`
+	// WaitingForServer is run state, not a setting: when a run of a schedule
+	// that waits for its server began waiting (RFC 3339), "" when none is.
+	// The set's card shows it; the run ends it, however it ends.
+	WaitingForServer string `json:"waitingForServer,omitempty"`
 
 	// Sets saved by the project's app before the fork was merged (1.2.0-rc)
 	// keep their server, machine kind and weekly or monthly schedule in these
@@ -365,6 +374,7 @@ func (a *App) SaveScheduledJob(job ScheduledJob) error {
 
 	// Set enabled by default
 	job.Enabled = true
+	job.WaitingForServer = ""
 
 	// Calculate next run
 	setNextRun(&job, time.Now())
@@ -524,7 +534,9 @@ func (a *App) UpdateScheduledJob(job ScheduledJob) error {
 			if job.LastRun == "" {
 				job.LastRun = j.LastRun
 			}
-			// Recalculate next run with the new schedules
+			// Recalculate next run with the new schedules; a run waiting
+			// for its server is no longer due (dropStaleServerHolds).
+			job.WaitingForServer = ""
 			setNextRun(&job, time.Now())
 			jobs[i] = job
 			found = true
@@ -577,6 +589,7 @@ func (a *App) SetScheduledJobEnabled(jobID string, enabled bool) error {
 	for i := range jobs {
 		if jobs[i].ID == jobID {
 			jobs[i].Enabled = enabled
+			jobs[i].WaitingForServer = ""
 			if enabled {
 				setNextRun(&jobs[i], time.Now())
 			}
@@ -1128,7 +1141,7 @@ func (a *App) checkAndRunScheduledJobs() {
 			// A run held back for the battery is due on every tick until the
 			// computer is plugged in: said once a quarter of an hour, not
 			// every minute.
-			if _, held := batteryHeld(job.ID); !held || verbose {
+			if _, held := batteryHeld(job.ID); (!held && job.WaitingForServer == "") || verbose {
 				writeDebugLog(fmt.Sprintf("[Scheduler] Executing scheduled job: %s", job.Name))
 			}
 			go a.executeScheduledJob(job, "scheduled")
@@ -1136,6 +1149,8 @@ func (a *App) checkAndRunScheduledJobs() {
 		}
 		a.retryHeldStartupRun(job)
 	}
+	// "When the server can be reached" (server_trigger.go).
+	a.checkServerTriggers(jobs, now)
 }
 
 // retryHeldStartupRun tries a run at startup held back for the battery
@@ -1182,6 +1197,16 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 	if !mayStart {
 		return
 	}
+	if trigger == "scheduled" {
+		if due, err := time.Parse(time.RFC3339, job.NextRun); err == nil {
+			battery.dueAt = due
+		}
+		// The schedule's server and network choices: the run may wait for
+		// its server, or be skipped on another network (server_trigger.go).
+		if !a.serverGate(job, battery, time.Now()) {
+			return
+		}
+	}
 	// Keep the computer awake until the run has started (#142): a computer
 	// woken by a timer goes back to sleep within minutes when left alone, and
 	// a run waiting for its server, or for its turn, then waited until
@@ -1202,12 +1227,20 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 	// not be back yet: an automatic run waits for its server first, here in
 	// its own goroutine (network_wait.go). A server still out of reach then:
 	// the run is not started.
-	if err := a.waitForServerAfterWake(job, trigger); err != nil {
-		writeDebugLog(fmt.Sprintf("Backup Set %s: %v", job.Name, err))
+	waited, werr := a.waitForServerAfterWake(job, trigger)
+	if werr != nil {
+		writeDebugLog(fmt.Sprintf("Backup Set %s: %v", job.Name, werr))
 		endAwake()
-		a.recordRunNotStarted(job, trigger, battery, err)
+		a.recordRunNotStarted(job, trigger, battery, werr)
 		a.recordJobRan(job)
 		return
+	}
+	if waited >= wokeWaitNoted && battery != nil {
+		secs := int(waited.Round(time.Second) / time.Second)
+		battery.notes = append(battery.notes, HistoryNote{
+			Key: NoteWokeWaited, Params: msgParams{"secs": secs},
+			Text: fmt.Sprintf("Waited %d s for the server after the computer woke or started.", secs),
+		})
 	}
 
 	writeDebugLog(fmt.Sprintf("Executing scheduled job: %s", job.Name))
@@ -1551,6 +1584,7 @@ func (a *App) recordJobRan(job ScheduledJob) {
 	for i, j := range jobs {
 		if j.ID == job.ID {
 			jobs[i].LastRun = time.Now().Format(time.RFC3339)
+			jobs[i].WaitingForServer = "" // any run ends a wait for the server
 			setNextRun(&jobs[i], time.Now())
 			found = true
 			break

@@ -41,6 +41,9 @@ func appWithServer() *App {
 	return &App{config: &Config{BaseURL: "https://192.168.0.242:8007"}}
 }
 
+// errOf is the error of waitForServerAfterWake, without how long it waited.
+func errOf(_ time.Duration, err error) error { return err }
+
 // Found on a laptop: woken with the power button, the held run started a
 // second after the wake and failed, the network not yet back. It now waits
 // for its server.
@@ -49,8 +52,12 @@ func TestNetworkWaitAfterWakeUntilTheServerAnswers(t *testing.T) {
 	start := woke.Add(time.Second)
 	f := newFakeNet(t, start, 3)
 	noteSchedulerTick(woke.Add(-8*time.Hour), woke) // asleep overnight
-	if err := appWithServer().waitForServerAfterWake(batterySet("plugged", 0, 0), "scheduled"); err != nil {
+	waited, err := appWithServer().waitForServerAfterWake(batterySet("plugged", 0, 0), "scheduled")
+	if err != nil {
 		t.Fatalf("the server answered, yet the run is not to start: %v", err)
+	}
+	if waited != 3*networkRetryEvery {
+		t.Errorf("said it waited %s, want %s", waited, 3*networkRetryEvery)
 	}
 	if len(f.dials) != 4 || f.dials[0] != "192.168.0.242:8007" {
 		t.Fatalf("tries %v, want four to 192.168.0.242:8007", f.dials)
@@ -84,7 +91,7 @@ func TestNetworkWaitUnreachableAfterWakeStopsTheRun(t *testing.T) {
 	woke := time.Date(2020, 3, 1, 16, 1, 39, 0, time.Local)
 	newFakeNet(t, woke, 1000)
 	noteSchedulerTick(woke.Add(-2*time.Hour), woke)
-	err := appWithServer().waitForServerAfterWake(batterySet("", 0, 0), "scheduled")
+	err := errOf(appWithServer().waitForServerAfterWake(batterySet("", 0, 0), "scheduled"))
 	if err == nil {
 		t.Fatal("the run was let start with its server out of reach")
 	}
@@ -99,7 +106,7 @@ func TestNetworkNoWaitWhenTheServerAnswersAtOnce(t *testing.T) {
 	start := time.Date(2020, 3, 1, 7, 40, 0, 0, time.Local)
 	f := newFakeNet(t, start, 0)
 	noteResume(start, "after the service started")
-	if err := appWithServer().waitForServerAfterWake(batterySet("", 0, 0), "startup"); err != nil {
+	if err := errOf(appWithServer().waitForServerAfterWake(batterySet("", 0, 0), "startup")); err != nil {
 		t.Fatalf("a server that answered stopped the run: %v", err)
 	}
 	if len(f.dials) != 1 || !f.now.Equal(start) {
@@ -121,12 +128,12 @@ func TestNetworkNoWaitForRunNowOrLongAfterAWake(t *testing.T) {
 			t.Errorf("%s: the run was stopped: %v", what, err)
 		}
 	}
-	goesOn("nothing woke or started yet", a.waitForServerAfterWake(job, "scheduled"))
+	goesOn("nothing woke or started yet", errOf(a.waitForServerAfterWake(job, "scheduled")))
 	noteResume(woke, "after the computer woke")
-	goesOn("Run now", a.waitForServerAfterWake(job, "manual"))
-	goesOn("no server to try", (&App{}).waitForServerAfterWake(job, "scheduled"))
+	goesOn("Run now", errOf(a.waitForServerAfterWake(job, "manual")))
+	goesOn("no server to try", errOf((&App{}).waitForServerAfterWake(job, "scheduled")))
 	f.now = woke.Add(networkWaitWindow + time.Second)
-	goesOn("long after the wake", a.waitForServerAfterWake(job, "scheduled"))
+	goesOn("long after the wake", errOf(a.waitForServerAfterWake(job, "scheduled")))
 	if len(f.dials) != 0 {
 		t.Fatalf("tried the server %d times", len(f.dials))
 	}

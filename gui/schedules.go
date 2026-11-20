@@ -43,7 +43,48 @@ type Schedule struct {
 	// "every 2 days/weeks/months/years" counts from. Empty: no start, and the
 	// count runs from Monday 3 January 2000.
 	Start string `json:"start,omitempty"`
+
+	// What a run of this schedule does when the set's server cannot be
+	// reached at its time (server_trigger.go). IfUnreachable "" records the
+	// run as failed, as before; "wait" holds it and starts it as soon as the
+	// server can be reached, for up to WaitHours (0 means
+	// defaultWaitHours). Networks and NotMetered limit the runs to those
+	// networks and to connections that are not metered (netinfo.go); with
+	// "wait" a run on another network waits for one of them, without it the
+	// run is skipped. All empty for a schedule saved before they existed:
+	// the run goes ahead as before. An older app reading the file ignores
+	// them and runs the schedule at its times.
+	IfUnreachable string   `json:"ifUnreachable,omitempty"`
+	WaitHours     int      `json:"waitHours,omitempty"`
+	Networks      []string `json:"networks,omitempty"`
+	NotMetered    bool     `json:"notMetered,omitempty"`
 }
+
+// IfUnreachable values.
+const (
+	ifUnreachableFail = ""
+	ifUnreachableWait = "wait"
+)
+
+// defaultWaitHours is how long a run waits for its server when the schedule
+// does not say; maxWaitHours the longest it may.
+const (
+	defaultWaitHours = 12
+	maxWaitHours     = 168
+)
+
+// waitFor is how long a run of the schedule waits for its server.
+func (s Schedule) waitFor() time.Duration {
+	h := s.WaitHours
+	if h <= 0 {
+		h = defaultWaitHours
+	}
+	return time.Duration(min(h, maxWaitHours)) * time.Hour
+}
+
+// hasNetworkFilter reports whether the schedule runs only on some networks
+// or connections.
+func (s Schedule) hasNetworkFilter() bool { return len(s.Networks) > 0 || s.NotMetered }
 
 // ScheduleMode values for ScheduledJob.ScheduleMode.
 const (
@@ -179,6 +220,12 @@ func validateSchedules(job ScheduledJob) error {
 				return fmt.Errorf("schedule %d: start date %q is not YYYY-MM-DD", n, s.Start)
 			}
 		}
+		if s.IfUnreachable != ifUnreachableFail && s.IfUnreachable != ifUnreachableWait {
+			return fmt.Errorf("schedule %d: unknown choice %q for a server that cannot be reached", n, s.IfUnreachable)
+		}
+		if s.WaitHours < 0 || s.WaitHours > maxWaitHours {
+			return fmt.Errorf("schedule %d: the wait for the server must be 1 to %d hours", n, maxWaitHours)
+		}
 		switch s.Unit {
 		case "minutes", "hours":
 			if (s.WindowStart == "") != (s.WindowEnd == "") {
@@ -233,7 +280,7 @@ func validateSchedules(job ScheduledJob) error {
 			}
 		}
 	}
-	return nil
+	return validateServerTrigger(job.ServerTrigger)
 }
 
 // nextRunFor returns a set's next run (RFC 3339) after now and the ID of the
