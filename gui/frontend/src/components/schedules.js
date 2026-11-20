@@ -44,6 +44,30 @@ export function jobScheduling(job) {
   return { mode: 'scheduled', schedules: [{ id: 's1', enabled: true, unit: 'days', every: 1, at: job.scheduleTime, weekdays: days }] }
 }
 
+// jobTriggers returns a set's "When to run" triggers as the editor shows
+// them: its schedules (copies), its server trigger (null for none) and
+// whether it runs when the computer starts. A set saved as "Only when I click
+// Run Now" (scheduleMode 'manual', before the triggers) has its schedules and
+// its server trigger turned off, so it still runs only by hand, and keeps
+// them for when they are turned on again.
+export function jobTriggers(job) {
+  const js = jobScheduling(job)
+  const manual = js.mode === 'manual'
+  const schedules = js.schedules.map(sc => ({ ...sc, weekdays: [...(sc.weekdays || [])], networks: [...(sc.networks || [])], enabled: manual ? false : sc.enabled }))
+  const st = job.serverTrigger
+  const serverTrigger = st ? { ...st, networks: [...(st.networks || [])], connections: [...(st.connections || [])], enabled: manual ? false : !!st.enabled } : null
+  return { schedules, serverTrigger, runAtStartup: !manual && !!job.runAtStartup }
+}
+
+// newServerTrigger is a new "When the server can be reached" trigger: at
+// most every 24 hours, on any network.
+export function newServerTrigger() {
+  return { enabled: true, everyHours: 24, networks: [], connections: [], notMetered: false }
+}
+
+// CONNECTIONS are the kinds of connection a trigger may be limited to.
+export const CONNECTIONS = ['wired', 'wifi', 'vpn', 'mobile']
+
 // nextScheduleId returns an ID none of the schedules has ("s1", "s2"...).
 export function nextScheduleId(list) {
   const used = new Set((list || []).map(s => s.id))

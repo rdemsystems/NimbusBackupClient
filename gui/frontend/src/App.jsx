@@ -35,7 +35,7 @@ const ABOUT_LINK_LABEL = {
   website: 'aboutLinkWebsite', help: 'aboutLinkHelp', updates: 'aboutLinkReleases', contact: 'aboutLinkContact',
   source: 'aboutLinkSource', issues: 'aboutLinkIssues', license: 'aboutLinkLicense',
 }
-import { newSchedule, describe as describeSchedule, badgeKey, scheduleProblem, jobScheduling } from './components/schedules'
+import { describe as describeSchedule, badgeKey, scheduleProblem, jobScheduling, jobTriggers } from './components/schedules'
 // Wails runtime imports (will be available when built with Wails)
 let OpenSnapshotTree, ListSnapshotChildren, SnapshotSelectionBytes
 let GetConfigWithHostname, TestConnection, StartBackup, StartMachineBackup, ListSnapshots, ListSnapshotContents, GetSnapshotMeta, RestoreSnapshot, OpenRestoreDestDialog, ListPhysicalDisks, GetVersion, EventsOn, SearchFiles, CancelSearch, CancelBackup, CancelRestore, GetBrand, OpenBrowser, ListDirectory
@@ -49,6 +49,8 @@ let ExportSettings, ImportSettings
 let SetSMTPSettings, SendTestEmail
 let GetLogsFolder, OpenLogsFolder, SaveLogs, GetServiceLogsStatus, OpenServiceLogsFolder
 let GetWakeTimerInfo, EnableWakeTimers, GetBatteryInfo
+// "When the server can be reached": the computer's networks and the trigger's "Right now" panel
+let GetNetworkInfo, GetServerTriggerStatus
 // What the computer does after a set's backup (gui/after_backup.go)
 let GetPowerActionsInfo, GetAfterBackupPending, CancelAfterBackup
 // Encryption key management
@@ -143,6 +145,8 @@ if (window.go) {
   GetWakeTimerInfo = window.go.main.App.GetWakeTimerInfo
   EnableWakeTimers = window.go.main.App.EnableWakeTimers
   GetBatteryInfo = window.go.main.App.GetBatteryInfo
+  GetNetworkInfo = window.go.main.App.GetNetworkInfo
+  GetServerTriggerStatus = window.go.main.App.GetServerTriggerStatus
   GetPowerActionsInfo = window.go.main.App.GetPowerActionsInfo
   GetAfterBackupPending = window.go.main.App.GetAfterBackupPending
   CancelAfterBackup = window.go.main.App.CancelAfterBackup
@@ -774,10 +778,15 @@ function App() {
     setBatteryCancel(!!job.batteryCancel)
     setBatteryCancelBelow(job.batteryCancelBelow ?? 10)
   }
-  // The set's schedules (gui/schedules.go): 'scheduled' runs on the list,
-  // 'manual' only on Run Now (the list is kept).
+  // The set's "When to run" triggers (gui/schedules.go, gui/server_trigger.go):
+  // its schedules ("At set times"), and its "When the server can be reached"
+  // trigger (null for none). A new set has none: it runs when Run Now is
+  // clicked. scheduleMode stays 'scheduled' in the editor: a set saved as
+  // 'manual' (Only when I click Run Now, before the triggers) loads with its
+  // schedules turned off instead.
   const [scheduleMode, setScheduleMode] = useState('scheduled')
-  const [schedules, setSchedules] = useState(() => [newSchedule('days', 's1')])
+  const [schedules, setSchedules] = useState(() => [])
+  const [serverTrigger, setServerTrigger] = useState(null)
   const [scheduledJobs, setScheduledJobs] = useState([])
   // path -> whether it can be read through a snapshot (false = network drive,
   // read live); filled for the folders of sets that ask for a snapshot.
@@ -3108,7 +3117,7 @@ function App() {
     setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
     setChangeDetectionMode(NEW_SET_CHANGE_DETECTION); setFullReadEvery(NEW_SET_FULL_READ_EVERY)
     setRunAtStartup(false); setWakeToRun(false); presetBattery(null)
-    setScheduleMode('scheduled'); setSchedules([newSchedule('days', 's1')])
+    setScheduleMode('scheduled'); setSchedules([]); setServerTrigger(null)
     setBackupDirs('')
     setExcludeList('')
     setTreeExcludes([])
@@ -3219,9 +3228,8 @@ function App() {
       if (!jobEnabled) {
         blockers.push(tl('saveWarnDisabled', 'The set is disabled, so it does not run on its schedule until you enable it.'))
       }
-      if (scheduleMode !== 'manual' && !runAtStartup && !schedules.some(sc => sc.enabled)) {
-        blockers.push(tl('saveWarnNoSchedule', 'No schedule is on, so it runs only when you press Run Now.'))
-      }
+      // A set with no trigger on runs when Run Now is clicked: the first row
+      // of When to run, so not a reason to warn.
       if (linuxMachineSet && machineSnapshotsOff && !liveReadAccepted) {
         blockers.push(tl('saveWarnSnapshotsOff', 'Use snapshots is off but reading without a snapshot is not accepted, so every run stops before it starts.'))
       }
@@ -3259,6 +3267,8 @@ function App() {
         batteryCancelBelow: batteryCancelBelow,
         scheduleMode,
         schedules,
+        // "When the server can be reached"; omitted when the set has none.
+        ...(serverTrigger ? { serverTrigger } : {}),
         backupDirs: backupType === 'directory' ? dirList : [],
         backupId: useVmType ? vmBackupID : config['backup-id'],
         useVSS: config.usevss,
@@ -3346,7 +3356,7 @@ function App() {
         setJobName('')
         setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
         setRunAtStartup(false); setWakeToRun(false); presetBattery(null)
-        setScheduleMode('scheduled'); setSchedules([newSchedule('days', 's1')])
+        setScheduleMode('scheduled'); setSchedules([]); setServerTrigger(null)
         setBackupDirs('')
         setEmailOnSuccess(false); setEmailOnSuccessTo('')
         setEmailOnFailure(false); setEmailOnFailureTo('')
@@ -5492,7 +5502,7 @@ function App() {
                     setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
                     setBackupMode('scheduled')
                     setRunAtStartup(false); setWakeToRun(false); presetBattery(null)
-                    setScheduleMode('scheduled'); setSchedules([newSchedule('days', 's1')])
+                    setScheduleMode('scheduled'); setSchedules([]); setServerTrigger(null)
                     setBackupDirs('')
                     setExcludeList('')
                     setTreeExcludes([])
@@ -5564,7 +5574,12 @@ function App() {
                                 padding: '2px 7px', borderRadius: '3px', background: '#eef0f4', color: '#3d5aa8',
                                 border: '1px solid #ccd4e6', verticalAlign: 'middle', marginRight: '6px',
                               }}>
-                                {(() => { const c = cardSchedule(job); return c.sch ? t(badgeKey(c.sch)).toUpperCase() + (c.on > 1 ? ` +${c.on - 1}` : '') : t('triggerModeManual').toUpperCase() })()}
+                                {(() => {
+                                  const c = cardSchedule(job)
+                                  const server = !c.manual && !!(job.serverTrigger && job.serverTrigger.enabled)
+                                  if (c.sch) return t(badgeKey(c.sch)).toUpperCase() + (c.on + (server ? 1 : 0) > 1 ? ` +${c.on - 1 + (server ? 1 : 0)}` : '')
+                                  return (server ? t('trigBadgeServer') : t('triggerModeManual')).toUpperCase()
+                                })()}
                               </span>
                               {/* Backup type badge — reuses the existing backupTypeDirectory/
                                   backupTypeMachine translations (already in all 6 languages),
@@ -5650,12 +5665,22 @@ function App() {
                                   scheduler keeps on the job; manual sets have none. */}
                               <div style={{lineHeight: 1.3, minWidth: 0, whiteSpace: 'nowrap'}}>
                                 <div>
-                                  {(() => { const c = cardSchedule(job); return c.manual ? t('manualOnDemand') : c.sch ? describeSchedule(t, language, c.sch) : t('schedNoneOnShort') })()}
+                                  {(() => {
+                                    const c = cardSchedule(job)
+                                    if (c.manual) return t('manualOnDemand')
+                                    if (c.sch) return describeSchedule(t, language, c.sch)
+                                    // No schedule on: the server trigger, else Run Now only.
+                                    return job.serverTrigger && job.serverTrigger.enabled ? t('trigKindServer') : t('schedNoneOnShort')
+                                  })()}
                                 </div>
                                 {!cardSchedule(job).manual && job.enabled === false && (
                                   <div>{t('schedSetNext', { time: tl('nextRunDisabled', 'disabled') })}</div>
                                 )}
-                                {!cardSchedule(job).manual && job.enabled !== false && job.nextRun && (() => {
+                                {/* A run of a schedule waiting for its server (server_trigger.go). */}
+                                {job.enabled !== false && job.waitingForServer && (
+                                  <div id={`card-waiting-${job.id}`} style={{color: '#9a5b00'}}>{t('cardWaitingServer')}</div>
+                                )}
+                                {!cardSchedule(job).manual && job.enabled !== false && !job.waitingForServer && job.nextRun && (() => {
                                   const when = new Date(job.nextRun)
                                   if (isNaN(when.getTime())) return null
                                   const now = new Date()
@@ -5754,8 +5779,8 @@ function App() {
                               setEditingJobId(job.id)
                               setJobName(job.name || '')
                               setBackupMode('scheduled')
-                              setRunAtStartup(job.runAtStartup); setWakeToRun(!!job.wakeToRun); presetBattery(job)
-                              { const js = jobScheduling(job); setScheduleMode(js.mode); setSchedules(js.schedules.map(sc => ({ ...sc, weekdays: [...(sc.weekdays || [])] }))) }
+                              setWakeToRun(!!job.wakeToRun); presetBattery(job)
+                              { const jt = jobTriggers(job); setScheduleMode('scheduled'); setSchedules(jt.schedules); setServerTrigger(jt.serverTrigger); setRunAtStartup(jt.runAtStartup) }
                               setBackupDirs((job.backupDirs || []).join('\n'))
                               // Machine-type jobs keep their selected disks in driveLetters, not
                               // backupDirs — without restoring this, handleStartBackup's "select
@@ -5833,8 +5858,8 @@ function App() {
                                     setEditingJobId(null)
                                     setJobName(t('cloneNameSuffix').replace('{name}', job.name || ''))
                                     setBackupMode('scheduled')
-                                    setRunAtStartup(job.runAtStartup); setWakeToRun(!!job.wakeToRun); presetBattery(job)
-                                    { const js = jobScheduling(job); setScheduleMode(js.mode); setSchedules(js.schedules.map(sc => ({ ...sc, weekdays: [...(sc.weekdays || [])] }))) }
+                                    setWakeToRun(!!job.wakeToRun); presetBattery(job)
+                                    { const jt = jobTriggers(job); setScheduleMode('scheduled'); setSchedules(jt.schedules); setServerTrigger(jt.serverTrigger); setRunAtStartup(jt.runAtStartup) }
                                     setBackupDirs((job.backupDirs || []).join('\n'))
                                     setSelectedDrives(job.driveLetters || [])
                                     setSelectedDiskIds(diskIdHints(job))
@@ -6044,9 +6069,13 @@ function App() {
               )}
 
               <ScheduleEditor
-                scheduleMode={scheduleMode} setScheduleMode={setScheduleMode}
                 schedules={schedules} setSchedules={setSchedules}
                 runAtStartup={runAtStartup} setRunAtStartup={setRunAtStartup}
+                serverTrigger={serverTrigger} setServerTrigger={setServerTrigger}
+                getNetworkInfo={GetNetworkInfo || null}
+                getTriggerStatus={GetServerTriggerStatus
+                  ? (trig) => GetServerTriggerStatus({ id: editingJobId || '', name: jobName, pbsServerId: backupPBSID, schedules: [], serverTrigger: trig })
+                  : null}
                 wakeToRun={wakeToRun} setWakeToRun={setWakeToRun} wakeInfo={wakeInfo}
                 onEnableWake={EnableWakeTimers ? (scope) => EnableWakeTimers(scope).then(setWakeInfo) : null}
                 battery={{ mode: onBattery, start: batteryStart, cancel: batteryCancel, cancelBelow: batteryCancelBelow }}
@@ -7587,6 +7616,7 @@ function App() {
                             <span>{
                               selected.trigger === 'scheduled' ? t('triggerScheduled') :
                               selected.trigger === 'startup' ? t('triggerStartup') :
+                              selected.trigger === 'server' ? t('triggerServer') :
                               selected.trigger === 'manual' ? t('triggerManual') :
                               selected.trigger === 'oneoff' ? t('triggerOneoff') :
                               selected.trigger
