@@ -90,6 +90,15 @@ func judgeWake(ev wakeEvent, exe string) wakeVerdict {
 }
 
 func describeWakeSource(ev wakeEvent) string {
+	// A Task Scheduler wake's text is the sentence "Windows will execute
+	// 'NT TASK\name' scheduled task that requested waking the computer."
+	// (seen on a laptop 2026-11-20): only the task's name is kept.
+	const taskPrefix, taskSuffix = "Windows will execute '", "' scheduled task"
+	if ev.SourceType == wakeSourceTimer && strings.HasPrefix(ev.SourceText, taskPrefix) {
+		if i := strings.Index(ev.SourceText, taskSuffix); i > len(taskPrefix) {
+			return fmt.Sprintf("the scheduled task %q", strings.TrimPrefix(ev.SourceText[len(taskPrefix):i], `NT TASK\`))
+		}
+	}
 	switch {
 	case ev.SourceType == wakeSourceTimer && ev.SourceText != "":
 		return "a wake timer of " + ev.SourceText

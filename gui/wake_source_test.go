@@ -91,6 +91,20 @@ func TestOnlyOurOwnTimerCountsAsOurWake(t *testing.T) {
 	}
 }
 
+// A Task Scheduler wake is named by its task (as recorded on a laptop
+// 2026-11-20), and is not ours.
+func TestATaskSchedulerWakeIsNamedByItsTask(t *testing.T) {
+	ev := wakeEvent{SourceType: 6, TimerOwner: `\Device\HarddiskVolume2\Windows\System32\svchost.exe`,
+		SourceText: `Windows will execute 'NT TASK\wakefix-otherwake' scheduled task that requested waking the computer.`}
+	v := judgeWake(ev, "salvanza-svc.exe")
+	if v.ours || !v.known {
+		t.Errorf("judged %+v, want known and not ours", v)
+	}
+	if want := `the scheduled task "wakefix-otherwake"`; v.what != want {
+		t.Errorf("described as %q, want %q", v.what, want)
+	}
+}
+
 // Windows writes the record a few seconds after the wake: the newest record
 // is the last sleep's until then, and is looked for again.
 func TestTheRecordOfAWakeIsWaitedFor(t *testing.T) {
