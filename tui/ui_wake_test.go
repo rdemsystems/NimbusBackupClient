@@ -21,7 +21,7 @@ func openScheduleStep(h *harness) {
 func TestEditorOffersToEnableWakeTimers(t *testing.T) {
 	be := newDemoBackend()
 	be.wake = WakeInfo{OnMains: true, Alert: "battery"}
-	h := newHarnessWith(t, be, 130, 58)
+	h := newHarnessWith(t, be, 130, 66)
 	openScheduleStep(h)
 	if !strings.Contains(h.screen(), "Enable wake timers on battery") {
 		t.Fatalf("no button to enable wake timers:\n%s", h.screen())
@@ -29,16 +29,16 @@ func TestEditorOffersToEnableWakeTimers(t *testing.T) {
 	if strings.Contains(h.screen(), "This computer's power") {
 		t.Errorf("the alert shows while Wake is not ticked:\n%s", h.screen())
 	}
-	// down to Wake: unit, every, at, days, if unreachable, wait, startup,
-	// server, at most every, not metered, wake
-	for i := 0; i < 11; i++ {
+	// down to Wake, under the first schedule: unit, every, at, days, wake
+	for i := 0; i < 5; i++ {
 		h.key(tcell.KeyTab, 0)
 	}
 	h.typ(' ')
 	h.waitFor("This computer's power")
-	// on to the button: battery, start, cancel, below (the texts are passed
-	// over), then the first button
-	for i := 0; i < 5; i++ {
+	// on to the button (the texts are passed over): if unreachable, wait,
+	// starts, wakes, signs in, idle, server, at most every, not metered,
+	// battery, start, cancel, below, then the first button
+	for i := 0; i < 14; i++ {
 		h.key(tcell.KeyTab, 0)
 	}
 	h.key(tcell.KeyEnter, 0)
@@ -61,7 +61,7 @@ func TestEditorOffersToEnableWakeTimers(t *testing.T) {
 func TestEditorSaysWakingIsBestEffortOnModernStandby(t *testing.T) {
 	be := newDemoBackend()
 	be.wake = WakeInfo{OnMains: true, OnBattery: true, ModernStandby: true}
-	h := newHarnessWith(t, be, 130, 76)
+	h := newHarnessWith(t, be, 130, 84)
 	openScheduleStep(h)
 	if strings.Contains(h.screen(), "best effort") {
 		t.Errorf("the statement shows while Wake is not ticked:\n%s", h.screen())
@@ -69,13 +69,13 @@ func TestEditorSaysWakingIsBestEffortOnModernStandby(t *testing.T) {
 	if strings.Contains(h.screen(), "Enable wake timers") {
 		t.Errorf("a wake timer button with nothing to enable:\n%s", h.screen())
 	}
-	for i := 0; i < 11; i++ {
+	for i := 0; i < 5; i++ {
 		h.key(tcell.KeyTab, 0)
 	}
 	h.typ(' ')
 	h.waitFor("Modern Standby: waking for a") // the text wraps beside the labels
 	h.waitFor("backup is best effort")
-	h.waitFor("hibernate, which wakes on any")
+	h.waitFor("which wakes on")
 }
 
 // No alert where the power plan lets timers wake the computer.

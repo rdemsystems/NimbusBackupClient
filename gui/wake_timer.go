@@ -42,23 +42,17 @@ type wakeTarget struct {
 	Set   string
 }
 
-// nextWake is the earliest run of an enabled, scheduled set with WakeToRun
-// that is still to come, and when to wake for it; ok is false when there is
-// none. A run already due is not woken for (the scheduler is running it):
-// while it runs, the set's stored next run is still the one under way, so the
-// run after it is worked out from the set's schedules, and the timer for it
-// is set at once rather than when the run has finished.
+// nextWake is the earliest run still to come, of an enabled, scheduled set,
+// from a schedule whose runs wake the computer (scheduleWakes), and when to
+// wake for it; ok is false when there is none. A run already due is not woken
+// for (the scheduler is running it): the schedules' next runs are worked out
+// from now, so while a run is under way the timer is already set for the one
+// after it rather than when the run has finished.
 func nextWake(jobs []ScheduledJob, now time.Time) (w wakeTarget, ok bool) {
 	for _, j := range jobs {
-		if !j.WakeToRun || !j.Enabled || j.ScheduleMode == ScheduleModeManual {
+		run, found := wakeRunFor(j, now)
+		if !found {
 			continue
-		}
-		run, err := time.Parse(time.RFC3339, j.NextRun)
-		if err != nil || !run.After(now) {
-			next, _ := nextRunFor(j, now)
-			if run, err = time.Parse(time.RFC3339, next); err != nil || !run.After(now) {
-				continue
-			}
 		}
 		if !ok || run.Before(w.Run) {
 			w, ok = wakeTarget{Run: run, SetID: j.ID, Set: j.Name}, true
@@ -71,6 +65,47 @@ func nextWake(jobs []ScheduledJob, now time.Time) (w wakeTarget, ok bool) {
 		}
 	}
 	return w, ok
+}
+
+// wakeRunFor is the set's next run after now that wakes the computer. A set
+// whose schedules have no wake choice of their own (one not yet loaded and
+// saved since that existed, or with only the old trigger fields) wakes for
+// its stored next run when WakeToRun is on, as before.
+func wakeRunFor(j ScheduledJob, now time.Time) (time.Time, bool) {
+	if !j.Enabled || j.ScheduleMode == ScheduleModeManual {
+		return time.Time{}, false
+	}
+	_, list := jobSchedules(j)
+	perSchedule := false
+	for _, s := range list {
+		if s.Wake != nil {
+			perSchedule = true
+			break
+		}
+	}
+	if !perSchedule {
+		if !j.WakeToRun {
+			return time.Time{}, false
+		}
+		run, err := time.Parse(time.RFC3339, j.NextRun)
+		if err != nil || !run.After(now) {
+			next, _ := nextRunFor(j, now)
+			if run, err = time.Parse(time.RFC3339, next); err != nil || !run.After(now) {
+				return time.Time{}, false
+			}
+		}
+		return run, true
+	}
+	var best time.Time
+	for _, s := range list {
+		if !s.Enabled || !scheduleWakes(j, s) {
+			continue
+		}
+		if t, ok := s.next(now); ok && (best.IsZero() || t.Before(best)) {
+			best = t
+		}
+	}
+	return best, !best.IsZero()
 }
 
 // wakeState is the timer currently set, if any.

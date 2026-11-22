@@ -742,10 +742,9 @@ function App() {
 
   // Scheduling states
   const [backupMode, setBackupMode] = useState('oneshot') // 'oneshot' or 'scheduled'
-  const [runAtStartup, setRunAtStartup] = useState(false)
-  // Wake the computer from sleep for the set's runs (#140), and what this
-  // computer allows (App.GetWakeTimerInfo, read once).
-  const [wakeToRun, setWakeToRun] = useState(false)
+  // What this computer allows for waking it from sleep for a set's runs
+  // (#140; App.GetWakeTimerInfo, read once). Each "At set times" line has its
+  // own wake choice (schedule.wake).
   const [wakeInfo, setWakeInfo] = useState(null)
   useEffect(() => {
     if (!GetWakeTimerInfo) return
@@ -787,6 +786,13 @@ function App() {
   const [scheduleMode, setScheduleMode] = useState('scheduled')
   const [schedules, setSchedules] = useState(() => [])
   const [serverTrigger, setServerTrigger] = useState(null)
+  // "When something happens on this computer" (gui/computer_events.go): null
+  // for none, else { enabled, starts, wakes, signIn, idleMinutes }.
+  const [computerEvents, setComputerEvents] = useState(null)
+  // Some enabled "At set times" line wakes the computer: written as the
+  // set's old wakeToRun for an older service, and what "only after a run it
+  // was woken for" needs.
+  const wakeToRun = scheduleMode !== 'manual' && schedules.some(s => s.enabled && s.wake)
   const [scheduledJobs, setScheduledJobs] = useState([])
   // path -> whether it can be read through a snapshot (false = network drive,
   // read live); filled for the folders of sets that ask for a snapshot.
@@ -3116,7 +3122,7 @@ function App() {
     setJobName('')
     setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
     setChangeDetectionMode(NEW_SET_CHANGE_DETECTION); setFullReadEvery(NEW_SET_FULL_READ_EVERY)
-    setRunAtStartup(false); setWakeToRun(false); presetBattery(null)
+    setComputerEvents(null); presetBattery(null)
     setScheduleMode('scheduled'); setSchedules([]); setServerTrigger(null)
     setBackupDirs('')
     setExcludeList('')
@@ -3257,8 +3263,11 @@ function App() {
       const jobData = {
         id: editingJobId || Date.now().toString(),
         name: jobName.trim() || `Backup ${config['backup-id'] || hostname}`,
-        runAtStartup: scheduleMode === 'manual' ? false : runAtStartup,
-        wakeToRun: scheduleMode === 'manual' ? false : wakeToRun,
+        // runAtStartup and wakeToRun are written from the triggers for an older
+        // service; the service reads computerEvents and each line's wake.
+        runAtStartup: scheduleMode !== 'manual' && !!computerEvents && !!computerEvents.enabled && !!computerEvents.starts,
+        wakeToRun,
+        computerEvents: computerEvents || null,
         // On battery: '' starts anyway (as every set saved before the rule);
         // the levels are kept when not in use, for when they are again.
         onBattery: onBattery === 'anyway' ? '' : onBattery,
@@ -3355,7 +3364,7 @@ function App() {
         // Reset form after save
         setJobName('')
         setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
-        setRunAtStartup(false); setWakeToRun(false); presetBattery(null)
+        setComputerEvents(null); presetBattery(null)
         setScheduleMode('scheduled'); setSchedules([]); setServerTrigger(null)
         setBackupDirs('')
         setEmailOnSuccess(false); setEmailOnSuccessTo('')
@@ -5501,7 +5510,7 @@ function App() {
                     setJobName('')
                     setMachineAsVM(false); setReadFreeSpace(false); setMachineSnapshotsOff(false); setLiveReadAccepted(false); setSkipParts([]); setJobEnabled(true); setVmIdNumber(''); setImageFolders('')
                     setBackupMode('scheduled')
-                    setRunAtStartup(false); setWakeToRun(false); presetBattery(null)
+                    setComputerEvents(null); presetBattery(null)
                     setScheduleMode('scheduled'); setSchedules([]); setServerTrigger(null)
                     setBackupDirs('')
                     setExcludeList('')
@@ -5779,8 +5788,8 @@ function App() {
                               setEditingJobId(job.id)
                               setJobName(job.name || '')
                               setBackupMode('scheduled')
-                              setWakeToRun(!!job.wakeToRun); presetBattery(job)
-                              { const jt = jobTriggers(job); setScheduleMode('scheduled'); setSchedules(jt.schedules); setServerTrigger(jt.serverTrigger); setRunAtStartup(jt.runAtStartup) }
+                              presetBattery(job)
+                              { const jt = jobTriggers(job); setScheduleMode('scheduled'); setSchedules(jt.schedules); setServerTrigger(jt.serverTrigger); setComputerEvents(jt.computerEvents) }
                               setBackupDirs((job.backupDirs || []).join('\n'))
                               // Machine-type jobs keep their selected disks in driveLetters, not
                               // backupDirs — without restoring this, handleStartBackup's "select
@@ -5858,8 +5867,8 @@ function App() {
                                     setEditingJobId(null)
                                     setJobName(t('cloneNameSuffix').replace('{name}', job.name || ''))
                                     setBackupMode('scheduled')
-                                    setWakeToRun(!!job.wakeToRun); presetBattery(job)
-                                    { const jt = jobTriggers(job); setScheduleMode('scheduled'); setSchedules(jt.schedules); setServerTrigger(jt.serverTrigger); setRunAtStartup(jt.runAtStartup) }
+                                    presetBattery(job)
+                                    { const jt = jobTriggers(job); setScheduleMode('scheduled'); setSchedules(jt.schedules); setServerTrigger(jt.serverTrigger); setComputerEvents(jt.computerEvents) }
                                     setBackupDirs((job.backupDirs || []).join('\n'))
                                     setSelectedDrives(job.driveLetters || [])
                                     setSelectedDiskIds(diskIdHints(job))
@@ -6070,13 +6079,13 @@ function App() {
 
               <ScheduleEditor
                 schedules={schedules} setSchedules={setSchedules}
-                runAtStartup={runAtStartup} setRunAtStartup={setRunAtStartup}
+                computerEvents={computerEvents} setComputerEvents={setComputerEvents}
                 serverTrigger={serverTrigger} setServerTrigger={setServerTrigger}
                 getNetworkInfo={GetNetworkInfo || null}
                 getTriggerStatus={GetServerTriggerStatus
                   ? (trig) => GetServerTriggerStatus({ id: editingJobId || '', name: jobName, pbsServerId: backupPBSID, schedules: [], serverTrigger: trig })
                   : null}
-                wakeToRun={wakeToRun} setWakeToRun={setWakeToRun} wakeInfo={wakeInfo}
+                wakeInfo={wakeInfo}
                 onEnableWake={EnableWakeTimers ? (scope) => EnableWakeTimers(scope).then(setWakeInfo) : null}
                 battery={{ mode: onBattery, start: batteryStart, cancel: batteryCancel, cancelBelow: batteryCancelBelow }}
                 setBattery={(p) => {
@@ -7617,6 +7626,9 @@ function App() {
                               selected.trigger === 'scheduled' ? t('triggerScheduled') :
                               selected.trigger === 'startup' ? t('triggerStartup') :
                               selected.trigger === 'server' ? t('triggerServer') :
+                              selected.trigger === 'wake' ? t('triggerWake') :
+                              selected.trigger === 'signin' ? t('triggerSignIn') :
+                              selected.trigger === 'idle' ? t('triggerIdle') :
                               selected.trigger === 'manual' ? t('triggerManual') :
                               selected.trigger === 'oneoff' ? t('triggerOneoff') :
                               selected.trigger

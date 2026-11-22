@@ -32,6 +32,7 @@ func TestMain(m *testing.M) {
 	keepAwakeForAfterBackup = func(string, string) func() { return func() {} }
 	latestWakeEvent = func() (wakeEvent, error) { return wakeEvent{}, errNoWakeRecord }
 	lastUserInput = func() (time.Time, bool) { return time.Time{}, false }
+	signedInSessions = func() (map[string]bool, bool) { return nil, false }
 
 	code := m.Run()
 

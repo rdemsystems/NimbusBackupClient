@@ -58,6 +58,12 @@ type Schedule struct {
 	WaitHours     int      `json:"waitHours,omitempty"`
 	Networks      []string `json:"networks,omitempty"`
 	NotMetered    bool     `json:"notMetered,omitempty"`
+
+	// Wake: this schedule's runs wake the computer from sleep or hibernate
+	// (wake_timer.go). nil for a schedule saved before each had its own: it
+	// follows the set's old WakeToRun, and normalizeJobSchedules gives it its
+	// own (computer_events.go, migrateScheduleWake).
+	Wake *bool `json:"wake,omitempty"`
 }
 
 // IfUnreachable values.
@@ -160,6 +166,12 @@ func normalizeJobSchedules(job *ScheduledJob) {
 		}
 	}
 	mirrorLegacyTrigger(job)
+	// Wake per schedule, and "When something happens on this computer" in
+	// place of RunAtStartup (computer_events.go): moved over once, and the old
+	// fields written back from them for an older app reading the file.
+	migrateScheduleWake(job)
+	migrateComputerEvents(job)
+	mirrorComputerEvents(job)
 	// Every path that loads or saves a set comes through here, so the
 	// choice of what the computer does after the backup is put in order too.
 	normalizeAfterBackup(job)
@@ -280,7 +292,10 @@ func validateSchedules(job ScheduledJob) error {
 			}
 		}
 	}
-	return validateServerTrigger(job.ServerTrigger)
+	if err := validateServerTrigger(job.ServerTrigger); err != nil {
+		return err
+	}
+	return validateComputerEvents(job.ComputerEvents)
 }
 
 // nextRunFor returns a set's next run (RFC 3339) after now and the ID of the

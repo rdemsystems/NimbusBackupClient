@@ -14,7 +14,7 @@ export const isoDay = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.
 
 // newSchedule is a fresh schedule of the given unit with sensible defaults.
 export function newSchedule(unit, id) {
-  const s = { id, enabled: true, unit, every: 1, start: isoDay(new Date()) }
+  const s = { id, enabled: true, unit, every: 1, start: isoDay(new Date()), wake: false }
   switch (unit) {
     case 'minutes': return { ...s, every: 30 }
     case 'hours': return { ...s, every: 2, minute: 0 }
@@ -53,10 +53,28 @@ export function jobScheduling(job) {
 export function jobTriggers(job) {
   const js = jobScheduling(job)
   const manual = js.mode === 'manual'
-  const schedules = js.schedules.map(sc => ({ ...sc, weekdays: [...(sc.weekdays || [])], networks: [...(sc.networks || [])], enabled: manual ? false : sc.enabled }))
+  // A schedule without a wake choice of its own (saved before each had one)
+  // follows the set's old wakeToRun, as the backend reads it.
+  const schedules = js.schedules.map(sc => ({ ...sc, weekdays: [...(sc.weekdays || [])], networks: [...(sc.networks || [])],
+    enabled: manual ? false : sc.enabled, wake: sc.wake === undefined || sc.wake === null ? !!job.wakeToRun : !!sc.wake }))
   const st = job.serverTrigger
   const serverTrigger = st ? { ...st, networks: [...(st.networks || [])], connections: [...(st.connections || [])], enabled: manual ? false : !!st.enabled } : null
-  return { schedules, serverTrigger, runAtStartup: !manual && !!job.runAtStartup }
+  // "When something happens on this computer"; a set saved before it existed
+  // has runAtStartup only (the backend moves it over when it loads the sets).
+  const ce = job.computerEvents || (job.runAtStartup ? { enabled: true, starts: true } : null)
+  const computerEvents = ce ? { enabled: manual ? false : !!ce.enabled, starts: !!ce.starts, wakes: !!ce.wakes, signIn: !!ce.signIn, idleMinutes: ce.idleMinutes || 0 } : null
+  return { schedules, serverTrigger, computerEvents }
+}
+
+// newComputerEvents is a new "When something happens on this computer"
+// trigger: when the computer starts.
+export function newComputerEvents() {
+  return { enabled: true, starts: true, wakes: false, signIn: false, idleMinutes: 0 }
+}
+
+// eventsOn reports whether the trigger has anything that can start a run.
+export function eventsOn(ce) {
+  return !!ce && !!ce.enabled && (ce.starts || ce.wakes || ce.signIn || ce.idleMinutes > 0)
 }
 
 // newServerTrigger is a new "When the server can be reached" trigger: at

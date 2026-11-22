@@ -23,8 +23,11 @@ type ScheduledJob struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
 	ScheduleTime string `json:"scheduleTime"` // HH:MM format, used when TriggerMode == "daily"
-	RunAtStartup bool   `json:"runAtStartup"`
-	WakeToRun    bool   `json:"wakeToRun,omitempty"` // wake the computer from sleep for the set's scheduled runs (wake_timer.go)
+	// RunAtStartup and WakeToRun are the model before ComputerEvents and a
+	// wake choice per schedule: only read to move a set saved before them, and
+	// written back from them for an older app (computer_events.go).
+	RunAtStartup bool `json:"runAtStartup"`
+	WakeToRun    bool `json:"wakeToRun,omitempty"`
 	// The set's "On battery" rule (battery_rule.go). OnBattery is "" (or
 	// "anyway"): start whatever the charge, which every set saved before the
 	// rule existed does; "above": start only at BatteryStartPercent or more
@@ -123,6 +126,10 @@ type ScheduledJob struct {
 	// which is every set saved before it existed; an older app reading the
 	// file ignores it.
 	ServerTrigger *ServerTrigger `json:"serverTrigger,omitempty"`
+	// ComputerEvents runs the set when the computer starts, wakes, someone
+	// signs in or it has been idle (computer_events.go). nil for a set without
+	// one; a set saved before it existed has RunAtStartup moved into it.
+	ComputerEvents *ComputerEvents `json:"computerEvents,omitempty"`
 	// WaitingForServer is run state, not a setting: when a run of a schedule
 	// that waits for its server began waiting (RFC 3339), "" when none is.
 	// The set's card shows it; the run ends it, however it ends.
@@ -969,9 +976,9 @@ func (a *App) StartScheduler() {
 			select {
 			case <-ticker.C:
 				now := time.Now()
-				noteSchedulerTick(lastTick, now)
+				resumed := noteSchedulerTick(lastTick, now)
 				lastTick = now
-				a.checkAndRunScheduledJobs()
+				a.checkAndRunScheduledJobs(resumed)
 				a.RefreshIdleTooltip()
 				a.refreshWakeTimer()
 			case <-stop:
@@ -1052,7 +1059,8 @@ func (a *App) CleanupAbandonedJobs() {
 	}
 }
 
-// HandleStartupRun executes scheduled jobs that have runAtStartup enabled
+// HandleStartupRun runs the sets whose "When something happens on this
+// computer" trigger has Starts ticked (computer_events.go).
 func (a *App) HandleStartupRun() {
 	writeDebugLog("HandleStartupRun called - checking for startup jobs")
 
@@ -1066,9 +1074,12 @@ func (a *App) HandleStartupRun() {
 	}
 
 	for _, job := range jobs {
-		if !job.Enabled || !job.RunAtStartup {
+		if !computerEventsOn(job) || !job.ComputerEvents.Starts {
 			continue
 		}
+		eventState.Lock()
+		eventState.started[job.ID] = time.Now() // a sign-in right after the start starts no second run
+		eventState.Unlock()
 
 		// Check if this job is already running (mutex protection)
 		// If scheduler already started it, the mutex will prevent duplicate execution
@@ -1080,8 +1091,9 @@ func (a *App) HandleStartupRun() {
 // schedulerTickCount tracks ticks for periodic verbose logging
 var schedulerTickCount int
 
-// checkAndRunScheduledJobs checks if any jobs need to run
-func (a *App) checkAndRunScheduledJobs() {
+// checkAndRunScheduledJobs checks if any jobs need to run. resumed: the
+// computer woke since the last tick (the "wakes" event).
+func (a *App) checkAndRunScheduledJobs(resumed bool) {
 	jobs, err := a.GetScheduledJobs()
 	if err != nil {
 		writeDebugLog(fmt.Sprintf("[Scheduler] Error loading scheduled jobs: %v", err))
@@ -1151,6 +1163,8 @@ func (a *App) checkAndRunScheduledJobs() {
 	}
 	// "When the server can be reached" (server_trigger.go).
 	a.checkServerTriggers(jobs, now)
+	// "When something happens on this computer" (computer_events.go).
+	a.checkComputerEvents(jobs, now, resumed)
 }
 
 // retryHeldStartupRun tries a run at startup held back for the battery

@@ -344,8 +344,10 @@ func (a *App) isUnattendedRun(key string) bool {
 	if !ok {
 		return false
 	}
+	// Every trigger but Run now: a schedule, the computer starting, waking,
+	// someone signing in, idle, the server becoming reachable.
 	t := v.(*pendingPostActionsEntry).trigger
-	return t == "scheduled" || t == "startup"
+	return t != "" && t != "manual"
 }
 
 // takePendingPostActions looks up and removes a key's entry — nil if key is

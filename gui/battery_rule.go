@@ -285,10 +285,11 @@ var wokenRun struct {
 // system recorded a wake within it), and when the wake
 // timer armed then was due within the gap, it woke the computer for its set.
 // Wall clock times are compared (Round(0)): a monotonic clock may not count
-// the time asleep.
-func noteSchedulerTick(prev, now time.Time) {
+// the time asleep. resumed: the computer slept or hibernated between the
+// ticks and has woken (the "wakes" event, computer_events.go).
+func noteSchedulerTick(prev, now time.Time) (resumed bool) {
 	if prev.IsZero() {
-		return
+		return false
 	}
 	p, n := prev.Round(0), now.Round(0)
 	// A gap shorter than wokenGap is a sleep only if the system recorded a
@@ -299,11 +300,11 @@ func noteSchedulerTick(prev, now time.Time) {
 	var short *wakeVerdict
 	if gap := n.Sub(p); gap < wokenGap {
 		if gap < shortSleepGap {
-			return
+			return false
 		}
 		v := whatWokeTheComputer(p)
 		if !v.known {
-			return
+			return false
 		}
 		short = &v
 	}
@@ -323,11 +324,11 @@ func noteSchedulerTick(prev, now time.Time) {
 		if armed {
 			writeDebugLog(fmt.Sprintf("[Wake] the computer woke at about %s; the wake timer is for %q at %s: not woken by it", n.Format(time.RFC3339), t.Set, t.At.Format(time.RFC3339)))
 		}
-		return
+		return true
 	}
 	if n.Sub(t.At) > wokenLate {
 		writeDebugLog(fmt.Sprintf("[Wake] the computer woke at about %s, %s after the wake timer for %q was due: not woken by the timer", n.Format(time.RFC3339), n.Sub(t.At).Round(time.Second), t.Set))
-		return
+		return true
 	}
 	// In the timer's window, but the system may say the power button woke it
 	// (wake_source.go).
@@ -338,7 +339,7 @@ func noteSchedulerTick(prev, now time.Time) {
 	}
 	if v.known && !v.ours {
 		writeDebugLog(fmt.Sprintf("[Wake] the computer woke at about %s, around the wake timer for %q, but Windows says %s woke it: not woken by the timer", n.Format(time.RFC3339), t.Set, v.what))
-		return
+		return true
 	}
 	wokenRun.Lock()
 	wokenRun.setID, wokenRun.at, wokenRun.used = t.SetID, n, false
@@ -347,6 +348,15 @@ func noteSchedulerTick(prev, now time.Time) {
 	// Left alone, a computer woken by a timer sleeps again within minutes,
 	// before the run has started (wake_hold.go).
 	holdAwakeAfterWake(t.SetID, t.Set)
+	return true
+}
+
+// wokenForSet reports whether the computer was just woken by this app's wake
+// timer for a run of the set (not yet taken by the run), without taking it.
+func wokenForSet(setID string, now time.Time) bool {
+	wokenRun.Lock()
+	defer wokenRun.Unlock()
+	return !wokenRun.used && wokenRun.setID == setID && now.Round(0).Sub(wokenRun.at) <= wokenFresh
 }
 
 // takeWoken returns when the computer was woken for this scheduled run of

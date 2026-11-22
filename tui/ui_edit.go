@@ -39,15 +39,18 @@ type editor struct {
 	mode                *tview.DropDown
 	unit                *tview.DropDown
 	every, at, weekdayF *tview.InputField
-	wake                *tview.Checkbox // wakeToRun: wake the computer from sleep for its runs (#140)
+	wake                *tview.Checkbox // the first schedule's wake: wake the computer from sleep for its runs (#140)
 	// the first schedule's "If the server cannot be reached at the time":
 	// record the run as failed, or wait up to waitHours for the server
 	unreach   *tview.DropDown
 	waitHours *tview.InputField
-	// the other triggers: when the computer starts (runAtStartup), and when
-	// the server can be reached (serverTrigger), at most every N hours, not
-	// on metered connections
-	startup                    *tview.Checkbox
+	// the other triggers: when something happens on this computer
+	// (computerEvents: it starts, wakes, someone signs in, or nobody has used
+	// the keyboard or mouse for N minutes, 0 for off), and when the server can
+	// be reached (serverTrigger), at most every N hours, not on metered
+	// connections
+	startup, evWakes, evSignIn *tview.Checkbox
+	evIdle                     *tview.InputField
 	serverOn, serverNotMetered *tview.Checkbox
 	serverEvery                *tview.InputField
 	// the set's On battery rule: start anyway, only at a charge of at least
@@ -307,7 +310,21 @@ func (e *editor) build() {
 		e.unreach.SetCurrentOption(0)
 	}
 	e.waitHours = tview.NewInputField().SetLabel("  Wait for up to (1 to 168 hours) ").SetText(strconv.Itoa(wait)).SetFieldWidth(4)
-	e.startup = tview.NewCheckbox().SetLabel("Also when the computer starts ").SetChecked(boolean(e.orig, "runAtStartup"))
+	// A set saved before computerEvents has runAtStartup only.
+	ce, _ := e.orig["computerEvents"].(map[string]interface{})
+	ceOn := ce != nil && boolean(ce, "enabled")
+	starts := boolean(e.orig, "runAtStartup")
+	if ce != nil {
+		starts = ceOn && boolean(ce, "starts")
+	}
+	idle := 0
+	if ceOn {
+		idle = int(num(ce, "idleMinutes"))
+	}
+	e.startup = tview.NewCheckbox().SetLabel("Also when the computer starts ").SetChecked(starts)
+	e.evWakes = tview.NewCheckbox().SetLabel("Also when it wakes from sleep or hibernate ").SetChecked(ceOn && boolean(ce, "wakes"))
+	e.evSignIn = tview.NewCheckbox().SetLabel("Also when someone signs in ").SetChecked(ceOn && boolean(ce, "signIn"))
+	e.evIdle = tview.NewInputField().SetLabel("Also when idle for (minutes, 0 off) ").SetText(strconv.Itoa(idle)).SetFieldWidth(5)
 	st, _ := e.orig["serverTrigger"].(map[string]interface{})
 	everyH := int(num(st, "everyHours"))
 	if everyH <= 0 {
@@ -316,7 +333,12 @@ func (e *editor) build() {
 	e.serverOn = tview.NewCheckbox().SetLabel("Also when the server can be reached ").SetChecked(st != nil && boolean(st, "enabled"))
 	e.serverEvery = tview.NewInputField().SetLabel("  At most every (1 to 744 hours) ").SetText(strconv.Itoa(everyH)).SetFieldWidth(4)
 	e.serverNotMetered = tview.NewCheckbox().SetLabel("  Not on metered connections ").SetChecked(st != nil && boolean(st, "notMetered"))
-	e.wake = tview.NewCheckbox().SetLabel("Wake the computer from sleep or hibernate to run it ").SetChecked(boolean(e.orig, "wakeToRun"))
+	// Each schedule has its own wake; one saved before that follows the set's.
+	scWake := boolean(e.orig, "wakeToRun")
+	if w, ok := sc["wake"].(bool); ok {
+		scWake = w
+	}
+	e.wake = tview.NewCheckbox().SetLabel("  Wake the computer for these runs ").SetChecked(scWake)
 	// A set saved before the rule existed has none of its fields: start
 	// anyway, never cancel.
 	e.battery = tview.NewDropDown().SetLabel("On battery ").SetOptions(batteryChoices, nil).
@@ -333,11 +355,13 @@ func (e *editor) build() {
 	e.batteryCancel = tview.NewCheckbox().SetLabel("Cancel a running backup on battery below a charge ").SetChecked(boolean(e.orig, "batteryCancel"))
 	e.batteryBelow = tview.NewInputField().SetLabel("  Cancel level (0 to 99 %, 0 never) ").SetText(strconv.Itoa(below)).SetFieldWidth(4)
 	f2 := styleForm(tview.NewForm()).AddFormItem(e.mode).AddFormItem(e.unit).AddFormItem(e.every).AddFormItem(e.at).AddFormItem(e.weekdayF).
-		AddFormItem(e.unreach).AddFormItem(e.waitHours).AddFormItem(e.startup).
-		AddFormItem(e.serverOn).AddFormItem(e.serverEvery).AddFormItem(e.serverNotMetered).AddFormItem(e.wake)
+		AddFormItem(e.wake)
 	e.addWakeAlert(f2)
-	f2.AddFormItem(e.battery).AddFormItem(e.batteryStart).AddFormItem(e.batteryCancel).AddFormItem(e.batteryBelow)
-	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept, as are network choices.\nThe server trigger counts from the last backup that worked.\nWaking works from sleep (usually hibernate too), not from shut down.\nOn battery: laptops only; on mains the set always runs. A cancelled backup is not saved.", 70, 6, true, false)
+	f2.AddFormItem(e.unreach).AddFormItem(e.waitHours).
+		AddFormItem(e.startup).AddFormItem(e.evWakes).AddFormItem(e.evSignIn).AddFormItem(e.evIdle).
+		AddFormItem(e.serverOn).AddFormItem(e.serverEvery).AddFormItem(e.serverNotMetered).
+		AddFormItem(e.battery).AddFormItem(e.batteryStart).AddFormItem(e.batteryCancel).AddFormItem(e.batteryBelow)
+	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept, as are network choices.\nThe server trigger counts from the last backup that worked.\nWaking works from sleep (usually hibernate too), not from shut down.\nIdle counts keyboard and mouse use by anyone signed in; it runs once each idle spell.\nOn battery: laptops only; on mains the set always runs. A cancelled backup is not saved.", 70, 7, true, false)
 	f2.SetTitle(" When to run ")
 
 	// ---- step 3: options
@@ -704,8 +728,8 @@ func (e *editor) document() (map[string]interface{}, error) {
 		doc["wakeToRun"] = false
 	} else {
 		doc["scheduleMode"] = "scheduled"
-		doc["wakeToRun"] = e.wake.IsChecked()
 		sc := copyMap(e.firstSchedule())
+		sc["wake"] = e.wake.IsChecked()
 		_, unit := e.unit.GetCurrentOption()
 		sc["unit"] = unit
 		n, err := strconv.Atoi(strings.TrimSpace(e.every.GetText()))
@@ -748,8 +772,42 @@ func (e *editor) document() (map[string]interface{}, error) {
 			list = []interface{}{sc}
 		}
 		doc["schedules"] = list
+		// The set's old wakeToRun, for an older service: on if any line
+		// wakes (a line saved before each had its own follows the set's).
+		wakes := false
+		for _, it := range list {
+			m, _ := it.(map[string]interface{})
+			w, ok := m["wake"].(bool)
+			if !ok {
+				w = boolean(e.orig, "wakeToRun")
+			}
+			if w && (m["enabled"] == nil || boolean(m, "enabled")) {
+				wakes = true
+			}
+		}
+		doc["wakeToRun"] = wakes
 	}
 	manual := doc["scheduleMode"] == "manual"
+	// When something happens on this computer: on while anything is ticked
+	// (this form has no separate on/off), kept turned off once the set has
+	// it; runAtStartup written for an older service.
+	idle, err := strconv.Atoi(strings.TrimSpace(e.evIdle.GetText()))
+	if err != nil || idle < 0 || idle > 24*60 {
+		return nil, fmt.Errorf("the idle time must be a whole number of minutes from 0 to 1440 (0 off)")
+	}
+	anyEvent := e.startup.IsChecked() || e.evWakes.IsChecked() || e.evSignIn.IsChecked() || idle > 0
+	ce := copyMap(func() map[string]interface{} { m, _ := e.orig["computerEvents"].(map[string]interface{}); return m }())
+	if anyEvent || ce != nil {
+		if ce == nil {
+			ce = map[string]interface{}{}
+		}
+		ce["enabled"] = anyEvent
+		ce["starts"] = e.startup.IsChecked()
+		ce["wakes"] = e.evWakes.IsChecked()
+		ce["signIn"] = e.evSignIn.IsChecked()
+		ce["idleMinutes"] = float64(idle)
+		doc["computerEvents"] = ce
+	}
 	doc["runAtStartup"] = !manual && e.startup.IsChecked()
 	// The server trigger: kept (turned off) when unticked, so its networks
 	// and other choices come back with it.

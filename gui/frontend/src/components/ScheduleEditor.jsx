@@ -3,8 +3,22 @@ import { useTranslation } from '../i18n/i18nContext'
 import {
   WEEK, UNITS, MIN_REPEAT_MINUTES, newSchedule, nextScheduleId, describe, nextRuns,
   nextSetRun, scheduleProblem, weekdayName, monthName, tp, nthWord,
-  newServerTrigger, CONNECTIONS,
+  newServerTrigger, CONNECTIONS, newComputerEvents, eventsOn,
 } from './schedules'
+
+// The longest "idle for" (gui/computer_events.go maxIdleMinutes).
+const MAX_IDLE_MINUTES = 24 * 60
+
+// eventsSummary says a "When something happens on this computer" trigger in
+// plain words: "When the computer starts; When someone signs in".
+export function eventsSummary(t, ce) {
+  const parts = []
+  if (ce.starts) parts.push(t('trigEventsStarts'))
+  if (ce.wakes) parts.push(t('trigEvWakes'))
+  if (ce.signIn) parts.push(t('trigEvSignIn'))
+  if (ce.idleMinutes > 0) parts.push(t('trigEvIdle', { n: ce.idleMinutes }))
+  return parts.length ? parts.join('; ') : t('trigEvNone')
+}
 
 // The longest a schedule's run waits for its server, and a server trigger's
 // "at most every" (gui/schedules.go maxWaitHours, server_trigger.go
@@ -27,9 +41,10 @@ export function serverSummary(t, language, st) {
   return parts.join(', ')
 }
 
-// timesExtra says a schedule's server and network choices, after its times.
+// timesExtra says a schedule's wake, server and network choices, after its times.
 function timesExtra(t, s) {
   const parts = []
+  if (s.wake) parts.push(t('trigSumWakes'))
   if (s.ifUnreachable === 'wait') parts.push(t('trigSumWaits', { n: s.waitHours > 0 ? s.waitHours : 12, unit: t('schedUnit_hours') }))
   if ((s.networks || []).length) parts.push(t('trigSumNetworks', { names: s.networks.join(', ') }))
   if (s.notMetered) parts.push(t('trigSumNotMetered'))
@@ -81,23 +96,28 @@ const readWakeAlertLeft = () => {
 // "By hand: When I click Run Now", is always there and always on (it is not
 // stored: every set can be run with Run Now). Then:
 //   - At set times: each of the set's schedules. Editing one shows only the
-//     fields its unit needs, its next 3 runs, and what a run does when the
-//     server cannot be reached at its time (fail, or wait up to N hours),
-//     and the networks it may run on;
+//     fields its unit needs, its next 3 runs, whether its runs wake the
+//     computer (schedule.wake, each line its own, #140), what a run does when
+//     the server cannot be reached at its time (fail, or wait up to N
+//     hours), and the networks it may run on;
 //   - When the server can be reached (serverTrigger, null for none): at most
 //     every N hours, on which networks and connections, and a "Right now"
 //     panel from getTriggerStatus(trigger) (App.GetServerTriggerStatus);
-//   - Computer events: when the computer starts (runAtStartup).
+//   - When something happens on this computer (computerEvents, null for
+//     none): it starts, wakes, someone signs in, or it has been idle.
+// One "Add a trigger" button opens a new trigger with its Type to pick first;
+// a type a set can have only once is greyed once it has it. Each editor's
+// Type list changes a trigger into another type (it replaces it).
 // getNetworkInfo is App.GetNetworkInfo, the networks the computer knows.
-// wakeToRun: wake the computer from sleep for the set's runs (#140); wakeInfo
-// is App.GetWakeTimerInfo, what this computer allows (null while unknown).
+// wakeInfo is App.GetWakeTimerInfo, what this computer allows for waking
+// (null while unknown).
 // battery is the set's On battery rule ({ mode: 'anyway' | 'above' | 'plugged',
 // start, cancel, cancelBelow }), setBattery changes part of it, and
 // batteryInfo is App.GetBatteryInfo: with no battery the section is greyed.
 // onEnableWake(scope) is App.EnableWakeTimers, for the alert below.
-export default function ScheduleEditor({ schedules, setSchedules, runAtStartup, setRunAtStartup,
+export default function ScheduleEditor({ schedules, setSchedules, computerEvents = null, setComputerEvents = () => {},
   serverTrigger = null, setServerTrigger = () => {}, getNetworkInfo = null, getTriggerStatus = null,
-  wakeToRun = false, setWakeToRun = () => {}, wakeInfo = null,
+  wakeInfo = null,
   battery = null, setBattery = () => {}, batteryInfo = null, onEnableWake = null }) {
   const { t, language } = useTranslation()
   // The alert under the Wake option when the power plan stops a timer waking
@@ -109,7 +129,9 @@ export default function ScheduleEditor({ schedules, setSchedules, runAtStartup, 
   const [wakeLeft, setWakeLeft] = useState(readWakeAlertLeft)
   const [wakeBusy, setWakeBusy] = useState(false)
   const [wakeError, setWakeError] = useState('')
-  const wakeAlert = wakeToRun && wakeInfo && wakeInfo.alert && wakeInfo.alert !== wakeLeft ? wakeInfo.alert : ''
+  // Some line's runs wake the computer: the power plan's alert applies.
+  const anyWake = schedules.some(s => s.enabled && s.wake)
+  const wakeAlert = anyWake && wakeInfo && wakeInfo.alert && wakeInfo.alert !== wakeLeft ? wakeInfo.alert : ''
   const leaveWake = () => {
     try { localStorage.setItem(WAKE_ALERT_LEFT, wakeAlert) } catch { /* shown again next time */ }
     setWakeLeft(wakeAlert)
@@ -146,13 +168,11 @@ export default function ScheduleEditor({ schedules, setSchedules, runAtStartup, 
     return t('batterySummaryAnyway', { cancel })
   }
   const batteryLine = batterySummary()
-  // The trigger being edited: a schedule's ID, 'server' or 'events'.
+  // The trigger being edited: a schedule's ID, 'server', 'events', or 'new'
+  // (Add a trigger: its type still to pick).
   const [editingId, setEditingId] = useState(null)
   const editing = schedules.find(s => s.id === editingId)
-  // The Computer events row stays in the list while its tick is off, until
-  // it is deleted (runAtStartup is its only setting for now).
-  const [eventsShown, setEventsShown] = useState(!!runAtStartup)
-  const showEvents = eventsShown || runAtStartup
+  const showEvents = !!computerEvents
 
   // The computer's networks (App.GetNetworkInfo): read when an editor that
   // offers them opens.
@@ -196,10 +216,10 @@ export default function ScheduleEditor({ schedules, setSchedules, runAtStartup, 
     setEditingId('server')
   }
   const addEvents = () => {
-    setRunAtStartup(true)
-    setEventsShown(true)
+    if (!computerEvents) setComputerEvents(newComputerEvents())
     setEditingId('events')
   }
+  const updateEvents = patch => setComputerEvents({ ...(computerEvents || newComputerEvents()), ...patch })
   const remove = (id) => {
     setSchedules(schedules.filter(s => s.id !== id))
     if (editingId === id) setEditingId(null)
@@ -209,38 +229,47 @@ export default function ScheduleEditor({ schedules, setSchedules, runAtStartup, 
     if (editingId === 'server') setEditingId(null)
   }
   const removeEvents = () => {
-    setRunAtStartup(false)
-    setEventsShown(false)
+    setComputerEvents(null)
     if (editingId === 'events') setEditingId(null)
   }
-  // The editor's Runs list: a trigger changed into another kind. A kind the
-  // set already has is offered greyed.
+  // The editor's Type list: a trigger changed into another type replaces it
+  // (from '' for a new one). A type the set already has is offered greyed.
   const changeKind = (from, to) => {
     if (to === 'times') add('days')
     else if (to === 'server') addServer()
     else if (to === 'events') addEvents()
     if (from === 'server') setServerTrigger(null)
-    else if (from === 'events') { setRunAtStartup(false); setEventsShown(false) }
+    else if (from === 'events') setComputerEvents(null)
     else if (from) setSchedules(prev => prev.filter(s => s.id !== from))
   }
   const fmt = d => d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
   const setNext = nextSetRun(schedules)
   const enabledCount = schedules.filter(s => s.enabled).length
   const serverOn = !!serverTrigger && serverTrigger.enabled
-  const anyOn = enabledCount > 0 || serverOn || runAtStartup
+  const eventsActive = eventsOn(computerEvents)
+  const anyOn = enabledCount > 0 || serverOn || eventsActive
 
-  // The Runs list at the top of each editor.
-  const runsSelect = (kind, from) => (
-    <div className="sched-row">
-      <span className="sched-key">{t('trigRuns')}</span>
-      <select id="trig-runs" className="sched-field" value={kind} aria-label={t('trigRuns')}
-        onChange={e => e.target.value !== kind && changeKind(from, e.target.value)}>
-        <option value="times">{t('trigKindTimes')}</option>
-        <option value="server" disabled={!!serverTrigger && kind !== 'server'}>{t('trigKindServer')}</option>
-        <option value="events" disabled={showEvents && kind !== 'events'}>{t('trigKindEvents')}</option>
-      </select>
-    </div>
-  )
+  // The Type list at the top of each editor ('' for a new trigger, its type
+  // still to pick). A type the set can have once is greyed once it has it.
+  const runsSelect = (kind, from) => {
+    const taken = (k, has) => has && kind !== k
+    const label = (k, key, has) => taken(k, has) ? t('trigAlreadyAdded', { kind: t(key) }) : t(key)
+    return (
+      <>
+        <div className="sched-row">
+          <label className="sched-key" htmlFor="trig-runs">{t('trigRuns')}</label>
+          <select id="trig-runs" className="sched-field" value={kind}
+            onChange={e => e.target.value && e.target.value !== kind && changeKind(from, e.target.value)}>
+            {kind === '' && <option value="">{t('trigTypeChoose')}</option>}
+            <option value="times">{t('trigKindTimes')}</option>
+            <option value="server" disabled={taken('server', !!serverTrigger)}>{label('server', 'trigKindServer', !!serverTrigger)}</option>
+            <option value="events" disabled={taken('events', showEvents)}>{label('events', 'trigKindEvents', showEvents)}</option>
+          </select>
+        </div>
+        {kind !== '' && <div className="sched-hint">{t('trigTypeChangeNote')}</div>}
+      </>
+    )
+  }
   const hoursBox = (id, value, max, onChange, label) => (
     <input id={id} type="number" min="1" max={max} value={value} className="sched-field narrow" aria-label={label}
       onChange={e => onChange(Math.max(0, Math.min(max, parseInt(e.target.value, 10) || 0)))}
@@ -397,6 +426,48 @@ export default function ScheduleEditor({ schedules, setSchedules, runAtStartup, 
 
         {problem && <div className="sched-warn">{t(problem, { n: MIN_REPEAT_MINUTES })}</div>}
 
+        {/* Waking the computer for this line's runs (#140): each line its own. */}
+        <div className="trig-box" id="sched-wake-box">
+          <div className="trig-box-title">{t('schedWakeTitle')}</div>
+          <div className="sched-row">
+            <label className="sched-startup">
+              <input type="checkbox" id="sched-wake" checked={!!s.wake} onChange={e => update(s.id, { wake: e.target.checked })} />
+              <span>{t('schedWakeLine')}</span>
+            </label>
+          </div>
+          {s.wake && wakeAlert && (
+            <div className="sched-warn" id="sched-wake-alert" role="alert">
+              <div>{t(wakeAlert === 'all' ? 'wakeAlertAll' : 'wakeAlertBattery')}</div>
+              {wakeError && <div id="sched-wake-alert-error">{t('wakeEnableFailed', { error: wakeError })}</div>}
+              <div className="sched-add-row">
+                <button type="button" className="btn btn-primary" id="sched-wake-enable" disabled={wakeBusy || !onEnableWake} onClick={enableWake}>
+                  {t(wakeAlert === 'all' ? 'wakeEnableAll' : 'wakeEnableBattery')}
+                </button>
+                <button type="button" className="btn btn-secondary" id="sched-wake-leave" disabled={wakeBusy} onClick={leaveWake}>
+                  {t(wakeAlert === 'all' ? 'wakeLeaveOff' : 'wakeLeaveMainsOnly')}
+                </button>
+              </div>
+            </div>
+          )}
+          {s.wake && (
+            <p className="sched-hint" id="sched-wake-note">
+              {t('wakeNote')}
+              {wakeInfo && !wakeInfo.supported && <><br />{t('wakeUnsupported')}</>}
+              {/* The short notes say what the alert above already asks about: shown once it is left. */}
+              {wakeInfo && wakeInfo.supported && !wakeInfo.onMains && wakeAlert !== 'all' && <><br />{t('wakeBlocked')}</>}
+              {wakeInfo && wakeInfo.supported && wakeInfo.onMains && !wakeInfo.onBattery && wakeAlert !== 'battery' && <><br />{t('wakeMainsOnly')}</>}
+            </p>
+          )}
+          {/* Modern Standby (S0 low power idle): Windows may ignore the wake,
+              keep awake and sleep requests, so waking is best effort (#142). */}
+          {s.wake && wakeInfo && wakeInfo.supported && wakeInfo.modernStandby && (
+            <div className="sched-warn" id="sched-wake-modern" role="note" style={{ marginTop: '6px' }}>
+              <strong>{t('wakeModernStandbyTitle')}</strong>
+              <div>{t('wakeModernStandby')}</div>
+            </div>
+          )}
+        </div>
+
         {/* What a run does when the server cannot be reached at its time,
             and the networks it may run on (gui/server_trigger.go). */}
         <div className="trig-box" id="sched-server">
@@ -440,7 +511,7 @@ export default function ScheduleEditor({ schedules, setSchedules, runAtStartup, 
             </label>
           </div>
           {netsUnsupported && <div className="sched-hint">{t('trigNetUnsupported')}</div>}
-          {wakeToRun && <div className="sched-hint">{t('trigNetWokenHint')}</div>}
+          {s.wake && <div className="sched-hint">{t('trigNetWokenHint')}</div>}
         </div>
 
         <div className="sched-next">
@@ -567,20 +638,54 @@ export default function ScheduleEditor({ schedules, setSchedules, runAtStartup, 
     )
   }
 
-  // Computer events: for now, when the computer starts.
-  const eventsEditor = () => (
-    <div className="schedule-editor" id="events-editor">
-      <strong>{t('trigEditTitle')}</strong>
-      {runsSelect('events', 'events')}
+  // When something happens on this computer: it starts, wakes, someone signs
+  // in, or nobody has used the keyboard or mouse for N minutes.
+  const eventsEditor = (ce) => {
+    const [idleBefore, idleAfter] = around('trigEvIdle', 'n')
+    const idleOn = ce.idleMinutes > 0
+    const tick = (id, key, on, patch) => (
       <div className="sched-row">
         <label className="sched-startup">
-          <input type="checkbox" id="sched-startup" checked={runAtStartup} onChange={e => setRunAtStartup(e.target.checked)} />
-          <span>{t('trigEventsStarts')}</span>
+          <input type="checkbox" id={id} checked={on} onChange={e => updateEvents(patch(e.target.checked))} />
+          <span>{t(key)}</span>
         </label>
       </div>
-      <div className="sched-hint">{t('trigEventsHint')}</div>
+    )
+    return (
+      <div className="schedule-editor" id="events-editor">
+        <strong>{t('trigEditTitle')}</strong>
+        {runsSelect('events', 'events')}
+        {tick('sched-startup', 'trigEventsStarts', !!ce.starts, v => ({ starts: v }))}
+        {tick('events-wakes', 'trigEvWakes', !!ce.wakes, v => ({ wakes: v }))}
+        {tick('events-signin', 'trigEvSignIn', !!ce.signIn, v => ({ signIn: v }))}
+        <div className="sched-row">
+          <label className="sched-startup">
+            <input type="checkbox" id="events-idle" checked={idleOn}
+              onChange={e => updateEvents({ idleMinutes: e.target.checked ? 15 : 0 })} />
+            <span>{idleBefore}</span>
+          </label>
+          <input id="events-idle-minutes" type="number" min="1" max={MAX_IDLE_MINUTES} value={idleOn ? ce.idleMinutes : 15}
+            disabled={!idleOn} className="sched-field narrow" aria-label={t('schedUnit_minutes')}
+            onChange={e => updateEvents({ idleMinutes: Math.max(0, Math.min(MAX_IDLE_MINUTES, parseInt(e.target.value, 10) || 0)) })}
+            onBlur={e => idleOn && updateEvents({ idleMinutes: Math.min(MAX_IDLE_MINUTES, Math.max(1, parseInt(e.target.value, 10) || 1)) })} />
+          <span>{idleAfter}</span>
+        </div>
+        {idleOn && <div className="sched-hint" id="events-idle-hint">{t('trigEvIdleHint')}</div>}
+        <div className="sched-hint">{t('trigEventsHint')}</div>
+        <div className="sched-done">
+          <button type="button" className="btn btn-secondary" id="events-done" onClick={() => setEditingId(null)}>{t('schedDone')}</button>
+        </div>
+      </div>
+    )
+  }
+
+  // Add a trigger: the type is picked first, then that type's editor opens.
+  const newEditor = () => (
+    <div className="schedule-editor" id="new-trigger-editor">
+      <strong>{t('trigNewTitle')}</strong>
+      {runsSelect('', '')}
       <div className="sched-done">
-        <button type="button" className="btn btn-secondary" id="events-done" onClick={() => setEditingId(null)}>{t('schedDone')}</button>
+        <button type="button" className="btn btn-secondary" id="new-trigger-cancel" onClick={() => setEditingId(null)}>{t('cancel')}</button>
       </div>
     </div>
   )
@@ -625,59 +730,20 @@ export default function ScheduleEditor({ schedules, setSchedules, runAtStartup, 
             onEdit: () => setEditingId(editingId === 'server' ? null : 'server'), onDelete: removeServer, editingRow: editingId === 'server',
           })}
           {showEvents && row({
-            id: 'trig-events', key: 'events', on: !!runAtStartup, onToggle: v => setRunAtStartup(v),
-            kind: t('trigKindEvents'), what: t('trigEventsStarts'), off: !runAtStartup,
+            id: 'trig-events', key: 'events', on: !!computerEvents.enabled, onToggle: v => updateEvents({ enabled: v }),
+            kind: t('trigKindEvents'), what: eventsSummary(t, computerEvents), off: !computerEvents.enabled,
             onEdit: () => setEditingId(editingId === 'events' ? null : 'events'), onDelete: removeEvents, editingRow: editingId === 'events',
           })}
         </ul>
         <div className="sched-add-row" id="trig-add">
-          <span>{t('trigAddLabel')}</span>
-          <button type="button" className="btn btn-secondary" id="sched-add" onClick={() => add('days')}>{t('trigKindTimes')}</button>
-          <button type="button" className="btn btn-secondary" id="trig-add-server" disabled={!!serverTrigger} onClick={addServer}>{t('trigKindServer')}</button>
-          <button type="button" className="btn btn-secondary" id="trig-add-events" disabled={showEvents} onClick={addEvents}>{t('trigKindEvents')}</button>
+          <button type="button" className="btn btn-secondary" id="trig-add-new" disabled={editingId === 'new'}
+            onClick={() => setEditingId('new')}>{t('trigAddTrigger')}</button>
         </div>
+        {editingId === 'new' && newEditor()}
         {editing && editor(editing)}
         {editingId === 'server' && serverTrigger && serverEditor(serverTrigger)}
-        {editingId === 'events' && eventsEditor()}
+        {editingId === 'events' && computerEvents && eventsEditor(computerEvents)}
       </div>
-
-          <div className="form-group">
-            <label className="sched-startup">
-              <input type="checkbox" id="sched-wake" checked={wakeToRun} onChange={e => setWakeToRun(e.target.checked)} />
-              <span>{t('wakeToRun')}</span>
-            </label>
-            {wakeAlert && (
-              <div className="sched-warn" id="sched-wake-alert" role="alert">
-                <div>{t(wakeAlert === 'all' ? 'wakeAlertAll' : 'wakeAlertBattery')}</div>
-                {wakeError && <div id="sched-wake-alert-error">{t('wakeEnableFailed', { error: wakeError })}</div>}
-                <div className="sched-add-row">
-                  <button type="button" className="btn btn-primary" id="sched-wake-enable" disabled={wakeBusy || !onEnableWake} onClick={enableWake}>
-                    {t(wakeAlert === 'all' ? 'wakeEnableAll' : 'wakeEnableBattery')}
-                  </button>
-                  <button type="button" className="btn btn-secondary" id="sched-wake-leave" disabled={wakeBusy} onClick={leaveWake}>
-                    {t(wakeAlert === 'all' ? 'wakeLeaveOff' : 'wakeLeaveMainsOnly')}
-                  </button>
-                </div>
-              </div>
-            )}
-            {wakeToRun && (
-              <p className="sched-hint" id="sched-wake-note">
-                {t('wakeNote')}
-                {wakeInfo && !wakeInfo.supported && <><br />{t('wakeUnsupported')}</>}
-                {/* The short notes say what the alert above already asks about: shown once it is left. */}
-                {wakeInfo && wakeInfo.supported && !wakeInfo.onMains && wakeAlert !== 'all' && <><br />{t('wakeBlocked')}</>}
-                {wakeInfo && wakeInfo.supported && wakeInfo.onMains && !wakeInfo.onBattery && wakeAlert !== 'battery' && <><br />{t('wakeMainsOnly')}</>}
-              </p>
-            )}
-            {/* Modern Standby (S0 low power idle): Windows may ignore the wake,
-                keep awake and sleep requests, so waking is best effort (#142). */}
-            {wakeToRun && wakeInfo && wakeInfo.supported && wakeInfo.modernStandby && (
-              <div className="sched-warn" id="sched-wake-modern" role="note" style={{ marginTop: '6px' }}>
-                <strong>{t('wakeModernStandbyTitle')}</strong>
-                <div>{t('wakeModernStandby')}</div>
-              </div>
-            )}
-          </div>
 
       {battery && (() => {
         const [aboveBefore, aboveAfter] = around('batteryAbove', 'n')
@@ -734,8 +800,8 @@ export default function ScheduleEditor({ schedules, setSchedules, runAtStartup, 
               {setNext && <>{t('schedSetNext', { time: fmt(setNext.time) })} ({describe(t, language, setNext.schedule)})</>}
               {setNext && enabledCount > 1 && <><br />{tp(t, language, 'schedCountOn', enabledCount)}</>}
               {serverOn && <>{setNext && <br />}<span id="schedule-summary-server">{t('trigKindServer')}: {serverSummary(t, language, serverTrigger)}</span></>}
-              {runAtStartup && <>{(setNext || serverOn) && <br />}{t('andAtStartup')}</>}
-              {setNext && wakeToRun && <><br />{t('andWakes')}</>}
+              {eventsActive && <>{(setNext || serverOn) && <br />}<span id="schedule-summary-events">{t('trigKindEvents')}: {eventsSummary(t, computerEvents)}</span></>}
+              {setNext && anyWake && <><br />{t('andWakes')}</>}
               {batteryLine && <><br /><span id="schedule-summary-battery">{batteryLine}</span></>}
               {setNext && <><br />{t('schedCatchUp')}</>}
             </>}
