@@ -1077,9 +1077,12 @@ func (a *App) HandleStartupRun() {
 		if !computerEventsOn(job) || !job.ComputerEvents.Starts {
 			continue
 		}
-		eventState.Lock()
-		eventState.started[job.ID] = time.Now() // a sign-in right after the start starts no second run
-		eventState.Unlock()
+		if soon, good := a.eventTooSoon(job, time.Now()); soon {
+			writeDebugLog(fmt.Sprintf("[Trigger] %s: the computer started, but its last backup that worked was at %s, within its at most every",
+				job.Name, good.Local().Format("15:04")))
+			continue
+		}
+		markEventStart(job.ID, time.Now()) // a sign-in right after the start starts no second run
 
 		// Check if this job is already running (mutex protection)
 		// If scheduler already started it, the mutex will prevent duplicate execution

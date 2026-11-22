@@ -62,14 +62,17 @@ export function jobTriggers(job) {
   // "When something happens on this computer"; a set saved before it existed
   // has runAtStartup only (the backend moves it over when it loads the sets).
   const ce = job.computerEvents || (job.runAtStartup ? { enabled: true, starts: true } : null)
-  const computerEvents = ce ? { enabled: manual ? false : !!ce.enabled, starts: !!ce.starts, wakes: !!ce.wakes, signIn: !!ce.signIn, idleMinutes: ce.idleMinutes || 0 } : null
+  const computerEvents = ce ? { enabled: manual ? false : !!ce.enabled, starts: !!ce.starts, wakes: !!ce.wakes, signIn: !!ce.signIn, idleMinutes: ce.idleMinutes || 0, everyMinutes: ce.everyMinutes || 0 } : null
   return { schedules, serverTrigger, computerEvents }
 }
 
 // newComputerEvents is a new "When something happens on this computer"
-// trigger: when the computer starts.
+// trigger: when the computer starts, at most every 4 hours (everyMinutes,
+// from the set's last backup that worked; 0 no limit).
+export const DEFAULT_EVENT_EVERY_MINUTES = 4 * 60
+export const MAX_EVENT_EVERY_MINUTES = 31 * 24 * 60
 export function newComputerEvents() {
-  return { enabled: true, starts: true, wakes: false, signIn: false, idleMinutes: 0 }
+  return { enabled: true, starts: true, wakes: false, signIn: false, idleMinutes: 0, everyMinutes: DEFAULT_EVENT_EVERY_MINUTES }
 }
 
 // eventsOn reports whether the trigger has anything that can start a run.

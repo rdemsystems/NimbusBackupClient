@@ -247,3 +247,43 @@ func TestEventRunsRespectScheduleAndSwitches(t *testing.T) {
 		t.Errorf("runs started: %v", *got)
 	}
 }
+
+// "At most every" counts from the set's last backup that worked, whatever
+// started it: a sign-in an hour after one starts nothing with a 4 hour limit,
+// one 5 hours after does; a failed run or another set's does not count.
+func TestEventAtMostEveryCountsFromTheLastGoodBackup(t *testing.T) {
+	got := startedRuns(t)
+	now := time.Now()
+	hist := []JobHistory{}
+	old := eventHistory
+	eventHistory = func(*App) ([]JobHistory, error) { return hist, nil }
+	t.Cleanup(func() { eventHistory = old })
+	a := &App{}
+	set := eventsSet("ev", ComputerEvents{SignIn: true, EveryMinutes: 240})
+	try := func(what string, want int) {
+		t.Helper()
+		eventState.Lock()
+		eventState.started = map[string]time.Time{}
+		eventState.Unlock()
+		*got = nil
+		a.startEventRun(set, triggerSignIn, "someone signed in", now)
+		if len(*got) != want {
+			t.Errorf("%s: %d runs started, want %d", what, len(*got), want)
+		}
+	}
+	try("no backup yet", 1)
+	hist = []JobHistory{
+		{JobID: "ev", Status: "failed", Timestamp: now.Add(-10 * time.Minute).Format(time.RFC3339)},
+		{JobID: "other", Status: "success", Timestamp: now.Add(-20 * time.Minute).Format(time.RFC3339)},
+		{JobID: "ev", Status: "success", Timestamp: now.Add(-time.Hour).Format(time.RFC3339)},
+	}
+	try("a backup worked an hour ago", 0)
+	hist[2].Timestamp = now.Add(-5 * time.Hour).Format(time.RFC3339)
+	try("the last one that worked was 5 hours ago", 1)
+	set.ComputerEvents.EveryMinutes = 0
+	hist[2].Timestamp = now.Add(-time.Hour).Format(time.RFC3339)
+	try("no limit", 1)
+	if err := validateComputerEvents(&ComputerEvents{EveryMinutes: maxEventEveryMinutes + 1}); err == nil {
+		t.Error("an at most every over 31 days was accepted")
+	}
+}

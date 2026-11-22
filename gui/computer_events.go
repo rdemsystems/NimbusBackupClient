@@ -43,10 +43,20 @@ type ComputerEvents struct {
 	// IdleMinutes over 0: when nobody has used the keyboard or mouse for that
 	// many minutes; once each time the computer goes idle.
 	IdleMinutes int `json:"idleMinutes,omitempty"`
+	// EveryMinutes over 0: at most every that many minutes, counted from the
+	// set's last backup that worked (whatever started it), so a phone call or
+	// a walk away from the desk does not start a backup each time. 0: no
+	// limit but eventMinGap (sets saved before it, whose run at startup ran
+	// every start).
+	EveryMinutes int `json:"everyMinutes,omitempty"`
 }
 
 const (
 	maxIdleMinutes = 24 * 60
+	// maxEventEveryMinutes: the longest "at most every", 31 days as for the
+	// server trigger; defaultEventEveryMinutes the choice for a new trigger.
+	maxEventEveryMinutes     = 31 * 24 * 60
+	defaultEventEveryMinutes = 4 * 60
 	// eventMinGap: after one of these events started a run of a set, no
 	// other event starts one for this long.
 	eventMinGap = 15 * time.Minute
@@ -65,7 +75,32 @@ func validateComputerEvents(e *ComputerEvents) error {
 	if e.IdleMinutes < 0 || e.IdleMinutes > maxIdleMinutes {
 		return fmt.Errorf("when something happens on this computer: idle for 1 to %d minutes", maxIdleMinutes)
 	}
+	if e.EveryMinutes < 0 || e.EveryMinutes > maxEventEveryMinutes {
+		return fmt.Errorf("when something happens on this computer: at most every 1 minute to %d days", maxEventEveryMinutes/(24*60))
+	}
 	return nil
+}
+
+// eventHistory reads the run history; a variable so the tests can give one.
+var eventHistory = func(a *App) ([]JobHistory, error) { return a.GetJobHistory() }
+
+// eventTooSoon reports whether the set's last backup that worked ended less
+// than its events trigger's "at most every" ago (false without a limit, or
+// when the history cannot be read: the event then runs, as without one).
+func (a *App) eventTooSoon(job ScheduledJob, now time.Time) (bool, time.Time) {
+	if job.ComputerEvents == nil || job.ComputerEvents.EveryMinutes <= 0 {
+		return false, time.Time{}
+	}
+	hist, err := eventHistory(a)
+	if err != nil {
+		writeDebugLog(fmt.Sprintf("[Trigger] %s: the run history could not be read: %v", job.Name, err))
+		return false, time.Time{}
+	}
+	good := lastGoodRun(hist, job.ID)
+	if good.IsZero() {
+		return false, good
+	}
+	return now.Sub(good) < time.Duration(job.ComputerEvents.EveryMinutes)*time.Minute, good
 }
 
 // migrateComputerEvents moves a set saved before ComputerEvents existed to it
@@ -216,8 +251,9 @@ func idleDue(setID string, minutes int, lastInput, now time.Time) bool {
 }
 
 // startEventRun starts a run of job for an event, unless the set is running,
-// a scheduled run of it is due (that run goes first), an event started one
-// within eventMinGap, or its On battery rule would hold it back.
+// a scheduled run of it is due (that run goes first), its last backup that
+// worked is within its "at most every", its On battery rule would hold it
+// back, or an event started one within eventMinGap.
 func (a *App) startEventRun(job ScheduledJob, trigger, why string, now time.Time) {
 	if next, err := time.Parse(time.RFC3339, job.NextRun); err == nil && !now.Before(next) {
 		writeDebugLog(fmt.Sprintf("[Trigger] %s: %s, but a scheduled run is due: that run goes first", job.Name, why))
@@ -229,22 +265,33 @@ func (a *App) startEventRun(job ScheduledJob, trigger, why string, now time.Time
 	if running {
 		return
 	}
-	eventState.Lock()
-	recent := now.Sub(eventState.started[job.ID]) < eventMinGap
-	if !recent {
-		eventState.started[job.ID] = now
-	}
-	eventState.Unlock()
-	if recent {
-		writeDebugLog(fmt.Sprintf("[Trigger] %s: %s, but an event started a backup less than %s ago", job.Name, why, formatDuration(eventMinGap)))
+	if soon, good := a.eventTooSoon(job, now); soon {
+		writeDebugLog(fmt.Sprintf("[Trigger] %s: %s, but its last backup that worked was at %s, less than %s ago", job.Name, why,
+			good.Local().Format("15:04"), formatDuration(time.Duration(job.ComputerEvents.EveryMinutes)*time.Minute)))
 		return
 	}
 	if hold, _ := job.batteryRule().Holds(readBattery()); hold {
 		writeDebugLog(fmt.Sprintf("[Trigger] %s: %s, but the On battery rule holds the run back", job.Name, why))
 		return
 	}
+	if !markEventStart(job.ID, now) {
+		writeDebugLog(fmt.Sprintf("[Trigger] %s: %s, but an event started a backup less than %s ago", job.Name, why, formatDuration(eventMinGap)))
+		return
+	}
 	writeDebugLog(fmt.Sprintf("[Trigger] %s: %s: starting a backup", job.Name, why))
 	startEventBackup(a, job, trigger)
+}
+
+// markEventStart notes that an event starts a run of the set now; false when
+// one did within eventMinGap (nothing is noted then).
+func markEventStart(setID string, now time.Time) bool {
+	eventState.Lock()
+	defer eventState.Unlock()
+	if now.Sub(eventState.started[setID]) < eventMinGap {
+		return false
+	}
+	eventState.started[setID] = now
+	return true
 }
 
 // startEventBackup starts the run; a variable so the tests can see it.

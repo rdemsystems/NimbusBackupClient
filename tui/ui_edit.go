@@ -50,7 +50,7 @@ type editor struct {
 	// be reached (serverTrigger), at most every N hours, not on metered
 	// connections
 	startup, evWakes, evSignIn *tview.Checkbox
-	evIdle                     *tview.InputField
+	evIdle, evEvery            *tview.InputField
 	serverOn, serverNotMetered *tview.Checkbox
 	serverEvery                *tview.InputField
 	// the set's On battery rule: start anyway, only at a charge of at least
@@ -325,6 +325,15 @@ func (e *editor) build() {
 	e.evWakes = tview.NewCheckbox().SetLabel("Also when it wakes from sleep or hibernate ").SetChecked(ceOn && boolean(ce, "wakes"))
 	e.evSignIn = tview.NewCheckbox().SetLabel("Also when someone signs in ").SetChecked(ceOn && boolean(ce, "signIn"))
 	e.evIdle = tview.NewInputField().SetLabel("Also when idle for (minutes, 0 off) ").SetText(strconv.Itoa(idle)).SetFieldWidth(5)
+	// At most every N minutes from the last backup that worked: 4 hours for a
+	// new trigger; a set that ran at every start (runAtStartup) keeps no limit.
+	evEvery := 240
+	if ce != nil {
+		evEvery = int(num(ce, "everyMinutes"))
+	} else if starts {
+		evEvery = 0
+	}
+	e.evEvery = tview.NewInputField().SetLabel("  These at most every (minutes, 0 no limit) ").SetText(strconv.Itoa(evEvery)).SetFieldWidth(6)
 	st, _ := e.orig["serverTrigger"].(map[string]interface{})
 	everyH := int(num(st, "everyHours"))
 	if everyH <= 0 {
@@ -358,7 +367,7 @@ func (e *editor) build() {
 		AddFormItem(e.wake)
 	e.addWakeAlert(f2)
 	f2.AddFormItem(e.unreach).AddFormItem(e.waitHours).
-		AddFormItem(e.startup).AddFormItem(e.evWakes).AddFormItem(e.evSignIn).AddFormItem(e.evIdle).
+		AddFormItem(e.startup).AddFormItem(e.evWakes).AddFormItem(e.evSignIn).AddFormItem(e.evIdle).AddFormItem(e.evEvery).
 		AddFormItem(e.serverOn).AddFormItem(e.serverEvery).AddFormItem(e.serverNotMetered).
 		AddFormItem(e.battery).AddFormItem(e.batteryStart).AddFormItem(e.batteryCancel).AddFormItem(e.batteryBelow)
 	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept, as are network choices.\nThe server trigger counts from the last backup that worked.\nWaking works from sleep (usually hibernate too), not from shut down.\nIdle counts keyboard and mouse use by anyone signed in; it runs once each idle spell.\nOn battery: laptops only; on mains the set always runs. A cancelled backup is not saved.", 70, 7, true, false)
@@ -795,6 +804,10 @@ func (e *editor) document() (map[string]interface{}, error) {
 	if err != nil || idle < 0 || idle > 24*60 {
 		return nil, fmt.Errorf("the idle time must be a whole number of minutes from 0 to 1440 (0 off)")
 	}
+	evEvery, err := strconv.Atoi(strings.TrimSpace(e.evEvery.GetText()))
+	if err != nil || evEvery < 0 || evEvery > 31*24*60 {
+		return nil, fmt.Errorf("\"at most every\" for the computer events must be a whole number of minutes from 0 to 44640 (0 no limit)")
+	}
 	anyEvent := e.startup.IsChecked() || e.evWakes.IsChecked() || e.evSignIn.IsChecked() || idle > 0
 	ce := copyMap(func() map[string]interface{} { m, _ := e.orig["computerEvents"].(map[string]interface{}); return m }())
 	if anyEvent || ce != nil {
@@ -806,6 +819,7 @@ func (e *editor) document() (map[string]interface{}, error) {
 		ce["wakes"] = e.evWakes.IsChecked()
 		ce["signIn"] = e.evSignIn.IsChecked()
 		ce["idleMinutes"] = float64(idle)
+		ce["everyMinutes"] = float64(evEvery)
 		doc["computerEvents"] = ce
 	}
 	doc["runAtStartup"] = !manual && e.startup.IsChecked()

@@ -21,7 +21,7 @@ func openScheduleStep(h *harness) {
 func TestEditorOffersToEnableWakeTimers(t *testing.T) {
 	be := newDemoBackend()
 	be.wake = WakeInfo{OnMains: true, Alert: "battery"}
-	h := newHarnessWith(t, be, 130, 66)
+	h := newHarnessWith(t, be, 130, 70)
 	openScheduleStep(h)
 	if !strings.Contains(h.screen(), "Enable wake timers on battery") {
 		t.Fatalf("no button to enable wake timers:\n%s", h.screen())
@@ -36,9 +36,9 @@ func TestEditorOffersToEnableWakeTimers(t *testing.T) {
 	h.typ(' ')
 	h.waitFor("This computer's power")
 	// on to the button (the texts are passed over): if unreachable, wait,
-	// starts, wakes, signs in, idle, server, at most every, not metered,
-	// battery, start, cancel, below, then the first button
-	for i := 0; i < 14; i++ {
+	// starts, wakes, signs in, idle, events at most every, server, at most
+	// every, not metered, battery, start, cancel, below, then the first button
+	for i := 0; i < 15; i++ {
 		h.key(tcell.KeyTab, 0)
 	}
 	h.key(tcell.KeyEnter, 0)
@@ -61,7 +61,7 @@ func TestEditorOffersToEnableWakeTimers(t *testing.T) {
 func TestEditorSaysWakingIsBestEffortOnModernStandby(t *testing.T) {
 	be := newDemoBackend()
 	be.wake = WakeInfo{OnMains: true, OnBattery: true, ModernStandby: true}
-	h := newHarnessWith(t, be, 130, 84)
+	h := newHarnessWith(t, be, 130, 88)
 	openScheduleStep(h)
 	if strings.Contains(h.screen(), "best effort") {
 		t.Errorf("the statement shows while Wake is not ticked:\n%s", h.screen())

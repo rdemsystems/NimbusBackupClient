@@ -4,6 +4,7 @@ import {
   WEEK, UNITS, MIN_REPEAT_MINUTES, newSchedule, nextScheduleId, describe, nextRuns,
   nextSetRun, scheduleProblem, weekdayName, monthName, tp, nthWord,
   newServerTrigger, CONNECTIONS, newComputerEvents, eventsOn,
+  DEFAULT_EVENT_EVERY_MINUTES, MAX_EVENT_EVERY_MINUTES,
 } from './schedules'
 
 // How often the server trigger's "Right now" panel looks again while open.
@@ -20,7 +21,13 @@ export function eventsSummary(t, ce) {
   if (ce.wakes) parts.push(t('trigEvWakes'))
   if (ce.signIn) parts.push(t('trigEvSignIn'))
   if (ce.idleMinutes > 0) parts.push(t('trigEvIdle', { n: ce.idleMinutes }))
-  return parts.length ? parts.join('; ') : t('trigEvNone')
+  if (!parts.length) return t('trigEvNone')
+  const m = ce.everyMinutes || 0
+  if (m > 0) {
+    const [n, u] = m % 1440 === 0 && m >= 2880 ? [m / 1440, 'days'] : m % 60 === 0 ? [m / 60, 'hours'] : [m, 'minutes']
+    parts.push(t('trigEvEverySum', { every: `${n} ${t('schedUnit_' + u)}` }))
+  }
+  return parts.join('; ')
 }
 
 // The longest a schedule's run waits for its server, and a server trigger's
@@ -197,6 +204,8 @@ export default function ScheduleEditor({ schedules, setSchedules, computerEvents
   const [status, setStatus] = useState(null)
   // The server trigger's "at most every" unit as chosen (null: from its hours).
   const [serverInDays, setServerInDays] = useState(null)
+  // The events trigger's "at most every" unit as chosen (null: from its minutes).
+  const [eventsUnit, setEventsUnit] = useState(null)
   const statusKey = editingId === 'server' && serverTrigger ? JSON.stringify(serverTrigger) : ''
   // The app hands a new getTriggerStatus each time it draws: kept in a ref so
   // that does not start the check again.
@@ -657,6 +666,44 @@ export default function ScheduleEditor({ schedules, setSchedules, computerEvents
     )
   }
 
+  // The events trigger's "At most every": ticked with N minutes, hours or days
+  // (everyMinutes, from the set's last backup that worked), unticked for no
+  // limit (0). Shown in the largest unit that divides it evenly.
+  const everyRow = (ce) => {
+    const m = ce.everyMinutes > 0 ? ce.everyMinutes : 0
+    const on = m > 0
+    const shown = on ? m : DEFAULT_EVENT_EVERY_MINUTES
+    const unit = eventsUnit ?? (shown % 1440 === 0 && shown >= 2880 ? 'days' : shown % 60 === 0 ? 'hours' : 'minutes')
+    const per = unit === 'days' ? 1440 : unit === 'hours' ? 60 : 1
+    return (
+      <>
+        <div className="sched-row">
+          <label className="sched-startup">
+            <input type="checkbox" id="events-every-on" checked={on}
+              onChange={e => updateEvents({ everyMinutes: e.target.checked ? DEFAULT_EVENT_EVERY_MINUTES : 0 })} />
+            <span>{t('trigAtMost')}</span>
+          </label>
+          <input id="events-every" type="number" min="1" max={Math.floor(MAX_EVENT_EVERY_MINUTES / per)} disabled={!on}
+            value={Math.max(1, Math.round(shown / per))} className="sched-field narrow" aria-label={t('trigAtMost')}
+            onChange={e => updateEvents({ everyMinutes: Math.min(MAX_EVENT_EVERY_MINUTES, Math.max(0, parseInt(e.target.value, 10) || 0) * per) })}
+            onBlur={e => on && updateEvents({ everyMinutes: Math.min(MAX_EVENT_EVERY_MINUTES, Math.max(1, parseInt(e.target.value, 10) || 1) * per) })} />
+          <select id="events-every-unit" className="sched-field" value={unit} disabled={!on} aria-label={t('schedUnitLabel')}
+            onChange={e => {
+              const u = e.target.value
+              const p = u === 'days' ? 1440 : u === 'hours' ? 60 : 1
+              setEventsUnit(u)
+              updateEvents({ everyMinutes: Math.min(MAX_EVENT_EVERY_MINUTES, Math.max(1, Math.round(shown / p)) * p) })
+            }}>
+            <option value="minutes">{t('schedUnit_minutes')}</option>
+            <option value="hours">{t('schedUnit_hours')}</option>
+            <option value="days">{t('schedUnit_days')}</option>
+          </select>
+        </div>
+        <div className="sched-hint" id="events-every-hint">{t(on ? 'trigEvEveryHint' : 'trigEvEveryOffHint')}</div>
+      </>
+    )
+  }
+
   // When something happens on this computer: it starts, wakes, someone signs
   // in, or nobody has used the keyboard or mouse for N minutes.
   const eventsEditor = (ce) => {
@@ -690,6 +737,7 @@ export default function ScheduleEditor({ schedules, setSchedules, computerEvents
           <span>{idleAfter}</span>
         </div>
         {idleOn && <div className="sched-hint" id="events-idle-hint">{t('trigEvIdleHint')}</div>}
+        {everyRow(ce)}
         <div className="sched-hint">{t('trigEventsHint')}</div>
         <div className="sched-done">
           <button type="button" className="btn btn-secondary" id="events-done" onClick={() => setEditingId(null)}>{t('schedDone')}</button>
