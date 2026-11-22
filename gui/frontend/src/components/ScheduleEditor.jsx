@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from '../i18n/i18nContext'
 import {
   WEEK, UNITS, MIN_REPEAT_MINUTES, newSchedule, nextScheduleId, describe, nextRuns,
   nextSetRun, scheduleProblem, weekdayName, monthName, tp, nthWord,
   newServerTrigger, CONNECTIONS, newComputerEvents, eventsOn,
 } from './schedules'
+
+// How often the server trigger's "Right now" panel looks again while open.
+const STATUS_EVERY_MS = 30 * 1000
 
 // The longest "idle for" (gui/computer_events.go maxIdleMinutes).
 const MAX_IDLE_MINUTES = 24 * 60
@@ -186,23 +189,37 @@ export default function ScheduleEditor({ schedules, setSchedules, computerEvents
   }, [wantsNets, getNetworkInfo])
   const netsUnsupported = !!netInfo && !netInfo.supported
 
-  // The server trigger's "Right now" panel, worked out again a moment after
-  // a change (it tries the server).
+  // The server trigger's "Right now" panel: worked out a moment after the
+  // editor opens or a choice changes (it tries the server), then again every
+  // STATUS_EVERY_MS in the background. "Checking..." shows only until the
+  // first answer; after that the panel keeps what it shows and changes only
+  // when the answer does.
   const [status, setStatus] = useState(null)
   // The server trigger's "at most every" unit as chosen (null: from its hours).
   const [serverInDays, setServerInDays] = useState(null)
   const statusKey = editingId === 'server' && serverTrigger ? JSON.stringify(serverTrigger) : ''
+  // The app hands a new getTriggerStatus each time it draws: kept in a ref so
+  // that does not start the check again.
+  const statusFn = useRef(getTriggerStatus)
+  statusFn.current = getTriggerStatus
+  const canCheck = !!getTriggerStatus
   useEffect(() => {
-    if (!statusKey || !getTriggerStatus) { setStatus(null); return }
+    if (!statusKey || !canCheck) { setStatus(null); return }
     let live = true
-    setStatus(null)
-    const timer = setTimeout(() => {
-      Promise.resolve(getTriggerStatus(JSON.parse(statusKey)))
-        .then(s => { if (live) setStatus(s || null) })
-        .catch(() => { if (live) setStatus(null) })
-    }, 600)
+    let timer = null
+    const check = () => {
+      Promise.resolve(statusFn.current && statusFn.current(JSON.parse(statusKey)))
+        .then(s => {
+          if (!live) return
+          // Same answer as shown: keep the old object, so nothing redraws.
+          if (s) setStatus(prev => (prev && JSON.stringify(prev) === JSON.stringify(s) ? prev : s))
+        })
+        .catch(() => {})
+        .finally(() => { if (live) timer = setTimeout(check, STATUS_EVERY_MS) })
+    }
+    timer = setTimeout(check, 600)
     return () => { live = false; clearTimeout(timer) }
-  }, [statusKey, getTriggerStatus])
+  }, [statusKey, canCheck])
 
   const update = (id, patch) => setSchedules(schedules.map(s => s.id === id ? { ...s, ...patch } : s))
   const updateServer = patch => setServerTrigger({ ...(serverTrigger || newServerTrigger()), ...patch })
@@ -624,6 +641,8 @@ export default function ScheduleEditor({ schedules, setSchedules, computerEvents
                   ))}
                 </ul>
                 <div className={status.verdict === 'now' ? 'trig-verdict ok' : 'trig-verdict'} id="server-verdict">
+                  {/* Green while every check passes, red while one does not. */}
+                  <span className={status.verdict === 'no' ? 'trig-dot no' : 'trig-dot ok'} id="server-dot" aria-hidden="true" />
                   {status.verdict === 'now' ? t('trigVerdictNow')
                     : status.verdict === 'notYet' ? t('trigVerdictNotYet', { time: status.nextAt ? fmt(new Date(status.nextAt)) : '' })
                     : t('trigVerdictNo')}

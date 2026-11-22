@@ -349,6 +349,9 @@ body {
 .trig-checks li.no span { color: #b91c1c; font-weight: bold; }
 .trig-verdict { margin-top: 8px; font-weight: 600; }
 .trig-verdict.ok { color: #2e7d47; }
+.trig-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+.trig-dot.ok { background: #2e7d47; }
+.trig-dot.no { background: #b91c1c; }
 .info-box.schedule-summary { background-color: #eef2ff; }
 
 /* Restore's snapshot list (List view): the header and every row share one
