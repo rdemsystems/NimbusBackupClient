@@ -52,6 +52,7 @@ makedepends=(go gtk3 webkit2gtk-4.1)
 # connect to the service, whose API token is root's alone.
 depends=(glibc gtk3 webkit2gtk-4.1 gdk-pixbuf2 glib2 libsoup3 systemd polkit)
 optdepends=('sudo: salvanza-gui-root from a terminal'
+            'noto-fonts-emoji: the emoji in the app, which otherwise show as boxes'
             'dkms: the snapshot module (the installer adds it, with the kernel headers)')
 provides=(proxmoxbackupclient)
 conflicts=(proxmoxbackupclient pbsgo)

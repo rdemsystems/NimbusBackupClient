@@ -19,6 +19,9 @@ BuildRequires: webkit2gtk4.1-devel
 # pkexec: the app asks for an administrator's password through it to connect
 # to the service, whose API token is root's alone.
 Requires:      polkit
+# The app shows a few emoji (the default server's star, the lock on a key);
+# without a colour emoji font they show as empty boxes.
+Recommends:    google-noto-color-emoji-fonts
 # Replaces the project's earlier packages: pbsgo (1.2.0-rc packaging) and
 # proxmoxbackupclient (the name before Salvanza). rpm wants a version on
 # Obsoletes; neither reached 3.0.

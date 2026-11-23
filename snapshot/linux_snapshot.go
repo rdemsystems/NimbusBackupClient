@@ -145,9 +145,24 @@ func moduleLoaded(module string) bool {
 	return false
 }
 
+// modprobePath finds modprobe where PATH does not: a root shell from `su`
+// (not `su -`) has no sbin folder on its PATH, and newer systems keep it in
+// /usr/sbin only.
+func modprobePath() string {
+	if p, err := exec.LookPath("modprobe"); err == nil {
+		return p
+	}
+	for _, p := range []string{"/usr/sbin/modprobe", "/sbin/modprobe"} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return "modprobe"
+}
+
 func ensureModule(c snapControl) bool {
 	if !moduleLoaded(c.module) {
-		if out, err := exec.Command("modprobe", c.module).CombinedOutput(); err != nil {
+		if out, err := exec.Command(modprobePath(), c.module).CombinedOutput(); err != nil {
 			log.Printf("Warning: modprobe %s failed: %v: %s", c.module, err, strings.TrimSpace(string(out)))
 			return false
 		}

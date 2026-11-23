@@ -39,10 +39,13 @@ func ensureNBDModule() error {
 	if _, err := os.Stat("/sys/module/nbd"); err == nil {
 		return nil
 	}
-	if _, err := os.Stat("/sbin/modprobe"); err != nil {
+	// SystemTool: a root shell from `su` (not `su -`) has no sbin folder on
+	// its PATH, and newer systems keep modprobe in /usr/sbin only.
+	modprobe := pbscommon.SystemTool("modprobe")
+	if modprobe == "modprobe" {
 		return errors.New("the nbd kernel module is not loaded and modprobe was not found; load it manually (modprobe nbd)")
 	}
-	out, err := exec.Command("modprobe", "nbd").CombinedOutput()
+	out, err := exec.Command(modprobe, "nbd").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("the nbd kernel module is not loaded and 'modprobe nbd' failed: %v: %s", err, strings.TrimSpace(string(out)))
 	}

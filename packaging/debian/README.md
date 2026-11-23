@@ -53,7 +53,10 @@ packaging/fedora/build-rpm.sh [output-dir]      # default: dist/
 The .deb depends on `pkexec | policykit-1` and suggests `dattobd-dkms` (from Datto's
 package repository; nobody publishes an `elastio-snap-dkms` package); the .rpm
 and the Arch package require `polkit`. The app needs pkexec to connect to the background
-service (below).
+service (below). The .deb recommends `fonts-noto-color-emoji`, the .rpm
+`google-noto-color-emoji-fonts` and the Arch package lists `noto-fonts-emoji` as optional:
+the app shows a few emoji, which without a colour emoji font appear as empty boxes
+(seen on Raspberry Pi OS).
 
 ## The menu entry
 
