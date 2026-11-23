@@ -1,6 +1,6 @@
 # Supported systems
 
-What Salvanza 2.0.0 runs on and what it has been tested with.
+What Salvanza 2.1 runs on and what it has been tested with.
 
 **Tested**: we run it there ourselves or in CI. **Expected to work**: it should,
 but we have not tested it. **Not available**: the feature does not exist on that
@@ -21,6 +21,10 @@ system.
 On Linux the app needs WebKitGTK, and polkit to connect to the service. The
 background service is a systemd unit: without systemd (Slackware, Alpine...) the
 app still runs its Backup Sets itself while it is open.
+
+The text-mode window (`salvanza-cli tui`) works through the background service,
+so it runs where the service does: on the Windows and Linux systems above, over
+SSH or on a text console as well.
 
 ## The command line (salvanza-cli)
 
@@ -60,8 +64,16 @@ Linux extended attributes and ACLs) is only applied by Salvanza; see the
 ## The restore ISO
 
 The bare-metal restore ISO (built on Clonezilla Live) restores Windows and Linux
-machine backups on UEFI and BIOS computers, onto a disk at least as large as the
-original.
+machine backups on UEFI and BIOS computers, MBR and GPT disks. It restores onto a
+disk at least as large as the original, or onto a smaller one when the data fits
+(see [Restoring onto a smaller disk](manual/BMR.md#8-restoring-onto-a-smaller-disk)).
+
+## Older versions of Salvanza
+
+Encrypted backups made with **Compress encrypted backups** on (a switch on each
+server that has a key) can only be restored by Salvanza 2.1 or later, and by
+restore ISOs made with 2.1 or later. With the switch off, version 2.0 and its
+ISOs still restore them. Unencrypted backups are read by every version.
 
 ## Older Windows
 
