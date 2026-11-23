@@ -1,0 +1,29 @@
+# Synology: copy this folder to the NAS (e.g. /volume1/docker/salvanza-nas),
+# then Container Manager > Project > Create, path = that folder. Or over SSH:
+#   cd /volume1/docker/salvanza-nas && sudo docker compose up -d --build
+# Then open http://<nas>:7681 (or through DSM's reverse proxy for HTTPS).
+services:
+  salvanza-nas:
+    build: .
+    image: salvanza-nas:dev
+    container_name: salvanza-nas
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Paris
+      UI_USER: admin
+      # The web login, from a file next to this one (chmod 600), so the
+      # password is not shown in the container's settings in the NAS UI.
+      UI_PASSWORD_FILE: /run/salvanza-ui-password
+    ports:
+      - "7681:7681"
+    volumes:
+      - ./ui-password:/run/salvanza-ui-password:ro
+      # Settings, Backup Sets, history, logs, encryption keys: keep them.
+      - ./state:/var/lib/salvanza
+      # The shares to back up, read-only. Add one line per share; in a Backup
+      # Set, choose the folders under /data. Turn "Use snapshots" off: there
+      # is no snapshot module in a container.
+      - /volume1/photo:/data/photo:ro
+      - /volume1/homes:/data/homes:ro
+      # Where restores may write (Restore > to a folder).
+      - /volume1/restore:/restore

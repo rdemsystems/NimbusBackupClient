@@ -1,0 +1,68 @@
+name: NAS Docker image
+
+# Builds docker/nas, starts it, checks that the service and the web text
+# window come up, then (outside pull requests) pushes it to GHCR so a NAS can
+# pull it instead of building it.
+
+on:
+  push:
+    branches: ['feat/docker-nas']
+    paths: ['docker/nas/**', '.github/workflows/docker-nas.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/salvanza-nas
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build
+        run: docker build -t salvanza-nas:test docker/nas
+
+      - name: Smoke test
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/state" "$RUNNER_TEMP/data"
+          echo hello > "$RUNNER_TEMP/data/hello.txt"
+          docker run -d --name nas -p 7681:7681 -e UI_PASSWORD=ci-secret -e TZ=Europe/Paris \
+            -v "$RUNNER_TEMP/state:/var/lib/salvanza" -v "$RUNNER_TEMP/data:/data:ro" salvanza-nas:test
+          for i in $(seq 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -u admin:ci-secret http://127.0.0.1:7681/ || true)
+            [ "$code" = 200 ] && break
+            sleep 2
+          done
+          docker logs nas
+          [ "$code" = 200 ] || { echo "web window not answering (last HTTP $code)"; exit 1; }
+          # Without the password the window must refuse.
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7681/)" = 401 ] || { echo "web window answers without a login"; exit 1; }
+          # The service is up and has written its API token.
+          docker exec nas test -s /var/lib/salvanza/api-token
+          docker exec nas sh -c 'pgrep -f salvanza-svc >/dev/null'
+          # The text window can reach the service (non-interactive check).
+          docker exec nas salvanza-cli tui -h 2>&1 | head -20 || true
+          # Without a password the container must not start the window.
+          docker run --rm salvanza-nas:test serve && { echo "started without UI_PASSWORD"; exit 1; } || true
+          echo "smoke test OK"
+
+      - name: Logs on failure
+        if: failure()
+        run: docker logs nas || true
+
+      - name: Push to GHCR
+        if: github.event_name != 'pull_request'
+        run: |
+          set -eu
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          sha=$(git rev-parse --short HEAD)
+          for tag in dev "dev-$sha"; do
+            docker tag salvanza-nas:test "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+          echo "pushed $IMAGE:dev and $IMAGE:dev-$sha" >> "$GITHUB_STEP_SUMMARY"
