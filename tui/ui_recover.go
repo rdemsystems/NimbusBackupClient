@@ -134,8 +134,9 @@ func (a *App) rollbackSet() {
 // comes. With next, it then waits for y and runs next (the real roll back after
 // its preview). Esc closes the window; a run that has started goes on.
 func (a *App) toolOutput(title string, args, next []string) {
-	tv := tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
+	tv := tview.NewTextView().SetDynamicColors(true).SetScrollable(true).SetWordWrap(true)
 	tv.SetBorder(true).SetTitle(" " + title + " ").SetBackgroundColor(colPanel)
+	tv.SetBorderPadding(0, 0, 1, 1)
 	foot := tview.NewTextView().SetDynamicColors(true)
 	state, pending := "running", next
 	setFoot := func(s string) { foot.SetText(" " + tag(colDim) + s) }

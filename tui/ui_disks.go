@@ -325,7 +325,7 @@ func (p *diskPicker) show() {
 	if p.skips {
 		hint += " or leaves a partition out (it is not read; zeros go into the image)"
 	}
-	help := tview.NewTextView().SetDynamicColors(true).SetText(tag(colDim) + hint + ".   Enter done   Esc cancel[-]")
+	help := tview.NewTextView().SetDynamicColors(true).SetWordWrap(true).SetText(tag(colDim) + hint + ".   Enter done   Esc cancel[-]")
 	p.draw()
 	p.table.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch {
@@ -345,7 +345,7 @@ func (p *diskPicker) show() {
 		return ev
 	})
 	body := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.table, 0, 1, true).AddItem(p.note, 2, 0, false).AddItem(help, 1, 0, false)
+		AddItem(p.table, 0, 1, true).AddItem(p.note, 2, 0, false).AddItem(help, 2, 0, false)
 	flex := tview.NewFlex().AddItem(nil, 0, 1, false).AddItem(body, 100, 0, true).AddItem(nil, 0, 1, false)
 	p.a.modal = true
 	p.a.pages.AddPage("disks", flex, true, false)
