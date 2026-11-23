@@ -14,6 +14,8 @@
 
 Projektseite: **[salvanza.org](https://salvanza.org/)** · Quellcode, Versionen und Issues: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
+**Unterstützte Systeme:** Windows 10 und 11 sowie Windows Server 2016 bis 2025, Linux (deb-, rpm- und Arch-Pakete), und die Kommandozeile auch unter macOS, FreeBSD, OpenBSD, NetBSD und Solaris. Die vollständige Tabelle: [Unterstützte Systeme](docs/COMPATIBILITY.md) (auf Englisch).
+
 Es handelt sich um eine **Sammlung von Werkzeugen**:
 
 - **Die Salvanza-App**, `salvanza-gui` (ursprünglich von RDEM Systems als Nimbus Backup GUI entwickelt, von mjb-is überarbeitet und erweitert): die App für Windows und Linux. Sicherungssätze mit jeweils mehreren Zeitplänen, Ordner- und Datenträgersicherungen mit konsistenten Snapshots (VSS unter Windows, elastio-snap/dattobd unter Linux), Wiederherstellung von Dateien aus Ordner- und Maschinensicherungen, „Gelöschte Dateien wiederherstellen“ und „Zurücksetzen“, mehrere PBS-Server, clientseitige Verschlüsselung und ein Hintergrunddienst, `salvanza-svc`, damit Zeitpläne auch ohne angemeldeten Benutzer laufen.

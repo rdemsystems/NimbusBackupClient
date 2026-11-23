@@ -14,6 +14,8 @@
 
 Sitio del proyecto: **[salvanza.org](https://salvanza.org/)** · Código fuente, versiones e incidencias: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
+**Sistemas compatibles:** Windows 10 y 11 y Windows Server 2016 a 2025, Linux (paquetes deb, rpm y Arch), y la línea de comandos también en macOS, FreeBSD, OpenBSD, NetBSD y Solaris. La tabla completa: [Sistemas compatibles](docs/COMPATIBILITY.md) (en inglés).
+
 Es un **conjunto de herramientas**:
 
 - **La aplicación Salvanza**, `salvanza-gui` (creada por RDEM Systems como Nimbus Backup GUI, rediseñada y ampliada por mjb-is): la aplicación para Windows y Linux. Conjuntos de copia de seguridad con varias programaciones cada uno, copias de carpetas y de discos enteros con instantáneas coherentes (VSS en Windows, elastio-snap/dattobd en Linux), restauración de archivos desde copias de carpetas y de máquinas, Recuperación y Reversión, varios servidores PBS, cifrado en el cliente y un servicio en segundo plano, `salvanza-svc`, para que las programaciones se ejecuten sin que nadie haya iniciado sesión.

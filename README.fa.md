@@ -14,6 +14,8 @@
 
 وب‌سایت پروژه: **[salvanza.org](https://salvanza.org/)** · کد منبع، نسخه‌ها و issueها: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
+**سیستم‌های پشتیبانی‌شده:** Windows 10 و 11 و Windows Server از 2016 تا 2025، Linux (بسته‌های deb، rpm و Arch)، و خط فرمان همچنین روی macOS، FreeBSD، OpenBSD، NetBSD و Solaris. جدول کامل: [سیستم‌های پشتیبانی‌شده](docs/COMPATIBILITY.md) (به انگلیسی).
+
 این برنامه یک **مجموعه ابزار** است:
 
 - **برنامهٔ Salvanza**، `salvanza-gui` (ساختهٔ اولیهٔ RDEM Systems با نام Nimbus Backup GUI، که mjb-is آن را بازنویسی و گسترش داده است): برنامهٔ ویندوز و لینوکس. **Backup Sets** (مجموعه‌های پشتیبان) که هر کدام چند زمان‌بندی دارند، پشتیبان‌گیری از پوشه و کل دیسک با اسنپ‌شات‌های سازگار (VSS در ویندوز، elastio-snap/dattobd در لینوکس)، بازیابی فایل‌ها از پشتیبان‌های پوشه و دستگاه، **Undelete** (بازگرداندن حذف‌شده‌ها) و **Roll back** (بازگشت به وضعیت قبلی)، چند سرور PBS، رمزنگاری سمت کلاینت، و یک سرویس پس‌زمینه، `salvanza-svc`، تا زمان‌بندی‌ها بدون ورود هیچ کاربری اجرا شوند.

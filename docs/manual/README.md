@@ -10,7 +10,7 @@ Salvanza backs up Windows and Linux computers to a Proxmox Backup Server (PBS). 
 | [CLI.md](CLI.md) | Scripting, servers without a desktop, scheduled tasks | `salvanza-cli` and its commands `backup-folder`, `backup-disk` and `attach-nbd` (and their earlier names): every flag, config files, environment variables, encryption, email reports, exit codes, Task Scheduler and cron |
 | [BMR.md](BMR.md) | Recovering a machine whose disk or system is gone | Making the boot media, the automated restore, the manual pbs-nbd entry, restoring `vm` snapshots onto Proxmox VE, different hardware, troubleshooting |
 
-For a quick decision on which restore to use, see [Restore scenarios](../RESTORE_GUIDE.md).
+For a quick decision on which restore to use, see [Restore scenarios](../RESTORE_GUIDE.md). For the systems each part runs on and how far each is tested, see [Supported systems](../COMPATIBILITY.md).
 
 ## Why use this client
 

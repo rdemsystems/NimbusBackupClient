@@ -14,6 +14,8 @@
 
 プロジェクトサイト：**[salvanza.org](https://salvanza.org/)** · ソースコード、リリース、issue：**[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
+**対応システム:** Windows 10 と 11、Windows Server 2016 から 2025、Linux（deb、rpm、Arch パッケージ）。コマンドラインは macOS、FreeBSD、OpenBSD、NetBSD、Solaris でも動作します。一覧表: [対応システム](docs/COMPATIBILITY.md)（英語）。
+
 これは**ツール群**です。
 
 - **Salvanza アプリ** `salvanza-gui`（RDEM Systems が Nimbus Backup GUI として開発し、mjb-is が改良・拡張したもの）：Windows と Linux 用のアプリです。それぞれ複数のスケジュールを持てる **Backup Sets**（バックアップセット）、一貫性のあるスナップショット（Windows では VSS、Linux では elastio-snap/dattobd）を使ったフォルダーおよびディスク全体のバックアップ、フォルダーバックアップとマシンバックアップからのファイル復元、**Undelete**（削除の取り消し）と **Roll back**（ロールバック）、複数の PBS サーバー、クライアント側暗号化、そして誰もサインインしていなくてもスケジュールを実行するバックグラウンドサービス `salvanza-svc` を備えています。
