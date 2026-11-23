@@ -1124,7 +1124,7 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 
 	// Skip directory junction points to avoid infinite loops and access errors
 	if !toplevel && isLinkEntry(path, fileInfo) {
-		skipMsg := fmt.Sprintf("Junction point (skipped): %s", path)
+		skipMsg := fmt.Sprintf("%s (skipped): %s", linkKind(fileInfo), path)
 		a.SkippedFiles = append(a.SkippedFiles, skipMsg)
 		return CatalogDir{}, nil // Return nil error to continue backup
 	}
@@ -1505,6 +1505,17 @@ const KeepsSymlinks = posixFidelity
 // never follows: a symbolic link, or on Windows a junction too.
 func IsLinkEntry(path string, fi os.FileInfo) bool { return isLinkEntry(path, fi) }
 
+// linkKind names a link isLinkEntry found, for the list of skipped items.
+// Windows has both: a symbolic link (mklink, mklink /D; Developer Mode, Git,
+// WSL) has os.ModeSymlink, and a junction (mklink /J; "Application Data",
+// "My Music" in every profile) comes back from Lstat as os.ModeIrregular.
+func linkKind(fi os.FileInfo) string {
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return "Symbolic link"
+	}
+	return "Junction point"
+}
+
 // On pxar first item and consquently entry point must always be WriteDir , because toplevel is always a directory
 // So backing up single file is not possible
 func (a *PXARArchive) WriteFile(path string, basename string, prefetched *prefetchEntry) (CatalogFile, error) {
@@ -1537,7 +1548,7 @@ func (a *PXARArchive) WriteFile(path string, basename string, prefetched *prefet
 
 	// Skip junction points and symlinks (common on Windows: "Application Data", etc.)
 	if isLinkEntry(path, fileInfo) {
-		skipMsg := fmt.Sprintf("Junction point (skipped): %s", path)
+		skipMsg := fmt.Sprintf("%s (skipped): %s", linkKind(fileInfo), path)
 		a.SkippedFiles = append(a.SkippedFiles, skipMsg)
 		return CatalogFile{}, nil // Return nil error to continue backup
 	}

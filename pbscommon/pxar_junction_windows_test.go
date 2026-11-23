@@ -73,6 +73,68 @@ func TestJunctionsSkippedNotReadErrors(t *testing.T) {
 	}
 }
 
+// Windows has real symbolic links as well as junctions (mklink and mklink /D,
+// made by Developer Mode, Git, WSL...). Both are skipped, each under its own
+// name, so the list of skipped items does not call a symbolic link a junction.
+func TestSymlinksAndJunctionsNamedApart(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	data := filepath.Join(root, "data")
+	for _, d := range []string{target, data} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tfile := filepath.Join(target, "t.txt")
+	if err := os.WriteFile(tfile, []byte("reached through a link"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	junction := filepath.Join(data, "junction")
+	dirLink := filepath.Join(data, "dir link")
+	fileLink := filepath.Join(data, "file link.txt")
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", junction, target).CombinedOutput(); err != nil {
+		t.Fatalf("mklink /J: %v: %s", err, out)
+	}
+	// A symbolic link needs administrator rights or Developer Mode.
+	if out, err := exec.Command("cmd", "/c", "mklink", "/D", dirLink, target).CombinedOutput(); err != nil {
+		t.Skipf("cannot make a symbolic link here (administrator or Developer Mode needed): %v: %s", err, out)
+	}
+	if out, err := exec.Command("cmd", "/c", "mklink", fileLink, tfile).CombinedOutput(); err != nil {
+		t.Fatalf("mklink: %v: %s", err, out)
+	}
+
+	var out bytes.Buffer
+	a := &PXARArchive{ArchiveName: "test.pxar.didx"}
+	a.WriteCB = func(b []byte) error { out.Write(b); return nil }
+	a.CatalogWriteCB = func(b []byte) error { return nil }
+	a.Create()
+	if _, err := a.WriteDir(data, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.ReadErrors) != 0 {
+		t.Errorf("links counted as read errors: %q", a.ReadErrors)
+	}
+	want := map[string]string{
+		junction: "Junction point (skipped): ",
+		dirLink:  "Symbolic link (skipped): ",
+		fileLink: "Symbolic link (skipped): ",
+	}
+	for p, prefix := range want {
+		found := false
+		for _, s := range a.SkippedFiles {
+			if s == prefix+p {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s not listed as %q; skipped: %q", p, prefix, a.SkippedFiles)
+		}
+	}
+	if bytes.Contains(out.Bytes(), []byte("reached through a link")) {
+		t.Error("a link's target was backed up through it")
+	}
+}
+
 // An irregular entry that is not a link (here: a file whose reparse tag is
 // not a name surrogate cannot be made without a driver, so a plain file and
 // a plain folder stand in) is not taken for a link.
