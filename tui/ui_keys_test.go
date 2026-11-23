@@ -10,6 +10,20 @@ import (
 	"pbscommon"
 )
 
+// dialogText is the text inside a modal dialog's double frame (between the
+// first and last ║ of each line), every line joined, with no spaces.
+func dialogText(screen string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(screen, "\n") {
+		i, j := strings.Index(line, "║"), strings.LastIndex(line, "║")
+		if i < 0 || j <= i {
+			continue
+		}
+		b.WriteString(strings.Join(strings.Fields(line[i+len("║"):j]), ""))
+	}
+	return b.String()
+}
+
 // writeTestKey makes a real key file without a passphrase, as the Proxmox
 // client's `key create --kdf none` does.
 func writeTestKey(t *testing.T, dir, name string) (path, fingerprint string) {
@@ -139,7 +153,12 @@ func TestImportAKeyFileChecksItAndShowsTheFingerprint(t *testing.T) {
 	h.key(tcell.KeyTab, 0) // Read
 	h.key(tcell.KeyEnter, 0)
 	h.waitFor("Import this key?")
-	h.waitFor(fp[:5]) // the dialog wraps the long fingerprint
+	// The dialog wraps the long fingerprint, and where it breaks depends on
+	// the random key (it broke after "3d:" once), so look for all of it in
+	// the dialog's own text with the lines joined.
+	if got := dialogText(h.screen()); !strings.Contains(got, fp) {
+		t.Errorf("the dialog does not show the whole fingerprint %s:\n%s", fp, h.screen())
+	}
 	h.waitFor("The key was checked")
 	h.key(tcell.KeyEnter, 0) // Yes
 	h.waitFor("The key was imported")
