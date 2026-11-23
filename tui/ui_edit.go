@@ -64,7 +64,7 @@ type editor struct {
 	exclude  *tview.TextArea
 	mailFail *tview.Checkbox
 	mailTo   *tview.InputField
-	// what the computer does after the backup (the app's Alerts tab): stays
+	// what the computer does after the backup (the app's Before and after tab): stays
 	// as it is, sleeps, hibernates or shuts down, after a wait, and maybe only
 	// after a run it was woken for
 	after        *tview.DropDown

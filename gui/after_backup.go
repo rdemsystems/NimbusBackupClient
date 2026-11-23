@@ -516,7 +516,7 @@ func (a *App) AfterBackupPendingForAPI() []api.AfterBackupPending {
 	return listAfterBackups()
 }
 
-// PowerActionsInfo is what the Alerts tab needs to offer the choices: whether
+// PowerActionsInfo is what the Before and after tab needs to offer the choices: whether
 // this computer can hibernate and, when not, why, as a code the app
 // translates: "off" (turned off, Windows), "none" (no hibernate state),
 // "kernel" (turned off in the Linux kernel), "swap" (no or not enough swap

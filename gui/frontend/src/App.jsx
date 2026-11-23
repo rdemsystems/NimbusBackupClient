@@ -894,8 +894,8 @@ function App() {
   // For the service:connected handler, which must not reload over an open form.
   const showBackupFormRef = useRef(false)
   useEffect(() => { showBackupFormRef.current = showBackupForm }, [showBackupForm])
-  const [backupFormTab, setBackupFormTab] = useState('source') // Backup Set editor: Source/Exclusions/Schedule/Destination/Alerts
-  // Alerts tab: post-backup actions, modelled on Backup for Workgroups'
+  const [backupFormTab, setBackupFormTab] = useState('source') // Backup Set editor: Source/Exclusions/When to run/Destination/Before and after
+  // Before and after tab (was Alerts): actions around the backup, modelled on Backup for Workgroups'
   // "Special Items" step. All independent, all off by default.
   const [emailOnSuccess, setEmailOnSuccess] = useState(false)
   const [emailOnSuccessTo, setEmailOnSuccessTo] = useState('')
