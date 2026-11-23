@@ -13,8 +13,13 @@ const STATUS_EVERY_MS = 30 * 1000
 // The longest "idle for" (gui/computer_events.go maxIdleMinutes).
 const MAX_IDLE_MINUTES = 24 * 60
 
+// lowerFirst puts a label that starts a sentence into the middle of one:
+// "When someone signs in" -> "when someone signs in", "Wired" -> "wired".
+// Names written with capitals inside ("Wi-Fi", "VPN", "WLAN") stay as they are.
+const lowerFirst = (s) => (s && !/[A-ZÀ-ÞΑ-ΩА-Я]/.test(s.slice(1)) ? s.charAt(0).toLocaleLowerCase() + s.slice(1) : s)
+
 // eventsSummary says a "When something happens on this computer" trigger in
-// plain words: "When the computer starts; When someone signs in".
+// plain words: "When the computer starts; when someone signs in".
 export function eventsSummary(t, ce) {
   const parts = []
   if (ce.starts) parts.push(t('trigEventsStarts'))
@@ -27,7 +32,7 @@ export function eventsSummary(t, ce) {
     const [n, u] = m % 1440 === 0 && m >= 2880 ? [m / 1440, 'days'] : m % 60 === 0 ? [m / 60, 'hours'] : [m, 'minutes']
     parts.push(t('trigEvEverySum', { every: `${n} ${t('schedUnit_' + u)}` }))
   }
-  return parts.join('; ')
+  return parts.map((p, i) => (i ? lowerFirst(p) : p)).join('; ')
 }
 
 // The longest a schedule's run waits for its server, and a server trigger's
@@ -46,7 +51,9 @@ export function serverSummary(t, language, st) {
   const every = h >= 48 && h % 24 === 0 ? tp(t, language, 'schedEvery_days', h / 24) : tp(t, language, 'schedEvery_hours', h)
   const parts = [t('trigServerSummary', { every })]
   if ((st.networks || []).length) parts.push(t('trigSumNetworks', { names: st.networks.join(', ') }))
-  if ((st.connections || []).length) parts.push((st.connections || []).map(k => connLabel(t, k)).join(', '))
+  // German writes these nouns with a capital ("Kabel"), so they keep it there.
+  const kind = (k) => (language === 'de' ? connLabel(t, k) : lowerFirst(connLabel(t, k)))
+  if ((st.connections || []).length) parts.push((st.connections || []).map(kind).join(', '))
   if (st.notMetered) parts.push(t('trigSumNotMetered'))
   return parts.join(', ')
 }
