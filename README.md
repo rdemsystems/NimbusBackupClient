@@ -38,13 +38,18 @@ The official `proxmox-backup-client` is a command-line tool for Linux. This clie
 
 ## 🆕 New in 2.1
 
-- **Backup Sets run on triggers.** A set's **When to run** tab (the Schedule tab before) lists its triggers, and a timed schedule is one kind among three:
-  - **At set times**: schedules as before, several per set, each now with its own choice to wake the computer, to wait for the server when it cannot be reached at the time, and to run only on some networks.
+Three big additions:
+
+- **A text-mode window: `salvanza-cli tui`.** The app in a terminal, for servers, SSH sessions and computers without a desktop, the Linux text console included. Backup Sets for folders and whole disks (run, pause, stop, edit, add), Restore (encrypted backups too), Undelete and Roll back, PBS servers and encryption keys, network shares, preferences, history, the Message Log and log files. See the [text-mode window manual](docs/manual/TUI.md).
+- **Bare-metal restore onto a smaller disk.** A machine backup used to need a disk at least as large as the one backed up. The restore ISO now checks whether the data fits, shows the plan, shrinks a partition on the way, keeps the disk and partition IDs, and never writes to the backup. Windows and Linux, MBR and GPT, UEFI and BIOS. The restore wizard is plainer too, and every release has its own ISO. See [Restoring onto a smaller disk](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk).
+- **Backup Sets run on triggers, and laptops back up at night.** A set's **When to run** tab (the Schedule tab before) lists its triggers, and a timed schedule is one kind among three:
+  - **At set times**: schedules as before, several per set, each with its own choice to wake the computer from sleep or hibernate for its runs, to wait for the server when it cannot be reached at the time, and to run only on some networks.
   - **When the server can be reached**: a laptop backs up when it is next home or on the VPN, at most every N hours, optionally only on some networks or kinds of connection and not on metered ones.
   - **When something happens on this computer**: when it starts, wakes from sleep or hibernate, someone signs in, or nobody has used it for N minutes, at most every N minutes, hours or days.
 
-  Sets saved in 2.0 keep running as they did. See [When to run](docs/manual/GUI.md#63-when-to-run-tab).
-- **Restores onto a smaller disk**, a **text-mode window** (`salvanza-cli tui`), and more: see the [CHANGELOG](CHANGELOG.md).
+  The computer is kept awake while a backup runs. On battery, a set can wait to be plugged in or for enough charge, and cancel a backup when the charge runs low. When the backup finishes, the computer can go back to sleep, hibernate or shut down. On Windows laptops with Modern Standby, Windows decides whether to honour the wake, so there it is best effort (the manual's "Waking the computer" has the reliable route). Sets saved in 2.0 keep running as they did. See [When to run](docs/manual/GUI.md#63-when-to-run-tab).
+
+Also: compression can be turned off, encrypted backups are compressed as the official client does (with a switch per server to stay readable by 2.0), exclusions take `!` and `**` as the official client's do, run logs are kept one file a week, and about 28 fixes. See the [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 New in 2.0
 
@@ -53,7 +58,6 @@ Version 2.0 merges a large body of work on the GUI, the background service and t
 - **The app connects to the background service with administrator rights.** With the service installed, the computer's PBS servers and Backup Sets belong to the service, and only the service reads its settings folder. The app asks for administrator rights once to connect (UAC on Windows, pkexec on Linux; on a standard account, an administrator's name and password). Only a small helper is elevated, and the app keeps the service's token in memory only. A user who cannot answer the prompt can choose **Use my own settings** and keep their own servers and Backup Sets, which run while the app is open; **Connect** later offers to copy them to the computer's. The app itself runs without administrator rights, and offers **Restart as administrator** where an operation needs it. See section 15 of the [GUI manual](docs/manual/GUI.md#connecting-to-the-background-service).
 - **The app checks it is talking to the service.** Before it sends anything to the service's local API, the app checks who answers: the service's own process on Windows, a socket owned by root on Linux. A program that takes the port while the service is stopped gets nothing.
 - **Backup Sets with several schedules each**, from every few minutes to once a year (the last day of the month, the 2nd Tuesday), each shown in plain words with its next 3 runs.
-- **Backups at night on laptops**: a Backup Set can wake the computer from sleep or hibernate to run, wait for the computer to be plugged in (or for enough charge) before it starts on battery, and send the computer back to sleep, into hibernate or off when it finishes. On Windows laptops with Modern Standby, Windows decides whether to honour the wake, so there it is best effort (the manual's "Waking the computer" has the reliable route).
 - **Incremental folder backups** with the official client's change detection (Data and Metadata modes): unchanged files are not read again.
 - **Faster machine backups** that skip free space, the paging file and the hibernation file, and write unreadable sectors as zeros instead of failing.
 - **Several backups at once** (**Maximum Concurrent Backups**, 1 to 8, default 3), also in the background service, each with its own snapshot, log, Pause and Stop.
