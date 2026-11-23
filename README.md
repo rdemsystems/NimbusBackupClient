@@ -10,13 +10,13 @@
 [![Release](https://img.shields.io/github/v/release/salvanza/salvanza_client)](https://github.com/salvanza/salvanza_client/releases)
 [![Documentation](https://img.shields.io/badge/docs-manuals-orange)](docs/manual/README.md)
 
-**Salvanza for Proxmox Backup Server (formerly Proxmox Backup Client) is an open-source (GPL-3.0) backup client for Proxmox Backup Server (PBS), for Windows and Linux.** It backs up folders as browsable file archives and whole machines as bootable disk images, on schedules or on demand. It restores anything from a single file to a whole machine: onto the same computer, onto a replacement, or into a Proxmox VE virtual machine.
+**Salvanza for Proxmox Backup Server (formerly Proxmox Backup Client) is an open-source (GPL-3.0) backup client for Proxmox Backup Server (PBS), for Windows and Linux.** It backs up folders as browsable file archives and whole machines as bootable disk images, at set times, when something happens on the computer, when the backup server can be reached, or on demand. It restores anything from a single file to a whole machine: onto the same computer, onto a replacement, or into a Proxmox VE virtual machine.
 
 Project site: **[salvanza.org](https://salvanza.org/)** · Source code, releases and issues: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
 It is a **suite of tools**:
 
-- **The Salvanza app**, `salvanza-gui` (originated by RDEM Systems as the Nimbus Backup GUI, reworked and extended by mjb-is): the app for Windows and Linux. Backup Sets with several schedules each, folder and whole-disk backups with consistent snapshots (VSS on Windows, elastio-snap/dattobd on Linux), restore of files from folder and machine backups, Undelete and Roll back, several PBS servers, client-side encryption, and a background service, `salvanza-svc`, so schedules run with nobody signed in.
+- **The Salvanza app**, `salvanza-gui` (originated by RDEM Systems as the Nimbus Backup GUI, reworked and extended by mjb-is): the app for Windows and Linux. Backup Sets that run on triggers (set times, computer events, the server coming into reach), folder and whole-disk backups with consistent snapshots (VSS on Windows, elastio-snap/dattobd on Linux), restore of files from folder and machine backups, Undelete and Roll back, several PBS servers, client-side encryption, and a background service, `salvanza-svc`, so Backup Sets run with nobody signed in.
 - **`salvanza-cli`**, one command line tool with a subcommand for each job:
   - **`salvanza-cli backup-folder`**: folder (pxar) backups with deduplication and change detection.
   - **`salvanza-cli backup-disk`**: live whole-disk backups (fidx) of Windows and Linux machines. The image is bootable after a restore.
@@ -31,10 +31,20 @@ It is a **suite of tools**:
 The official `proxmox-backup-client` is a command-line tool for Linux. This client works with the same server and the same backup formats, and adds:
 
 - **Windows.** There is no official client for Windows. Here there are command-line tools and an app, folder backups through VSS snapshots, and live whole-disk backups.
-- **An app for Windows and Linux**: Backup Sets on schedules, run by a background service so nobody needs to be signed in, Restore with search, Undelete and Roll back, Reports and e-mail.
+- **An app for Windows and Linux**: Backup Sets that run at set times, when the computer starts, wakes, is signed in to or left idle, or when their server can be reached, run by a background service so nobody needs to be signed in, Restore with search, Undelete and Roll back, Reports and e-mail.
 - **Whole machines**: bootable disk images, single files back from them, and a guided bare-metal restore ISO, onto the same computer, new hardware or a Proxmox VE virtual machine.
 - **Windows file details kept**: NTFS permissions, attributes, alternate data streams, extended attributes and creation times are recorded with each folder backup, and this client's Restore puts them back.
 - **No lock-in**: what this client backs up restores with the official client, and what the official client backs up restores with this one (see below).
+
+## 🆕 New in 2.1
+
+- **Backup Sets run on triggers.** A set's **When to run** tab (the Schedule tab before) lists its triggers, and a timed schedule is one kind among three:
+  - **At set times**: schedules as before, several per set, each now with its own choice to wake the computer, to wait for the server when it cannot be reached at the time, and to run only on some networks.
+  - **When the server can be reached**: a laptop backs up when it is next home or on the VPN, at most every N hours, optionally only on some networks or kinds of connection and not on metered ones.
+  - **When something happens on this computer**: when it starts, wakes from sleep or hibernate, someone signs in, or nobody has used it for N minutes, at most every N minutes, hours or days.
+
+  Sets saved in 2.0 keep running as they did. See [When to run](docs/manual/GUI.md#63-when-to-run-tab).
+- **Restores onto a smaller disk**, a **text-mode window** (`salvanza-cli tui`), and more: see the [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 New in 2.0
 
@@ -139,7 +149,7 @@ When a release's installers scan clean on VirusTotal, the release page links the
 2. Start **Salvanza for Proxmox Backup Server**. The installers set up the background service, so the app asks once for administrator rights to connect to it (UAC on Windows, your password through pkexec on Linux). If you cannot give them, choose **Use my own settings**.
 3. Add your PBS server in **Preferences > Account Information** and **Test** it.
 4. Create a Backup Set (or a one-off backup) and select the folders or disks to back up.
-5. Run it. With the background service, its schedules run whether or not anyone is signed in.
+5. On its **When to run** tab, add a trigger: set times, something that happens on the computer, or when the server can be reached. With the background service, it runs whether or not anyone is signed in.
 
 The [GUI manual](docs/manual/GUI.md) walks through every step.
 
@@ -179,13 +189,13 @@ Run elevated (admin); exit code `0` = success, `3010` = success + reboot require
 ## ✨ Features
 
 ### GUI
-The main features are listed under [New in 2.0](#-new-in-20). Also:
+The main features are listed under [New in 2.1](#-new-in-21) and [New in 2.0](#-new-in-20). Also:
 - 18 interface languages: French, English, Italian, German, Polish, Spanish, Bulgarian, Czech, Greek, Hungarian, Latvian, Lithuanian, Dutch, Portuguese, Romanian, Slovak, Turkish and Ukrainian
 - **One-off backups** of folders or whole disks, and machine backups stored as `host` or as a Proxmox VE `vm` backup, with a **forensic copy** option that reads free space too
 - **Restore** with file search (wildcards, regular expressions, full paths), selective restore, NTFS/POSIX ACLs, alternate data streams, Windows creation times and an optional verify pass
 - **Pause, Resume and Stop** a running backup, also from the tray on Windows and for runs the background service makes
 - Live progress card (forecast finish, files done, upload speed, data transferred, compression ratio), **Reports**, a **Message Log** and **View Full Logs**
-- Email notifications, post-backup actions, Backup Set cloning, settings export and import
+- Email notifications, actions before and after the backup, Backup Set cloning, settings export and import
 - Several PBS servers, with certificate fingerprint pinning (trust on first use), API token or user/password login
 - Five colour themes and a custom colour, chosen by each user (the unbranded app; a branded app keeps its brand's colours)
 
@@ -281,7 +291,7 @@ Printing a paper key, and restoring a disk image, stay in the app and in the [ba
 <td width="33%">
 
 [<img src="docs/screenshots/gui-schedule-tab.png" width="280">](docs/screenshots/gui-schedule-tab.png)
-**Schedules**: several per set, with the next 3 runs
+**When to run**: the set's triggers, with each schedule's next 3 runs
 
 </td>
 <td width="33%">

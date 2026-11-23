@@ -30,11 +30,11 @@ The GUI backs up Windows and Linux computers to a Proxmox Backup Server (PBS) an
 
 * **Folder backups** store one or more folders as a file archive (pxar). You can browse them and restore single files.
 * **Machine backups** store whole physical disks as images. You restore them onto bare metal with the Clonezilla ISO ([BMR.md](BMR.md)), or onto Proxmox VE if you stored them as a `vm` snapshot. You can also browse a machine backup in Restore and take single files out of it ([section 9.6](#96-files-from-a-machine-backup)).
-* **Backup Sets** are named, saved jobs with a schedule. **One-off backups** run once and are not saved.
+* **Backup Sets** are named, saved jobs that run on their triggers: at set times, when something happens on the computer, when their server can be reached, or when you click Run Now. **One-off backups** run once and are not saved.
 * **Change detection** (Metadata mode) makes repeat folder backups read only new and changed files. See [section 7](#7-incremental-folder-backups-change-detection).
 * **Undelete** finds files that have gone from a Backup Set's folders and puts them back. **Roll back** returns a set's folders to how they were at a chosen backup, with a preview first and Undo afterwards. Both work for folder and machine sets.
 * **Client-side encryption** encrypts every chunk before it leaves the machine, using a standard PBS key file.
-* **A background service** (Windows and Linux) runs the schedules when nobody is signed in and the GUI is closed.
+* **A background service** (Windows and Linux) runs the Backup Sets on their triggers when nobody is signed in and the GUI is closed.
 
 ## 2. Install and start
 
@@ -1073,7 +1073,7 @@ Click a run for its details:
 | Detail | Notes |
 |---|---|
 | Status, Date / Time | |
-| Mode | Automatic (scheduled), Automatic (at startup), Manual (Run Now) or Manual (one-off) |
+| Mode | What started the run: Automatic (scheduled), Automatic (at startup), When the computer woke, When someone signed in, When the computer was idle, When the server could be reached, Manual (Run Now) or Manual (one-off) |
 | Type | Folders, Full machine, Restore, Undelete or Roll back |
 | Encryption | Encrypted or Unencrypted |
 | Change detection | Legacy, Data (split archive) or Metadata (unchanged files skipped), with "N unchanged files reused without reading, size" |
