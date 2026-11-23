@@ -10,13 +10,13 @@
 [![Versión](https://img.shields.io/github/v/release/salvanza/salvanza_client)](https://github.com/salvanza/salvanza_client/releases)
 [![Documentación](https://img.shields.io/badge/docs-manuals-orange)](docs/manual/README.md)
 
-**Salvanza for Proxmox Backup Server (antes Proxmox Backup Client) es un cliente de copias de seguridad de código abierto (GPL-3.0) para Proxmox Backup Server (PBS), para Windows y Linux.** Hace copias de seguridad de carpetas como archivos de ficheros explorables y de máquinas enteras como imágenes de disco arrancables, según una programación o a petición. Restaura cualquier cosa, desde un solo archivo hasta una máquina entera: en el mismo equipo, en uno de sustitución o en una máquina virtual de Proxmox VE.
+**Salvanza for Proxmox Backup Server (antes Proxmox Backup Client) es un cliente de copias de seguridad de código abierto (GPL-3.0) para Proxmox Backup Server (PBS), para Windows y Linux.** Hace copias de seguridad de carpetas como archivos de ficheros explorables y de máquinas enteras como imágenes de disco arrancables, a horas fijas, cuando pasa algo en el equipo, cuando se puede llegar al servidor de copias, o a petición. Restaura cualquier cosa, desde un solo archivo hasta una máquina entera: en el mismo equipo, en uno de sustitución o en una máquina virtual de Proxmox VE.
 
 Sitio del proyecto: **[salvanza.org](https://salvanza.org/)** · Código fuente, versiones e incidencias: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
 Es un **conjunto de herramientas**:
 
-- **La aplicación Salvanza**, `salvanza-gui` (creada por RDEM Systems como Nimbus Backup GUI, rediseñada y ampliada por mjb-is): la aplicación para Windows y Linux. Conjuntos de copia de seguridad con varias programaciones cada uno, copias de carpetas y de discos enteros con instantáneas coherentes (VSS en Windows, elastio-snap/dattobd en Linux), restauración de archivos desde copias de carpetas y de máquinas, Recuperación y Reversión, varios servidores PBS, cifrado en el cliente y un servicio en segundo plano, `salvanza-svc`, para que las programaciones se ejecuten sin que nadie haya iniciado sesión.
+- **La aplicación Salvanza**, `salvanza-gui` (creada por RDEM Systems como Nimbus Backup GUI, rediseñada y ampliada por mjb-is): la aplicación para Windows y Linux. Conjuntos de copia de seguridad que se ejecutan con activadores (horas fijas, eventos del equipo, el servidor de nuevo al alcance), copias de carpetas y de discos enteros con instantáneas coherentes (VSS en Windows, elastio-snap/dattobd en Linux), restauración de archivos desde copias de carpetas y de máquinas, Recuperación y Reversión, varios servidores PBS, cifrado en el cliente y un servicio en segundo plano, `salvanza-svc`, para que los conjuntos de copia de seguridad se ejecuten sin que nadie haya iniciado sesión.
 - **`salvanza-cli`**, una única herramienta de línea de comandos con un subcomando para cada tarea:
   - **`salvanza-cli backup-folder`**: copias de seguridad de carpetas (pxar) con deduplicación y detección de cambios.
   - **`salvanza-cli backup-disk`**: copias en caliente de discos enteros (fidx) de máquinas Windows y Linux. La imagen es arrancable tras una restauración.
@@ -31,10 +31,21 @@ Es un **conjunto de herramientas**:
 El `proxmox-backup-client` oficial es una herramienta de línea de comandos para Linux. Este cliente trabaja con el mismo servidor y los mismos formatos de copia, y añade:
 
 - **Windows.** No existe un cliente oficial para Windows. Aquí hay herramientas de línea de comandos y una aplicación, copias de carpetas mediante instantáneas VSS y copias en caliente de discos enteros.
-- **Una aplicación para Windows y Linux**: conjuntos de copia de seguridad programados, ejecutados por un servicio en segundo plano sin que nadie tenga que iniciar sesión, restauración con búsqueda, Recuperación y Reversión, informes y correo electrónico.
+- **Una aplicación para Windows y Linux**: conjuntos de copia de seguridad que se ejecutan a horas fijas, cuando el equipo se inicia, se reactiva, alguien inicia sesión o queda inactivo, o cuando se puede llegar a su servidor, ejecutados por un servicio en segundo plano sin que nadie tenga que iniciar sesión, restauración con búsqueda, Recuperación y Reversión, informes y correo electrónico.
 - **Máquinas enteras**: imágenes de disco arrancables, archivos sueltos recuperados de ellas y una ISO de restauración bare-metal guiada, en el mismo equipo, en hardware nuevo o en una máquina virtual de Proxmox VE.
 - **Se conservan los detalles de los archivos de Windows**: permisos NTFS, atributos, flujos de datos alternativos, atributos extendidos y fechas de creación se registran con cada copia de carpeta, y la restauración de este cliente los vuelve a aplicar.
 - **Sin ataduras**: lo que copia este cliente se restaura con el cliente oficial, y lo que copia el cliente oficial se restaura con este (vea más abajo).
+
+<a id="-new-in-21"></a>
+## 🆕 Novedades de la 2.1
+
+- **Los conjuntos de copia de seguridad se ejecutan con activadores.** La pestaña **Cuándo ejecutar** de un conjunto (antes la pestaña Programación) muestra sus activadores, y una programación horaria es solo uno de tres tipos:
+  - **A horas fijas**: las programaciones de siempre, varias por conjunto, cada una ahora con su propia opción de reactivar el equipo, de esperar al servidor si no se puede llegar a él a la hora prevista, y de ejecutarse solo en algunas redes.
+  - **Cuando se puede llegar al servidor**: un portátil hace la copia en cuanto vuelve a casa o a la VPN, como mucho cada N horas, opcionalmente solo en algunas redes o tipos de conexión y no en conexiones de uso medido.
+  - **Cuando pasa algo en este equipo**: cuando se inicia, se reactiva de la suspensión o la hibernación, alguien inicia sesión, o nadie lo ha usado en N minutos, como mucho cada N minutos, horas o días.
+
+  Los conjuntos guardados con la 2.0 siguen ejecutándose como antes. Consulte [Cuándo ejecutar](docs/manual/GUI.md#63-when-to-run-tab).
+- **Restauración en un disco más pequeño**, una **ventana en modo texto** (`salvanza-cli tui`) y más: consulte el [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Novedades de la 2.0
 
@@ -138,7 +149,7 @@ Cuando los instaladores de una versión salen limpios en VirusTotal, la página 
 2. Inicie **Salvanza for Proxmox Backup Server**. Los instaladores configuran el servicio en segundo plano, así que la aplicación pide una vez derechos de administrador para conectarse a él (UAC en Windows, su contraseña mediante pkexec en Linux). Si no puede concederlos, elija **Usar mi propia configuración**.
 3. Añada su servidor PBS en **Preferencias > Información de la cuenta** y compruébelo con **Probar**.
 4. Cree un conjunto de copia de seguridad (o una copia de seguridad puntual) y seleccione las carpetas o los discos que quiere copiar.
-5. Ejecútelo. Con el servicio en segundo plano, sus programaciones se ejecutan haya o no alguien con la sesión iniciada.
+5. En su pestaña **Cuándo ejecutar**, añada un activador: horas fijas, algo que pasa en el equipo, o cuando se puede llegar al servidor. Con el servicio en segundo plano, se ejecuta haya o no alguien con la sesión iniciada.
 
 El [manual de la interfaz gráfica](docs/manual/GUI.md) explica cada paso.
 
@@ -178,13 +189,13 @@ Ejecútelo con privilegios elevados (administrador); código de salida `0` = éx
 ## ✨ Funciones
 
 ### Interfaz gráfica
-Las funciones principales se enumeran en [Novedades de la 2.0](#-new-in-20). Además:
+Las funciones principales se enumeran en [Novedades de la 2.1](#-new-in-21) y [Novedades de la 2.0](#-new-in-20). Además:
 - 18 idiomas de interfaz: francés, inglés, italiano, alemán, polaco, español, búlgaro, checo, griego, húngaro, letón, lituano, neerlandés, portugués, rumano, eslovaco, turco y ucraniano
 - **Copias de seguridad puntuales** de carpetas o de discos enteros, y copias de máquina guardadas como `host` o como copia `vm` de Proxmox VE, con una opción de **copia forense** que también lee el espacio libre
 - **Restauración** con búsqueda de archivos (comodines, expresiones regulares, rutas completas), restauración selectiva, ACL NTFS/POSIX, flujos de datos alternativos, fechas de creación de Windows y una pasada de verificación opcional
 - **Pausar, Reanudar y Detener** una copia en curso, también desde la bandeja en Windows y para las ejecuciones del servicio en segundo plano
 - Tarjeta de progreso en directo (fin previsto, archivos procesados, velocidad de subida, datos transferidos, tasa de compresión), **Informes**, un **Registro de mensajes** y **Ver registros completos**
-- Notificaciones por correo electrónico, acciones tras la copia, clonación de conjuntos de copia de seguridad, exportación e importación de la configuración
+- Notificaciones por correo electrónico, acciones antes y después de la copia, clonación de conjuntos de copia de seguridad, exportación e importación de la configuración
 - Varios servidores PBS, con fijación de la huella del certificado (confianza en el primer uso), inicio de sesión con token de API o con usuario y contraseña
 - Cinco temas de colores y un color personalizado, elegidos por cada usuario (en la aplicación sin marca; una aplicación con marca mantiene los colores de su marca)
 
@@ -224,7 +235,7 @@ Los tres subcomandos aceptan `-keyfile` y `-keyfile-passphrase` para instantáne
 <td width="33%">
 
 [<img src="docs/screenshots/gui-schedule-tab.png" width="280">](docs/screenshots/gui-schedule-tab.png)
-**Programaciones**: varias por conjunto, con las 3 próximas ejecuciones
+**Cuándo ejecutar**: los activadores del conjunto, con las 3 próximas ejecuciones de cada programación
 
 </td>
 <td width="33%">

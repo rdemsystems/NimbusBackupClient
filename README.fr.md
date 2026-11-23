@@ -10,13 +10,13 @@
 [![Version](https://img.shields.io/github/v/release/salvanza/salvanza_client)](https://github.com/salvanza/salvanza_client/releases)
 [![Documentation](https://img.shields.io/badge/docs-manuals-orange)](docs/manual/README.md)
 
-**Salvanza for Proxmox Backup Server (anciennement Proxmox Backup Client) est un client de sauvegarde open source (GPL-3.0) pour Proxmox Backup Server (PBS), sous Windows et Linux.** Il sauvegarde des dossiers sous forme d'archives de fichiers consultables et des machines entières sous forme d'images disque amorçables, selon des planifications ou à la demande. Il restaure tout, d'un simple fichier à une machine entière : sur le même ordinateur, sur une machine de remplacement ou dans une machine virtuelle Proxmox VE.
+**Salvanza for Proxmox Backup Server (anciennement Proxmox Backup Client) est un client de sauvegarde open source (GPL-3.0) pour Proxmox Backup Server (PBS), sous Windows et Linux.** Il sauvegarde des dossiers sous forme d'archives de fichiers consultables et des machines entières sous forme d'images disque amorçables, à heures fixes, quand quelque chose se passe sur l'ordinateur, quand le serveur de sauvegarde est joignable, ou à la demande. Il restaure tout, d'un simple fichier à une machine entière : sur le même ordinateur, sur une machine de remplacement ou dans une machine virtuelle Proxmox VE.
 
 Site du projet : **[salvanza.org](https://salvanza.org/)** · Code source, versions et issues : **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
 Il s'agit d'une **suite d'outils** :
 
-- **L'application Salvanza**, `salvanza-gui` (créée par RDEM Systems sous le nom de Nimbus Backup GUI, remaniée et étendue par mjb-is) : l'application pour Windows et Linux. Des ensembles de sauvegarde avec plusieurs planifications chacun, des sauvegardes de dossiers et de disques entiers avec des instantanés cohérents (VSS sous Windows, elastio-snap/dattobd sous Linux), la restauration de fichiers depuis les sauvegardes de dossiers et de machines, Récupération et Retour arrière, plusieurs serveurs PBS, le chiffrement côté client, et un service d'arrière-plan, `salvanza-svc`, pour que les planifications s'exécutent sans session ouverte.
+- **L'application Salvanza**, `salvanza-gui` (créée par RDEM Systems sous le nom de Nimbus Backup GUI, remaniée et étendue par mjb-is) : l'application pour Windows et Linux. Des ensembles de sauvegarde qui s'exécutent sur des déclencheurs (heures fixes, événements de l'ordinateur, serveur de nouveau joignable), des sauvegardes de dossiers et de disques entiers avec des instantanés cohérents (VSS sous Windows, elastio-snap/dattobd sous Linux), la restauration de fichiers depuis les sauvegardes de dossiers et de machines, Récupération et Retour arrière, plusieurs serveurs PBS, le chiffrement côté client, et un service d'arrière-plan, `salvanza-svc`, pour que les ensembles de sauvegarde s'exécutent sans session ouverte.
 - **`salvanza-cli`**, un seul outil en ligne de commande, avec une sous-commande pour chaque tâche :
   - **`salvanza-cli backup-folder`** : sauvegardes de dossiers (pxar) avec déduplication et détection des changements.
   - **`salvanza-cli backup-disk`** : sauvegardes à chaud de disques entiers (fidx) de machines Windows et Linux. L'image est amorçable après restauration.
@@ -31,10 +31,21 @@ Il s'agit d'une **suite d'outils** :
 Le `proxmox-backup-client` officiel est un outil en ligne de commande pour Linux. Ce client fonctionne avec le même serveur et les mêmes formats de sauvegarde, et ajoute :
 
 - **Windows.** Il n'existe pas de client officiel pour Windows. Ici, il y a des outils en ligne de commande et une application, des sauvegardes de dossiers via des instantanés VSS et des sauvegardes à chaud de disques entiers.
-- **Une application pour Windows et Linux** : des ensembles de sauvegarde planifiés, exécutés par un service d'arrière-plan sans que personne n'ait à ouvrir de session, la restauration avec recherche, Récupération et Retour arrière, les rapports et l'e-mail.
+- **Une application pour Windows et Linux** : des ensembles de sauvegarde qui s'exécutent à heures fixes, quand l'ordinateur démarre, sort de veille, qu'une session s'ouvre ou qu'il reste inactif, ou quand leur serveur est joignable, exécutés par un service d'arrière-plan sans que personne n'ait à ouvrir de session, la restauration avec recherche, Récupération et Retour arrière, les rapports et l'e-mail.
 - **Des machines entières** : des images de disque amorçables, des fichiers isolés récupérés depuis ces images, et un ISO de restauration bare-metal guidée, sur le même ordinateur, sur un nouveau matériel ou dans une machine virtuelle Proxmox VE.
 - **Les détails des fichiers Windows conservés** : permissions NTFS, attributs, flux de données alternatifs, attributs étendus et dates de création sont enregistrés avec chaque sauvegarde de dossier, et la restauration de ce client les remet en place.
 - **Aucune dépendance** : ce que ce client sauvegarde se restaure avec le client officiel, et ce que le client officiel sauvegarde se restaure avec celui-ci (voir ci-dessous).
+
+<a id="-new-in-21"></a>
+## 🆕 Nouveautés de la 2.1
+
+- **Les ensembles de sauvegarde s'exécutent sur des déclencheurs.** L'onglet **Quand l'exécuter** d'un ensemble (auparavant l'onglet Planification) liste ses déclencheurs, et une planification horaire n'est plus qu'un type parmi trois :
+  - **À heures fixes** : les planifications comme avant, plusieurs par ensemble, chacune avec désormais son propre choix de réveiller l'ordinateur, d'attendre le serveur s'il n'est pas joignable à l'heure prévue, et de ne s'exécuter que sur certains réseaux.
+  - **Quand le serveur est joignable** : un portable se sauvegarde dès qu'il est de retour à la maison ou sur le VPN, au plus toutes les N heures, éventuellement seulement sur certains réseaux ou types de connexion, et pas sur les connexions limitées.
+  - **Quand quelque chose se passe sur cet ordinateur** : quand il démarre, sort de veille ou de veille prolongée, qu'une session s'ouvre, ou que personne ne l'a utilisé depuis N minutes, au plus toutes les N minutes, heures ou jours.
+
+  Les ensembles enregistrés avec la 2.0 continuent de s'exécuter comme avant. Voir [Quand l'exécuter](docs/manual/GUI.md#63-when-to-run-tab).
+- **Restauration sur un disque plus petit**, une **fenêtre en mode texte** (`salvanza-cli tui`), et plus encore : voir le [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Nouveautés de la 2.0
 
@@ -138,7 +149,7 @@ Lorsque les installeurs d'une version ne déclenchent aucune alerte sur VirusTot
 2. Lancez **Salvanza for Proxmox Backup Server**. Les installeurs mettent en place le service d'arrière-plan : l'application demande donc une fois les droits d'administrateur pour s'y connecter (UAC sous Windows, votre mot de passe via pkexec sous Linux). Si vous ne pouvez pas les fournir, choisissez **Utiliser mes propres paramètres**.
 3. Ajoutez votre serveur PBS dans **Préférences > Informations du compte** et vérifiez-le avec **Tester**.
 4. Créez un ensemble de sauvegarde (ou une sauvegarde ponctuelle) et sélectionnez les dossiers ou les disques à sauvegarder.
-5. Lancez-le. Avec le service d'arrière-plan, ses planifications s'exécutent qu'une session soit ouverte ou non.
+5. Dans son onglet **Quand l'exécuter**, ajoutez un déclencheur : des heures fixes, quelque chose qui se passe sur l'ordinateur, ou quand le serveur est joignable. Avec le service d'arrière-plan, il s'exécute qu'une session soit ouverte ou non.
 
 Le [manuel de l'interface graphique](docs/manual/GUI.md) détaille chaque étape.
 
@@ -178,13 +189,13 @@ Exécutez en tant qu'administrateur ; code de sortie `0` = succès, `3010` = suc
 ## ✨ Fonctionnalités
 
 ### Interface graphique
-Les principales fonctionnalités sont listées dans [Nouveautés de la 2.0](#-new-in-20). En outre :
+Les principales fonctionnalités sont listées dans [Nouveautés de la 2.1](#-new-in-21) et [Nouveautés de la 2.0](#-new-in-20). En outre :
 - 18 langues d'interface : français, anglais, italien, allemand, polonais, espagnol, bulgare, tchèque, grec, hongrois, letton, lituanien, néerlandais, portugais, roumain, slovaque, turc et ukrainien
 - **Sauvegardes ponctuelles** de dossiers ou de disques entiers, et sauvegardes machine stockées en tant que `host` ou en tant que sauvegarde `vm` de Proxmox VE, avec une option de **copie forensique** qui lit aussi l'espace libre
 - **Restauration** avec recherche de fichiers (caractères génériques, expressions régulières, chemins complets), restauration sélective, ACL NTFS/POSIX, flux de données alternatifs, dates de création Windows et une passe de vérification facultative
 - **Pause, Reprendre et Arrêter** pour une sauvegarde en cours, y compris depuis la zone de notification sous Windows et pour les exécutions du service d'arrière-plan
 - Carte de progression en direct (fin estimée, fichiers traités, vitesse d'envoi, données transférées, taux de compression), **Rapports**, un **Journal des messages** et **Voir les journaux complets**
-- Notifications par e-mail, actions après sauvegarde, clonage d'ensembles de sauvegarde, export et import des paramètres
+- Notifications par e-mail, actions avant et après la sauvegarde, clonage d'ensembles de sauvegarde, export et import des paramètres
 - Plusieurs serveurs PBS, avec épinglage de l'empreinte du certificat (confiance à la première utilisation), connexion par jeton d'API ou par utilisateur et mot de passe
 - Cinq thèmes de couleurs et une couleur personnalisée, choisis par chaque utilisateur (application sans marque ; une application de marque garde les couleurs de sa marque)
 
@@ -224,7 +235,7 @@ Les trois sous-commandes acceptent `-keyfile` et `-keyfile-passphrase` pour les 
 <td width="33%">
 
 [<img src="docs/screenshots/gui-schedule-tab.png" width="280">](docs/screenshots/gui-schedule-tab.png)
-**Planifications** : plusieurs par ensemble, avec les 3 prochaines exécutions
+**Quand l'exécuter** : les déclencheurs de l'ensemble, avec les 3 prochaines exécutions de chaque planification
 
 </td>
 <td width="33%">

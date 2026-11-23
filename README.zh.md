@@ -10,13 +10,13 @@
 [![Release](https://img.shields.io/github/v/release/salvanza/salvanza_client)](https://github.com/salvanza/salvanza_client/releases)
 [![Documentation](https://img.shields.io/badge/docs-manuals-orange)](docs/manual/README.md)
 
-**Salvanza for Proxmox Backup Server（原名 Proxmox Backup Client）是一款开源（GPL-3.0）的 Proxmox Backup Server（PBS）备份客户端，支持 Windows 和 Linux。** 它可以把文件夹备份为可浏览的文件归档，把整台机器备份为可启动的磁盘映像，按计划或随时手动运行。从单个文件到整台机器，都可以恢复：恢复到同一台计算机、恢复到替换机器，或恢复为 Proxmox VE 虚拟机。
+**Salvanza for Proxmox Backup Server（原名 Proxmox Backup Client）是一款开源（GPL-3.0）的 Proxmox Backup Server（PBS）备份客户端，支持 Windows 和 Linux。** 它可以把文件夹备份为可浏览的文件归档，把整台机器备份为可启动的磁盘映像，可在设定的时间、计算机上发生某些事情时、能连上备份服务器时运行，也可随时手动运行。从单个文件到整台机器，都可以恢复：恢复到同一台计算机、恢复到替换机器，或恢复为 Proxmox VE 虚拟机。
 
 项目网站：**[salvanza.org](https://salvanza.org/)** · 源代码、版本发布和问题反馈：**[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
 它是一**套工具**：
 
-- **Salvanza 应用** `salvanza-gui`（最初由 RDEM Systems 开发，名为 Nimbus Backup GUI，后由 mjb-is 重新设计和扩展）：适用于 Windows 和 Linux 的应用程序。每个 Backup Set（备份集）可设置多个计划；文件夹备份和整盘备份都使用一致性快照（Windows 上用 VSS，Linux 上用 elastio-snap/dattobd）；可以从文件夹备份和机器备份中恢复文件；支持 Undelete（找回已删除文件）和 Roll back（回滚）、多台 PBS 服务器、客户端加密，以及后台服务 `salvanza-svc`，让计划任务在无人登录时也能运行。
+- **Salvanza 应用** `salvanza-gui`（最初由 RDEM Systems 开发，名为 Nimbus Backup GUI，后由 mjb-is 重新设计和扩展）：适用于 Windows 和 Linux 的应用程序。Backup Set（备份集）按触发器运行（设定的时间、计算机上的事件、重新连上服务器时）；文件夹备份和整盘备份都使用一致性快照（Windows 上用 VSS，Linux 上用 elastio-snap/dattobd）；可以从文件夹备份和机器备份中恢复文件；支持 Undelete（找回已删除文件）和 Roll back（回滚）、多台 PBS 服务器、客户端加密，以及后台服务 `salvanza-svc`，让备份集在无人登录时也能运行。
 - **`salvanza-cli`**：一个命令行工具，每项任务对应一个子命令：
   - **`salvanza-cli backup-folder`**：文件夹（pxar）备份，带重复数据删除和变更检测。
   - **`salvanza-cli backup-disk`**：在线整盘备份（fidx），适用于 Windows 和 Linux 机器。恢复后的映像可以直接启动。
@@ -32,10 +32,21 @@
 官方的 `proxmox-backup-client` 是一个 Linux 命令行工具。本客户端使用同一台服务器和相同的备份格式，并且增加了：
 
 - **Windows。** Windows 没有官方客户端。这里有命令行工具和应用程序，通过 VSS 快照备份文件夹，并可在线备份整个磁盘。
-- **适用于 Windows 和 Linux 的应用程序**：按计划运行的 Backup Set（备份集），由后台服务执行，无需任何人登录；带搜索的恢复、Undelete（找回已删除文件）和 Roll back（回滚）、报告和电子邮件。
+- **适用于 Windows 和 Linux 的应用程序**：Backup Set（备份集）可在设定的时间、计算机启动、唤醒、有人登录或闲置时，或能连上其服务器时运行，由后台服务执行，无需任何人登录；带搜索的恢复、Undelete（找回已删除文件）和 Roll back（回滚）、报告和电子邮件。
 - **整台机器**：可启动的磁盘镜像、从镜像中恢复单个文件，以及引导式裸机恢复 ISO，可恢复到同一台计算机、新硬件或 Proxmox VE 虚拟机。
 - **保留 Windows 文件信息**：NTFS 权限、属性、备用数据流、扩展属性和创建时间会随每次文件夹备份一起记录，本客户端的恢复会把它们还原。
 - **不被绑定**：本客户端备份的内容可以用官方客户端恢复，官方客户端备份的内容也可以用本客户端恢复（见下文）。
+
+<a id="-new-in-21"></a>
+## 🆕 2.1 新特性
+
+- **Backup Set 按触发器运行。** 备份集的 **When to run**（何时运行；以前叫 **Schedule** 选项卡）选项卡列出它的触发器，定时计划现在只是三种触发器之一：
+  - **At set times**（在设定的时间）：和以前一样的计划，每个备份集可有多个，每个计划现在都可以单独选择是否唤醒计算机、到时连不上服务器时是否等待，以及是否只在某些网络上运行。
+  - **When the server can be reached**（能连上服务器时）：笔记本电脑一回到家或连上 VPN 就备份，最多每 N 小时一次，可选只在某些网络或连接类型上运行，并且不在按流量计费的连接上运行。
+  - **When something happens on this computer**（这台计算机上发生某些事情时）：计算机启动、从睡眠或休眠中唤醒、有人登录，或 N 分钟无人使用时，最多每 N 分钟、小时或天一次。
+
+  在 2.0 中保存的备份集照旧运行。参见 [When to run](docs/manual/GUI.md#63-when-to-run-tab)。
+- **恢复到更小的磁盘**、**文本模式窗口**（`salvanza-cli tui`）等等：参见 [CHANGELOG](CHANGELOG.md)。
 
 ## 🆕 2.0 新特性
 
@@ -140,7 +151,7 @@ gh attestation verify .\Salvanza-<version>-x64.msi --repo salvanza/salvanza_clie
 2. 启动 **Salvanza for Proxmox Backup Server**。安装程序会设置好后台服务，因此应用会请求一次管理员权限来连接服务（Windows 上是 UAC，Linux 上通过 pkexec 输入你的密码）。如果无法提供管理员权限，请选择 **Use my own settings**（使用我自己的设置）。
 3. 在 **Preferences > Account Information**（首选项 > 账户信息）中添加你的 PBS 服务器，并点击 **Test**（测试）。
 4. 创建一个 Backup Set（备份集）或一次性备份，选择要备份的文件夹或磁盘。
-5. 运行它。有了后台服务，无论是否有人登录，计划任务都会运行。
+5. 在它的 **When to run** 选项卡中添加一个触发器：设定的时间、计算机上发生的事情，或能连上服务器时。有了后台服务，无论是否有人登录，它都会运行。
 
 [GUI 手册](docs/manual/GUI.md)详细介绍了每一个步骤。
 
@@ -180,13 +191,13 @@ msiexec /x Salvanza-<version>-x64.msi /quiet KEEP_CONFIG=0
 ## ✨ 功能
 
 ### GUI
-主要功能见 [2.0 新特性](#-new-in-20)。此外还有：
+主要功能见 [2.1 新特性](#-new-in-21)和 [2.0 新特性](#-new-in-20)。此外还有：
 - 18 种界面语言：法语、英语、意大利语、德语、波兰语、西班牙语、保加利亚语、捷克语、希腊语、匈牙利语、拉脱维亚语、立陶宛语、荷兰语、葡萄牙语、罗马尼亚语、斯洛伐克语、土耳其语和乌克兰语
 - 文件夹或整盘的**一次性备份**；机器备份可存储为 `host` 备份，也可存储为 Proxmox VE `vm` 备份，并提供连空闲空间一起读取的**取证副本**选项
 - **恢复**：支持文件搜索（通配符、正则表达式、完整路径）、选择性恢复、NTFS/POSIX ACL、备用数据流、Windows 创建时间，以及可选的校验步骤
 - 对正在运行的备份执行 **Pause, Resume and Stop**（暂停、继续和停止），在 Windows 上也可从托盘操作，后台服务执行的备份同样适用
 - 实时进度卡片（预计完成时间、已完成文件数、上传速度、已传输数据量、压缩率）、**Reports**（报告）、**Message Log**（消息日志）和 **View Full Logs**（查看完整日志）
-- 电子邮件通知、备份后操作、备份集克隆、设置导出和导入
+- 电子邮件通知、备份前后的操作、备份集克隆、设置导出和导入
 - 多台 PBS 服务器，支持证书指纹锁定（首次使用时信任），可用 API 令牌或用户名/密码登录
 - 五种配色主题和一种自定义颜色，由每个用户自行选择（无品牌版应用；品牌版应用保留其品牌配色）
 
@@ -226,7 +237,7 @@ msiexec /x Salvanza-<version>-x64.msi /quiet KEEP_CONFIG=0
 <td width="33%">
 
 [<img src="docs/screenshots/gui-schedule-tab.png" width="280">](docs/screenshots/gui-schedule-tab.png)
-**Schedules**（计划）：每个备份集可有多个计划，并显示接下来的 3 次运行
+**When to run**（何时运行）：备份集的触发器，并显示每个计划接下来的 3 次运行
 
 </td>
 <td width="33%">

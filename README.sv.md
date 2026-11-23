@@ -10,13 +10,13 @@
 [![Release](https://img.shields.io/github/v/release/salvanza/salvanza_client)](https://github.com/salvanza/salvanza_client/releases)
 [![Documentation](https://img.shields.io/badge/docs-manuals-orange)](docs/manual/README.md)
 
-**Salvanza for Proxmox Backup Server (tidigare Proxmox Backup Client) är en säkerhetskopieringsklient med öppen källkod (GPL-3.0) för Proxmox Backup Server (PBS), för Windows och Linux.** Den säkerhetskopierar mappar som filarkiv som går att bläddra i och hela datorer som startbara diskavbilder, enligt schema eller på begäran. Den återställer allt från en enda fil till en hel dator: till samma dator, till en ersättningsdator eller till en virtuell maskin i Proxmox VE.
+**Salvanza for Proxmox Backup Server (tidigare Proxmox Backup Client) är en säkerhetskopieringsklient med öppen källkod (GPL-3.0) för Proxmox Backup Server (PBS), för Windows och Linux.** Den säkerhetskopierar mappar som filarkiv som går att bläddra i och hela datorer som startbara diskavbilder, på bestämda tider, när något händer på datorn, när säkerhetskopieringsservern går att nå, eller på begäran. Den återställer allt från en enda fil till en hel dator: till samma dator, till en ersättningsdator eller till en virtuell maskin i Proxmox VE.
 
 Projektets webbplats: **[salvanza.org](https://salvanza.org/)** · Källkod, versioner och ärenden: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
 Det är en **verktygssvit**:
 
-- **Salvanza-appen**, `salvanza-gui` (ursprungligen skapad av RDEM Systems som Nimbus Backup GUI, omarbetad och utökad av mjb-is): appen för Windows och Linux. **Backup Sets** (säkerhetskopieringsuppsättningar) med flera scheman var, säkerhetskopior av mappar och hela diskar med konsekventa ögonblicksbilder (VSS i Windows, elastio-snap/dattobd i Linux), återställning av filer från mapp- och datorsäkerhetskopior, **Undelete** (ångra borttagning) och **Roll back** (återgå), flera PBS-servrar, kryptering på klientsidan och en bakgrundstjänst, `salvanza-svc`, så att scheman körs utan att någon är inloggad.
+- **Salvanza-appen**, `salvanza-gui` (ursprungligen skapad av RDEM Systems som Nimbus Backup GUI, omarbetad och utökad av mjb-is): appen för Windows och Linux. **Backup Sets** (säkerhetskopieringsuppsättningar) som körs av utlösare (bestämda tider, händelser på datorn, servern inom räckhåll igen), säkerhetskopior av mappar och hela diskar med konsekventa ögonblicksbilder (VSS i Windows, elastio-snap/dattobd i Linux), återställning av filer från mapp- och datorsäkerhetskopior, **Undelete** (ångra borttagning) och **Roll back** (återgå), flera PBS-servrar, kryptering på klientsidan och en bakgrundstjänst, `salvanza-svc`, så att uppsättningarna körs utan att någon är inloggad.
 - **`salvanza-cli`**, ett enda kommandoradsverktyg med ett underkommando för varje uppgift:
   - **`salvanza-cli backup-folder`**: säkerhetskopiering av mappar (pxar) med deduplicering och ändringsidentifiering.
   - **`salvanza-cli backup-disk`**: säkerhetskopiering av hela diskar (fidx) under drift för Windows- och Linux-datorer. Avbilden är startbar efter en återställning.
@@ -32,10 +32,21 @@ Det är en **verktygssvit**:
 Den officiella `proxmox-backup-client` är ett kommandoradsverktyg för Linux. Den här klienten arbetar mot samma server med samma säkerhetskopieformat och lägger till:
 
 - **Windows.** Det finns ingen officiell klient för Windows. Här finns kommandoradsverktyg och en app, säkerhetskopior av mappar via VSS-ögonblicksbilder och livesäkerhetskopior av hela diskar.
-- **En app för Windows och Linux**: schemalagda **Backup Sets** som körs av en bakgrundstjänst, så att ingen behöver vara inloggad, återställning med sökning, **Undelete** och **Roll back**, rapporter och e-post.
+- **En app för Windows och Linux**: **Backup Sets** som körs på bestämda tider, när datorn startar, vaknar, någon loggar in eller den lämnas orörd, eller när deras server går att nå, och som körs av en bakgrundstjänst, så att ingen behöver vara inloggad, återställning med sökning, **Undelete** och **Roll back**, rapporter och e-post.
 - **Hela datorer**: startbara diskavbilder, enskilda filer ur dem och en guidad ISO för återställning från grunden (bare metal), till samma dator, ny hårdvara eller en virtuell maskin i Proxmox VE.
 - **Windows filinformation bevaras**: NTFS-behörigheter, attribut, alternativa dataströmmar, utökade attribut och skapandetider registreras med varje mappsäkerhetskopia, och den här klientens återställning lägger tillbaka dem.
 - **Ingen inlåsning**: det den här klienten säkerhetskopierar kan återställas med den officiella klienten, och det den officiella klienten säkerhetskopierar kan återställas med den här (se nedan).
+
+<a id="-new-in-21"></a>
+## 🆕 Nytt i 2.1
+
+- **Backup Sets körs av utlösare.** En uppsättnings flik **When to run** (när den ska köras; tidigare fliken **Schedule**) listar dess utlösare, och ett schema är nu bara en av tre sorter:
+  - **At set times** (på bestämda tider): scheman som förut, flera per uppsättning, och vart och ett har nu sitt eget val att väcka datorn, att vänta på servern när den inte går att nå på utsatt tid, och att bara köras på vissa nätverk.
+  - **When the server can be reached** (när servern går att nå): en bärbar dator säkerhetskopierar så fort den är hemma eller på VPN igen, högst var N:e timme, om så önskas bara på vissa nätverk eller anslutningstyper och inte på anslutningar med datapriser.
+  - **When something happens on this computer** (när något händer på den här datorn): när den startar, vaknar ur strömsparläge eller viloläge, någon loggar in, eller ingen har använt den på N minuter, högst var N:e minut, timme eller dag.
+
+  Uppsättningar som sparats i 2.0 fortsätter att köras som förut. Se [When to run](docs/manual/GUI.md#63-when-to-run-tab).
+- **Återställning till en mindre disk**, ett **textläges-fönster** (`salvanza-cli tui`) och mer: se [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Nytt i 2.0
 
@@ -140,7 +151,7 @@ När en versions installationsprogram är rena i VirusTotal länkar versionssida
 2. Starta **Salvanza for Proxmox Backup Server**. Installationsprogrammen sätter upp bakgrundstjänsten, så appen ber en gång om administratörsbehörighet för att ansluta till den (UAC i Windows, ditt lösenord via pkexec i Linux). Om du inte kan ge den, välj **Use my own settings** (använd mina egna inställningar).
 3. Lägg till din PBS-server under **Preferences > Account Information** (inställningar > kontoinformation) och klicka på **Test** (testa).
 4. Skapa en **Backup Set** (säkerhetskopieringsuppsättning) eller en engångssäkerhetskopia och välj de mappar eller diskar som ska säkerhetskopieras.
-5. Kör den. Med bakgrundstjänsten körs dess scheman oavsett om någon är inloggad eller inte.
+5. Lägg till en utlösare på dess flik **When to run**: bestämda tider, något som händer på datorn, eller när servern går att nå. Med bakgrundstjänsten körs den oavsett om någon är inloggad eller inte.
 
 [Handboken för det grafiska gränssnittet](docs/manual/GUI.md) går igenom varje steg.
 
@@ -180,13 +191,13 @@ Kör med förhöjd behörighet (administratör); slutkod `0` = lyckades, `3010` 
 ## ✨ Funktioner
 
 ### Grafiskt gränssnitt
-Huvudfunktionerna finns listade under [Nytt i 2.0](#-new-in-20). Dessutom:
+Huvudfunktionerna finns listade under [Nytt i 2.1](#-new-in-21) och [Nytt i 2.0](#-new-in-20). Dessutom:
 - 18 gränssnittsspråk: franska, engelska, italienska, tyska, polska, spanska, bulgariska, tjeckiska, grekiska, ungerska, lettiska, litauiska, nederländska, portugisiska, rumänska, slovakiska, turkiska och ukrainska
 - **Engångssäkerhetskopior** av mappar eller hela diskar, och datorsäkerhetskopior lagrade som `host` eller som en `vm`-säkerhetskopia i Proxmox VE, med alternativet **Forensic copy** (kriminalteknisk kopia) som även läser ledigt utrymme
 - **Återställning** med filsökning (jokertecken, reguljära uttryck, fullständiga sökvägar), selektiv återställning, NTFS/POSIX-ACL:er, alternativa dataströmmar, skapandetider i Windows och en valfri verifieringsomgång
 - **Pause, Resume och Stop** (pausa, återuppta, stoppa) för en pågående säkerhetskopia, även från meddelandefältet i Windows och för körningar som bakgrundstjänsten gör
 - Förloppskort i realtid (beräknad sluttid, klara filer, uppladdningshastighet, överförda data, komprimeringsgrad), **Reports** (rapporter), **Message Log** (meddelandelogg) och **View Full Logs** (visa fullständiga loggar)
-- Aviseringar via e-post, åtgärder efter säkerhetskopiering, kloning av uppsättningar, export och import av inställningar
+- Aviseringar via e-post, åtgärder före och efter säkerhetskopiering, kloning av uppsättningar, export och import av inställningar
 - Flera PBS-servrar, med fastlåsning av certifikatets fingeravtryck (förtroende vid första användning), inloggning med API-token eller användare/lösenord
 - Fem färgteman och en egen färg, som varje användare väljer själv (i appen utan varumärke; en app med varumärke behåller sitt varumärkes färger)
 
@@ -226,7 +237,7 @@ De tre underkommandona tar `-keyfile` och `-keyfile-passphrase` för krypterade 
 <td width="33%">
 
 [<img src="docs/screenshots/gui-schedule-tab.png" width="280">](docs/screenshots/gui-schedule-tab.png)
-**Schedules** (scheman): flera per uppsättning, med de 3 nästa körningarna
+**When to run** (när den ska köras): uppsättningens utlösare, med de 3 nästa körningarna för varje schema
 
 </td>
 <td width="33%">

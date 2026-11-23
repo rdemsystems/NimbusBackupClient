@@ -10,13 +10,13 @@
 [![Release](https://img.shields.io/github/v/release/salvanza/salvanza_client)](https://github.com/salvanza/salvanza_client/releases)
 [![Documentation](https://img.shields.io/badge/docs-manuals-orange)](docs/manual/README.md)
 
-**Salvanza for Proxmox Backup Server (fost Proxmox Backup Client) este un client de backup open-source (GPL-3.0) pentru Proxmox Backup Server (PBS), pentru Windows și Linux.** Face backup folderelor ca arhive de fișiere care pot fi răsfoite și mașinilor întregi ca imagini de disc bootabile, după o programare sau la cerere. Restaurează orice, de la un singur fișier la o mașină întreagă: pe același computer, pe un computer înlocuitor sau într-o mașină virtuală Proxmox VE.
+**Salvanza for Proxmox Backup Server (fost Proxmox Backup Client) este un client de backup open-source (GPL-3.0) pentru Proxmox Backup Server (PBS), pentru Windows și Linux.** Face backup folderelor ca arhive de fișiere care pot fi răsfoite și mașinilor întregi ca imagini de disc bootabile, la ore stabilite, când se întâmplă ceva pe calculator, când serverul de backup poate fi accesat, sau la cerere. Restaurează orice, de la un singur fișier la o mașină întreagă: pe același computer, pe un computer înlocuitor sau într-o mașină virtuală Proxmox VE.
 
 Site-ul proiectului: **[salvanza.org](https://salvanza.org/)** · Cod sursă, versiuni și issues: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
 Este o **suită de instrumente**:
 
-- **Aplicația Salvanza**, `salvanza-gui` (creată de RDEM Systems ca Nimbus Backup GUI, refăcută și extinsă de mjb-is): aplicația pentru Windows și Linux. Seturi de backup cu mai multe programări fiecare, backup-uri de foldere și de discuri întregi cu instantanee consecvente (VSS pe Windows, elastio-snap/dattobd pe Linux), restaurarea fișierelor din backup-urile de foldere și de mașini, Recuperare fișiere șterse și Revenire, mai multe servere PBS, criptare pe partea clientului și un serviciu de fundal, `salvanza-svc`, astfel încât programările rulează fără ca cineva să fie autentificat.
+- **Aplicația Salvanza**, `salvanza-gui` (creată de RDEM Systems ca Nimbus Backup GUI, refăcută și extinsă de mjb-is): aplicația pentru Windows și Linux. Seturi de backup care rulează prin declanșatoare (ore stabilite, evenimente ale calculatorului, serverul din nou accesibil), backup-uri de foldere și de discuri întregi cu instantanee consecvente (VSS pe Windows, elastio-snap/dattobd pe Linux), restaurarea fișierelor din backup-urile de foldere și de mașini, Recuperare fișiere șterse și Revenire, mai multe servere PBS, criptare pe partea clientului și un serviciu de fundal, `salvanza-svc`, astfel încât seturile de backup rulează fără ca cineva să fie autentificat.
 - **`salvanza-cli`**, un singur instrument în linia de comandă, cu o subcomandă pentru fiecare sarcină:
   - **`salvanza-cli backup-folder`**: backup-uri de foldere (pxar) cu deduplicare și detectarea modificărilor.
   - **`salvanza-cli backup-disk`**: backup-uri live de discuri întregi (fidx) pentru mașini Windows și Linux. Imaginea este bootabilă după restaurare.
@@ -32,10 +32,21 @@ Este o **suită de instrumente**:
 `proxmox-backup-client` oficial este un instrument în linie de comandă pentru Linux. Acest client lucrează cu același server și aceleași formate de backup și adaugă:
 
 - **Windows.** Nu există un client oficial pentru Windows. Aici există instrumente în linie de comandă și o aplicație, backup-uri de foldere prin instantanee VSS și backup-uri live ale discurilor întregi.
-- **O aplicație pentru Windows și Linux**: seturi de backup programate, rulate de un serviciu de fundal fără să fie nevoie ca cineva să fie autentificat, restaurare cu căutare, Recuperare fișiere șterse și Revenire, rapoarte și e-mail.
+- **O aplicație pentru Windows și Linux**: seturi de backup care rulează la ore stabilite, când calculatorul pornește, se trezește, cineva se autentifică sau rămâne neutilizat, ori când serverul lor poate fi accesat, rulate de un serviciu de fundal fără să fie nevoie ca cineva să fie autentificat, restaurare cu căutare, Recuperare fișiere șterse și Revenire, rapoarte și e-mail.
 - **Mașini întregi**: imagini de disc bootabile, fișiere individuale din ele și un ISO de restaurare bare-metal ghidată, pe același computer, pe hardware nou sau într-o mașină virtuală Proxmox VE.
 - **Detaliile fișierelor Windows păstrate**: permisiunile NTFS, atributele, fluxurile de date alternative, atributele extinse și orele de creare sunt înregistrate cu fiecare backup de folder, iar restaurarea acestui client le pune la loc.
 - **Fără blocare**: ce salvează acest client se restaurează cu clientul oficial, iar ce salvează clientul oficial se restaurează cu acesta (vedeți mai jos).
+
+<a id="-new-in-21"></a>
+## 🆕 Noutăți în 2.1
+
+- **Seturile de backup rulează prin declanșatoare.** Fila **Când rulează** a unui set (înainte fila Programare) arată declanșatoarele lui, iar o programare orară este acum doar unul dintre trei tipuri:
+  - **La ore stabilite**: programările de dinainte, mai multe pentru fiecare set, fiecare având acum propria opțiune de a trezi calculatorul, de a aștepta serverul când nu poate fi accesat la ora stabilită și de a rula doar în anumite rețele.
+  - **Când serverul poate fi accesat**: un laptop face backup imediat ce revine acasă sau pe VPN, cel mult o dată la N ore, opțional doar în anumite rețele sau tipuri de conexiune și nu pe conexiuni contorizate.
+  - **Când se întâmplă ceva pe acest calculator**: când pornește, se trezește din repaus sau hibernare, cineva se autentifică, sau nimeni nu l-a folosit de N minute, cel mult o dată la N minute, ore sau zile.
+
+  Seturile salvate cu 2.0 rulează în continuare ca înainte. Vedeți [Când rulează](docs/manual/GUI.md#63-when-to-run-tab).
+- **Restaurare pe un disc mai mic**, o **fereastră în mod text** (`salvanza-cli tui`) și altele: vedeți [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Noutăți în 2.0
 
@@ -140,7 +151,7 @@ Când programele de instalare ale unei versiuni trec curat de scanarea VirusTota
 2. Porniți **Salvanza for Proxmox Backup Server**. Programele de instalare configurează serviciul de fundal, așa că aplicația cere o singură dată drepturi de administrator pentru a se conecta la el (UAC pe Windows, parola dvs. prin pkexec pe Linux). Dacă nu le puteți da, alegeți **Folosește setările mele**.
 3. Adăugați serverul PBS în **Preferințe > Informații despre cont** și apăsați **Testează**.
 4. Creați un set de backup (sau un backup unic) și selectați folderele sau discurile de salvat.
-5. Rulați-l. Cu serviciul de fundal, programările sale rulează indiferent dacă cineva este autentificat sau nu.
+5. În fila sa **Când rulează**, adăugați un declanșator: ore stabilite, ceva ce se întâmplă pe calculator, sau când serverul poate fi accesat. Cu serviciul de fundal, rulează indiferent dacă cineva este autentificat sau nu.
 
 [Manualul interfeței grafice](docs/manual/GUI.md) descrie fiecare pas în detaliu.
 
@@ -180,13 +191,13 @@ Rulați cu drepturi ridicate (administrator); codul de ieșire `0` = succes, `30
 ## ✨ Funcționalități
 
 ### Interfața grafică
-Funcționalitățile principale sunt enumerate în [Noutăți în 2.0](#-new-in-20). În plus:
+Funcționalitățile principale sunt enumerate în [Noutăți în 2.1](#-new-in-21) și [Noutăți în 2.0](#-new-in-20). În plus:
 - 18 limbi ale interfeței: franceză, engleză, italiană, germană, poloneză, spaniolă, bulgară, cehă, greacă, maghiară, letonă, lituaniană, neerlandeză, portugheză, română, slovacă, turcă și ucraineană
 - **Backup-uri unice** ale folderelor sau ale discurilor întregi și backup-uri de mașini stocate ca `host` sau ca backup `vm` Proxmox VE, cu opțiunea **Copie criminalistică**, care citește și spațiul liber
 - **Restaurare** cu căutare de fișiere (metacaractere, expresii regulate, căi complete), restaurare selectivă, ACL-uri NTFS/POSIX, fluxuri de date alternative, orele de creare Windows și o verificare opțională
 - **Pauză, Reia și Oprește** pentru un backup în curs, inclusiv din zona de notificare pe Windows și pentru rulările făcute de serviciul de fundal
 - Card de progres în timp real (estimarea finalizării, fișiere procesate, viteza de încărcare, date transferate, raport de compresie), **Rapoarte**, **Jurnal de mesaje** și **Vezi jurnalele complete**
-- Notificări prin e-mail, acțiuni după backup, clonarea seturilor de backup, exportul și importul setărilor
+- Notificări prin e-mail, acțiuni înainte și după backup, clonarea seturilor de backup, exportul și importul setărilor
 - Mai multe servere PBS, cu fixarea amprentei certificatului (încredere la prima utilizare), autentificare cu token API sau cu utilizator/parolă
 - Cinci teme de culori și o culoare personalizată, alese de fiecare utilizator (în aplicația fără marcă; o aplicație cu marcă păstrează culorile mărcii sale)
 
@@ -226,7 +237,7 @@ Cele trei subcomenzi acceptă `-keyfile` și `-keyfile-passphrase` pentru instan
 <td width="33%">
 
 [<img src="docs/screenshots/gui-schedule-tab.png" width="280">](docs/screenshots/gui-schedule-tab.png)
-**Programări**: mai multe pentru fiecare set, cu următoarele 3 rulări
+**Când rulează**: declanșatoarele setului, cu următoarele 3 rulări ale fiecărei programări
 
 </td>
 <td width="33%">

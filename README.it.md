@@ -10,13 +10,13 @@
 [![Release](https://img.shields.io/github/v/release/salvanza/salvanza_client)](https://github.com/salvanza/salvanza_client/releases)
 [![Documentazione](https://img.shields.io/badge/docs-manuals-orange)](docs/manual/README.md)
 
-**Salvanza for Proxmox Backup Server (in precedenza Proxmox Backup Client) è un client di backup open source (GPL-3.0) per Proxmox Backup Server (PBS), per Windows e Linux.** Esegue il backup delle cartelle come archivi di file sfogliabili e di intere macchine come immagini disco avviabili, secondo pianificazioni o su richiesta. Ripristina qualsiasi cosa, da un singolo file a un'intera macchina: sullo stesso computer, su una macchina sostitutiva o in una macchina virtuale Proxmox VE.
+**Salvanza for Proxmox Backup Server (in precedenza Proxmox Backup Client) è un client di backup open source (GPL-3.0) per Proxmox Backup Server (PBS), per Windows e Linux.** Esegue il backup delle cartelle come archivi di file sfogliabili e di intere macchine come immagini disco avviabili, a orari stabiliti, quando succede qualcosa sul computer, quando il server di backup è raggiungibile, o su richiesta. Ripristina qualsiasi cosa, da un singolo file a un'intera macchina: sullo stesso computer, su una macchina sostitutiva o in una macchina virtuale Proxmox VE.
 
 Sito del progetto: **[salvanza.org](https://salvanza.org/)** · Codice sorgente, release e issue: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
 È una **suite di strumenti**:
 
-- **L'app Salvanza**, `salvanza-gui` (nata da RDEM Systems come Nimbus Backup GUI, rielaborata ed estesa da mjb-is): l'app per Windows e Linux. Set di backup con più pianificazioni ciascuno, backup di cartelle e di dischi interi con snapshot coerenti (VSS su Windows, elastio-snap/dattobd su Linux), ripristino di file dai backup di cartelle e di macchine, Recupero e Rollback, più server PBS, cifratura lato client e un servizio in background, `salvanza-svc`, che esegue le pianificazioni anche senza utenti connessi.
+- **L'app Salvanza**, `salvanza-gui` (nata da RDEM Systems come Nimbus Backup GUI, rielaborata ed estesa da mjb-is): l'app per Windows e Linux. Set di backup che partono da attivatori (orari stabiliti, eventi del computer, il server di nuovo raggiungibile), backup di cartelle e di dischi interi con snapshot coerenti (VSS su Windows, elastio-snap/dattobd su Linux), ripristino di file dai backup di cartelle e di macchine, Recupero e Rollback, più server PBS, cifratura lato client e un servizio in background, `salvanza-svc`, che esegue i set di backup anche senza utenti connessi.
 - **`salvanza-cli`**, un unico strumento da riga di comando con un sottocomando per ogni attività:
   - **`salvanza-cli backup-folder`**: backup di cartelle (pxar) con deduplicazione e rilevamento delle modifiche.
   - **`salvanza-cli backup-disk`**: backup a caldo di dischi interi (fidx) di macchine Windows e Linux. Dopo il ripristino l'immagine è avviabile.
@@ -31,10 +31,21 @@ Sito del progetto: **[salvanza.org](https://salvanza.org/)** · Codice sorgente,
 Il `proxmox-backup-client` ufficiale è uno strumento a riga di comando per Linux. Questo client funziona con lo stesso server e gli stessi formati di backup, e in più offre:
 
 - **Windows.** Non esiste un client ufficiale per Windows. Qui ci sono strumenti a riga di comando e un'app, backup di cartelle tramite snapshot VSS e backup a caldo di dischi interi.
-- **Un'app per Windows e Linux**: set di backup pianificati, eseguiti da un servizio in background senza che nessuno debba essere connesso, ripristino con ricerca, Recupero e Rollback, report ed e-mail.
+- **Un'app per Windows e Linux**: set di backup che partono a orari stabiliti, quando il computer si avvia, si riattiva, qualcuno accede o resta inattivo, o quando il loro server è raggiungibile, eseguiti da un servizio in background senza che nessuno debba essere connesso, ripristino con ricerca, Recupero e Rollback, report ed e-mail.
 - **Macchine intere**: immagini disco avviabili, singoli file recuperati da esse e una ISO di ripristino bare-metal guidato, sullo stesso computer, su nuovo hardware o in una macchina virtuale Proxmox VE.
 - **I dettagli dei file Windows conservati**: permessi NTFS, attributi, stream di dati alternativi, attributi estesi e date di creazione vengono registrati con ogni backup di cartella, e il ripristino di questo client li rimette al loro posto.
 - **Nessun vincolo**: ciò che questo client salva si ripristina con il client ufficiale, e ciò che salva il client ufficiale si ripristina con questo (vedi sotto).
+
+<a id="-new-in-21"></a>
+## 🆕 Novità della 2.1
+
+- **I set di backup partono da attivatori.** La scheda **Quando eseguire** di un set (prima la scheda Pianificazione) elenca i suoi attivatori, e una pianificazione oraria è solo uno dei tre tipi:
+  - **A orari stabiliti**: le pianificazioni di sempre, più di una per set, ognuna ora con la propria scelta di riattivare il computer, di attendere il server se non è raggiungibile all'orario previsto, e di eseguirsi solo su alcune reti.
+  - **Quando il server è raggiungibile**: un portatile fa il backup appena torna a casa o sulla VPN, al massimo ogni N ore, facoltativamente solo su alcune reti o tipi di connessione e non sulle connessioni a consumo.
+  - **Quando succede qualcosa su questo computer**: quando si avvia, si riattiva dalla sospensione o dall'ibernazione, qualcuno accede, o nessuno lo usa da N minuti, al massimo ogni N minuti, ore o giorni.
+
+  I set salvati con la 2.0 continuano a funzionare come prima. Vedi [Quando eseguire](docs/manual/GUI.md#63-when-to-run-tab).
+- **Ripristino su un disco più piccolo**, una **finestra in modalità testo** (`salvanza-cli tui`) e altro: vedi il [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Novità della 2.0
 
@@ -138,7 +149,7 @@ Quando gli installer di una release risultano puliti su VirusTotal, la pagina de
 2. Avvia **Salvanza for Proxmox Backup Server**. Gli installer configurano il servizio in background, quindi l'app chiede una volta i diritti di amministratore per connettersi (UAC su Windows, la tua password tramite pkexec su Linux). Se non puoi concederli, scegli **Usa le mie impostazioni**.
 3. Aggiungi il tuo server PBS in **Preferenze > Informazioni account** e verificalo con **Test**.
 4. Crea un set di backup (o un backup una tantum) e seleziona le cartelle o i dischi di cui eseguire il backup.
-5. Eseguilo. Con il servizio in background, le sue pianificazioni vengono eseguite che ci sia o no un utente connesso.
+5. Nella sua scheda **Quando eseguire**, aggiungi un attivatore: orari stabiliti, qualcosa che succede sul computer, o quando il server è raggiungibile. Con il servizio in background, viene eseguito che ci sia o no un utente connesso.
 
 Il [manuale della GUI](docs/manual/GUI.md) descrive ogni passaggio.
 
@@ -178,13 +189,13 @@ Esegui con privilegi elevati (amministratore); codice di uscita `0` = successo, 
 ## ✨ Funzionalità
 
 ### GUI
-Le funzionalità principali sono elencate in [Novità della 2.0](#-new-in-20). Inoltre:
+Le funzionalità principali sono elencate in [Novità della 2.1](#-new-in-21) e [Novità della 2.0](#-new-in-20). Inoltre:
 - 18 lingue dell'interfaccia: francese, inglese, italiano, tedesco, polacco, spagnolo, bulgaro, ceco, greco, ungherese, lettone, lituano, olandese, portoghese, rumeno, slovacco, turco e ucraino
 - **Backup una tantum** di cartelle o di dischi interi, e backup macchina salvati come `host` o come backup `vm` di Proxmox VE, con un'opzione di **copia forense** che legge anche lo spazio libero
 - **Ripristino** con ricerca dei file (caratteri jolly, espressioni regolari, percorsi completi), ripristino selettivo, ACL NTFS/POSIX, stream di dati alternativi, date di creazione di Windows e una verifica facoltativa
 - **Pausa, Riprendi e Ferma** per un backup in corso, anche dall'area di notifica su Windows e per le esecuzioni del servizio in background
 - Scheda di avanzamento in tempo reale (fine prevista, file elaborati, velocità di upload, dati trasferiti, rapporto di compressione), **Report**, un **Registro messaggi** e **Visualizza registri completi**
-- Notifiche via email, azioni dopo il backup, clonazione dei set di backup, esportazione e importazione delle impostazioni
+- Notifiche via email, azioni prima e dopo il backup, clonazione dei set di backup, esportazione e importazione delle impostazioni
 - Più server PBS, con pinning dell'impronta del certificato (fiducia al primo utilizzo), accesso con token API o con utente e password
 - Cinque temi di colori e un colore personalizzato, scelti da ciascun utente (nell'app senza marchio; un'app con marchio mantiene i colori del suo marchio)
 
@@ -224,7 +235,7 @@ I tre sottocomandi accettano `-keyfile` e `-keyfile-passphrase` per gli snapshot
 <td width="33%">
 
 [<img src="docs/screenshots/gui-schedule-tab.png" width="280">](docs/screenshots/gui-schedule-tab.png)
-**Pianificazioni**: più di una per set, con le prossime 3 esecuzioni
+**Quando eseguire**: gli attivatori del set, con le prossime 3 esecuzioni di ogni pianificazione
 
 </td>
 <td width="33%">

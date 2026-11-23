@@ -10,13 +10,13 @@
 [![Release](https://img.shields.io/github/v/release/salvanza/salvanza_client)](https://github.com/salvanza/salvanza_client/releases)
 [![Dokumentation](https://img.shields.io/badge/docs-manuals-orange)](docs/manual/README.md)
 
-**Salvanza for Proxmox Backup Server (früher Proxmox Backup Client) ist ein Open-Source-Sicherungsclient (GPL-3.0) für Proxmox Backup Server (PBS), für Windows und Linux.** Er sichert Ordner als durchsuchbare Dateiarchive und ganze Maschinen als bootfähige Datenträgerabbilder, nach Zeitplan oder bei Bedarf. Er stellt alles wieder her, von einer einzelnen Datei bis zur ganzen Maschine: auf demselben Computer, auf einem Ersatzgerät oder in einer virtuellen Maschine unter Proxmox VE.
+**Salvanza for Proxmox Backup Server (früher Proxmox Backup Client) ist ein Open-Source-Sicherungsclient (GPL-3.0) für Proxmox Backup Server (PBS), für Windows und Linux.** Er sichert Ordner als durchsuchbare Dateiarchive und ganze Maschinen als bootfähige Datenträgerabbilder, zu festen Zeiten, wenn auf dem Computer etwas passiert, wenn der Sicherungsserver erreichbar ist, oder bei Bedarf. Er stellt alles wieder her, von einer einzelnen Datei bis zur ganzen Maschine: auf demselben Computer, auf einem Ersatzgerät oder in einer virtuellen Maschine unter Proxmox VE.
 
 Projektseite: **[salvanza.org](https://salvanza.org/)** · Quellcode, Versionen und Issues: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
 Es handelt sich um eine **Sammlung von Werkzeugen**:
 
-- **Die Salvanza-App**, `salvanza-gui` (ursprünglich von RDEM Systems als Nimbus Backup GUI entwickelt, von mjb-is überarbeitet und erweitert): die App für Windows und Linux. Sicherungssätze mit jeweils mehreren Zeitplänen, Ordner- und Datenträgersicherungen mit konsistenten Snapshots (VSS unter Windows, elastio-snap/dattobd unter Linux), Wiederherstellung von Dateien aus Ordner- und Maschinensicherungen, „Gelöschte Dateien wiederherstellen“ und „Zurücksetzen“, mehrere PBS-Server, clientseitige Verschlüsselung und ein Hintergrunddienst, `salvanza-svc`, damit Zeitpläne auch ohne angemeldeten Benutzer laufen.
+- **Die Salvanza-App**, `salvanza-gui` (ursprünglich von RDEM Systems als Nimbus Backup GUI entwickelt, von mjb-is überarbeitet und erweitert): die App für Windows und Linux. Sicherungssätze, die über Auslöser laufen (feste Zeiten, Ereignisse am Computer, der Server wieder erreichbar), Ordner- und Datenträgersicherungen mit konsistenten Snapshots (VSS unter Windows, elastio-snap/dattobd unter Linux), Wiederherstellung von Dateien aus Ordner- und Maschinensicherungen, „Gelöschte Dateien wiederherstellen“ und „Zurücksetzen“, mehrere PBS-Server, clientseitige Verschlüsselung und ein Hintergrunddienst, `salvanza-svc`, damit Sicherungssätze auch ohne angemeldeten Benutzer laufen.
 - **`salvanza-cli`**, ein einziges Kommandozeilenwerkzeug mit einem Unterbefehl für jede Aufgabe:
   - **`salvanza-cli backup-folder`**: Ordnersicherungen (pxar) mit Deduplizierung und Änderungserkennung.
   - **`salvanza-cli backup-disk`**: Live-Sicherungen ganzer Datenträger (fidx) von Windows- und Linux-Maschinen. Das Abbild ist nach einer Wiederherstellung bootfähig.
@@ -31,10 +31,21 @@ Es handelt sich um eine **Sammlung von Werkzeugen**:
 Der offizielle `proxmox-backup-client` ist ein Kommandozeilenwerkzeug für Linux. Dieser Client arbeitet mit demselben Server und denselben Sicherungsformaten und bietet zusätzlich:
 
 - **Windows.** Für Windows gibt es keinen offiziellen Client. Hier gibt es Kommandozeilenwerkzeuge und eine App, Ordnersicherungen über VSS-Snapshots und Live-Sicherungen ganzer Datenträger.
-- **Eine App für Windows und Linux**: geplante Sicherungssätze, ausgeführt von einem Hintergrunddienst, sodass niemand angemeldet sein muss, Wiederherstellung mit Suche, „Gelöschte Dateien wiederherstellen“ und „Zurücksetzen“, Berichte und E-Mail.
+- **Eine App für Windows und Linux**: Sicherungssätze, die zu festen Zeiten laufen, wenn der Computer startet, aufwacht, sich jemand anmeldet oder er unbenutzt bleibt, oder wenn ihr Server erreichbar ist, ausgeführt von einem Hintergrunddienst, sodass niemand angemeldet sein muss, Wiederherstellung mit Suche, „Gelöschte Dateien wiederherstellen“ und „Zurücksetzen“, Berichte und E-Mail.
 - **Ganze Maschinen**: startfähige Datenträgerabbilder, einzelne Dateien daraus und eine geführte Bare-Metal-Wiederherstellungs-ISO, auf denselben Computer, neue Hardware oder eine virtuelle Maschine in Proxmox VE.
 - **Windows-Dateidetails bleiben erhalten**: NTFS-Berechtigungen, Attribute, alternative Datenströme, erweiterte Attribute und Erstellungszeiten werden mit jeder Ordnersicherung aufgezeichnet, und die Wiederherstellung dieses Clients setzt sie wieder.
 - **Keine Bindung**: Was dieser Client sichert, lässt sich mit dem offiziellen Client wiederherstellen, und was der offizielle Client sichert, mit diesem (siehe unten).
+
+<a id="-new-in-21"></a>
+## 🆕 Neu in 2.1
+
+- **Sicherungssätze laufen über Auslöser.** Die Registerkarte **Wann ausführen** eines Satzes (früher die Registerkarte Zeitplan) listet seine Auslöser, und ein Zeitplan ist nur noch eine von drei Arten:
+  - **Zu festen Zeiten**: Zeitpläne wie bisher, mehrere pro Satz, jeder jetzt mit eigener Wahl, ob er den Computer weckt, auf den Server wartet, wenn dieser zur geplanten Zeit nicht erreichbar ist, und nur in bestimmten Netzwerken läuft.
+  - **Wenn der Server erreichbar ist**: Ein Laptop sichert, sobald er wieder zu Hause oder im VPN ist, höchstens alle N Stunden, wahlweise nur in bestimmten Netzwerken oder Verbindungsarten und nicht über getaktete Verbindungen.
+  - **Wenn auf diesem Computer etwas passiert**: wenn er startet, aus dem Energiesparmodus oder Ruhezustand aufwacht, sich jemand anmeldet oder ihn N Minuten lang niemand benutzt hat, höchstens alle N Minuten, Stunden oder Tage.
+
+  Mit 2.0 gespeicherte Sätze laufen weiter wie bisher. Siehe [Wann ausführen](docs/manual/GUI.md#63-when-to-run-tab).
+- **Wiederherstellung auf einen kleineren Datenträger**, ein **Textmodus-Fenster** (`salvanza-cli tui`) und mehr: siehe das [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Neu in 2.0
 
@@ -138,7 +149,7 @@ Wenn die Installer einer Version bei VirusTotal ohne Befund bleiben, verlinkt di
 2. Starten Sie **Salvanza for Proxmox Backup Server**. Die Installer richten den Hintergrunddienst ein, daher fragt die App einmal nach Administratorrechten, um sich mit ihm zu verbinden (UAC unter Windows, Ihr Kennwort über pkexec unter Linux). Wenn Sie diese nicht erteilen können, wählen Sie **Eigene Einstellungen verwenden**.
 3. Fügen Sie Ihren PBS-Server unter **Einstellungen > Kontoinformationen** hinzu und prüfen Sie ihn mit **Testen**.
 4. Legen Sie einen Sicherungssatz an (oder eine einmalige Sicherung) und wählen Sie die zu sichernden Ordner oder Datenträger aus.
-5. Führen Sie ihn aus. Mit dem Hintergrunddienst laufen seine Zeitpläne, ob jemand angemeldet ist oder nicht.
+5. Fügen Sie auf seiner Registerkarte **Wann ausführen** einen Auslöser hinzu: feste Zeiten, etwas, das auf dem Computer passiert, oder wenn der Server erreichbar ist. Mit dem Hintergrunddienst läuft er, ob jemand angemeldet ist oder nicht.
 
 Das [GUI-Handbuch](docs/manual/GUI.md) erklärt jeden Schritt.
 
@@ -178,13 +189,13 @@ Mit erhöhten Rechten (Administrator) ausführen; Exit-Code `0` = Erfolg, `3010`
 ## ✨ Funktionen
 
 ### GUI
-Die wichtigsten Funktionen stehen unter [Neu in 2.0](#-new-in-20). Außerdem:
+Die wichtigsten Funktionen stehen unter [Neu in 2.1](#-new-in-21) und [Neu in 2.0](#-new-in-20). Außerdem:
 - 18 Sprachen für die Oberfläche: Französisch, Englisch, Italienisch, Deutsch, Polnisch, Spanisch, Bulgarisch, Tschechisch, Griechisch, Ungarisch, Lettisch, Litauisch, Niederländisch, Portugiesisch, Rumänisch, Slowakisch, Türkisch und Ukrainisch
 - **Einmalige Sicherungen** von Ordnern oder ganzen Datenträgern, und Maschinensicherungen, die als `host` oder als `vm`-Sicherung von Proxmox VE gespeichert werden, mit der Option **Forensische Kopie**, die auch freien Speicher liest
 - **Wiederherstellung** mit Dateisuche (Platzhalter, reguläre Ausdrücke, vollständige Pfade), selektiver Wiederherstellung, NTFS-/POSIX-ACLs, alternativen Datenströmen, Windows-Erstellungszeiten und einem optionalen Prüfdurchlauf
 - **Pause, Fortsetzen und Stoppen** einer laufenden Sicherung, auch über den Infobereich unter Windows und für Läufe des Hintergrunddienstes
 - Live-Fortschrittsanzeige (voraussichtliches Ende, erledigte Dateien, Upload-Geschwindigkeit, übertragene Daten, Kompressionsrate), **Berichte**, ein **Meldungsprotokoll** und **Vollständige Protokolle anzeigen**
-- E-Mail-Benachrichtigungen, Aktionen nach der Sicherung, Klonen von Sicherungssätzen, Export und Import der Einstellungen
+- E-Mail-Benachrichtigungen, Aktionen vor und nach der Sicherung, Klonen von Sicherungssätzen, Export und Import der Einstellungen
 - Mehrere PBS-Server, mit Pinning des Zertifikats-Fingerprints (Vertrauen bei erster Verwendung), Anmeldung per API-Token oder mit Benutzer und Kennwort
 - Fünf Farbschemata und eine eigene Farbe, von jedem Benutzer selbst gewählt (in der App ohne Branding; eine App mit Branding behält die Farben ihrer Marke)
 
@@ -224,7 +235,7 @@ Die drei Unterbefehle nehmen `-keyfile` und `-keyfile-passphrase` für verschlü
 <td width="33%">
 
 [<img src="docs/screenshots/gui-schedule-tab.png" width="280">](docs/screenshots/gui-schedule-tab.png)
-**Zeitpläne**: mehrere pro Satz, mit den nächsten 3 Ausführungen
+**Wann ausführen**: die Auslöser des Satzes, mit den nächsten 3 Ausführungen jedes Zeitplans
 
 </td>
 <td width="33%">
