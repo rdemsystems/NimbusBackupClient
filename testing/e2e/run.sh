@@ -674,6 +674,9 @@ cleanup() {
 	fi
 	exit "$rc"
 }
-trap cleanup EXIT
-
-main
+# Run only when executed. remote.sh (the cross-platform job) sources this
+# file for its fixtures and checks, and must not start the suite.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+	trap cleanup EXIT
+	main
+fi

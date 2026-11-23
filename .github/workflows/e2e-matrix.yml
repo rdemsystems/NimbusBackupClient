@@ -1,0 +1,151 @@
+name: End-to-end matrix (PBS versions, BSD and Solaris)
+
+# The e2e workflow (e2e.yml) proves our backups against ONE PBS (latest) on
+# Linux. This one widens it, nightly and on demand, so it does not slow pull
+# requests down:
+#
+#  * pbs-versions: the same suite against several PBS releases. 3.4 is out of
+#    upstream support: it is tested so we know whether it still works, and its
+#    failure does not fail the workflow.
+#  * vm: salvanza-cli backup-folder run on FreeBSD, OpenBSD, NetBSD and Solaris
+#    VMs (vmactions, QEMU inside the Linux runner), against a PBS container on
+#    the runner. The runner then restores the snapshot with the official client
+#    and compares the CONTENT (bytes, names, tree). Off Linux the pxar writer
+#    keeps the historic shape (pbscommon/pxar_meta_other.go, posixFidelity =
+#    false): symbolic links are skipped and modes/owners are fixed, so the job
+#    checks files and folders, and that no link comes back (it fails on purpose
+#    if links start being stored: then switch it to the full comparison). The
+#    official client is used here only as the reference pxar reader.
+#
+# Both jobs are informational (continue-on-error) until they have been green
+# for a while; then the supported PBS releases can gate releases.
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: e2e-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.25'
+
+jobs:
+  pbs-versions:
+    name: PBS ${{ matrix.pbs }}${{ !matrix.supported && ' (not supported upstream)' || '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: ${{ !matrix.supported }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pbs: 'v4.0.21-1', supported: true }
+          - { pbs: 'v4.1.9-1',  supported: true }
+          - { pbs: 'v4.2.0-1',  supported: true }
+          - { pbs: 'latest',    supported: true }
+          - { pbs: 'v3.4.1',    supported: false }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache-dependency-path: '**/go.sum'
+      - name: Run end-to-end suite
+        env:
+          PBS_IMAGE: ayufan/proxmox-backup-server:${{ matrix.pbs }}
+        run: make test-e2e
+      - name: PBS container logs
+        if: failure()
+        run: docker logs --tail 200 pbs-e2e || true
+
+  vm:
+    name: CLI on ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [freebsd, openbsd, netbsd, solaris]
+    env:
+      E2E_OS: ${{ matrix.os }}
+      # Inside the workspace: vmactions copies the workspace into the VM at the
+      # same path (rsync), so the fixture, the key and remote.env are there.
+      WORK: ${{ github.workspace }}/e2e-work
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache-dependency-path: '**/go.sum'
+
+      - name: Cross-build salvanza-cli for ${{ matrix.os }}/amd64
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=amd64 \
+            go build -trimpath -o "dist/salvanza-cli-${{ matrix.os }}" ./cli
+
+      - name: Start PBS, make the fixture and the key
+        run: ./testing/e2e/remote.sh up
+
+      # `uses:` cannot take a matrix value, hence one step per system.
+      # vmactions boots the VM with QEMU user-mode networking (slirp): the
+      # VM's default gateway is the runner's loopback, so the PBS container,
+      # published on 127.0.0.1, is reachable from the VM as is.
+      # A release given by its leading part runs its newest point release.
+      - name: Back up from FreeBSD
+        if: matrix.os == 'freebsd'
+        uses: vmactions/freebsd-vm@811efaaac0668df8bfb8308c3ec997b5ab50037b # v1.6.0
+        with:
+          release: '15'
+          envs: 'E2E_OS WORK'
+          copyback: false
+          run: sh testing/e2e/vm-backup.sh
+
+      - name: Back up from OpenBSD
+        if: matrix.os == 'openbsd'
+        uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
+        with:
+          release: '8'
+          envs: 'E2E_OS WORK'
+          copyback: false
+          run: sh testing/e2e/vm-backup.sh
+
+      - name: Back up from NetBSD
+        if: matrix.os == 'netbsd'
+        uses: vmactions/netbsd-vm@5957cf330aef2e6ddc63c604364c99ce2e02b91d # v1.5.3
+        with:
+          release: '11'
+          envs: 'E2E_OS WORK'
+          copyback: false
+          run: sh testing/e2e/vm-backup.sh
+
+      - name: Back up from Solaris
+        if: matrix.os == 'solaris'
+        uses: vmactions/solaris-vm@1c166978f5a2c1f87f1c9d4d8dd85ae3d1eff6f7 # v1.4.2
+        with:
+          release: '11.4'
+          envs: 'E2E_OS WORK'
+          copyback: false
+          run: sh testing/e2e/vm-backup.sh
+
+      - name: Restore on the runner and compare
+        run: ./testing/e2e/remote.sh verify
+
+      - name: PBS container logs
+        if: failure()
+        run: docker logs --tail 200 pbs-e2e || true
+
+      - name: Stop PBS
+        if: always()
+        run: ./testing/e2e/remote.sh down
