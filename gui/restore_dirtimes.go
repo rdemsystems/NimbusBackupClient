@@ -31,7 +31,7 @@ func applyDirectoryTimes(extracted []pbscommon.PXARExtractedFile, cancelled func
 			break
 		}
 		t := time.Unix(d.ModTime, int64(d.ModNanos))
-		if err := os.Chtimes(d.Path, t, t); err != nil {
+		if err := os.Chtimes(pbscommon.OSPath(d.Path), t, t); err != nil {
 			failed++
 			writeBackupLog("Folder timestamp apply failed for " + d.Path + ": " + err.Error())
 		} else {

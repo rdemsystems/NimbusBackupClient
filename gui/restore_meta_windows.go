@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"golang.org/x/sys/windows"
+	"pbscommon"
 )
 
 // restorePrivileges switches on, once per process, the privileges that let
@@ -28,7 +29,7 @@ func applyCreationTime(destPath string, created int64) error {
 	if created <= 0 {
 		return nil
 	}
-	p, err := windows.UTF16PtrFromString(destPath)
+	p, err := windows.UTF16PtrFromString(pbscommon.OSPath(destPath))
 	if err != nil {
 		return err
 	}
@@ -56,6 +57,9 @@ func applyCreationTime(destPath string, created int64) error {
 // logging) but must never abort or fail the restore itself — the file's
 // actual content already restored successfully regardless.
 func applyNTFSMetadata(destPath string, entry FileMetaEntry, sddls []string) error {
+	// A name Windows takes for a device (com1, nul.txt) is only reached in
+	// the \\?\ form; every call below hands the path to Windows.
+	destPath = pbscommon.OSPath(destPath)
 	if entry.Attrs != 0 {
 		if pathW, err := windows.UTF16PtrFromString(destPath); err == nil {
 			_ = windows.SetFileAttributes(pathW, entry.Attrs)

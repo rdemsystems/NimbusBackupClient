@@ -71,6 +71,9 @@ func (c *NTFSMetaCollector) Collect(absPath string, info os.FileInfo, isDir bool
 		return nil
 	}
 	rel = filepath.ToSlash(rel)
+	// From here the path is only handed to Windows: OSPath reaches a name
+	// Windows takes for a device (com1, nul.txt).
+	absPath = OSPath(absPath)
 
 	// The file's own attributes from the directory listing: a reparse point
 	// (link, junction) keeps the lookups that follow it, as before.

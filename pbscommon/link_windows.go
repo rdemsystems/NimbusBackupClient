@@ -37,7 +37,7 @@ func isLinkEntry(path string, fi os.FileInfo) bool {
 // dwReserved0) and reports whether it is a name surrogate (bit 29), as
 // IO_REPARSE_TAG_MOUNT_POINT and IO_REPARSE_TAG_SYMLINK are.
 func reparseNameSurrogate(path string) bool {
-	p, err := syscall.UTF16PtrFromString(path)
+	p, err := syscall.UTF16PtrFromString(OSPath(path))
 	if err != nil {
 		return false
 	}

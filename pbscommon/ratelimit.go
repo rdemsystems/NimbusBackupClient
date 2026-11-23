@@ -338,7 +338,7 @@ func (l *limitedReaderAt) ReadAt(p []byte, off int64) (int, error) {
 // WriteFile goes through a handle from here (the read-ahead workers use
 // readFileLimited), so the folder backup's disk reads are counted in one place.
 func (a *PXARArchive) openSource(path string) (io.ReadSeekCloser, error) {
-	f, err := openForRead(path)
+	f, err := openForRead(OSPath(path))
 	if err != nil {
 		return nil, err
 	}
@@ -349,6 +349,7 @@ func (a *PXARArchive) openSource(path string) (io.ReadSeekCloser, error) {
 // for the folder backup's read-ahead workers. With no limit it is
 // os.ReadFile itself.
 func readFileLimited(ctx context.Context, path string) ([]byte, error) {
+	path = OSPath(path)
 	if SpeedLimit(LimitDiskRead) <= 0 {
 		return os.ReadFile(path)
 	}

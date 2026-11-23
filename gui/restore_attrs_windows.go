@@ -2,7 +2,11 @@
 
 package main
 
-import "syscall"
+import (
+	"syscall"
+
+	"pbscommon"
+)
 
 // File attributes a restore puts back from a disk image: read-only, hidden,
 // system and archive. The others (compressed, encrypted, sparse, reparse)
@@ -14,14 +18,14 @@ func applyFileAttributes(path string, attrs uint32) {
 	if a == 0 {
 		a = 0x80 // FILE_ATTRIBUTE_NORMAL
 	}
-	if p, err := syscall.UTF16PtrFromString(path); err == nil {
+	if p, err := syscall.UTF16PtrFromString(pbscommon.OSPath(path)); err == nil {
 		_ = syscall.SetFileAttributes(p, a)
 	}
 }
 
 // clearReadOnly lets an existing read-only file be replaced.
 func clearReadOnly(path string) {
-	p, err := syscall.UTF16PtrFromString(path)
+	p, err := syscall.UTF16PtrFromString(pbscommon.OSPath(path))
 	if err != nil {
 		return
 	}

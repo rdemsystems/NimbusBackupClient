@@ -89,7 +89,7 @@ func streamsAndEAsOf(h windows.Handle, path string, budget *int64) ([]StreamEntr
 // to MaxStreamBytes each) and extended attributes, as a backup records them.
 func ReadStreamsAndEAs(path string) ([]StreamEntry, []EAEntry, error) {
 	budget := int64(MaxStreamBytesTotal)
-	return readStreamsAndEAs(path, &budget)
+	return readStreamsAndEAs(OSPath(path), &budget)
 }
 
 type streamName struct {
@@ -195,6 +195,7 @@ func queryEAs(h windows.Handle) []EAEntry {
 // without content (Skipped set) are not written and are counted in skipped. Writing a
 // stream changes the file's modification time; the caller sets it again.
 func WriteStreamsAndEAs(path string, streams []StreamEntry, eas []EAEntry) (written, skipped int, err error) {
+	path = OSPath(path) // a name Windows takes for a device (com1, nul.txt)
 	for _, s := range streams {
 		if s.Skipped != "" {
 			skipped++

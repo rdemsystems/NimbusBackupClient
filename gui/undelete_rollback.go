@@ -864,8 +864,10 @@ func (a *App) applyRollbackMoves(ctx context.Context, p *rollbackPlan, policy st
 		if done%200 == 0 || done == total {
 			emit(0.03+0.07*float64(done)/float64(max(total, 1)), fmt.Sprintf("Moving files aside: %d of %d", done, total))
 		}
-		if err := os.MkdirAll(filepath.Dir(to), 0o700); err == nil {
-			if err = os.Rename(from, to); err == nil {
+		// OSPath: a name Windows takes for a device (com1, nul.txt) is only
+		// reached in its \\?\ form.
+		if err := os.MkdirAll(pbscommon.OSPath(filepath.Dir(to)), 0o700); err == nil {
+			if err = os.Rename(pbscommon.OSPath(from), pbscommon.OSPath(to)); err == nil {
 				m.Moved = append(m.Moved, rollbackMove{From: from, To: to, Kind: kind})
 				return true
 			} else {
@@ -905,7 +907,7 @@ func (a *App) applyRollbackMoves(ctx context.Context, p *rollbackPlan, policy st
 			sort.Slice(dirs, func(i, j int) bool { return len(dirs[i].Path) > len(dirs[j].Path) })
 			for _, d := range dirs {
 				full := filepath.Join(w.f.Dir, filepath.FromSlash(d.Path))
-				if os.Remove(full) == nil {
+				if os.Remove(pbscommon.OSPath(full)) == nil {
 					m.RemovedDirs = append(m.RemovedDirs, full)
 				}
 			}
@@ -947,7 +949,7 @@ func missingParents(dir, rel string) []string {
 	cur := filepath.Dir(filepath.Join(dir, filepath.FromSlash(rel)))
 	stop := filepath.Clean(dir)
 	for cur != stop && len(cur) > len(stop) {
-		if _, err := os.Stat(cur); err == nil {
+		if _, err := os.Stat(pbscommon.OSPath(cur)); err == nil {
 			break
 		}
 		out = append(out, cur)
@@ -1031,7 +1033,7 @@ func (a *App) ListRollbacks(jobID string) ([]RollbackRecord, error) {
 				} else {
 					r.Moved++
 				}
-				if fi, err := os.Lstat(mv.To); err == nil {
+				if fi, err := os.Lstat(pbscommon.OSPath(mv.To)); err == nil {
 					r.Bytes += fi.Size()
 				}
 			}
@@ -1110,11 +1112,11 @@ func (a *App) UndoRollback(manifestPath string) (string, error) {
 	for _, mv := range m.Moved {
 		// Lstat: a kept symbolic link is the copy itself, and a relative one
 		// no longer resolves from the safety folder.
-		if _, err := os.Lstat(mv.To); err != nil {
+		if _, err := os.Lstat(pbscommon.OSPath(mv.To)); err != nil {
 			problems = append(problems, fmt.Sprintf("%s: the kept copy is gone", mv.From))
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(mv.From), 0o755); err != nil {
+		if err := os.MkdirAll(pbscommon.OSPath(filepath.Dir(mv.From)), 0o755); err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", mv.From, err))
 			continue
 		}
@@ -1122,7 +1124,7 @@ func (a *App) UndoRollback(manifestPath string) (string, error) {
 			problems = append(problems, fmt.Sprintf("%s: %v", mv.From, err))
 			continue
 		}
-		if err := os.Rename(mv.To, mv.From); err != nil {
+		if err := os.Rename(pbscommon.OSPath(mv.To), pbscommon.OSPath(mv.From)); err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", mv.From, err))
 			continue
 		}
@@ -1166,6 +1168,7 @@ func (a *App) UndoRollback(manifestPath string) (string, error) {
 // removeFileForce deletes a file, clearing a read-only attribute that would
 // stop Windows from deleting it.
 func removeFileForce(p string) error {
+	p = pbscommon.OSPath(p) // a name Windows takes for a device (com1, nul.txt)
 	err := os.Remove(p)
 	if err == nil || os.IsNotExist(err) {
 		return err

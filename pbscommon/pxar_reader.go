@@ -1142,9 +1142,14 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 			return nil
 		}
 
+		// osp is fullPath as Windows must be given it: a name it takes for a
+		// device (com1, nul.txt) is only reached in the \\?\ form. Messages
+		// and the results keep fullPath.
+		osp := OSPath(fullPath)
+
 		if e.IsDir {
 			keepTime := folderKeepsOwnTime(e.Path, fullPath, includes, overwrite)
-			if err := os.MkdirAll(fullPath, 0755); err != nil {
+			if err := os.MkdirAll(osp, 0755); err != nil {
 				extracted = append(extracted, PXARExtractedFile{
 					Path: fullPath, IsDir: true,
 					Skipped: true, SkipReason: fmt.Sprintf("mkdir: %v", err),
@@ -1161,7 +1166,7 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 
 		// File: ensure parent dir exists (a parent might not have been
 		// emitted yet if the user selected a deep path directly).
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(osp), 0755); err != nil {
 			extracted = append(extracted, PXARExtractedFile{
 				Path: fullPath, Size: e.Size,
 				Skipped: true, SkipReason: fmt.Sprintf("mkdir parent: %v", err),
@@ -1170,7 +1175,7 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 		}
 
 		if !overwrite {
-			if _, err := os.Stat(fullPath); err == nil {
+			if _, err := os.Stat(osp); err == nil {
 				extracted = append(extracted, PXARExtractedFile{
 					Path: fullPath, Size: e.Size,
 					Skipped: true, Expected: true, SkipReason: "already exists",
@@ -1192,7 +1197,7 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 		// can still redirect the write — confining the parent chain (no-follow /
 		// Windows reparse handling) is a separate hardening.
 		fsStart := time.Now()
-		out, err := os.CreateTemp(filepath.Dir(fullPath), filepath.Base(fullPath)+".proxmox-*.part")
+		out, err := os.CreateTemp(filepath.Dir(osp), filepath.Base(fullPath)+".proxmox-*.part")
 		pr.fsOverheadNanos.Add(int64(time.Since(fsStart)))
 		if err != nil {
 			extracted = append(extracted, PXARExtractedFile{
@@ -1226,7 +1231,7 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 			return nil
 		}
 		fsStart = time.Now()
-		renErr := os.Rename(tmpPath, fullPath)
+		renErr := os.Rename(tmpPath, osp)
 		pr.fsOverheadNanos.Add(int64(time.Since(fsStart)))
 		if renErr != nil {
 			_ = os.Remove(tmpPath)
@@ -1237,12 +1242,12 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 			return nil
 		}
 		if pr.restoreOwner {
-			applyModeOwner(fullPath, e.Mode, e.UID, e.GID, true)
+			applyModeOwner(osp, e.Mode, e.UID, e.GID, true)
 		}
 		if !pr.keepNewTimes && (e.ModTimeSet || e.ModTime != 0) { // 0 from the archive = 1970-01-01; negative = pre-1970
 			fsStart = time.Now()
 			t := time.Unix(e.ModTime, int64(e.ModNanos))
-			_ = os.Chtimes(fullPath, t, t)
+			_ = os.Chtimes(osp, t, t)
 			pr.fsOverheadNanos.Add(int64(time.Since(fsStart)))
 		}
 		extracted = append(extracted, PXARExtractedFile{
@@ -1400,9 +1405,10 @@ func (pr *PXARReader) ExtractWithRewriterParallel(rewriter PathRewriter, include
 			appendResult(pr.extractSymlink(e, fullPath, overwrite))
 			return nil
 		}
+		osp := OSPath(fullPath) // the \\?\ form for a Windows device name (com1, nul.txt)
 		if e.IsDir {
 			keepTime := folderKeepsOwnTime(e.Path, fullPath, includes, overwrite)
-			if err := os.MkdirAll(fullPath, 0755); err != nil {
+			if err := os.MkdirAll(osp, 0755); err != nil {
 				appendResult(PXARExtractedFile{
 					Path: fullPath, IsDir: true,
 					Skipped: true, SkipReason: fmt.Sprintf("mkdir: %v", err),
@@ -1416,7 +1422,7 @@ func (pr *PXARReader) ExtractWithRewriterParallel(rewriter PathRewriter, include
 			})
 			return nil
 		}
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(osp), 0755); err != nil {
 			appendResult(PXARExtractedFile{
 				Path: fullPath, Size: e.Size,
 				Skipped: true, SkipReason: fmt.Sprintf("mkdir parent: %v", err),
@@ -1424,7 +1430,7 @@ func (pr *PXARReader) ExtractWithRewriterParallel(rewriter PathRewriter, include
 			return nil
 		}
 		if !overwrite {
-			if _, err := os.Stat(fullPath); err == nil {
+			if _, err := os.Stat(osp); err == nil {
 				appendResult(PXARExtractedFile{
 					Path: fullPath, Size: e.Size,
 					Skipped: true, Expected: true, SkipReason: "already exists",
@@ -1481,8 +1487,9 @@ func (pr *PXARReader) ExtractWithRewriterParallel(rewriter PathRewriter, include
 // the caller) — duplicated rather than shared, deliberately (see
 // ExtractWithRewriterParallel's doc comment).
 func (pr *PXARReader) extractOneFileParallel(e PXARTreeEntry, fullPath string, payload *io.SectionReader) PXARExtractedFile {
+	osp := OSPath(fullPath) // the \\?\ form for a Windows device name (com1, nul.txt)
 	fsStart := time.Now()
-	out, err := os.CreateTemp(filepath.Dir(fullPath), filepath.Base(fullPath)+".proxmox-*.part")
+	out, err := os.CreateTemp(filepath.Dir(osp), filepath.Base(fullPath)+".proxmox-*.part")
 	pr.fsOverheadNanos.Add(int64(time.Since(fsStart)))
 	if err != nil {
 		return PXARExtractedFile{
@@ -1517,7 +1524,7 @@ func (pr *PXARReader) extractOneFileParallel(e PXARTreeEntry, fullPath string, p
 	}
 
 	fsStart = time.Now()
-	renErr := os.Rename(tmpPath, fullPath)
+	renErr := os.Rename(tmpPath, osp)
 	pr.fsOverheadNanos.Add(int64(time.Since(fsStart)))
 	if renErr != nil {
 		_ = os.Remove(tmpPath)
@@ -1527,12 +1534,12 @@ func (pr *PXARReader) extractOneFileParallel(e PXARTreeEntry, fullPath string, p
 		}
 	}
 	if pr.restoreOwner {
-		applyModeOwner(fullPath, e.Mode, e.UID, e.GID, true)
+		applyModeOwner(osp, e.Mode, e.UID, e.GID, true)
 	}
 	if !pr.keepNewTimes && (e.ModTimeSet || e.ModTime != 0) { // 0 from the archive = 1970-01-01; negative = pre-1970
 		fsStart = time.Now()
 		t := time.Unix(e.ModTime, int64(e.ModNanos))
-		_ = os.Chtimes(fullPath, t, t)
+		_ = os.Chtimes(osp, t, t)
 		pr.fsOverheadNanos.Add(int64(time.Since(fsStart)))
 	}
 	return PXARExtractedFile{

@@ -1103,10 +1103,11 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 		a.root = path
 	}
 
-	// Check if directory is a junction point/symlink before reading it
-	fileInfo, err := os.Lstat(path)
+	// Check if directory is a junction point/symlink before reading it.
+	// OSPath reaches a folder named like a Windows device (com1, nul...).
+	fileInfo, err := os.Lstat(OSPath(path))
 	if err != nil {
-		err = a.retrySource(path, err, "reading directory", func() (e error) { fileInfo, e = os.Lstat(path); return })
+		err = a.retrySource(path, err, "reading directory", func() (e error) { fileInfo, e = os.Lstat(OSPath(path)); return })
 	}
 	if a.walkMustStop(err) {
 		return CatalogDir{}, err
@@ -1129,9 +1130,9 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 		return CatalogDir{}, nil // Return nil error to continue backup
 	}
 
-	files, err := os.ReadDir(path)
+	files, err := os.ReadDir(OSPath(path))
 	if err != nil {
-		err = a.retrySource(path, err, "reading directory", func() (e error) { files, e = os.ReadDir(path); return })
+		err = a.retrySource(path, err, "reading directory", func() (e error) { files, e = os.ReadDir(OSPath(path)); return })
 	}
 	if a.walkMustStop(err) {
 		return CatalogDir{}, err
@@ -1527,10 +1528,11 @@ func (a *PXARArchive) WriteFile(path string, basename string, prefetched *prefet
 	}
 	//fmt.Printf("Write file %s at %d\n", path, a.pos)
 
-	// Use Lstat to detect symlinks/junction points without following them
-	fileInfo, err := os.Lstat(path)
+	// Use Lstat to detect symlinks/junction points without following them.
+	// OSPath reaches a file named like a Windows device (nul, com1.txt...).
+	fileInfo, err := os.Lstat(OSPath(path))
 	if err != nil {
-		err = a.retrySource(path, err, "reading", func() (e error) { fileInfo, e = os.Lstat(path); return })
+		err = a.retrySource(path, err, "reading", func() (e error) { fileInfo, e = os.Lstat(OSPath(path)); return })
 	}
 	if a.walkMustStop(err) {
 		return CatalogFile{}, err
