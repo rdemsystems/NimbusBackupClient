@@ -370,7 +370,7 @@ func (e *editor) build() {
 		AddFormItem(e.startup).AddFormItem(e.evWakes).AddFormItem(e.evSignIn).AddFormItem(e.evIdle).AddFormItem(e.evEvery).
 		AddFormItem(e.serverOn).AddFormItem(e.serverEvery).AddFormItem(e.serverNotMetered).
 		AddFormItem(e.battery).AddFormItem(e.batteryStart).AddFormItem(e.batteryCancel).AddFormItem(e.batteryBelow)
-	f2.AddTextView("", tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept, as are network choices.\nThe server trigger counts from the last backup that worked.\nWaking works from sleep (usually hibernate too), not from shut down.\nIdle counts keyboard and mouse use by anyone signed in; it runs once each idle spell.\nOn battery: laptops only; on mains the set always runs. A cancelled backup is not saved.", 70, 7, true, false)
+	addHint(f2, tag(colDim)+"Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun (empty = every day). Hours and minutes need no time of day.\nOnly the first schedule is edited here; others the set has are kept, as are network choices.\nThe server trigger counts from the last backup that worked.\nWaking works from sleep (usually hibernate too), not from shut down.\nIdle counts keyboard and mouse use by anyone signed in; it runs once each idle spell.\nOn battery: laptops only; on mains the set always runs. A cancelled backup is not saved.", 7)
 	f2.SetTitle(" When to run ")
 
 	// ---- step 3: options
@@ -568,7 +568,7 @@ func (e *editor) buildAfterBackup(f *tview.Form) {
 	e.afterStopped = tview.NewCheckbox().SetLabel("  Not if the backup was stopped by hand ").SetChecked(!boolean(e.orig, "afterBackupEvenIfStopped"))
 	e.afterInUse = tview.NewCheckbox().SetLabel("  Not if someone used the computer since it woke or the backup started ").SetChecked(!boolean(e.orig, "afterBackupEvenIfInUse"))
 	f.AddFormItem(e.after).AddFormItem(e.afterWait).AddFormItem(e.afterWoken).AddFormItem(e.afterStopped).AddFormItem(e.afterInUse)
-	f.AddTextView("", tag(colDim)+"It waits for any other backup still running; the app shows a notice with Cancel.\nShutting down closes every program, with any unsaved work, and a computer\nthat is shut down cannot be woken for the next backup.", 78, 3, true, false)
+	addHint(f, tag(colDim)+"It waits for any other backup still running; the app shows a notice with Cancel.\nShutting down closes every program, with any unsaved work, and a computer\nthat is shut down cannot be woken for the next backup.", 3)
 }
 
 // applyAfterBackup puts what the computer does after the backup in doc. Call

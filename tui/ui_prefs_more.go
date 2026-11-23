@@ -144,7 +144,7 @@ func (p *prefsView) saveLogs() {
 	path := tview.NewInputField().SetLabel("File ").SetFieldWidth(60).SetText(defaultLogsPath())
 	form := styleForm(tview.NewForm()).AddFormItem(path)
 	form.SetTitle(" Save logs ")
-	form.AddTextView("", tag(colDim)+"One zip with the service's logs of the last two weeks, to attach to a bug report. A file that already exists is never overwritten. The logs name your folders and servers: look through them before you post them.", 70, 4, true, false)
+	addHint(form, tag(colDim)+"One zip with the service's logs of the last two weeks, to attach to a bug report. A file that already exists is never overwritten. The logs name your folders and servers: look through them before you post them.", 4)
 	cancel := func() { p.a.closeModal("savelogs") }
 	form.AddButton("Save", func() {
 		dest := strings.TrimSpace(path.GetText())

@@ -46,13 +46,13 @@ func (a *App) undeleteSet() {
 	if !ok || (a.tab != 0 && a.tab != 1) {
 		return
 	}
-	days := tview.NewInputField().SetLabel("Also look in the backups of the last N days (0 = the newest) ").SetFieldWidth(5).
+	days := tview.NewInputField().SetLabel("Also look in the backups of the last (days) ").SetFieldWidth(5).
 		SetAcceptanceFunc(tview.InputFieldInteger).SetText("0")
-	to := tview.NewInputField().SetLabel("Restore under this folder (empty = where the files were) ").SetFieldWidth(40)
+	to := tview.NewInputField().SetLabel("Restore under this folder ").SetFieldWidth(40)
 	verify := tview.NewCheckbox().SetLabel("Check the restored files against the backup ").SetChecked(true)
 	form := styleForm(tview.NewForm()).AddFormItem(days).AddFormItem(to).AddFormItem(verify)
 	form.SetTitle(" Undelete: " + s.Name + " ")
-	form.AddTextView("", tag(colDim)+"Finds files that are in the backups but gone from the disk, and puts them back. A file that has come back is never replaced. Files that look moved are listed, not restored.", 80, 3, true, false)
+	addHint(form, tag(colDim)+"Finds files that are in the backups but gone from the disk, and puts them back. A file that has come back is never replaced. Files that look moved are listed, not restored. 0 days looks in the newest backup only. An empty folder puts the files back where they were.", 3)
 	args := func(dry bool) []string {
 		out := []string{"-undelete", s.ID}
 		if n := atoi(days); n > 0 {
@@ -88,7 +88,7 @@ func (a *App) rollbackSet() {
 	if !ok || (a.tab != 0 && a.tab != 1) {
 		return
 	}
-	at := tview.NewInputField().SetLabel("Back to the backup at or before (YYYY-MM-DD HH:MM, empty = newest) ").SetFieldWidth(18)
+	at := tview.NewInputField().SetLabel("Back to the backup at or before ").SetFieldWidth(18).SetPlaceholder("YYYY-MM-DD HH:MM")
 	var texts []string
 	for _, p := range rollbackPolicies {
 		texts = append(texts, p.text)
@@ -98,7 +98,7 @@ func (a *App) rollbackSet() {
 	verify := tview.NewCheckbox().SetLabel("Check the restored files against the backup ").SetChecked(true)
 	form := styleForm(tview.NewForm()).AddFormItem(at).AddFormItem(policy).AddFormItem(first).AddFormItem(verify)
 	form.SetTitle(" Roll back: " + s.Name + " ")
-	form.AddTextView("", tag(colDim)+"Puts the set's folders back as that backup had them. It compares first and shows the counts, then waits for y. Everything replaced or removed is kept in a safety folder; Earlier roll backs lists them, to undo one or delete its safety copies.", 80, 4, true, false)
+	addHint(form, tag(colDim)+"Puts the set's folders back as that backup had them. It compares first and shows the counts, then waits for y. Everything replaced or removed is kept in a safety folder; Earlier roll backs lists them, to undo one or delete its safety copies. Leave the date empty for the newest backup.", 4)
 	args := func() []string {
 		i, _ := policy.GetCurrentOption()
 		out := []string{"-rollback", s.ID, "-policy", rollbackPolicies[i].id}

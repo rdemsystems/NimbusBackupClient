@@ -66,7 +66,7 @@ func (a *App) buildPrefs() tview.Primitive {
 	f1.SetTitle(" Backup options ")
 	f2 := styleForm(tview.NewForm()).AddFormItem(p.host).AddFormItem(p.port).AddFormItem(p.user).AddFormItem(p.pass).
 		AddFormItem(p.insecure).AddFormItem(p.from).AddFormItem(p.testTo)
-	f2.AddTextView("", tag(colDim)+"Leave the password empty to keep the stored one. Every Backup Set's e-mail setting uses this account.", 70, 2, true, false)
+	addHint(f2, tag(colDim)+"Leave the password empty to keep the stored one. Every Backup Set's e-mail setting uses this account.", 2)
 	f2.SetTitle(" E-mail ")
 
 	p.shareList = tview.NewTextView().SetDynamicColors(true)
@@ -75,13 +75,13 @@ func (a *App) buildPrefs() tview.Primitive {
 	p.sharePass = tview.NewInputField().SetLabel("Password ").SetFieldWidth(30).SetMaskCharacter('*')
 	p.shareTest = tview.NewInputField().SetLabel(`Try it on a folder (optional, \\server\share\folder) `).SetFieldWidth(40)
 	f3 := styleForm(tview.NewForm()).AddFormItem(p.shareServer).AddFormItem(p.shareUser).AddFormItem(p.sharePass).AddFormItem(p.shareTest)
-	f3.AddTextView("", tag(colDim)+"Backups that run in the service reach another computer's share with the login saved for its server. Leave the password empty to keep the stored one. To check a folder without saving, fill only the folder and choose Check folder.", 76, 3, true, false)
+	addHint(f3, tag(colDim)+"Backups that run in the service reach another computer's share with the login saved for its server. Leave the password empty to keep the stored one. To check a folder without saving, fill only the folder and choose Check folder.", 3)
 	f3.SetTitle(" Network shares ")
 
 	p.setFile = tview.NewInputField().SetLabel("File ").SetFieldWidth(60)
 	p.setSecrets = tview.NewCheckbox().SetLabel("Include passwords and secrets in the export ")
 	f4 := styleForm(tview.NewForm()).AddFormItem(p.setFile).AddFormItem(p.setSecrets)
-	f4.AddTextView("", tag(colDim)+"Export writes the Backup Sets, servers and preferences to a new file (never over an existing one; with secrets it is readable only by you). Import merges such a file into this computer's settings, in the service. Save logs asks for a file and writes the service's logs of the last two weeks into one zip, to attach to a bug report.", 76, 4, true, false)
+	addHint(f4, tag(colDim)+"Export writes the Backup Sets, servers and preferences to a new file (never over an existing one; with secrets it is readable only by you). Import merges such a file into this computer's settings, in the service. Save logs asks for a file and writes the service's logs of the last two weeks into one zip, to attach to a bug report.", 4)
 	f4.SetTitle(" Settings file ")
 
 	p.title = tview.NewTextView().SetDynamicColors(true)

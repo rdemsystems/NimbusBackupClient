@@ -100,7 +100,7 @@ func (d *demoBackend) Status() (*api.StatusResponse, error) {
 			active++
 		}
 	}
-	return &api.StatusResponse{Running: true, Version: "2.0.0", ActiveJobs: active}, nil
+	return &api.StatusResponse{Running: true, Version: "2.1.0", ActiveJobs: active}, nil
 }
 
 func (d *demoBackend) Sets() ([]Set, error) {

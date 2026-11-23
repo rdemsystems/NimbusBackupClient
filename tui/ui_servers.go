@@ -213,14 +213,14 @@ func (a *App) openServerEditor(s Server, isNew bool) {
 	f1.SetTitle(" Server ")
 	f2 := styleForm(tview.NewForm()).AddFormItem(e.login).AddFormItem(e.tokenID).AddFormItem(e.secret).
 		AddFormItem(e.username).AddFormItem(e.password)
-	f2.AddTextView("", hint, 60, 1, true, false)
+	addHint(f2, hint, 1)
 	f2.SetTitle(" Login ")
 	f3 := styleForm(tview.NewForm()).AddFormItem(e.keyFile).AddFormItem(e.keyPass).AddFormItem(e.forgetPass).AddFormItem(e.compress)
-	f3.AddTextView("", tag(colDim)+"Backups to this server are encrypted with the key. Leave the key file empty for none.\n"+
+	addHint(f3, tag(colDim)+"Backups to this server are encrypted with the key. Leave the key file empty for none.\n"+
 		"A passphrase is stored so scheduled backups can run alone; leave it empty to keep the stored one.\n"+
 		"Keep a copy of the key file somewhere safe: without it the backups cannot be restored.\n"+
-		"Compressed encrypted backups need version 2.1 or later to restore. Leave it off only while you\n"+
-		"still restore with version 2.0.0 or earlier, or with a restore ISO made before 2.1.", 96, 6, true, false)
+		"Compressed encrypted backups need version 2.1 or later to restore. Leave it off only while you "+
+		"still restore with version 2.0.0 or earlier, or with a restore ISO made before 2.1.", 6)
 	f3.SetTitle(" Encryption ")
 
 	e.title = tview.NewTextView().SetDynamicColors(true)

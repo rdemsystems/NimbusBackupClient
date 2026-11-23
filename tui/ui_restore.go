@@ -342,7 +342,7 @@ func (r *restoreView) askPassphrase(note string, then func(string)) {
 	if note != "" {
 		text = note
 	}
-	form.AddTextView("", tag(colDim)+text, 56, 2, true, false)
+	addHint(form, tag(colDim)+text, 2)
 	form.SetTitle(" Encrypted backup ")
 	closeAsk := func() {
 		a.pages.RemovePage("passphrase")

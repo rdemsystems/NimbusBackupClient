@@ -155,7 +155,7 @@ func (e *serverEditor) importKey() {
 	path := tview.NewInputField().SetLabel("Key file ").SetFieldWidth(60)
 	pass := tview.NewInputField().SetLabel("Its passphrase ").SetFieldWidth(40).SetMaskCharacter('*')
 	form := styleForm(tview.NewForm()).AddFormItem(path).AddFormItem(pass)
-	form.AddTextView("", tag(colDim)+"The passphrase, if the key has one, lets the key be checked and stored for scheduled backups.", 66, 2, true, false)
+	addHint(form, tag(colDim)+"The passphrase, if the key has one, lets the key be checked and stored for scheduled backups.", 2)
 	form.SetTitle(" Import a key file ")
 	closeForm := func() {
 		a.pages.RemovePage("keyimport")
