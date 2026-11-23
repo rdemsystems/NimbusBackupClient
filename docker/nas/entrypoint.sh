@@ -44,7 +44,9 @@ serve() {
 	log "web text window on port $port (user '$user')"
 	# -W: the browser may type (ttyd is read-only otherwise). Each browser tab
 	# gets its own text window; closing it leaves the backups running.
-	ttyd -W -p "$port" -c "$user:$UI_PASSWORD" \
+	# -d 3: errors and warnings only; ttyd's notices print the login (base64)
+	# into the container log, which the NAS UI shows.
+	ttyd -W -d 3 -p "$port" -c "$user:$UI_PASSWORD" \
 		-t titleFixed="Salvanza" -t fontSize=15 -t disableLeaveAlert=true \
 		salvanza-cli tui &
 	ui=$!

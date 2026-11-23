@@ -45,8 +45,12 @@ jobs:
           # The service is up and has written its API token.
           docker exec nas test -s /var/lib/salvanza/api-token
           docker exec nas sh -c 'pgrep -f salvanza-svc >/dev/null'
-          # The text window can reach the service (non-interactive check).
-          docker exec nas salvanza-cli tui -h 2>&1 | head -20 || true
+          # The text window reaches the service with its token.
+          docker exec nas salvanza-cli tui -check
+          # The login must not end up in the container log.
+          if docker logs nas 2>&1 | grep -q -e "$(printf 'admin:ci-secret' | base64)" -e ci-secret; then
+            echo "the web login appears in the container log"; exit 1
+          fi
           # Without a password the container must not start the window.
           docker run --rm salvanza-nas:test serve && { echo "started without UI_PASSWORD"; exit 1; } || true
           echo "smoke test OK"
