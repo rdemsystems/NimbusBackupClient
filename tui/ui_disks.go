@@ -325,7 +325,7 @@ func (p *diskPicker) show() {
 	if p.skips {
 		hint += " or leaves a partition out (it is not read; zeros go into the image)"
 	}
-	help := tview.NewTextView().SetDynamicColors(true).SetWordWrap(true).SetText(tag(colDim) + hint + ".   Enter done   Esc cancel[-]")
+	help := tview.NewTextView().SetDynamicColors(true).SetWordWrap(true).SetText(tag(colDim) + hint + ".\nEnter done   Esc cancel[-]")
 	p.draw()
 	p.table.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch {
