@@ -14,6 +14,8 @@
 
 Сайт проекта: **[salvanza.org](https://salvanza.org/)** · Исходный код, выпуски и issues: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
+**Поддерживаемые системы:** Windows 10 и 11 и Windows Server с 2016 по 2025, Linux (пакеты deb, rpm и Arch), а командная строка также на macOS, FreeBSD, OpenBSD, NetBSD и Solaris. Полная таблица: [Поддерживаемые системы](docs/COMPATIBILITY.md) (на английском).
+
 Это **набор инструментов**:
 
 - **Приложение Salvanza**, `salvanza-gui` (создано RDEM Systems как Nimbus Backup GUI, переработано и расширено mjb-is): приложение для Windows и Linux. Наборы резервного копирования, которые запускаются по триггерам (в заданное время, по событиям компьютера, когда сервер снова доступен), резервные копии папок и целых дисков с согласованными снимками (VSS в Windows, elastio-snap/dattobd в Linux), восстановление файлов из копий папок и машин, **Undelete** (восстановление удалённых файлов) и **Roll back** (откат), несколько серверов PBS, шифрование на стороне клиента и фоновая служба `salvanza-svc`, благодаря которой наборы выполняются, даже когда никто не вошёл в систему.

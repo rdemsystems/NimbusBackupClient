@@ -14,6 +14,8 @@
 
 Site-ul proiectului: **[salvanza.org](https://salvanza.org/)** · Cod sursă, versiuni și issues: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
+**Sisteme acceptate:** Windows 10 și 11 și Windows Server 2016 până la 2025, Linux (pachete deb, rpm și Arch), iar linia de comandă și pe macOS, FreeBSD, OpenBSD, NetBSD și Solaris. Tabelul complet: [Sisteme acceptate](docs/COMPATIBILITY.md) (în engleză).
+
 Este o **suită de instrumente**:
 
 - **Aplicația Salvanza**, `salvanza-gui` (creată de RDEM Systems ca Nimbus Backup GUI, refăcută și extinsă de mjb-is): aplicația pentru Windows și Linux. Seturi de backup care rulează prin declanșatoare (ore stabilite, evenimente ale calculatorului, serverul din nou accesibil), backup-uri de foldere și de discuri întregi cu instantanee consecvente (VSS pe Windows, elastio-snap/dattobd pe Linux), restaurarea fișierelor din backup-urile de foldere și de mașini, Recuperare fișiere șterse și Revenire, mai multe servere PBS, criptare pe partea clientului și un serviciu de fundal, `salvanza-svc`, astfel încât seturile de backup rulează fără ca cineva să fie autentificat.

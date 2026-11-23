@@ -14,6 +14,8 @@
 
 Projektets webbplats: **[salvanza.org](https://salvanza.org/)** · Källkod, versioner och ärenden: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
+**Stödda system:** Windows 10 och 11 och Windows Server 2016 till 2025, Linux (deb-, rpm- och Arch-paket), och kommandoraden även på macOS, FreeBSD, OpenBSD, NetBSD och Solaris. Hela tabellen: [Stödda system](docs/COMPATIBILITY.md) (på engelska).
+
 Det är en **verktygssvit**:
 
 - **Salvanza-appen**, `salvanza-gui` (ursprungligen skapad av RDEM Systems som Nimbus Backup GUI, omarbetad och utökad av mjb-is): appen för Windows och Linux. **Backup Sets** (säkerhetskopieringsuppsättningar) som körs av utlösare (bestämda tider, händelser på datorn, servern inom räckhåll igen), säkerhetskopior av mappar och hela diskar med konsekventa ögonblicksbilder (VSS i Windows, elastio-snap/dattobd i Linux), återställning av filer från mapp- och datorsäkerhetskopior, **Undelete** (ångra borttagning) och **Roll back** (återgå), flera PBS-servrar, kryptering på klientsidan och en bakgrundstjänst, `salvanza-svc`, så att uppsättningarna körs utan att någon är inloggad.

@@ -14,6 +14,8 @@
 
 موقع المشروع: **[salvanza.org](https://salvanza.org/)** · الشيفرة المصدرية والإصدارات والبلاغات: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
+**الأنظمة المدعومة:** Windows 10 و11 وWindows Server من 2016 إلى 2025، وLinux (حزم deb وrpm وArch)، وأداة سطر الأوامر أيضًا على macOS وFreeBSD وOpenBSD وNetBSD وSolaris. الجدول الكامل: [الأنظمة المدعومة](docs/COMPATIBILITY.md) (بالإنجليزية).
+
 إنه **مجموعة من الأدوات**:
 
 - **تطبيق Salvanza**، `salvanza-gui` (أنشأته RDEM Systems في الأصل باسم Nimbus Backup GUI، ثم أعاد mjb-is صياغته ووسّعه): التطبيق لـ Windows وLinux. **Backup Sets** (مجموعات النسخ الاحتياطي) تعمل بمشغِّلات (أوقات محددة، وأحداث على الحاسوب، وعودة الخادم إلى متناول الوصول)، ونسخ احتياطي للمجلدات وللأقراص كاملة مع لقطات متسقة (VSS على Windows، وelastio-snap/dattobd على Linux)، واستعادة الملفات من نسخ المجلدات ونسخ الأجهزة، و**Undelete** (استرجاع المحذوفات) و**Roll back** (التراجع)، وعدة خوادم PBS، وتشفير من جهة العميل، وخدمة خلفية، `salvanza-svc`، تُشغّل مجموعات النسخ الاحتياطي دون أن يكون أي مستخدم مسجّلًا للدخول.

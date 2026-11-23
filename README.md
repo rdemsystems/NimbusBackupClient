@@ -14,6 +14,8 @@
 
 Project site: **[salvanza.org](https://salvanza.org/)** · Source code, releases and issues: **[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
+**Supported systems:** Windows 10 and 11 and Windows Server 2016 to 2025, Linux (deb, rpm and Arch packages), and the command line also on macOS, FreeBSD, OpenBSD, NetBSD and Solaris. The full table: [Supported systems](docs/COMPATIBILITY.md).
+
 It is a **suite of tools**:
 
 - **The Salvanza app**, `salvanza-gui` (originated by RDEM Systems as the Nimbus Backup GUI, reworked and extended by mjb-is): the app for Windows and Linux. Backup Sets that run on triggers (set times, computer events, the server coming into reach), folder and whole-disk backups with consistent snapshots (VSS on Windows, elastio-snap/dattobd on Linux), restore of files from folder and machine backups, Undelete and Roll back, several PBS servers, client-side encryption, and a background service, `salvanza-svc`, so Backup Sets run with nobody signed in.

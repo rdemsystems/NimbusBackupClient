@@ -14,6 +14,8 @@
 
 项目网站：**[salvanza.org](https://salvanza.org/)** · 源代码、版本发布和问题反馈：**[github.com/salvanza/salvanza_client](https://github.com/salvanza/salvanza_client)**
 
+**支持的系统：** Windows 10 和 11、Windows Server 2016 至 2025、Linux（deb、rpm 和 Arch 软件包），命令行工具还可在 macOS、FreeBSD、OpenBSD、NetBSD 和 Solaris 上运行。完整表格：[支持的系统](docs/COMPATIBILITY.md)（英文）。
+
 它是一**套工具**：
 
 - **Salvanza 应用** `salvanza-gui`（最初由 RDEM Systems 开发，名为 Nimbus Backup GUI，后由 mjb-is 重新设计和扩展）：适用于 Windows 和 Linux 的应用程序。Backup Set（备份集）按触发器运行（设定的时间、计算机上的事件、重新连上服务器时）；文件夹备份和整盘备份都使用一致性快照（Windows 上用 VSS，Linux 上用 elastio-snap/dattobd）；可以从文件夹备份和机器备份中恢复文件；支持 Undelete（找回已删除文件）和 Roll back（回滚）、多台 PBS 服务器、客户端加密，以及后台服务 `salvanza-svc`，让备份集在无人登录时也能运行。
