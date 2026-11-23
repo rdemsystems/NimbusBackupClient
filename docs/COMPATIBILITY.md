@@ -1,8 +1,10 @@
 # Supported systems
 
-What Salvanza 2.0.0 runs on and what it has been tested with. "Tested" means we
-run it there ourselves or in CI; "expected to work" means it should, but we have
-not tested it.
+What Salvanza 2.0.0 runs on and what it has been tested with.
+
+**Tested**: we run it there ourselves or in CI. **Expected to work**: it should,
+but we have not tested it. **Not available**: the feature does not exist on that
+system.
 
 ## The app and the background service
 
@@ -28,8 +30,8 @@ A single file with nothing to install alongside it.
 |---|---|---|---|
 | Windows (x64) | Tested | Tested | VSS |
 | Linux (amd64, arm64) | Tested | Tested | elastio-snap or dattobd (not btrfs) |
-| FreeBSD, OpenBSD, NetBSD, Solaris (x86_64) | Tested in CI | No | None |
-| macOS (Intel, Apple Silicon) | Expected to work | No | None |
+| FreeBSD, OpenBSD, NetBSD, Solaris (x86_64) | Tested in CI | Not available (Windows and Linux only) | None: files are read as they are |
+| macOS (Intel, Apple Silicon) | Expected to work | Not available (Windows and Linux only) | None: files are read as they are |
 | 32-bit systems | No build | | |
 
 What a folder backup keeps of each file besides its contents:
