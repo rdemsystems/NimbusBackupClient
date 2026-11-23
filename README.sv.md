@@ -22,6 +22,7 @@ Det är en **verktygssvit**:
   - **`salvanza-cli backup-disk`**: säkerhetskopiering av hela diskar (fidx) under drift för Windows- och Linux-datorer. Avbilden är startbar efter en återställning.
   - **`salvanza-cli attach-nbd`**: ansluter en disksäkerhetskopia som en NBD-blockenhet (Linux).
 - **En ISO för bare metal-återställning** (Salvanza-BMR) byggd på Clonezilla Live, med guidad återställning från påslag till omstart.
+- **Återställning till en mindre disk** när data får plats: ISO:n för återställning krymper en partition på vägen, behåller diskens och partitionernas ID:n och skriver aldrig till säkerhetskopian ([hur](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk)).
 
 > Nyckelord: salvanza · proxmox backup server client windows · PBS-klient · Windows-säkerhetskopiering med VSS · oföränderliga säkerhetskopior utanför huset · fysisk till virtuell (P2V) · bare metal-återställning · gränssnitt för Proxmox Backup Server.
 
@@ -40,13 +41,21 @@ Den officiella `proxmox-backup-client` är ett kommandoradsverktyg för Linux. D
 <a id="-new-in-21"></a>
 ## 🆕 Nytt i 2.1
 
-- **Backup Sets körs av utlösare.** En uppsättnings flik **When to run** (när den ska köras; tidigare fliken **Schedule**) listar dess utlösare, och ett schema är nu bara en av tre sorter:
-  - **At set times** (på bestämda tider): scheman som förut, flera per uppsättning, och vart och ett har nu sitt eget val att väcka datorn, att vänta på servern när den inte går att nå på utsatt tid, och att bara köras på vissa nätverk.
+De stora nyheterna:
+
+- **Ett textläges-fönster: `salvanza-cli tui`.** Appen i en terminal, för servrar, SSH-sessioner och datorer utan skrivbord, Linux textkonsol inräknad. **Backup Sets** för mappar och hela diskar (kör, pausa, stoppa, redigera, lägg till), återställning (även av krypterade säkerhetskopior), **Undelete** och **Roll back**, PBS-servrar och krypteringsnycklar, nätverksresurser, inställningar, historik, meddelandeloggen och loggfiler. Se [handboken för textläges-fönstret](docs/manual/TUI.md).
+- **Bare metal-återställning till en mindre disk.** En datorsäkerhetskopia krävde tidigare en disk som var minst lika stor som den som säkerhetskopierades. ISO:n för återställning kontrollerar nu om data får plats, visar planen, krymper en partition på vägen, behåller diskens och partitionernas ID:n och skriver aldrig till säkerhetskopian. Windows och Linux, MBR och GPT, UEFI och BIOS. Återställningsguiden är också tydligare, och varje version har sin egen ISO. Se [Återställning till en mindre disk](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk).
+- **Backup Sets körs av utlösare, och bärbara datorer säkerhetskopieras på natten.** En uppsättnings flik **When to run** (när den ska köras; tidigare fliken **Schedule**) listar dess utlösare, och ett schema är nu bara en av tre sorter:
+  - **At set times** (på bestämda tider): scheman som förut, flera per uppsättning, och vart och ett har sitt eget val att väcka datorn ur strömsparläge eller viloläge för sina körningar, att vänta på servern när den inte går att nå på utsatt tid, och att bara köras på vissa nätverk.
   - **When the server can be reached** (när servern går att nå): en bärbar dator säkerhetskopierar så fort den är hemma eller på VPN igen, högst var N:e timme, om så önskas bara på vissa nätverk eller anslutningstyper och inte på anslutningar med datapriser.
   - **When something happens on this computer** (när något händer på den här datorn): när den startar, vaknar ur strömsparläge eller viloläge, någon loggar in, eller ingen har använt den på N minuter, högst var N:e minut, timme eller dag.
 
-  Uppsättningar som sparats i 2.0 fortsätter att köras som förut. Se [When to run](docs/manual/GUI.md#63-when-to-run-tab).
-- **Återställning till en mindre disk**, ett **textläges-fönster** (`salvanza-cli tui`) och mer: se [CHANGELOG](CHANGELOG.md).
+  Datorn hålls vaken medan en säkerhetskopiering pågår. På batteri kan en uppsättning vänta tills datorn är ansluten eller har tillräcklig laddning, och avbryta en säkerhetskopiering när laddningen blir för låg. När säkerhetskopieringen är klar kan datorn gå tillbaka till strömsparläge, viloläge eller stängas av. På bärbara Windows-datorer med Modern Standby avgör Windows om väckningen ska följas, så där är den inte garanterad (handbokens avsnitt "Waking the computer" beskriver det säkra sättet). Uppsättningar som sparats i 2.0 fortsätter att köras som förut. Se [When to run](docs/manual/GUI.md#63-when-to-run-tab).
+
+- **Krypterade säkerhetskopior komprimeras**, så som proxmox-backup-client komprimerar dem, så de tar mindre plats i datalagret och går fortare att skicka. Varje server med en nyckel har en brytare **Compress encrypted backups** (komprimera krypterade säkerhetskopior): avstängd förblir säkerhetskopiorna läsbara för version 2.0 och dess återställnings-ISO:er. Varje säkerhetskopia registrerar nu vilken version som gjorde den, så en äldre version som stöter på en nyare form säger vilken version som behövs i stället för att misslyckas halvvägs. Komprimeringen kan också stängas av helt (nivån None), för data som inte går att komprimera. Se [fliken Kryptering](docs/manual/GUI.md#encryption-tab).
+- **Undantag fungerar som den officiella klientens `.pxarexclude`.** Mönstren läses i ordning och det sista som matchar avgör. Ett mönster som börjar med `!` tar tillbaka det som mönstren före det uteslöt, så `*`, `!**/`, `!*.pst` säkerhetskopierar varje mapp och bara `.pst`-filerna i dem. `**` går genom valfritt antal mappar (`**/cache`), och ett mönster som slutar med `/` matchar bara mappar. En lista utan `!` utesluter precis det den uteslöt förut. Se [Undantag](docs/manual/GUI.md#exclusions).
+
+Dessutom: körningsloggar sparas i en fil per vecka i stället för en fil per körning, anslutningstestet säger vad kontot får göra i datalagret, och ett 28-tal rättelser. Se [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Nytt i 2.0
 

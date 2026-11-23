@@ -22,6 +22,7 @@ Es handelt sich um eine **Sammlung von Werkzeugen**:
   - **`salvanza-cli backup-disk`**: Live-Sicherungen ganzer Datenträger (fidx) von Windows- und Linux-Maschinen. Das Abbild ist nach einer Wiederherstellung bootfähig.
   - **`salvanza-cli attach-nbd`**: bindet eine Datenträgersicherung als NBD-Blockgerät ein (Linux).
 - **Ein ISO für die Bare-Metal-Wiederherstellung** (Salvanza-BMR) auf Basis von Clonezilla Live, mit einer geführten Wiederherstellung vom Einschalten bis zum Neustart.
+- **Wiederherstellung auf einen kleineren Datenträger**, wenn die Daten passen: Das Wiederherstellungs-ISO verkleinert dabei eine Partition, behält die IDs von Datenträger und Partitionen und schreibt nie in die Sicherung ([wie](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk)).
 
 > Schlüsselwörter: salvanza · proxmox backup server client windows · PBS-Client · Windows-VSS-Sicherung · unveränderliche Offsite-Sicherungen · physisch zu virtuell (P2V) · Bare-Metal-Wiederherstellung · Oberfläche für Proxmox Backup Server.
 
@@ -39,13 +40,21 @@ Der offizielle `proxmox-backup-client` ist ein Kommandozeilenwerkzeug für Linux
 <a id="-new-in-21"></a>
 ## 🆕 Neu in 2.1
 
-- **Sicherungssätze laufen über Auslöser.** Die Registerkarte **Wann ausführen** eines Satzes (früher die Registerkarte Zeitplan) listet seine Auslöser, und ein Zeitplan ist nur noch eine von drei Arten:
-  - **Zu festen Zeiten**: Zeitpläne wie bisher, mehrere pro Satz, jeder jetzt mit eigener Wahl, ob er den Computer weckt, auf den Server wartet, wenn dieser zur geplanten Zeit nicht erreichbar ist, und nur in bestimmten Netzwerken läuft.
+Die großen Neuerungen:
+
+- **Ein Textmodus-Fenster: `salvanza-cli tui`.** Die App im Terminal, für Server, SSH-Sitzungen und Computer ohne Desktop, die Linux-Textkonsole eingeschlossen. Sicherungssätze für Ordner und ganze Datenträger (ausführen, pausieren, stoppen, bearbeiten, hinzufügen), Wiederherstellung (auch verschlüsselter Sicherungen), „Gelöschte Dateien wiederherstellen“ und „Zurücksetzen“, PBS-Server und Schlüssel, Netzwerkfreigaben, Einstellungen, Verlauf, das Meldungsprotokoll und Protokolldateien. Siehe das [Handbuch zum Textmodus-Fenster](docs/manual/TUI.md).
+- **Bare-Metal-Wiederherstellung auf einen kleineren Datenträger.** Eine Maschinensicherung brauchte bisher einen Datenträger, der mindestens so groß ist wie der gesicherte. Das Wiederherstellungs-ISO prüft jetzt, ob die Daten passen, zeigt den Plan, verkleinert dabei eine Partition, behält die IDs von Datenträger und Partitionen und schreibt nie in die Sicherung. Windows und Linux, MBR und GPT, UEFI und BIOS. Der Wiederherstellungsassistent ist auch klarer, und jede Version hat ihr eigenes ISO. Siehe [Wiederherstellung auf einen kleineren Datenträger](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk).
+- **Sicherungssätze laufen über Auslöser, und Laptops sichern nachts.** Die Registerkarte **Wann ausführen** eines Satzes (früher die Registerkarte Zeitplan) listet seine Auslöser, und ein Zeitplan ist nur noch eine von drei Arten:
+  - **Zu festen Zeiten**: Zeitpläne wie bisher, mehrere pro Satz, jeder mit eigener Wahl, ob er den Computer für seine Ausführungen aus dem Energiesparmodus oder Ruhezustand weckt, auf den Server wartet, wenn dieser zur geplanten Zeit nicht erreichbar ist, und nur in bestimmten Netzwerken läuft.
   - **Wenn der Server erreichbar ist**: Ein Laptop sichert, sobald er wieder zu Hause oder im VPN ist, höchstens alle N Stunden, wahlweise nur in bestimmten Netzwerken oder Verbindungsarten und nicht über getaktete Verbindungen.
   - **Wenn auf diesem Computer etwas passiert**: wenn er startet, aus dem Energiesparmodus oder Ruhezustand aufwacht, sich jemand anmeldet oder ihn N Minuten lang niemand benutzt hat, höchstens alle N Minuten, Stunden oder Tage.
 
-  Mit 2.0 gespeicherte Sätze laufen weiter wie bisher. Siehe [Wann ausführen](docs/manual/GUI.md#63-when-to-run-tab).
-- **Wiederherstellung auf einen kleineren Datenträger**, ein **Textmodus-Fenster** (`salvanza-cli tui`) und mehr: siehe das [CHANGELOG](CHANGELOG.md).
+  Der Computer bleibt wach, solange eine Sicherung läuft. Im Akkubetrieb kann ein Satz warten, bis der Computer angeschlossen oder genug geladen ist, und eine Sicherung abbrechen, wenn der Akku zu schwach wird. Nach der Sicherung kann der Computer wieder in den Energiesparmodus oder Ruhezustand gehen oder herunterfahren. Auf Windows-Laptops mit Modern Standby entscheidet Windows, ob es das Wecken zulässt, dort ist es also ohne Gewähr (der Abschnitt „Waking the computer“ im Handbuch beschreibt den zuverlässigen Weg). Mit 2.0 gespeicherte Sätze laufen weiter wie bisher. Siehe [Wann ausführen](docs/manual/GUI.md#63-when-to-run-tab).
+
+- **Verschlüsselte Sicherungen werden komprimiert**, so wie proxmox-backup-client sie komprimiert, sie brauchen also weniger Platz auf dem Datenspeicher und weniger Zeit zum Senden. Jeder Server mit einem Schlüssel hat einen Schalter **Verschlüsselte Sicherungen komprimieren**: Ausgeschaltet bleiben die Sicherungen für Version 2.0 und ihre Wiederherstellungs-ISOs lesbar. Jede Sicherung hält jetzt fest, welche Version sie erstellt hat, sodass eine ältere Version, die auf eine neuere Form trifft, sagt, welche Version sie braucht, statt mittendrin abzubrechen. Die Komprimierung lässt sich auch ganz abschalten (die Stufe Keine), für Daten, die sich nicht komprimieren lassen. Siehe [Registerkarte Verschlüsselung](docs/manual/GUI.md#encryption-tab).
+- **Ausschlüsse funktionieren wie `.pxarexclude` beim offiziellen Client.** Die Muster werden der Reihe nach gelesen, und das letzte passende entscheidet. Ein Muster, das mit `!` beginnt, holt zurück, was die Muster davor ausgeschlossen haben, so sichert `*`, `!**/`, `!*.pst` jeden Ordner und darin nur die `.pst`-Dateien. `**` überspringt beliebig viele Ordner (`**/cache`), und ein Muster, das auf `/` endet, passt nur auf Ordner. Eine Liste ohne `!` schließt genau das aus, was sie vorher ausgeschlossen hat. Siehe [Ausschlüsse](docs/manual/GUI.md#exclusions).
+
+Außerdem: Ausführungsprotokolle werden in einer Datei pro Woche statt in einer Datei pro Ausführung aufbewahrt, der Verbindungstest sagt, was das Konto auf dem Datenspeicher darf, und etwa 28 Fehlerbehebungen. Siehe das [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Neu in 2.0
 

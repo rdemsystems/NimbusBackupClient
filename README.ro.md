@@ -22,6 +22,7 @@ Este o **suită de instrumente**:
   - **`salvanza-cli backup-disk`**: backup-uri live de discuri întregi (fidx) pentru mașini Windows și Linux. Imaginea este bootabilă după restaurare.
   - **`salvanza-cli attach-nbd`**: atașează un backup de disc ca dispozitiv bloc NBD (Linux).
 - **Un ISO de restaurare bare-metal** (Salvanza-BMR) bazat pe Clonezilla Live, cu o restaurare ghidată de la pornire până la repornire.
+- **Restaurare pe un disc mai mic** când datele încap: ISO-ul de restaurare micșorează o partiție pe parcurs, păstrează ID-urile discului și ale partițiilor și nu scrie niciodată în backup ([cum](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk)).
 
 > Cuvinte cheie: salvanza · proxmox backup server client windows · client PBS · backup Windows cu VSS · backup-uri offsite imuabile · fizic în virtual (P2V) · restaurare bare-metal · interfață pentru Proxmox Backup Server.
 
@@ -40,13 +41,21 @@ Este o **suită de instrumente**:
 <a id="-new-in-21"></a>
 ## 🆕 Noutăți în 2.1
 
-- **Seturile de backup rulează prin declanșatoare.** Fila **Când rulează** a unui set (înainte fila Programare) arată declanșatoarele lui, iar o programare orară este acum doar unul dintre trei tipuri:
-  - **La ore stabilite**: programările de dinainte, mai multe pentru fiecare set, fiecare având acum propria opțiune de a trezi calculatorul, de a aștepta serverul când nu poate fi accesat la ora stabilită și de a rula doar în anumite rețele.
+Adăugirile mari:
+
+- **O fereastră în mod text: `salvanza-cli tui`.** Aplicația într-un terminal, pentru servere, sesiuni SSH și calculatoare fără desktop, inclusiv consola text din Linux. Seturi de backup pentru foldere și discuri întregi (rulare, pauză, oprire, editare, adăugare), restaurare (inclusiv a backup-urilor criptate), Recuperare fișiere șterse și Revenire, servere PBS și chei de criptare, partajări de rețea, preferințe, istoric, jurnalul de mesaje și fișierele jurnal. Vedeți [manualul ferestrei în mod text](docs/manual/TUI.md).
+- **Restaurare bare-metal pe un disc mai mic.** Un backup de mașină avea nevoie de un disc cel puțin la fel de mare ca cel salvat. ISO-ul de restaurare verifică acum dacă datele încap, arată planul, micșorează o partiție pe parcurs, păstrează ID-urile discului și ale partițiilor și nu scrie niciodată în backup. Windows și Linux, MBR și GPT, UEFI și BIOS. Și asistentul de restaurare este mai clar, iar fiecare versiune are propriul ISO. Vedeți [Restaurarea pe un disc mai mic](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk).
+- **Seturile de backup rulează prin declanșatoare, iar laptopurile fac backup noaptea.** Fila **Când rulează** a unui set (înainte fila Programare) arată declanșatoarele lui, iar o programare orară este acum doar unul dintre trei tipuri:
+  - **La ore stabilite**: programările de dinainte, mai multe pentru fiecare set, fiecare cu propria opțiune de a trezi calculatorul din repaus sau hibernare pentru rulările sale, de a aștepta serverul când nu poate fi accesat la ora stabilită și de a rula doar în anumite rețele.
   - **Când serverul poate fi accesat**: un laptop face backup imediat ce revine acasă sau pe VPN, cel mult o dată la N ore, opțional doar în anumite rețele sau tipuri de conexiune și nu pe conexiuni contorizate.
   - **Când se întâmplă ceva pe acest calculator**: când pornește, se trezește din repaus sau hibernare, cineva se autentifică, sau nimeni nu l-a folosit de N minute, cel mult o dată la N minute, ore sau zile.
 
-  Seturile salvate cu 2.0 rulează în continuare ca înainte. Vedeți [Când rulează](docs/manual/GUI.md#63-when-to-run-tab).
-- **Restaurare pe un disc mai mic**, o **fereastră în mod text** (`salvanza-cli tui`) și altele: vedeți [CHANGELOG](CHANGELOG.md).
+  Calculatorul rămâne treaz cât timp rulează un backup. Pe baterie, un set poate aștepta să fie conectat la priză sau să aibă destulă încărcare și poate anula un backup când bateria scade prea mult. La sfârșitul backup-ului, calculatorul poate reveni în repaus, poate hiberna sau se poate opri. Pe laptopurile Windows cu Modern Standby, Windows decide dacă respectă trezirea, așa că acolo nu este garantată (secțiunea „Waking the computer” din manual descrie metoda sigură). Seturile salvate cu 2.0 rulează în continuare ca înainte. Vedeți [Când rulează](docs/manual/GUI.md#63-when-to-run-tab).
+
+- **Backup-urile criptate sunt comprimate**, așa cum le comprimă proxmox-backup-client, deci ocupă mai puțin spațiu pe datastore și se trimit mai repede. Fiecare server cu o cheie are un comutator **Comprimă backup-urile criptate**: oprit, backup-urile rămân citibile de versiunea 2.0 și de ISO-urile ei de restaurare. Fiecare backup înregistrează acum versiunea care l-a făcut, așa că o versiune mai veche care întâlnește o formă mai nouă spune de ce versiune are nevoie în loc să eșueze la jumătatea drumului. Compresia poate fi și oprită complet (nivelul Fără compresie), pentru date care nu se comprimă. Vedeți [Fila Criptare](docs/manual/GUI.md#encryption-tab).
+- **Excluderile funcționează ca `.pxarexclude` al clientului oficial.** Modelele sunt citite în ordine și decide ultimul care se potrivește. Un model care începe cu `!` aduce înapoi ce au lăsat afară cele dinaintea lui, așa că `*`, `!**/`, `!*.pst` face backup fiecărui folder și, în ele, doar fișierelor `.pst`. `**` trece prin oricâte foldere (`**/cache`), iar un model care se termină cu `/` se potrivește doar cu foldere. O listă fără `!` lasă afară exact ce lăsa și înainte. Vedeți [Excluderi](docs/manual/GUI.md#exclusions).
+
+De asemenea: jurnalele rulărilor sunt păstrate într-un fișier pe săptămână în loc de un fișier pentru fiecare rulare, testul de conexiune spune ce poate face contul pe datastore, și aproximativ 28 de corecturi. Vedeți [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Noutăți în 2.0
 

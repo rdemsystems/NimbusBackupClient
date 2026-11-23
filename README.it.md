@@ -22,6 +22,7 @@ Sito del progetto: **[salvanza.org](https://salvanza.org/)** · Codice sorgente,
   - **`salvanza-cli backup-disk`**: backup a caldo di dischi interi (fidx) di macchine Windows e Linux. Dopo il ripristino l'immagine è avviabile.
   - **`salvanza-cli attach-nbd`**: collega un backup di disco come dispositivo a blocchi NBD (Linux).
 - **Una ISO di ripristino bare-metal** (Salvanza-BMR) basata su Clonezilla Live, con un ripristino guidato dall'accensione al riavvio.
+- **Ripristino su un disco più piccolo** quando i dati ci stanno: la ISO di ripristino riduce una partizione strada facendo, mantiene gli ID del disco e delle partizioni e non scrive mai nel backup ([come](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk)).
 
 > Parole chiave: salvanza · client proxmox backup server windows · client PBS · backup VSS Windows · backup offsite immutabili · da fisico a virtuale (P2V) · ripristino bare-metal · interfaccia Proxmox Backup Server.
 
@@ -39,13 +40,21 @@ Il `proxmox-backup-client` ufficiale è uno strumento a riga di comando per Linu
 <a id="-new-in-21"></a>
 ## 🆕 Novità della 2.1
 
-- **I set di backup partono da attivatori.** La scheda **Quando eseguire** di un set (prima la scheda Pianificazione) elenca i suoi attivatori, e una pianificazione oraria è solo uno dei tre tipi:
-  - **A orari stabiliti**: le pianificazioni di sempre, più di una per set, ognuna ora con la propria scelta di riattivare il computer, di attendere il server se non è raggiungibile all'orario previsto, e di eseguirsi solo su alcune reti.
+Le grandi novità:
+
+- **Una finestra in modalità testo: `salvanza-cli tui`.** L'app in un terminale, per server, sessioni SSH e computer senza desktop, compresa la console testuale di Linux. Set di backup per cartelle e dischi interi (avviare, mettere in pausa, fermare, modificare, aggiungere), ripristino (anche dei backup cifrati), Recupero e Rollback, server PBS e chiavi di cifratura, condivisioni di rete, preferenze, cronologia, il registro dei messaggi e i file di log. Vedi il [manuale della finestra in modalità testo](docs/manual/TUI.md).
+- **Ripristino bare-metal su un disco più piccolo.** Un backup di macchina richiedeva un disco grande almeno quanto quello salvato. La ISO di ripristino ora controlla se i dati ci stanno, mostra il piano, riduce una partizione strada facendo, mantiene gli ID del disco e delle partizioni e non scrive mai nel backup. Windows e Linux, MBR e GPT, UEFI e BIOS. Anche la procedura guidata di ripristino è più chiara, e ogni versione ha la propria ISO. Vedi [Ripristino su un disco più piccolo](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk).
+- **I set di backup partono da attivatori, e i portatili fanno il backup di notte.** La scheda **Quando eseguire** di un set (prima la scheda Pianificazione) elenca i suoi attivatori, e una pianificazione oraria è solo uno dei tre tipi:
+  - **A orari stabiliti**: le pianificazioni di sempre, più di una per set, ognuna con la propria scelta di riattivare il computer dalla sospensione o dall'ibernazione per le sue esecuzioni, di attendere il server se non è raggiungibile all'orario previsto, e di eseguirsi solo su alcune reti.
   - **Quando il server è raggiungibile**: un portatile fa il backup appena torna a casa o sulla VPN, al massimo ogni N ore, facoltativamente solo su alcune reti o tipi di connessione e non sulle connessioni a consumo.
   - **Quando succede qualcosa su questo computer**: quando si avvia, si riattiva dalla sospensione o dall'ibernazione, qualcuno accede, o nessuno lo usa da N minuti, al massimo ogni N minuti, ore o giorni.
 
-  I set salvati con la 2.0 continuano a funzionare come prima. Vedi [Quando eseguire](docs/manual/GUI.md#63-when-to-run-tab).
-- **Ripristino su un disco più piccolo**, una **finestra in modalità testo** (`salvanza-cli tui`) e altro: vedi il [CHANGELOG](CHANGELOG.md).
+  Il computer resta acceso mentre un backup è in corso. A batteria, un set può attendere di essere collegato alla corrente o di avere carica sufficiente, e annullare un backup quando la carica scende troppo. Al termine del backup, il computer può tornare in sospensione, andare in ibernazione o spegnersi. Sui portatili Windows con Modern Standby è Windows a decidere se rispettare la riattivazione, quindi lì non è garantita (la sezione "Waking the computer" del manuale spiega il metodo affidabile). I set salvati con la 2.0 continuano a funzionare come prima. Vedi [Quando eseguire](docs/manual/GUI.md#63-when-to-run-tab).
+
+- **I backup cifrati sono compressi**, come li comprime proxmox-backup-client, quindi occupano meno spazio sul datastore e richiedono meno tempo per l'invio. Ogni server con una chiave ha un interruttore **Comprimi i backup cifrati**: spento, i backup restano leggibili dalla versione 2.0 e dalle sue ISO di ripristino. Ogni backup ora registra la versione che l'ha creato, così una versione più vecchia che incontra una forma più recente dice quale versione serve invece di fallire a metà. La compressione si può anche disattivare del tutto (il livello Nessuna), per i dati che non si comprimono. Vedi [Scheda Cifratura](docs/manual/GUI.md#encryption-tab).
+- **Le esclusioni funzionano come il `.pxarexclude` del client ufficiale.** I modelli sono letti in ordine e decide l'ultimo che corrisponde. Un modello che inizia con `!` riprende ciò che i precedenti avevano escluso, quindi `*`, `!**/`, `!*.pst` salva ogni cartella e, al loro interno, solo i file `.pst`. `**` attraversa un numero qualsiasi di cartelle (`**/cache`), e un modello che termina con `/` corrisponde solo alle cartelle. Un elenco senza `!` esclude esattamente ciò che escludeva prima. Vedi [Esclusioni](docs/manual/GUI.md#exclusions).
+
+Inoltre: i log delle esecuzioni sono tenuti in un file a settimana invece che in un file per esecuzione, il test di connessione dice cosa può fare l'account sul datastore, e circa 28 correzioni. Vedi il [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Novità della 2.0
 

@@ -22,6 +22,7 @@
   - **`salvanza-cli backup-disk`**：在线整盘备份（fidx），适用于 Windows 和 Linux 机器。恢复后的映像可以直接启动。
   - **`salvanza-cli attach-nbd`**：把磁盘备份挂接为 NBD 块设备（Linux）。
 - **裸机恢复 ISO**（Salvanza-BMR）：基于 Clonezilla Live，从开机到重启全程引导恢复。
+- **恢复到更小的磁盘**（数据放得下时）：恢复 ISO 在恢复过程中缩小一个分区，保留磁盘和分区的 ID，并且从不写入备份（[方法](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk)）。
 
 > 关键词：salvanza · proxmox backup server client windows · PBS 客户端 · Windows VSS 备份 · 不可变异地备份 · 物理机转虚拟机（P2V） · 裸机恢复 · Proxmox Backup Server 界面。
 
@@ -40,13 +41,20 @@
 <a id="-new-in-21"></a>
 ## 🆕 2.1 新特性
 
-- **Backup Set 按触发器运行。** 备份集的 **When to run**（何时运行；以前叫 **Schedule** 选项卡）选项卡列出它的触发器，定时计划现在只是三种触发器之一：
-  - **At set times**（在设定的时间）：和以前一样的计划，每个备份集可有多个，每个计划现在都可以单独选择是否唤醒计算机、到时连不上服务器时是否等待，以及是否只在某些网络上运行。
+主要新增内容：
+
+- **文本模式窗口：`salvanza-cli tui`。** 在终端中运行的应用，适用于服务器、SSH 会话和没有桌面的计算机，包括 Linux 文本控制台。可以管理文件夹和整盘的 Backup Set（运行、暂停、停止、编辑、添加）、恢复（包括加密备份）、Undelete 和 Roll back、PBS 服务器和加密密钥、网络共享、首选项、历史记录、消息日志和日志文件。参见[文本模式窗口手册](docs/manual/TUI.md)。
+- **裸机恢复到更小的磁盘。** 以前，机器备份需要一块至少和原磁盘一样大的磁盘。现在恢复 ISO 会先检查数据是否放得下，显示方案，在恢复过程中缩小一个分区，保留磁盘和分区的 ID，并且从不写入备份。支持 Windows 和 Linux、MBR 和 GPT、UEFI 和 BIOS。恢复向导也更简明了，每个版本都有自己的 ISO。参见[恢复到更小的磁盘](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk)。
+- **Backup Set 按触发器运行，笔记本电脑可在夜间备份。** 备份集的 **When to run**（何时运行；以前叫 **Schedule** 选项卡）选项卡列出它的触发器，定时计划现在只是三种触发器之一：
+  - **At set times**（在设定的时间）：和以前一样的计划，每个备份集可有多个，每个计划都可以单独选择是否为其运行把计算机从睡眠或休眠中唤醒、到时连不上服务器时是否等待，以及是否只在某些网络上运行。
   - **When the server can be reached**（能连上服务器时）：笔记本电脑一回到家或连上 VPN 就备份，最多每 N 小时一次，可选只在某些网络或连接类型上运行，并且不在按流量计费的连接上运行。
   - **When something happens on this computer**（这台计算机上发生某些事情时）：计算机启动、从睡眠或休眠中唤醒、有人登录，或 N 分钟无人使用时，最多每 N 分钟、小时或天一次。
 
-  在 2.0 中保存的备份集照旧运行。参见 [When to run](docs/manual/GUI.md#63-when-to-run-tab)。
-- **恢复到更小的磁盘**、**文本模式窗口**（`salvanza-cli tui`）等等：参见 [CHANGELOG](CHANGELOG.md)。
+  备份运行期间计算机保持唤醒。使用电池时，备份集可以等到接上电源或电量足够再开始，并在电量过低时取消备份。备份完成后，计算机可以重新睡眠、休眠或关机。在带有 Modern Standby 的 Windows 笔记本电脑上，是否执行唤醒由 Windows 决定，因此不能保证（手册中的“Waking the computer”一节介绍了可靠的做法）。在 2.0 中保存的备份集照旧运行。参见 [When to run](docs/manual/GUI.md#63-when-to-run-tab)。
+- **加密备份会被压缩**，与 proxmox-backup-client 的压缩方式相同，因此在数据存储上占用更少空间，发送也更快。每台配有密钥的服务器都有一个 **Compress encrypted backups**（压缩加密备份）开关：关闭时，备份仍可被 2.0 版及其恢复 ISO 读取。现在每个备份都会记录生成它的版本，因此旧版本遇到较新的格式时会说明需要哪个版本，而不是中途失败。也可以完全关闭压缩（级别 None），用于无法压缩的数据。参见[加密选项卡](docs/manual/GUI.md#encryption-tab)。
+- **排除规则与官方客户端的 `.pxarexclude` 一致。** 规则按顺序读取，最后一条匹配的规则说了算。以 `!` 开头的规则会把前面规则排除的内容加回来，因此 `*`、`!**/`、`!*.pst` 会备份所有文件夹，但其中只备份 `.pst` 文件。`**` 可跨越任意层文件夹（`**/cache`），以 `/` 结尾的规则只匹配文件夹。不含 `!` 的列表排除的内容与以前完全相同。参见[排除](docs/manual/GUI.md#exclusions)。
+
+此外：运行日志改为每周一个文件，而不是每次运行一个文件；测试连接会说明该账户在数据存储上能做什么；还有约 28 项修复。参见 [CHANGELOG](CHANGELOG.md)。
 
 ## 🆕 2.0 新特性
 

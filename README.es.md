@@ -22,6 +22,7 @@ Es un **conjunto de herramientas**:
   - **`salvanza-cli backup-disk`**: copias en caliente de discos enteros (fidx) de máquinas Windows y Linux. La imagen es arrancable tras una restauración.
   - **`salvanza-cli attach-nbd`**: conecta una copia de disco como dispositivo de bloques NBD (Linux).
 - **Una ISO de restauración bare-metal** (Salvanza-BMR) basada en Clonezilla Live, con una restauración guiada desde el encendido hasta el reinicio.
+- **Restauración en un disco más pequeño** cuando los datos caben: la ISO de restauración reduce una partición por el camino, conserva los identificadores del disco y de las particiones, y nunca escribe en la copia ([cómo](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk)).
 
 > Palabras clave: salvanza · cliente proxmox backup server windows · cliente PBS · copia de seguridad VSS de Windows · copias externas inmutables · físico a virtual (P2V) · restauración bare-metal · interfaz de Proxmox Backup Server.
 
@@ -39,13 +40,21 @@ El `proxmox-backup-client` oficial es una herramienta de línea de comandos para
 <a id="-new-in-21"></a>
 ## 🆕 Novedades de la 2.1
 
-- **Los conjuntos de copia de seguridad se ejecutan con activadores.** La pestaña **Cuándo ejecutar** de un conjunto (antes la pestaña Programación) muestra sus activadores, y una programación horaria es solo uno de tres tipos:
-  - **A horas fijas**: las programaciones de siempre, varias por conjunto, cada una ahora con su propia opción de reactivar el equipo, de esperar al servidor si no se puede llegar a él a la hora prevista, y de ejecutarse solo en algunas redes.
+Las grandes novedades:
+
+- **Una ventana en modo texto: `salvanza-cli tui`.** La aplicación en un terminal, para servidores, sesiones SSH y equipos sin escritorio, incluida la consola de texto de Linux. Conjuntos de copia de seguridad de carpetas y de discos enteros (ejecutar, pausar, detener, editar, añadir), restauración (también de copias cifradas), Recuperación y Reversión, servidores PBS y claves de cifrado, recursos compartidos de red, preferencias, historial, el registro de mensajes y los archivos de registro. Consulte el [manual de la ventana en modo texto](docs/manual/TUI.md).
+- **Restauración bare-metal en un disco más pequeño.** Una copia de máquina necesitaba un disco al menos tan grande como el copiado. La ISO de restauración ahora comprueba si los datos caben, muestra el plan, reduce una partición por el camino, conserva los identificadores del disco y de las particiones, y nunca escribe en la copia. Windows y Linux, MBR y GPT, UEFI y BIOS. El asistente de restauración también es más claro, y cada versión tiene su propia ISO. Consulte [Restaurar en un disco más pequeño](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk).
+- **Los conjuntos de copia de seguridad se ejecutan con activadores, y los portátiles hacen la copia de noche.** La pestaña **Cuándo ejecutar** de un conjunto (antes la pestaña Programación) muestra sus activadores, y una programación horaria es solo uno de tres tipos:
+  - **A horas fijas**: las programaciones de siempre, varias por conjunto, cada una con su propia opción de reactivar el equipo de la suspensión o la hibernación para sus ejecuciones, de esperar al servidor si no se puede llegar a él a la hora prevista, y de ejecutarse solo en algunas redes.
   - **Cuando se puede llegar al servidor**: un portátil hace la copia en cuanto vuelve a casa o a la VPN, como mucho cada N horas, opcionalmente solo en algunas redes o tipos de conexión y no en conexiones de uso medido.
   - **Cuando pasa algo en este equipo**: cuando se inicia, se reactiva de la suspensión o la hibernación, alguien inicia sesión, o nadie lo ha usado en N minutos, como mucho cada N minutos, horas o días.
 
-  Los conjuntos guardados con la 2.0 siguen ejecutándose como antes. Consulte [Cuándo ejecutar](docs/manual/GUI.md#63-when-to-run-tab).
-- **Restauración en un disco más pequeño**, una **ventana en modo texto** (`salvanza-cli tui`) y más: consulte el [CHANGELOG](CHANGELOG.md).
+  El equipo se mantiene despierto mientras se hace una copia. Con batería, un conjunto puede esperar a estar enchufado o a tener carga suficiente, y cancelar una copia cuando la carga baja demasiado. Al terminar la copia, el equipo puede volver a la suspensión, hibernar o apagarse. En los portátiles Windows con Modern Standby, Windows decide si respeta la reactivación, así que allí no está garantizada (el apartado "Waking the computer" del manual explica el método fiable). Los conjuntos guardados con la 2.0 siguen ejecutándose como antes. Consulte [Cuándo ejecutar](docs/manual/GUI.md#63-when-to-run-tab).
+
+- **Las copias cifradas se comprimen**, como las comprime proxmox-backup-client, así que ocupan menos espacio en el almacén de datos y tardan menos en enviarse. Cada servidor con una clave tiene un interruptor **Comprimir las copias de seguridad cifradas**: desactivado, las copias siguen pudiendo leerse con la versión 2.0 y sus ISO de restauración. Ahora cada copia registra la versión que la hizo, así que una versión anterior que encuentra una forma más nueva indica qué versión necesita en lugar de fallar a mitad. La compresión también se puede desactivar del todo (el nivel Ninguna), para datos que no se comprimen. Consulte [Pestaña Cifrado](docs/manual/GUI.md#encryption-tab).
+- **Las exclusiones funcionan como el `.pxarexclude` del cliente oficial.** Los patrones se leen en orden y decide el último que coincide. Un patrón que empieza por `!` recupera lo que los anteriores dejaron fuera, así que `*`, `!**/`, `!*.pst` copia todas las carpetas y, dentro de ellas, solo los archivos `.pst`. `**` atraviesa cualquier número de carpetas (`**/cache`), y un patrón que termina en `/` solo coincide con carpetas. Una lista sin `!` deja fuera exactamente lo mismo que antes. Consulte [Exclusiones](docs/manual/GUI.md#exclusions).
+
+Además: los registros de ejecución se guardan en un archivo por semana en lugar de un archivo por ejecución, la prueba de conexión dice qué puede hacer la cuenta en el almacén de datos, y unas 28 correcciones. Consulte el [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Novedades de la 2.0
 

@@ -22,6 +22,7 @@ Il s'agit d'une **suite d'outils** :
   - **`salvanza-cli backup-disk`** : sauvegardes à chaud de disques entiers (fidx) de machines Windows et Linux. L'image est amorçable après restauration.
   - **`salvanza-cli attach-nbd`** : attache une sauvegarde de disque comme périphérique bloc NBD (Linux).
 - **Une ISO de restauration bare-metal** (Salvanza-BMR) basée sur Clonezilla Live, avec une restauration guidée de la mise sous tension jusqu'au redémarrage.
+- **Restauration sur un disque plus petit** quand les données tiennent : l'ISO de restauration réduit une partition au passage, garde les identifiants du disque et des partitions, et n'écrit jamais dans la sauvegarde ([comment](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk)).
 
 > Mots-clés : salvanza · client proxmox backup server windows · client PBS · sauvegarde VSS Windows · sauvegardes externalisées immuables · physique vers virtuel (P2V) · restauration bare-metal · interface Proxmox Backup Server.
 
@@ -39,13 +40,21 @@ Le `proxmox-backup-client` officiel est un outil en ligne de commande pour Linux
 <a id="-new-in-21"></a>
 ## 🆕 Nouveautés de la 2.1
 
-- **Les ensembles de sauvegarde s'exécutent sur des déclencheurs.** L'onglet **Quand l'exécuter** d'un ensemble (auparavant l'onglet Planification) liste ses déclencheurs, et une planification horaire n'est plus qu'un type parmi trois :
-  - **À heures fixes** : les planifications comme avant, plusieurs par ensemble, chacune avec désormais son propre choix de réveiller l'ordinateur, d'attendre le serveur s'il n'est pas joignable à l'heure prévue, et de ne s'exécuter que sur certains réseaux.
+Les grands ajouts :
+
+- **Une fenêtre en mode texte : `salvanza-cli tui`.** L'application dans un terminal, pour les serveurs, les sessions SSH et les ordinateurs sans bureau, console texte de Linux comprise. Les ensembles de sauvegarde de dossiers et de disques entiers (lancer, mettre en pause, arrêter, modifier, ajouter), la restauration (sauvegardes chiffrées comprises), Récupération et Retour arrière, les serveurs PBS et les clés de chiffrement, les partages réseau, les préférences, l'historique, le journal des messages et les fichiers journaux. Voir le [manuel de la fenêtre en mode texte](docs/manual/TUI.md).
+- **Restauration bare-metal sur un disque plus petit.** Une sauvegarde de machine demandait un disque au moins aussi grand que celui sauvegardé. L'ISO de restauration vérifie maintenant si les données tiennent, montre le plan, réduit une partition au passage, garde les identifiants du disque et des partitions, et n'écrit jamais dans la sauvegarde. Windows et Linux, MBR et GPT, UEFI et BIOS. L'assistant de restauration est aussi plus clair, et chaque version a sa propre ISO. Voir [Restaurer sur un disque plus petit](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk).
+- **Les ensembles de sauvegarde s'exécutent sur des déclencheurs, et les portables se sauvegardent la nuit.** L'onglet **Quand l'exécuter** d'un ensemble (auparavant l'onglet Planification) liste ses déclencheurs, et une planification horaire n'est plus qu'un type parmi trois :
+  - **À heures fixes** : les planifications comme avant, plusieurs par ensemble, chacune avec son propre choix de sortir l'ordinateur de veille ou de veille prolongée pour ses exécutions, d'attendre le serveur s'il n'est pas joignable à l'heure prévue, et de ne s'exécuter que sur certains réseaux.
   - **Quand le serveur est joignable** : un portable se sauvegarde dès qu'il est de retour à la maison ou sur le VPN, au plus toutes les N heures, éventuellement seulement sur certains réseaux ou types de connexion, et pas sur les connexions limitées.
   - **Quand quelque chose se passe sur cet ordinateur** : quand il démarre, sort de veille ou de veille prolongée, qu'une session s'ouvre, ou que personne ne l'a utilisé depuis N minutes, au plus toutes les N minutes, heures ou jours.
 
-  Les ensembles enregistrés avec la 2.0 continuent de s'exécuter comme avant. Voir [Quand l'exécuter](docs/manual/GUI.md#63-when-to-run-tab).
-- **Restauration sur un disque plus petit**, une **fenêtre en mode texte** (`salvanza-cli tui`), et plus encore : voir le [CHANGELOG](CHANGELOG.md).
+  L'ordinateur reste éveillé pendant une sauvegarde. Sur batterie, un ensemble peut attendre d'être branché ou d'avoir assez de charge, et annuler une sauvegarde quand la charge devient trop faible. À la fin de la sauvegarde, l'ordinateur peut se remettre en veille, en veille prolongée ou s'éteindre. Sur les portables Windows avec Modern Standby, c'est Windows qui décide d'honorer ou non le réveil, donc il n'est pas garanti (la section « Waking the computer » du manuel donne la méthode fiable). Les ensembles enregistrés avec la 2.0 continuent de s'exécuter comme avant. Voir [Quand l'exécuter](docs/manual/GUI.md#63-when-to-run-tab).
+
+- **Les sauvegardes chiffrées sont compressées**, comme proxmox-backup-client les compresse, elles prennent donc moins de place sur le datastore et moins de temps à envoyer. Chaque serveur qui a une clé a un interrupteur **Compresser les sauvegardes chiffrées** : désactivé, les sauvegardes restent lisibles par la version 2.0 et ses ISO de restauration. Chaque sauvegarde enregistre maintenant la version qui l'a faite, donc une version plus ancienne qui rencontre une forme plus récente indique la version nécessaire au lieu d'échouer en cours de route. La compression peut aussi être désactivée entièrement (le niveau Aucune), pour les données qui ne se compressent pas. Voir [Onglet Chiffrement](docs/manual/GUI.md#encryption-tab).
+- **Les exclusions fonctionnent comme le `.pxarexclude` du client officiel.** Les motifs sont lus dans l'ordre et le dernier qui correspond décide. Un motif qui commence par `!` reprend ce que les précédents avaient exclu, donc `*`, `!**/`, `!*.pst` sauvegarde tous les dossiers et seulement les fichiers `.pst` qu'ils contiennent. `**` traverse n'importe quel nombre de dossiers (`**/cache`), et un motif qui se termine par `/` ne correspond qu'aux dossiers. Une liste sans `!` exclut exactement ce qu'elle excluait avant. Voir [Exclusions](docs/manual/GUI.md#exclusions).
+
+Aussi : les journaux d'exécution sont gardés dans un fichier par semaine au lieu d'un fichier par exécution, le test de connexion indique ce que le compte peut faire sur le datastore, et environ 28 corrections. Voir le [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 Nouveautés de la 2.0
 
