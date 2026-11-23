@@ -38,7 +38,7 @@ The official `proxmox-backup-client` is a command-line tool for Linux. This clie
 
 ## 🆕 New in 2.1
 
-Three big additions:
+The big additions:
 
 - **A text-mode window: `salvanza-cli tui`.** The app in a terminal, for servers, SSH sessions and computers without a desktop, the Linux text console included. Backup Sets for folders and whole disks (run, pause, stop, edit, add), Restore (encrypted backups too), Undelete and Roll back, PBS servers and encryption keys, network shares, preferences, history, the Message Log and log files. See the [text-mode window manual](docs/manual/TUI.md).
 - **Bare-metal restore onto a smaller disk.** A machine backup used to need a disk at least as large as the one backed up. The restore ISO now checks whether the data fits, shows the plan, shrinks a partition on the way, keeps the disk and partition IDs, and never writes to the backup. Windows and Linux, MBR and GPT, UEFI and BIOS. The restore wizard is plainer too, and every release has its own ISO. See [Restoring onto a smaller disk](docs/manual/BMR.md#8-restoring-onto-a-smaller-disk).
@@ -49,7 +49,10 @@ Three big additions:
 
   The computer is kept awake while a backup runs. On battery, a set can wait to be plugged in or for enough charge, and cancel a backup when the charge runs low. When the backup finishes, the computer can go back to sleep, hibernate or shut down. On Windows laptops with Modern Standby, Windows decides whether to honour the wake, so there it is best effort (the manual's "Waking the computer" has the reliable route). Sets saved in 2.0 keep running as they did. See [When to run](docs/manual/GUI.md#63-when-to-run-tab).
 
-Also: compression can be turned off, encrypted backups are compressed as the official client does (with a switch per server to stay readable by 2.0), exclusions take `!` and `**` as the official client's do, run logs are kept one file a week, and about 28 fixes. See the [CHANGELOG](CHANGELOG.md).
+- **Encrypted backups are compressed**, as proxmox-backup-client compresses them, so they take less room on the datastore and less time to send. Each server with a key has a **Compress encrypted backups** switch: off, backups stay readable by version 2.0 and its restore ISOs. Every backup now records the version that made it, so an older version that meets a newer form says which version it needs instead of failing part way. Compression can also be turned off altogether (the level None), for data that does not compress. See [Encryption tab](docs/manual/GUI.md#encryption-tab).
+- **Exclusions work as the official client's `.pxarexclude` does.** The patterns are read in order and the last one that matches decides. A pattern starting with `!` brings back what the ones before it left out, so `*`, `!**/`, `!*.pst` backs up every folder and only the `.pst` files in them. `**` crosses any number of folders (`**/cache`), and a pattern ending in `/` matches folders only. A list without `!` leaves out exactly what it did before. See [Exclusions](docs/manual/GUI.md#exclusions).
+
+Also: run logs are kept one file a week instead of one file per run, Test connection says what the account may do on the datastore, and about 28 fixes. See the [CHANGELOG](CHANGELOG.md).
 
 ## 🆕 New in 2.0
 
