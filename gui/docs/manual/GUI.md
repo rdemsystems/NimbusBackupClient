@@ -1073,7 +1073,7 @@ Click a run for its details:
 | Detail | Notes |
 |---|---|
 | Status, Date / Time | |
-| Mode | What started the run: Automatic (scheduled), Automatic (at startup), When the computer woke, When someone signed in, When the computer was idle, When the server could be reached, Manual (Run Now) or Manual (one-off) |
+| Mode | What started the run: At a set time, When the computer started, When the computer woke, When someone signed in, When the computer was idle, When the server could be reached, Manual (Run Now) or Manual (one-off) |
 | Type | Folders, Full machine, Restore, Undelete or Roll back |
 | Encryption | Encrypted or Unencrypted |
 | Change detection | Legacy, Data (split archive) or Metadata (unchanged files skipped), with "N unchanged files reused without reading, size" |
