@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !unix
 
 package pbscommon
 
@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Archives written off Linux must keep the historic fixed shape.
+// Archives written on Windows must keep the historic fixed shape.
 func TestEntryMetaLegacyShape(t *testing.T) {
 	fi, err := os.Stat(".")
 	if err != nil {
@@ -18,6 +18,6 @@ func TestEntryMetaLegacyShape(t *testing.T) {
 		t.Errorf("got %o %d %d %d %d", mode, uid, gid, secs, nanos)
 	}
 	if posixFidelity {
-		t.Error("posixFidelity must be false off Linux")
+		t.Error("posixFidelity must be false on Windows")
 	}
 }

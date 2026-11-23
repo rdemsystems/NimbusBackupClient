@@ -1,4 +1,4 @@
-//go:build linux
+//go:build unix
 
 package pbscommon
 
@@ -7,9 +7,14 @@ import (
 	"syscall"
 )
 
-// posixFidelity: on Linux the archive records the real permission bits, owner
-// and nanosecond mtime, stores symbolic links, and skips FIFOs, sockets and
-// device nodes. Other platforms keep the historic fixed 0777 / uid 1000 shape.
+// posixFidelity: on Linux, the BSDs, macOS and Solaris the archive records the
+// real permission bits, owner and nanosecond mtime, stores symbolic links, and
+// skips FIFOs, sockets and device nodes. Windows keeps the historic fixed
+// 0777 / uid 1000 shape (pxar_meta_other.go).
+//
+// Nothing here is Linux-only: the mtime comes from FileInfo.ModTime, and
+// syscall.Stat_t has Mode, Uid and Gid on every Unix (Mode is 16 bits on the
+// BSDs and macOS, 32 on Linux and Solaris; the mask and conversion cover both).
 const posixFidelity = true
 
 // entryMeta returns the pxar ENTRY fields for a file of the given kind
