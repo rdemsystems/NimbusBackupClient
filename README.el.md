@@ -131,6 +131,7 @@
 | Debian, Ubuntu, Mint | `sudo apt install ./salvanza_<version>_amd64.deb` |
 | Fedora | `sudo dnf install ./salvanza-<version>-*.rpm` |
 | Arch | Το πακέτο που δημιουργείται από το [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) (`make pkgarch`) |
+| Slackware, Alpine και άλλα Linux χωρίς πακέτο | Το αρχείο της υπηρεσίας, `salvanza-service-<version>-linux-amd64.tar.gz`: η υπηρεσία παρασκηνίου και το `salvanza-cli`, χωρίς την εφαρμογή. Αποσυμπιέστε το και εκτελέστε `sh install.sh` ως root ([πώς](docs/manual/GUI.md#linux-without-a-package-slackware-alpine-and-others)) |
 | Μόνο γραμμή εντολών | Τα αρχεία `salvanza-cli` ανά πλατφόρμα |
 | Ένα μηχάνημα για επαναφορά | Το ISO επαναφοράς bare-metal ([εγχειρίδιο επαναφοράς bare-metal](docs/manual/BMR.md#3-get-the-iso-and-make-the-boot-media)), ή δημιουργήστε το μόνοι σας ([παρακάτω](#-bare-metal-restore-iso)) |
 

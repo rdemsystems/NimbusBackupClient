@@ -129,6 +129,7 @@ Dieselben Handbücher sind in die App eingebaut (**Hilfe**, F1), funktionieren a
 | Debian, Ubuntu, Mint | `sudo apt install ./salvanza_<version>_amd64.deb` |
 | Fedora | `sudo dnf install ./salvanza-<version>-*.rpm` |
 | Arch | Das aus [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) gebaute Paket (`make pkgarch`) |
+| Slackware, Alpine und andere Linux-Systeme ohne Paket | Das Dienstarchiv `salvanza-service-<version>-linux-amd64.tar.gz`: der Hintergrunddienst und `salvanza-cli`, ohne die App. Entpacken und als root `sh install.sh` ausführen ([Anleitung](docs/manual/GUI.md#linux-without-a-package-slackware-alpine-and-others)) |
 | Nur die Kommandozeile | Die `salvanza-cli`-Archive je Plattform |
 | Eine Maschine zum Wiederherstellen | Das ISO für die Bare-Metal-Wiederherstellung ([Handbuch zur Bare-Metal-Wiederherstellung](docs/manual/BMR.md#3-get-the-iso-and-make-the-boot-media)), oder bauen Sie es selbst ([siehe unten](#-bare-metal-restore-iso)) |
 

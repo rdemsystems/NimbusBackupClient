@@ -131,6 +131,7 @@ Aceleași manuale sunt integrate în aplicație (**Ajutor**, F1), deci funcțion
 | Debian, Ubuntu, Mint | `sudo apt install ./salvanza_<version>_amd64.deb` |
 | Fedora | `sudo dnf install ./salvanza-<version>-*.rpm` |
 | Arch | Pachetul construit din [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) (`make pkgarch`) |
+| Slackware, Alpine și alte Linux fără pachet | Arhiva serviciului, `salvanza-service-<version>-linux-amd64.tar.gz`: serviciul de fundal și `salvanza-cli`, fără aplicație. Dezarhivați-o și rulați `sh install.sh` ca root ([cum](docs/manual/GUI.md#linux-without-a-package-slackware-alpine-and-others)) |
 | Doar linia de comandă | Arhivele `salvanza-cli` pentru fiecare platformă |
 | O mașină de restaurat | ISO-ul de restaurare bare-metal ([manualul de restaurare bare-metal](docs/manual/BMR.md#3-get-the-iso-and-make-the-boot-media)) sau construiți-l singur ([mai jos](#-bare-metal-restore-iso)) |
 

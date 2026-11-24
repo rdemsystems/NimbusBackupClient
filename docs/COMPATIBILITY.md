@@ -24,8 +24,8 @@ On Linux the app needs WebKitGTK, and polkit to connect to the service. The
 background service runs under systemd, SysV init, Slackware's rc.d or OpenRC.
 For a computer with no Salvanza package, the service archive
 (`salvanza-service-<version>-linux-<arch>.tar.gz`) installs the service and the
-command line with `install.sh`; see "Without systemd" in the
-[GUI manual](manual/GUI.md#linux-service). Without any service, the app still
+command line with `install.sh`; see [Linux without a package](manual/GUI.md#linux-without-a-package-slackware-alpine-and-others)
+in the GUI manual. Without any service, the app still
 runs its Backup Sets itself while it is open.
 
 The text-mode window (`salvanza-cli tui`) works through the background service,

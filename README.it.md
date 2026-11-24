@@ -129,6 +129,7 @@ Gli stessi manuali sono integrati nell'app (**Guida**, F1), quindi funzionano of
 | Debian, Ubuntu, Mint | `sudo apt install ./salvanza_<version>_amd64.deb` |
 | Fedora | `sudo dnf install ./salvanza-<version>-*.rpm` |
 | Arch | Il pacchetto generato da [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) (`make pkgarch`) |
+| Slackware, Alpine e altri Linux senza pacchetto | L'archivio del servizio, `salvanza-service-<version>-linux-amd64.tar.gz`: il servizio in background e `salvanza-cli`, senza l'app. Estrailo ed esegui `sh install.sh` come root ([come](docs/manual/GUI.md#linux-without-a-package-slackware-alpine-and-others)) |
 | Solo la riga di comando | Gli archivi `salvanza-cli` per piattaforma |
 | Una macchina da ripristinare | La ISO di ripristino bare-metal ([manuale del ripristino bare-metal](docs/manual/BMR.md#3-get-the-iso-and-make-the-boot-media)), oppure compilala tu stesso ([più avanti](#-bare-metal-restore-iso)) |
 

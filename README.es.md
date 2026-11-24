@@ -129,6 +129,7 @@ Los mismos manuales están integrados en la aplicación (**Ayuda**, F1), así qu
 | Debian, Ubuntu, Mint | `sudo apt install ./salvanza_<version>_amd64.deb` |
 | Fedora | `sudo dnf install ./salvanza-<version>-*.rpm` |
 | Arch | El paquete generado a partir de [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) (`make pkgarch`) |
+| Slackware, Alpine y otros Linux sin paquete | El archivo del servicio, `salvanza-service-<version>-linux-amd64.tar.gz`: el servicio en segundo plano y `salvanza-cli`, sin la aplicación. Descomprímalo y ejecute `sh install.sh` como root ([cómo](docs/manual/GUI.md#linux-without-a-package-slackware-alpine-and-others)) |
 | Solo la línea de comandos | Los archivos comprimidos de `salvanza-cli` por plataforma |
 | Una máquina que restaurar | La ISO de restauración bare-metal ([manual de restauración bare-metal](docs/manual/BMR.md#3-get-the-iso-and-make-the-boot-media)), o constrúyala usted mismo ([más abajo](#-bare-metal-restore-iso)) |
 

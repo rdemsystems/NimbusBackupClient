@@ -130,6 +130,7 @@ Salvanza 是 Proxmox Backup Client 的新名称，升级是自动完成的。安
 | Debian、Ubuntu、Mint | `sudo apt install ./salvanza_<version>_amd64.deb` |
 | Fedora | `sudo dnf install ./salvanza-<version>-*.rpm` |
 | Arch | 由 [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) 构建的软件包（`make pkgarch`） |
+| Slackware、Alpine 等没有软件包的 Linux | 服务归档 `salvanza-service-<version>-linux-amd64.tar.gz`：后台服务和 `salvanza-cli`，不含应用。解压后以 root 运行 `sh install.sh`（[方法](docs/manual/GUI.md#linux-without-a-package-slackware-alpine-and-others)） |
 | 只用命令行 | 各平台的 `salvanza-cli` 压缩包 |
 | 需要恢复的机器 | 裸机恢复 ISO（[裸机恢复手册](docs/manual/BMR.md#3-get-the-iso-and-make-the-boot-media)），或自行构建（[见下文](#-bare-metal-restore-iso)） |
 

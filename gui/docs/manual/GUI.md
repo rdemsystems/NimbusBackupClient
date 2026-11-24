@@ -60,7 +60,44 @@ Only one copy of the GUI runs at a time on Windows. Starting it again brings the
 
 * **Packages**: `.deb` (Debian, Ubuntu, Mint), `.rpm` (Fedora) and an Arch package (built from [packaging/arch/PKGBUILD](../../packaging/arch/PKGBUILD) with `make pkgarch`), package name `salvanza`. They install the app in `/usr/lib/salvanza/` (started by `/usr/bin/salvanza-gui`), the command line `salvanza-cli` ([CLI.md](CLI.md)), the manuals, the background service (turned on by a fresh install) and one menu entry, **Salvanza for Proxmox Backup Server**, which starts the app as you. With the service it asks for your password once to connect to it ([section 15](#connecting-to-the-background-service)). For the few things that need the app itself as root (machine backups without the service, restoring into folders only root may write), the app offers **Restart as administrator**, which runs `salvanza-gui-root` (pkexec from the desktop, sudo from a terminal). The `salvanza` package replaces the earlier `proxmoxbackupclient` (and `pbsgo`) package; the service moves the earlier settings, `/var/lib/proxmoxbackupclient`, to `/var/lib/salvanza` the first time it starts, and the app moves each user's `~/.proxmox-backup-guardian` to `~/.salvanza`, keeping a copy of the settings files in a `pre-salvanza-<date>` folder there.
 
-The app needs the WebKitGTK runtime that Wails programs use; most desktop distributions already have it. Folder backups run as a normal user. **Machine** backups need root. Linux has no VSS: a consistent snapshot of a mounted disk needs the `elastio-snap` (or `dattobd`) kernel module loaded and root rights. Installing the module is described next.
+The app needs the WebKitGTK runtime that Wails programs use; most desktop distributions already have it. Folder backups run as a normal user. **Machine** backups need root. Linux has no VSS: a consistent snapshot of a mounted disk needs the `elastio-snap` (or `dattobd`) kernel module loaded and root rights. Installing the module is described below.
+
+#### Linux without a package (Slackware, Alpine and others)
+
+Slackware, Alpine, Gentoo, Void and other Linux systems have no Salvanza package. For them each release has the **service archive**: the background service and the command line, with a script that installs them. It has no app: you set up servers and Backup Sets in the [text-mode window](TUI.md), and the service runs them. Both programs are static, so the same archive works with glibc (Slackware) and musl (Alpine).
+
+1. From the [releases page](https://github.com/salvanza/salvanza_client/releases), download `salvanza-service-<version>-linux-amd64.tar.gz` (or `-linux-arm64.tar.gz` for 64-bit ARM) and check it against `SHA256SUMS.txt`:
+   ```
+   sha256sum salvanza-service-<version>-linux-amd64.tar.gz
+   ```
+2. Unpack it and, as root, run its install script:
+   ```
+   tar xzf salvanza-service-<version>-linux-amd64.tar.gz
+   cd salvanza-service-<version>-linux-amd64
+   sh install.sh
+   ```
+   It puts the service in `/usr/libexec/salvanza/salvanza-svc` and the command line in `/usr/bin/salvanza-cli`, then sets the service up to start with the computer, for the service manager it finds, and starts it:
+
+   | Service manager | Systems | What `install.sh` sets up |
+   |---|---|---|
+   | Slackware's rc.d | Slackware | `/etc/rc.d/rc.salvanza`, started from `/etc/rc.d/rc.local` and stopped from `/etc/rc.d/rc.local_shutdown` |
+   | OpenRC | Alpine, Gentoo | `/etc/init.d/salvanza`, in the default run level |
+   | SysV init | Devuan, Debian with sysvinit | `/etc/init.d/salvanza`, turned on with `update-rc.d`, `chkconfig` or links in `/etc/rcN.d` |
+   | systemd | Most others | `/etc/systemd/system/salvanza.service` (where there is a package, use the package instead) |
+
+   It ends by saying which one it used. On a computer with none of these it installs the command line only and says so.
+3. As root, start the text-mode window and add your PBS server and Backup Sets:
+   ```
+   salvanza-cli tui
+   ```
+
+**Updating.** Download the new archive and run its `sh install.sh` the same way. It stops the service, replaces both programs and starts it again; the settings, Backup Sets and keys in `/var/lib/salvanza/` are kept. There is no package manager to tell you about a new version, so look at the releases page now and then.
+
+**Removing.** Run `sh install.sh remove` as root, from the archive's folder. It stops the service, removes its start-up entries and both programs, and keeps `/var/lib/salvanza/`; delete that folder yourself to remove the settings.
+
+**Controlling the service.** `/etc/rc.d/rc.salvanza start|stop|restart|status` on Slackware, `rc-service salvanza start|stop|status` on OpenRC, `/etc/init.d/salvanza start|stop|status` with SysV init. More in [Linux service](#linux-service).
+
+Devuan does not need the archive: the `.deb` installs the app, the command line and the service, and uses SysV init there.
 
 ### Linux snapshots: installing elastio-snap or dattobd
 
@@ -1173,7 +1210,7 @@ The .deb, .rpm and Arch packages install the service program (`/usr/libexec/salv
 
 `/var/lib/salvanza/` belongs to root alone (folders 0700, files 0600), as `C:\ProgramData\Salvanza\` belongs to SYSTEM and Administrators. A GUI started normally works on the settings through the service once it has connected ([below](#connecting-to-the-background-service)). Earlier versions let the `sudo` (or `wheel`) group read the folder directly; the service undoes that when it starts. Backups you start from the GUI run in the service, which records them in Reports as it does its scheduled runs. An upgrade of the package restarts a running service. Removing the package stops and disables the service and keeps `/var/lib/salvanza/`; delete that folder yourself to remove the settings.
 
-**Without systemd.** On a computer started by SysV init (Devuan, or Debian with sysvinit), Slackware's rc.d or OpenRC (Alpine, Gentoo), the service runs from an init script instead of the unit, and the buttons above do the same with it: **Install and start** writes the script, turns it on at boot and starts it; Start, Stop and Remove use it. The script is `/etc/init.d/salvanza` (SysV and OpenRC; with SysV it is turned on at boot with `update-rc.d`, or `chkconfig`, or links in `/etc/rcN.d`), or `/etc/rc.d/rc.salvanza` on Slackware, started from `/etc/rc.d/rc.local` and stopped from `rc.local_shutdown`. The service writes its process number to `/run/salvanza.pid`, which is how the script and the GUI tell that it runs. The .deb includes the SysV script and uses it on Devuan. For a computer with no Salvanza package (Slackware, Alpine and others), the service archive `salvanza-service-<version>-linux-<arch>.tar.gz` holds the service program and the command line, both static, with `install.sh`: run `sh install.sh` as root to install the service for this computer's service manager and start it, and `sh install.sh remove` to take it out again (the settings in `/var/lib/salvanza/` are kept). Set up servers and Backup Sets with `salvanza-cli tui` ([text-mode window](TUI.md)). Putting the computer to sleep or into hibernate after a backup uses elogind's `loginctl`, else the kernel's `/sys/power/state`. A computer with none of these has no service, and the GUI runs the schedules while it is open.
+**Without systemd.** On a computer started by SysV init (Devuan, or Debian with sysvinit), Slackware's rc.d or OpenRC (Alpine, Gentoo), the service runs from an init script instead of the unit, and the buttons above do the same with it: **Install and start** writes the script, turns it on at boot and starts it; Start, Stop and Remove use it. The script is `/etc/init.d/salvanza` (SysV and OpenRC; with SysV it is turned on at boot with `update-rc.d`, or `chkconfig`, or links in `/etc/rcN.d`), or `/etc/rc.d/rc.salvanza` on Slackware, started from `/etc/rc.d/rc.local` and stopped from `rc.local_shutdown`. The service writes its process number to `/run/salvanza.pid`, which is how the script and the GUI tell that it runs. The .deb includes the SysV script and uses it on Devuan. For a computer with no Salvanza package (Slackware, Alpine and others), the service archive installs the service and the command line ([Linux without a package](#linux-without-a-package-slackware-alpine-and-others)). Putting the computer to sleep or into hibernate after a backup uses elogind's `loginctl`, else the kernel's `/sys/power/state`. A computer with none of these has no service, and the GUI runs the schedules while it is open.
 
 Runs the service makes on its own schedule show in an open GUI window, with Pause, Resume and Stop ([section 8](#8-the-backup-progress-card)); several at once each have their own. The service runs backups side by side as the app does, with the same **Maximum Concurrent Backups** setting ([section 6.7](#67-several-backups-at-once)), which it reads before each run.
 
@@ -1188,7 +1225,7 @@ salvanza-svc.exe -service install|uninstall|start|stop|restart
 Run it as administrator (Windows) or root (Linux). Usually you do not need to:
 
 * **Windows.** The installer (MSI) installs the service as `salvanza-svc` (a branded build's as its own program name, such as `nimbusbackup-svc`), and **Preferences > Advanced > Run as Service** in the GUI installs, starts, stops and removes it under the same name, and so does `-service install`. **Run as Service** also copies your own settings (`%USERPROFILE%\.salvanza`) to `C:\ProgramData\Salvanza` if the service has none yet; `-service install` does not. The services of earlier installs (`ProxmoxBackupClientSVC`, `ProxmoxBackupClient` from test builds before 14 October 2026, and the other brands' services) are stopped and removed by the new service when it starts, so there are never two.
-* **Linux.** The `.deb`, `.rpm` and Arch packages install the systemd unit `salvanza.service`, and a fresh install enables and starts it; an upgrade keeps your choice, so a service you turned off stays off. To turn it on again, use **Run as Service** in the GUI started as administrator: it copies your Backup Sets, servers, keys and history to `/var/lib/salvanza`, where the service reads them, then enables and starts the unit. `systemctl` and `/usr/libexec/salvanza/salvanza-svc -service ...` act on the same unit but do not copy any settings. Without systemd, use the init script (`/etc/init.d/salvanza start|stop|status`, `rc-service salvanza ...` on OpenRC, or `/etc/rc.d/rc.salvanza ...` on Slackware) or the service archive's `install.sh` ([above](#linux-service)).
+* **Linux.** The `.deb`, `.rpm` and Arch packages install the systemd unit `salvanza.service`, and a fresh install enables and starts it; an upgrade keeps your choice, so a service you turned off stays off. To turn it on again, use **Run as Service** in the GUI started as administrator: it copies your Backup Sets, servers, keys and history to `/var/lib/salvanza`, where the service reads them, then enables and starts the unit. `systemctl` and `/usr/libexec/salvanza/salvanza-svc -service ...` act on the same unit but do not copy any settings. Without systemd, use the init script (`/etc/init.d/salvanza start|stop|status`, `rc-service salvanza ...` on OpenRC, or `/etc/rc.d/rc.salvanza ...` on Slackware) or the service archive's `install.sh` ([Linux without a package](#linux-without-a-package-slackware-alpine-and-others)).
 
 The service's settings folder is the service's alone: SYSTEM and Administrators on Windows, root (0700, files 0600) on Linux. The GUI reaches it through the service's local API on `127.0.0.1:18765`, which needs the token in `api-token` in that folder. The GUI gets the token by asking for administrator rights (UAC, or pkexec on Linux) and keeps it in memory. The service makes a new token each time it starts, and every 24 hours.
 

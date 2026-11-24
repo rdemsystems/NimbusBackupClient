@@ -3,13 +3,16 @@
 # standard container, the same way on a developer's machine and in GitHub
 # Actions (.github/workflows/build-and-release.yml, job linux-packages).
 #
-# Usage: packaging/build-linux-package.sh <deb|rpm|arch> [output-dir]
+# Usage: packaging/build-linux-package.sh <deb|rpm|arch|service> [output-dir]
 #
-#   deb   ubuntu:22.04, the oldest base supported (Ubuntu 22.04, Linux Mint
-#         21, Debian 12 and newer): packaging/debian/build-deb.sh
-#   rpm   fedora:44: rpmbuild with packaging/fedora/salvanza.spec
-#   arch  archlinux: make pkgarch (packaging/arch/PKGBUILD); x86_64 only,
-#         there is no official Arch Linux image for arm64
+#   deb      ubuntu:22.04, the oldest base supported (Ubuntu 22.04, Linux Mint
+#            21, Debian 12 and newer): packaging/debian/build-deb.sh
+#   rpm      fedora:44: rpmbuild with packaging/fedora/salvanza.spec
+#   arch     archlinux: make pkgarch (packaging/arch/PKGBUILD); x86_64 only,
+#            there is no official Arch Linux image for arm64
+#   service  golang:<PBS_GO>-trixie: the service archive for Linux with no
+#            Salvanza package (Slackware, Alpine...),
+#            packaging/linux/service/build-service-archive.sh
 #
 # Environment:
 #   PBS_ARCH     amd64 or arm64 (default: the host's). A foreign architecture
@@ -37,8 +40,8 @@ set -eu
 
 KIND=${1:-}
 case "$KIND" in
-    deb | rpm | arch) : ;;
-    *) echo "usage: $0 <deb|rpm|arch> [output-dir]" >&2; exit 2 ;;
+    deb | rpm | arch | service) : ;;
+    *) echo "usage: $0 <deb|rpm|arch|service> [output-dir]" >&2; exit 2 ;;
 esac
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -88,6 +91,7 @@ case "$KIND" in
     deb) IMAGE=ubuntu:22.04 ;;
     rpm) IMAGE=fedora:44 ;;
     arch) IMAGE=archlinux:latest ;;
+    service) IMAGE=golang:$GO_SERIES-trixie ;;
 esac
 
 echo "==> $KIND for $ARCH, version $VERSION, in $IMAGE"
@@ -174,6 +178,18 @@ arch)
     done
     p=$(ls /tmp/pkg/*.pkg.tar.zst)
     check_installer "$(tar -tf "$p")"
+    ;;
+service)
+    export GOFLAGS=-buildvcs=false
+    echo "==> $(go version)"
+    copy_source /build
+    cd /build
+    PBS_VERSION="$VERSION" sh packaging/linux/service/build-service-archive.sh /tmp/pkg "$(go env GOARCH)"
+    p=$(ls /tmp/pkg/*.tar.gz)
+    # The archive must bring both programs, install.sh and the four init scripts.
+    n=$(tar -tzf "$p" | grep -cE '/(salvanza-svc|salvanza-cli|install\.sh|README\.txt|init/salvanza\.(sysv|openrc|service))$' || true)
+    echo "==> files in the service archive: $n of 7"
+    [ "$n" = 7 ]
     ;;
 esac
 cp /tmp/pkg/* /out/

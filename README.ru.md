@@ -131,6 +131,7 @@ Salvanza является новым названием Proxmox Backup Client, �
 | Debian, Ubuntu, Mint | `sudo apt install ./salvanza_<version>_amd64.deb` |
 | Fedora | `sudo dnf install ./salvanza-<version>-*.rpm` |
 | Arch | Пакет, собранный из [packaging/arch/PKGBUILD](packaging/arch/PKGBUILD) (`make pkgarch`) |
+| Slackware, Alpine и другие Linux без пакета | Архив службы `salvanza-service-<version>-linux-amd64.tar.gz`: фоновая служба и `salvanza-cli`, без приложения. Распакуйте его и выполните `sh install.sh` от root ([как](docs/manual/GUI.md#linux-without-a-package-slackware-alpine-and-others)) |
 | Только командная строка | Архивы `salvanza-cli` для каждой платформы |
 | Машина, которую нужно восстановить | ISO для восстановления bare-metal ([руководство по восстановлению bare-metal](docs/manual/BMR.md#3-get-the-iso-and-make-the-boot-media)) или соберите его сами ([ниже](#-bare-metal-restore-iso)) |
 

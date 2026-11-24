@@ -440,6 +440,11 @@ jobs:
           - { kind: rpm,  arch: amd64, runner: ubuntu-24.04 }
           - { kind: rpm,  arch: arm64, runner: ubuntu-24.04-arm }
           - { kind: arch, arch: amd64, runner: ubuntu-24.04 }
+          # The service archive, for Linux with no Salvanza package
+          # (Slackware, Alpine...): the service and the command line, static,
+          # with install.sh.
+          - { kind: service, arch: amd64, runner: ubuntu-24.04 }
+          - { kind: service, arch: arm64, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -630,7 +635,8 @@ jobs:
           cp *.msi ../../release/
           cd ../..
 
-          # Linux packages: .deb and .rpm (amd64, arm64), Arch (x86_64).
+          # Linux packages: .deb and .rpm (amd64, arm64), Arch (x86_64), and
+          # the service archive (amd64, arm64).
           cp artifacts/linux-*/* release/
 
           # The bare-metal restore ISO, as it is: it is not put in an archive
@@ -760,6 +766,7 @@ jobs:
           | `salvanza_<version>_amd64.deb`, `salvanza_<version>_arm64.deb` | Debian 12+, Ubuntu 22.04+, Linux Mint 21+ |
           | `salvanza-<version>-1.fc44.x86_64.rpm`, `...aarch64.rpm` | Fedora |
           | `salvanza-<version>-1-x86_64.pkg.tar.zst` | Arch Linux, Manjaro, EndeavourOS |
+          | `salvanza-service-<version>-linux-amd64.tar.gz`, `...-linux-arm64.tar.gz` | Slackware, Alpine and other Linux with no package: the background service and the command line, no app. Unpack it and run `sh install.sh` as root ([how](https://github.com/${{ github.repository }}/blob/${{ steps.version.outputs.VERSION }}/docs/manual/GUI.md#linux-without-a-package-slackware-alpine-and-others)) |
 
           The command line, `salvanza-cli`, is in every installer and package
           and in the per-platform archives (`salvanza-cli-*` and
