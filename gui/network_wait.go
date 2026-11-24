@@ -186,18 +186,42 @@ func waitForServer(name, addr, why string) (reachable bool, waited time.Duration
 	return waitForServerUpTo(name, addr, why, networkWaitMax)
 }
 
+// networkStepMax is the longest one pause and try can take with the computer
+// awake: a step that took longer was spent asleep or frozen, and only this
+// much of it counts towards the wait (waitForServerUpTo).
+var networkStepMax = networkRetryEvery + networkDialTimeout + 5*time.Second
+
 // waitForServerUpTo is waitForServer with its own longest wait.
+//
+// Only time the computer was awake counts towards max (#142). Found on a
+// Modern Standby laptop 2026-11-23: woken at 16:12, the service was frozen in
+// standby during its first try, which came back at 17:19. Measured by the
+// clock, the 2 minute wait was then long over, and the run was given up after
+// a single try. So each pause and try counts for at most networkStepMax, and
+// the rest of a longer one is noted as time asleep: the run always gets its
+// full set of tries. The waited it returns is the time that counted.
 func waitForServerUpTo(name, addr, why string, max time.Duration) (reachable bool, waited time.Duration, lastErr error) {
-	start := netNow()
+	prev := netNow()
+	var asleep time.Duration
 	logged := false
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), networkDialTimeout)
 		err := dialServer(ctx, addr)
 		cancel()
-		waited = netNow().Round(0).Sub(start.Round(0))
+		now := netNow()
+		step := now.Round(0).Sub(prev.Round(0))
+		prev = now
+		if step < 0 {
+			step = 0 // the clock was set back
+		}
+		if step > networkStepMax {
+			asleep += step - networkStepMax
+			step = networkStepMax
+		}
+		waited += step
 		if err == nil {
 			if logged {
-				writeDebugLog(fmt.Sprintf("[Network] %s reachable after %ds", name, int(waited.Round(time.Second)/time.Second)))
+				writeDebugLog(fmt.Sprintf("[Network] %s reachable after %ds%s", name, int(waited.Round(time.Second)/time.Second), asleepNote(asleep)))
 			}
 			return true, waited, nil
 		}
@@ -206,9 +230,18 @@ func waitForServerUpTo(name, addr, why string, max time.Duration) (reachable boo
 			logged = true
 		}
 		if waited >= max {
-			writeDebugLog(fmt.Sprintf("[Network] %s still not reachable after %s: the run is not started (%v)", name, waited.Round(time.Second), err))
+			writeDebugLog(fmt.Sprintf("[Network] %s still not reachable after %s%s: the run is not started (%v)", name, waited.Round(time.Second), asleepNote(asleep), err))
 			return false, waited, err
 		}
 		netSleep(networkRetryEvery)
 	}
+}
+
+// asleepNote is the part of a [Network] line saying how long the computer was
+// asleep or frozen during the wait, not counted in it; "" when it was not.
+func asleepNote(asleep time.Duration) string {
+	if asleep < time.Second {
+		return ""
+	}
+	return fmt.Sprintf(" (and %s with the computer asleep, not counted)", asleep.Round(time.Second))
 }

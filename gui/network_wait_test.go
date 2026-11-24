@@ -84,6 +84,53 @@ func TestNetworkWaitGivesUpAfterTwoMinutes(t *testing.T) {
 	}
 }
 
+// #142, Sean's laptop 2026-11-23: woken at 16:12, the service was frozen in
+// Modern Standby during its first try, which came back at 17:19. The wait
+// gave up after that one try, the clock saying 67 minutes had gone. Time
+// asleep no longer counts: the run gets its full set of tries.
+func TestNetworkWaitDoesNotCountTimeAsleep(t *testing.T) {
+	woke := time.Date(2026, 11, 23, 16, 12, 19, 0, time.Local)
+	f := newFakeNet(t, woke, 1000)
+	frozen := 67 * time.Minute
+	dial := dialServer
+	dialServer = func(ctx context.Context, addr string) error {
+		if len(f.dials) == 0 {
+			f.now = f.now.Add(frozen)
+		}
+		return dial(ctx, addr)
+	}
+	reachable, waited, err := waitForServer("pbs", "192.168.0.242:8007", "after the computer woke")
+	if reachable || err == nil {
+		t.Fatalf("an unreachable server was reported reachable (err %v)", err)
+	}
+	// The frozen try counts as one long try (networkStepMax), so a try or
+	// two fewer than an unbroken wait, never just the one.
+	full := int(networkWaitMax/networkRetryEvery) + 1
+	if fewest := full - int(networkStepMax/networkRetryEvery); len(f.dials) < fewest || len(f.dials) > full {
+		t.Errorf("%d tries, want %d to %d: the frozen hour was counted", len(f.dials), fewest, full)
+	}
+	if waited < networkWaitMax || waited > networkWaitMax+networkStepMax {
+		t.Errorf("said it waited %s, want about %s", waited, networkWaitMax)
+	}
+
+	// Frozen, then the server answers on a later try: the run goes on.
+	f2 := newFakeNet(t, woke, 3)
+	dial2 := dialServer
+	dialServer = func(ctx context.Context, addr string) error {
+		if len(f2.dials) == 1 {
+			f2.now = f2.now.Add(frozen)
+		}
+		return dial2(ctx, addr)
+	}
+	reachable, waited, err = waitForServer("pbs", "192.168.0.242:8007", "after the computer woke")
+	if !reachable || err != nil {
+		t.Fatalf("the server answered on the fourth try, yet: reachable %v, err %v", reachable, err)
+	}
+	if waited > 3*networkRetryEvery+networkStepMax {
+		t.Errorf("said it waited %s: the frozen hour was counted", waited)
+	}
+}
+
 // #142: a run woken for whose server is still out of reach after the wait is
 // not started, and says why: it used to start anyway and fail at its login
 // with "no such host", which did not say the server was never reached.
