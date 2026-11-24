@@ -1,11 +1,11 @@
-//go:build linux
+//go:build unix
 
 package pbscommon
 
 import (
 	"os"
-	"syscall"
-	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // applyModeOwner sets ownership (when owner is true and the process is root)
@@ -46,20 +46,15 @@ func chownLink(path string, uid, gid uint32) {
 	}
 }
 
-// setLinkTime sets a symlink's own mtime without following it.
+// setLinkTime sets a symlink's own mtime without following it. utimensat
+// with AT_SYMLINK_NOFOLLOW exists on every Unix, but its flag value differs
+// (0x100 on Linux, 0x200 on FreeBSD, ...), so it goes through x/sys.
 func setLinkTime(path string, secs int64, nanos uint32) {
-	ts := [2]syscall.Timespec{
+	ts := []unix.Timespec{
 		{Sec: secs, Nsec: int64(nanos)},
 		{Sec: secs, Nsec: int64(nanos)},
 	}
-	p, err := syscall.BytePtrFromString(path)
-	if err != nil {
-		return
-	}
-	dirfd := -100 // AT_FDCWD
-	const atSymlinkNofollow = 0x100
-	_, _, _ = syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(dirfd), uintptr(unsafe.Pointer(p)),
-		uintptr(unsafe.Pointer(&ts[0])), atSymlinkNofollow, 0, 0)
+	_ = unix.UtimesNanoAt(unix.AT_FDCWD, path, ts, unix.AT_SYMLINK_NOFOLLOW)
 }
 
 // ApplyDirMetadata applies a restored folder's recorded owner and full mode

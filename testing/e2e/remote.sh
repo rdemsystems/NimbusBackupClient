@@ -38,23 +38,6 @@ up() {
 	ok "PBS ready for the $E2E_OS VM; settings in $WORK/remote.env"
 }
 
-# assert_tree_off_linux <src> <restored> <label>: what a backup made off
-# Linux keeps. pxar_meta_other.go (posixFidelity = false) skips symbolic links
-# there, as on Windows, so files and folders must match and no link may come
-# back. If links start being stored on these systems, this fails on purpose:
-# switch the check to assert_tree_identical then.
-assert_tree_off_linux() {
-	local a="$1" b="$2" label="$3"
-	diff -u <(tree_manifest "$a") <(tree_manifest "$b") >&2 \
-		|| die "$label: restored files differ from the source"
-	diff -u <(tree_dirs "$a") <(tree_dirs "$b") >&2 \
-		|| die "$label: restored directory tree differs from the source"
-	local links
-	links="$(tree_links "$b")"
-	[ -z "$links" ] || die "$label: symbolic links came back, which off Linux used to be skipped: $links"
-	ok "$label: $(tree_manifest "$a" | wc -l) file(s) byte-identical, tree layout identical, $(tree_links "$a" | wc -l) symlink(s) skipped as documented off Linux"
-}
-
 verify() {
 	# A new process: take back what `up` found (configure_pbs's exports are gone).
 	# shellcheck disable=SC1091
@@ -66,11 +49,11 @@ verify() {
 
 	section "Snapshots made on $E2E_OS"
 	pbc_restore "host/vm-$E2E_OS" backup.pxar.didx "restore-$E2E_OS"
-	assert_tree_off_linux "$WORK/src" "$WORK/restore-$E2E_OS" "$E2E_OS directory backup"
+	assert_tree_identical "$WORK/src" "$WORK/restore-$E2E_OS" "$E2E_OS directory backup"
 	assert_backup_meta "$WORK/restore-$E2E_OS" "$WORK/src" "vm-$E2E_OS"
 
 	pbc_restore "host/vm-$E2E_OS-enc" backup.pxar.didx "restore-$E2E_OS-enc" --keyfile key.pem
-	assert_tree_off_linux "$WORK/src" "$WORK/restore-$E2E_OS-enc" "$E2E_OS encrypted directory backup"
+	assert_tree_identical "$WORK/src" "$WORK/restore-$E2E_OS-enc" "$E2E_OS encrypted directory backup"
 
 	test_server_side_verify || die "PBS verify failed"
 }

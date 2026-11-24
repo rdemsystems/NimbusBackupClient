@@ -46,7 +46,7 @@ func applyDirectoryTimes(extracted []pbscommon.PXARExtractedFile, cancelled func
 }
 
 // applyDirectoryOwnership restores each folder's recorded owner and full mode
-// bits. Only called when the restore runs as root on Linux (see
+// bits. Only called when the restore runs as root on a Unix system (see
 // restoreOwnershipEnabled). Deepest folders first, failures ignored: the
 // content is already on disk.
 func applyDirectoryOwnership(extracted []pbscommon.PXARExtractedFile) {
@@ -63,9 +63,9 @@ func applyDirectoryOwnership(extracted []pbscommon.PXARExtractedFile) {
 }
 
 // restoreOwnershipEnabled: owners and setuid/setgid/sticky bits are restored
-// only for a root restore on Linux. Archives written on Windows record a fixed
-// 1000:1000 and 0777, so applying them for an ordinary user would only loosen
-// permissions.
+// only for a root restore on Unix (Linux, the BSDs, macOS, Solaris). Archives
+// written on Windows record a fixed 1000:1000 and 0777, so applying them for
+// an ordinary user would only loosen permissions.
 func restoreOwnershipEnabled() bool {
-	return runtime.GOOS == "linux" && os.Geteuid() == 0
+	return runtime.GOOS != "windows" && os.Geteuid() == 0
 }

@@ -1,6 +1,9 @@
-//go:build !linux
+//go:build !unix
 
 package pbscommon
+
+// Windows: owners and Unix modes are not applied; symbolic links are not
+// restored (extractSymlink).
 
 import "os"
 

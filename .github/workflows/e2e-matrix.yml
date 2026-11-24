@@ -10,12 +10,10 @@ name: End-to-end matrix (PBS versions, BSD and Solaris)
 #  * vm: salvanza-cli backup-folder run on FreeBSD, OpenBSD, NetBSD and Solaris
 #    VMs (vmactions, QEMU inside the Linux runner), against a PBS container on
 #    the runner. The runner then restores the snapshot with the official client
-#    and compares the CONTENT (bytes, names, tree). Off Linux the pxar writer
-#    keeps the historic shape (pbscommon/pxar_meta_other.go, posixFidelity =
-#    false): symbolic links are skipped and modes/owners are fixed, so the job
-#    checks files and folders, and that no link comes back (it fails on purpose
-#    if links start being stored: then switch it to the full comparison). The
-#    official client is used here only as the reference pxar reader.
+#    and compares the content: bytes, names, tree and symbolic links. Modes,
+#    owners and times, and who may restore what, are the restore matrix's
+#    (restore-matrix.yml). The official client is used here only as the
+#    reference pxar reader.
 #
 # Both jobs are informational (continue-on-error) until they have been green
 # for a while; then the supported PBS releases can gate releases.

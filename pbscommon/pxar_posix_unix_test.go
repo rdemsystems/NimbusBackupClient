@@ -1,4 +1,4 @@
-//go:build linux
+//go:build unix
 
 package pbscommon
 
@@ -9,7 +9,16 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
+
+// A file's and a link's own owner when the test runs as root, to prove that a
+// root restore puts back an owner other than its own.
+const otherID = 4321
+
+// linkTime is the source links' own mtime.
+var linkTime = time.Unix(1_600_000_000, 987_654_321)
 
 func buildPosixTree(t *testing.T) string {
 	t.Helper()
@@ -30,10 +39,27 @@ func buildPosixTree(t *testing.T) string {
 	must(os.Symlink("plain.txt", filepath.Join(root, "link-rel")))
 	must(os.Symlink("/etc/hostname", filepath.Join(root, "sub", "link-abs")))
 	must(os.Symlink("does-not-exist", filepath.Join(root, "dangling")))
-	must(syscall.Mkfifo(filepath.Join(root, "fifo"), 0o644))
+	must(unix.Mkfifo(filepath.Join(root, "fifo"), 0o644))
 	mt := time.Unix(1_700_000_000, 123_456_789)
 	must(os.Chtimes(filepath.Join(root, "plain.txt"), mt, mt))
+	lt := []unix.Timespec{unix.NsecToTimespec(linkTime.UnixNano()), unix.NsecToTimespec(linkTime.UnixNano())}
+	must(unix.UtimesNanoAt(unix.AT_FDCWD, filepath.Join(root, "link-rel"), lt, unix.AT_SYMLINK_NOFOLLOW))
+	if os.Geteuid() == 0 {
+		must(os.Lchown(filepath.Join(root, "plain.txt"), otherID, otherID))
+		must(os.Lchown(filepath.Join(root, "link-rel"), otherID, otherID))
+	}
 	return root
+}
+
+// lstatT returns what the file system recorded for one path (some keep less
+// than nanosecond precision, and the BSDs give a new file its folder's group).
+func lstatT(t *testing.T, path string) (os.FileInfo, *syscall.Stat_t) {
+	t.Helper()
+	fi, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fi, fi.Sys().(*syscall.Stat_t)
 }
 
 func writePosixArchive(t *testing.T, root string) (pxar, catalog []byte, a *PXARArchive) {
@@ -97,8 +123,10 @@ func TestPosixArchiveRoundTrip(t *testing.T) {
 	for _, e := range entries {
 		byPath[e.Path] = e
 	}
-	if e := byPath["plain.txt"]; e.Mode&0o7777 != 0o640 || e.ModTime != 1_700_000_000 || e.ModNanos != 123_456_789 {
-		t.Errorf("plain.txt: mode %o mtime %d.%d", e.Mode&0o7777, e.ModTime, e.ModNanos)
+	srcPlain, srcPlainSt := lstatT(t, filepath.Join(root, "plain.txt"))
+	if e := byPath["plain.txt"]; e.Mode&0o7777 != 0o640 || e.ModTime != srcPlain.ModTime().Unix() ||
+		e.ModNanos != uint32(srcPlain.ModTime().Nanosecond()) {
+		t.Errorf("plain.txt: mode %o mtime %d.%d, source mtime %v", e.Mode&0o7777, e.ModTime, e.ModNanos, srcPlain.ModTime())
 	}
 	if e := byPath["suid"]; e.Mode&0o7777 != 0o4755 {
 		t.Errorf("suid mode %o", e.Mode&0o7777)
@@ -118,8 +146,8 @@ func TestPosixArchiveRoundTrip(t *testing.T) {
 	if _, ok := byPath["fifo"]; ok {
 		t.Error("fifo was archived")
 	}
-	if e := byPath["plain.txt"]; e.UID != uint32(os.Getuid()) || e.GID != uint32(os.Getgid()) {
-		t.Errorf("owner %d:%d, want %d:%d", e.UID, e.GID, os.Getuid(), os.Getgid())
+	if e := byPath["plain.txt"]; e.UID != srcPlainSt.Uid || e.GID != srcPlainSt.Gid {
+		t.Errorf("owner %d:%d, want %d:%d", e.UID, e.GID, srcPlainSt.Uid, srcPlainSt.Gid)
 	}
 
 	// Extract with ownership/mode restore and compare.
@@ -142,8 +170,23 @@ func TestPosixArchiveRoundTrip(t *testing.T) {
 		t.Errorf("dangling restored as %q, %v", tgt, err)
 	}
 	if fi, _ := os.Stat(filepath.Join(dest, "plain.txt")); fi == nil || fi.Mode().Perm() != 0o640 ||
-		fi.ModTime().UnixNano() != 1_700_000_000_123_456_789 {
+		!fi.ModTime().Equal(srcPlain.ModTime()) {
 		t.Errorf("plain.txt restored wrong: %v", fi)
+	}
+	// A link's own time, and with root the file's and the link's own owner.
+	srcLink, srcLinkSt := lstatT(t, filepath.Join(root, "link-rel"))
+	dstLink, dstLinkSt := lstatT(t, filepath.Join(dest, "link-rel"))
+	if !dstLink.ModTime().Equal(srcLink.ModTime()) {
+		t.Errorf("link-rel time %v, want %v", dstLink.ModTime(), srcLink.ModTime())
+	}
+	if os.Geteuid() == 0 {
+		_, dstPlainSt := lstatT(t, filepath.Join(dest, "plain.txt"))
+		if dstPlainSt.Uid != otherID || dstPlainSt.Gid != otherID {
+			t.Errorf("plain.txt owner %d:%d, want %d:%d", dstPlainSt.Uid, dstPlainSt.Gid, otherID, otherID)
+		}
+		if dstLinkSt.Uid != srcLinkSt.Uid || dstLinkSt.Gid != srcLinkSt.Gid {
+			t.Errorf("link-rel owner %d:%d, want %d:%d", dstLinkSt.Uid, dstLinkSt.Gid, srcLinkSt.Uid, srcLinkSt.Gid)
+		}
 	}
 	if fi, _ := os.Stat(filepath.Join(dest, "suid")); fi == nil || fi.Mode()&os.ModeSetuid == 0 {
 		t.Errorf("setuid lost: %v", fi)
