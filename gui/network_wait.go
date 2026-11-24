@@ -183,6 +183,11 @@ func (a *App) waitForServerAfterWake(job ScheduledJob, trigger string) (time.Dur
 // once is not logged; one that does not is logged once when the wait begins
 // and once when it ends.
 func waitForServer(name, addr, why string) (reachable bool, waited time.Duration, lastErr error) {
+	return waitForServerUpTo(name, addr, why, networkWaitMax)
+}
+
+// waitForServerUpTo is waitForServer with its own longest wait.
+func waitForServerUpTo(name, addr, why string, max time.Duration) (reachable bool, waited time.Duration, lastErr error) {
 	start := netNow()
 	logged := false
 	for {
@@ -200,7 +205,7 @@ func waitForServer(name, addr, why string) (reachable bool, waited time.Duration
 			writeDebugLog(fmt.Sprintf("[Network] waiting for %s %s (%v)", name, why, err))
 			logged = true
 		}
-		if waited >= networkWaitMax {
+		if waited >= max {
 			writeDebugLog(fmt.Sprintf("[Network] %s still not reachable after %s: the run is not started (%v)", name, waited.Round(time.Second), err))
 			return false, waited, err
 		}

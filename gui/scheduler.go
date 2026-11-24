@@ -960,6 +960,9 @@ func (a *App) StartScheduler() {
 		defer ticker.Stop()
 		// Only a running scheduler starts the backup a wake is for.
 		a.refreshWakeTimer()
+		// On a Modern Standby computer, runs whose server is out of reach
+		// while the screen is off wait for it (standby_defer.go).
+		startDisplayWatch()
 		defer dropWakeTimer()
 		// The tick before, so a tick after a long gap tells that the computer
 		// slept, and woke for a set's run (battery_rule.go).
@@ -1190,6 +1193,11 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 		writeDebugLog(fmt.Sprintf("Job %s skipped: a roll back of this set is running", job.Name))
 		return
 	}
+	// On a Modern Standby computer the set's run waits for the screen to come
+	// on (standby_defer.go): not tried again on every tick meanwhile.
+	if trigger != "manual" && waitingForScreen(job.ID) {
+		return
+	}
 	// Check if job is already running
 	runningJobsMutex.Lock()
 	if runningJobs[job.ID] {
@@ -1239,6 +1247,26 @@ func (a *App) executeScheduledJob(job ScheduledJob, trigger string) {
 	// This hold takes over from the one the wake took for this set's run
 	// (wake_hold.go).
 	releaseWakeHold(job.ID)
+
+	// A Modern Standby computer with its screen off has no network unless
+	// networking in standby is on: a run whose server does not answer waits
+	// for the screen to come on rather than failing (standby_defer.go). A run
+	// that has waited standbyWaitMax for the screen goes ahead.
+	var since time.Time
+	var waitedForScreen, expired bool
+	if trigger != "manual" { // Run now leaves the waiting run to the scheduler
+		since, waitedForScreen, expired = takeStandbyWait(job.ID)
+	}
+	if !expired && !a.standbyCheck(job, trigger) {
+		endAwake()
+		return
+	}
+	if waitedForScreen && battery != nil {
+		battery.notes = append(battery.notes, HistoryNote{
+			Key: NoteStandbyWaited, Params: msgParams{"time": clock(since)},
+			Text: fmt.Sprintf("Waited for the screen to come on: from %s the computer was in Modern Standby, with no network for the backup.", clock(since)),
+		})
+	}
 
 	// Just after the computer woke or this program started, the network may
 	// not be back yet: an automatic run waits for its server first, here in

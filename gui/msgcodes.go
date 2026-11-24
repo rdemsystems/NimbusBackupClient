@@ -92,6 +92,8 @@ const (
 	NoteServerWaited MessageKey = "noteServerWaited" // {due}, {start}
 	NoteWokeWaited   MessageKey = "noteWokeWaited"   // {secs}
 	NoteRanLate      MessageKey = "noteRanLate"      // {due}, {start}
+	// A Modern Standby computer's run waited for the screen (standby_defer.go).
+	NoteStandbyWaited MessageKey = "noteStandbyWaited" // {time}
 	// Message Log lines (after the set's name):
 	MsgLogServerWaiting      MessageKey = "msgServerWaiting"      // {until}
 	MsgLogServerGaveUp       MessageKey = "msgServerGaveUp"       // {since}
