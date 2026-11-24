@@ -1,0 +1,237 @@
+name: Restore matrix (permissions, owners, cross-system)
+
+# Backs up a fixture of every file mode, folder mode, symbolic link and a
+# user's home on Linux, macOS, FreeBSD, OpenBSD, NetBSD and Solaris, as root
+# with files of three owners, then restores each archive on every system: as
+# root, as uid 1 (a system account), as uid 1000 (the user who owns the
+# home) and as uid 1512 (the same person on another computer), with our
+# reader, and on Linux with the official pxar tool too. Every entry is
+# compared with what the file system recorded: content, link target, mode,
+# owner and time. testing/restore-matrix/README.md has the expected results.
+#
+# Nightly and on demand only: it boots eight VMs (vmactions, QEMU inside the
+# Linux runner). Each job's summary shows its part of the matrix.
+
+on:
+  schedule:
+    - cron: '47 3 * * *'
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: restore-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.25'
+
+jobs:
+  build:
+    name: Build the test binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache-dependency-path: '**/go.sum'
+      - name: Cross-compile pbscommon's tests
+        run: |
+          mkdir -p dist/restore-matrix
+          cd pbscommon
+          for t in linux/amd64 darwin/arm64 freebsd/amd64 openbsd/amd64 netbsd/amd64 solaris/amd64; do
+            CGO_ENABLED=0 GOOS="${t%/*}" GOARCH="${t#*/}" \
+              go test -c -trimpath -o "../dist/restore-matrix/pbscommon-test-${t%/*}" .
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-binaries
+          path: dist/restore-matrix
+
+  # Each system backs up and restores its own fixture, as root and as the
+  # other users, and writes its archive for the others.
+  produce:
+    name: Back up on ${{ matrix.system }}
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { system: linux,   runner: ubuntu-latest }
+          - { system: darwin,  runner: macos-latest }
+          - { system: freebsd, runner: ubuntu-latest }
+          - { system: openbsd, runner: ubuntu-latest }
+          - { system: netbsd,  runner: ubuntu-latest }
+          - { system: solaris, runner: ubuntu-latest }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: test-binaries
+          path: dist/restore-matrix
+
+      - name: Run on the runner
+        if: matrix.system == 'linux' || matrix.system == 'darwin'
+        run: sudo sh testing/restore-matrix/run.sh produce ${{ matrix.system }}
+
+      # `uses:` cannot take a matrix value, hence one step per system. The VM
+      # runs in the workspace (synced in), and copyback brings the archive
+      # and the report back.
+      - name: Run on FreeBSD
+        if: matrix.system == 'freebsd'
+        uses: vmactions/freebsd-vm@811efaaac0668df8bfb8308c3ec997b5ab50037b # v1.6.0
+        with:
+          release: '15'
+          run: sh testing/restore-matrix/run.sh produce freebsd
+      - name: Run on OpenBSD
+        if: matrix.system == 'openbsd'
+        uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
+        with:
+          release: '8'
+          run: sh testing/restore-matrix/run.sh produce openbsd
+      - name: Run on NetBSD
+        if: matrix.system == 'netbsd'
+        uses: vmactions/netbsd-vm@5957cf330aef2e6ddc63c604364c99ce2e02b91d # v1.5.3
+        with:
+          release: '11'
+          run: sh testing/restore-matrix/run.sh produce netbsd
+      - name: Run on Solaris
+        if: matrix.system == 'solaris'
+        uses: vmactions/solaris-vm@1c166978f5a2c1f87f1c9d4d8dd85ae3d1eff6f7 # v1.4.2
+        with:
+          release: '11.4'
+          run: sh testing/restore-matrix/run.sh produce solaris
+
+      - name: Summary
+        if: always()
+        run: sh testing/restore-matrix/summary.sh "Backed up and restored on ${{ matrix.system }}" restore-matrix-out/report-produce-${{ matrix.system }}.md
+      # Even when a test failed: the other systems still restore what was made.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: archive-${{ matrix.system }}
+          path: restore-matrix-out/archives
+          if-no-files-found: warn
+
+  # Every system restores every archive it got, as root and as the others.
+  restore:
+    name: Restore on ${{ matrix.system }}
+    needs: produce
+    if: ${{ !cancelled() }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { system: linux,   runner: ubuntu-latest }
+          - { system: darwin,  runner: macos-latest }
+          - { system: freebsd, runner: ubuntu-latest }
+          - { system: openbsd, runner: ubuntu-latest }
+          - { system: netbsd,  runner: ubuntu-latest }
+          - { system: solaris, runner: ubuntu-latest }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: test-binaries
+          path: dist/restore-matrix
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: restore-matrix-in
+      - name: Archives to restore
+        run: ls -l restore-matrix-in
+
+      - name: Run on the runner
+        if: matrix.system == 'linux' || matrix.system == 'darwin'
+        run: sudo sh testing/restore-matrix/run.sh restore ${{ matrix.system }}
+      - name: Run on FreeBSD
+        if: matrix.system == 'freebsd'
+        uses: vmactions/freebsd-vm@811efaaac0668df8bfb8308c3ec997b5ab50037b # v1.6.0
+        with:
+          release: '15'
+          run: sh testing/restore-matrix/run.sh restore freebsd
+      - name: Run on OpenBSD
+        if: matrix.system == 'openbsd'
+        uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
+        with:
+          release: '8'
+          run: sh testing/restore-matrix/run.sh restore openbsd
+      - name: Run on NetBSD
+        if: matrix.system == 'netbsd'
+        uses: vmactions/netbsd-vm@5957cf330aef2e6ddc63c604364c99ce2e02b91d # v1.5.3
+        with:
+          release: '11'
+          run: sh testing/restore-matrix/run.sh restore netbsd
+      - name: Run on Solaris
+        if: matrix.system == 'solaris'
+        uses: vmactions/solaris-vm@1c166978f5a2c1f87f1c9d4d8dd85ae3d1eff6f7 # v1.4.2
+        with:
+          release: '11.4'
+          run: sh testing/restore-matrix/run.sh restore solaris
+
+      - name: Summary
+        if: always()
+        run: sh testing/restore-matrix/summary.sh "Restored on ${{ matrix.system }}" restore-matrix-out/report-restore-${{ matrix.system }}.md
+
+  # The official pxar tool restores every archive as root on Linux: our
+  # archives from every system must read the same in the reference reader.
+  official:
+    name: Restore with the official pxar
+    needs: produce
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: test-binaries
+          path: dist/restore-matrix
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: restore-matrix-in
+      - name: Build the official client
+        run: docker build -q -t pbc-official testing/e2e/official-client
+      - name: Extract every archive as root and compare
+        run: |
+          set -u
+          chmod +x dist/restore-matrix/pbscommon-test-linux
+          mkdir -p restore-matrix-out
+          report="$PWD/restore-matrix-out/report-official.md"
+          : >"$report"
+          ver="$(docker run --rm --entrypoint proxmox-backup-client pbc-official version | head -n1)"
+          echo "official client: $ver"
+          rc=0
+          for m in restore-matrix-in/*.json; do
+            sys="$(basename "$m" .json)"
+            echo "::group::$sys"
+            sudo rm -rf "official/$sys"
+            mkdir -p official
+            if docker run --rm -v "$PWD/restore-matrix-in:/in:ro" -v "$PWD/official:/out" \
+                --entrypoint pxar pbc-official extract "/in/$sys.pxar" "/out/$sys"; then
+              sudo env SALVANZA_PERM_EXTRACTED="$PWD/official/$sys" SALVANZA_PERM_MANIFEST="$PWD/$m" \
+                SALVANZA_PERM_TOOL="official pxar" SALVANZA_PERM_REPORT="$report" \
+                ./dist/restore-matrix/pbscommon-test-linux -test.v -test.count=1 -test.run '^TestPermExtracted$' || rc=1
+            else
+              echo "| linux | $sys | official pxar extract failed | ❌ | | | |" >>"$report"
+              rc=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $rc
+      - name: Summary
+        if: always()
+        run: sh testing/restore-matrix/summary.sh "Restored on Linux with the official pxar" restore-matrix-out/report-official.md
