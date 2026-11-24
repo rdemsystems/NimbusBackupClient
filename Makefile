@@ -26,8 +26,6 @@ GUI_BIN := salvanza-gui
 
 # Go build flags (security hardening)
 GO_FLAGS := -trimpath -buildmode=pie
-LDFLAGS := -s -w -X main.version=$(VERSION) \
-	-extldflags '-static-pie -Wl,-z,relro,-z,now'
 
 # Wails desktop frontend tags.
 # The "production" tag links the real webkit/gtk cgo backend instead of the
@@ -79,7 +77,11 @@ install-deps:
 cli:
 	@echo "🔨 Building the command line ($(CLI_BIN))..."
 	@mkdir -p $(BUILD_DIR)
-	cd cli && GOWORK=off go build $(GO_FLAGS) -ldflags="$(LDFLAGS)" \
+	# Pure Go (CGO_ENABLED=0), like the deb, rpm and Arch packages: a static
+	# program that runs on any Linux and any x86-64 CPU. Linked with the C
+	# toolchain of a new build machine (2.0.0 on GitHub's ubuntu-latest), it
+	# would not start on a CPU without AVX ("Illegal instruction").
+	cd cli && GOWORK=off CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" \
 		-o ../$(BUILD_DIR)/$(CLI_BIN)$(shell go env GOEXE) .
 	@echo "✅ Built: $(BUILD_DIR)/$(CLI_BIN)"
 

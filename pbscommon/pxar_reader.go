@@ -1231,7 +1231,7 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 			return nil
 		}
 		fsStart = time.Now()
-		renErr := os.Rename(tmpPath, osp)
+		renErr := replaceFile(tmpPath, osp)
 		pr.fsOverheadNanos.Add(int64(time.Since(fsStart)))
 		if renErr != nil {
 			_ = os.Remove(tmpPath)
@@ -1524,7 +1524,7 @@ func (pr *PXARReader) extractOneFileParallel(e PXARTreeEntry, fullPath string, p
 	}
 
 	fsStart = time.Now()
-	renErr := os.Rename(tmpPath, osp)
+	renErr := replaceFile(tmpPath, osp)
 	pr.fsOverheadNanos.Add(int64(time.Since(fsStart)))
 	if renErr != nil {
 		_ = os.Remove(tmpPath)

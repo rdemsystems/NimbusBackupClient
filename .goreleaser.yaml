@@ -17,6 +17,12 @@ builds:
   - id: salvanza-cli
     main: ./cli
     binary: salvanza-cli
+    # Pure Go, like the deb, rpm and Arch packages. Without this the native
+    # linux/amd64 build links with the build machine's C toolchain and the
+    # 2.0.0 archive refused to start on CPUs without AVX ("CPU ISA level is
+    # lower than required").
+    env:
+      - CGO_ENABLED=0
     goos:
       - linux
       - windows
