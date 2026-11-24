@@ -322,6 +322,10 @@ type PXARExtractedFile struct {
 	// folder times after the files are written (gui/restore_dirtimes.go)
 	// skips it. False, the zero value, means the snapshot's time applies.
 	KeepOwnTime bool
+	// Existed marks a folder that was already there before the restore
+	// created it; FinishDirs leaves the mode and owner of such a folder alone
+	// when it also keeps its own time.
+	Existed bool
 	// SHA256 is the hash of the payload as written, set only for files when
 	// the reader was told to hash (SetHashFiles).
 	SHA256 []byte
@@ -1149,6 +1153,8 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 
 		if e.IsDir {
 			keepTime := folderKeepsOwnTime(e.Path, fullPath, includes, overwrite)
+			_, statErr := os.Lstat(osp)
+			existed := statErr == nil
 			if err := os.MkdirAll(osp, 0755); err != nil {
 				extracted = append(extracted, PXARExtractedFile{
 					Path: fullPath, IsDir: true,
@@ -1159,7 +1165,7 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 			extracted = append(extracted, PXARExtractedFile{
 				Path: fullPath, ArchivePath: e.Path, IsDir: true,
 				Mode: os.FileMode(e.Mode & 0777), ModTime: e.ModTime, ModNanos: e.ModNanos, ModTimeSet: e.ModTimeSet,
-				RawMode: e.Mode, UID: e.UID, GID: e.GID, KeepOwnTime: keepTime,
+				RawMode: e.Mode, UID: e.UID, GID: e.GID, KeepOwnTime: keepTime, Existed: existed,
 			})
 			return nil
 		}
@@ -1408,6 +1414,8 @@ func (pr *PXARReader) ExtractWithRewriterParallel(rewriter PathRewriter, include
 		osp := OSPath(fullPath) // the \\?\ form for a Windows device name (com1, nul.txt)
 		if e.IsDir {
 			keepTime := folderKeepsOwnTime(e.Path, fullPath, includes, overwrite)
+			_, statErr := os.Lstat(osp)
+			existed := statErr == nil
 			if err := os.MkdirAll(osp, 0755); err != nil {
 				appendResult(PXARExtractedFile{
 					Path: fullPath, IsDir: true,
@@ -1418,7 +1426,7 @@ func (pr *PXARReader) ExtractWithRewriterParallel(rewriter PathRewriter, include
 			appendResult(PXARExtractedFile{
 				Path: fullPath, ArchivePath: e.Path, IsDir: true,
 				Mode: os.FileMode(e.Mode & 0777), ModTime: e.ModTime, ModNanos: e.ModNanos, ModTimeSet: e.ModTimeSet,
-				RawMode: e.Mode, UID: e.UID, GID: e.GID, KeepOwnTime: keepTime,
+				RawMode: e.Mode, UID: e.UID, GID: e.GID, KeepOwnTime: keepTime, Existed: existed,
 			})
 			return nil
 		}

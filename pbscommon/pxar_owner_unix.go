@@ -63,3 +63,18 @@ func setLinkTime(path string, secs int64, nanos uint32) {
 func ApplyDirMetadata(path string, mode, uid, gid uint32) {
 	applyModeOwner(path, mode, uid, gid, true)
 }
+
+// ApplyDirMode applies a folder's recorded permission bits for a restore that
+// does not run as root: the bits the archive removed are removed, none is
+// added (so the folder is never more open than at its creation, 0755 under
+// the usual umask), and setuid, setgid and sticky are left out, as for files.
+func ApplyDirMode(path string, mode uint32) {
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.IsDir() {
+		return
+	}
+	cur := fi.Mode().Perm()
+	if want := cur & os.FileMode(mode&0o777); want != cur {
+		_ = os.Chmod(path, want)
+	}
+}

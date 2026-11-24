@@ -1980,9 +1980,9 @@ func finishExtraction(opts RestoreOptions, extracted []pbscommon.PXARExtractedFi
 				})
 			writeBackupLog(fmt.Sprintf("Folder timestamps: applied %d, failed %d", dApplied, dFailed))
 		}
-		if restoreOwnershipEnabled() {
-			applyDirectoryOwnership(extracted)
-		}
+		// Folder modes (and owners for a root restore), now that their
+		// contents are written.
+		pbscommon.FinishDirs(extracted, restoreOwnershipEnabled())
 		if opts.Ctx != nil && opts.Ctx.Err() != nil {
 			return errorSkipCount, nil, fmt.Errorf("restore cancelled while setting folder timestamps")
 		}

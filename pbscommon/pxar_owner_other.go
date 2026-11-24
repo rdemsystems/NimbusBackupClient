@@ -16,3 +16,5 @@ func chownLink(path string, uid, gid uint32) {}
 func setLinkTime(path string, secs int64, nanos uint32) {}
 
 func ApplyDirMetadata(path string, mode, uid, gid uint32) {}
+
+func ApplyDirMode(path string, mode uint32) {}
