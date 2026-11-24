@@ -112,7 +112,7 @@ jobs:
 
       - name: Summary
         if: always()
-        run: sh testing/restore-matrix/summary.sh "Backed up and restored on ${{ matrix.system }}" restore-matrix-out/report-produce-${{ matrix.system }}.md
+        run: sh testing/restore-matrix/summary.sh "Backed up and restored on ${{ matrix.system }}" restore-matrix-out/report-produce-${{ matrix.system }}.md --gaps restore-matrix-out/gaps-produce-${{ matrix.system }}.md
       # Even when a test failed: the other systems still restore what was made.
       - uses: actions/upload-artifact@v4
         if: always()

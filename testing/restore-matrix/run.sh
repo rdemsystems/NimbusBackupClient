@@ -10,7 +10,8 @@
 #   run.sh restore <system>  every archive in restore-matrix-in (one per
 #                            system) restored here, by root and the other users
 #
-# The summary lines go to restore-matrix-out/report-<step>-<system>.md.
+# The summary lines go to restore-matrix-out/report-<step>-<system>.md, the
+# known gaps (TestRestoreGaps) to gaps-<step>-<system>.md.
 set -eu
 
 step="${1:?produce or restore}" sys="${2:?system (GOOS)}"
@@ -21,15 +22,17 @@ out="$PWD/restore-matrix-out"
 mkdir -p "$out"
 chmod +x "$bin"
 SALVANZA_PERM_REPORT="$out/report-$step-$sys.md"
-export SALVANZA_PERM_REPORT
+SALVANZA_GAP_REPORT="$out/gaps-$step-$sys.md"
+export SALVANZA_PERM_REPORT SALVANZA_GAP_REPORT
 : >"$SALVANZA_PERM_REPORT"
+: >"$SALVANZA_GAP_REPORT"
 echo "[restore-matrix] $(uname -a)"
 
 case "$step" in
 produce)
 	SALVANZA_PERM_PRODUCE="$out/archives"
 	export SALVANZA_PERM_PRODUCE
-	tests='^(TestPermMatrix|TestPermProduce|TestFinishDirsSelectedFile|TestApplyDirMode|TestPosixArchiveRoundTrip|TestSelectiveSymlinkRestoreViaBST|TestApplyDirMetadata|TestEntryMetaPosixShape)$'
+	tests='^(TestPermMatrix|TestPermProduce|TestRestoreGaps|TestFinishDirsSelectedFile|TestApplyDirMode|TestPosixArchiveRoundTrip|TestSelectiveSymlinkRestoreViaBST|TestApplyDirMetadata|TestEntryMetaPosixShape)$'
 	;;
 restore)
 	SALVANZA_PERM_ARCHIVES="$PWD/restore-matrix-in"
