@@ -13,15 +13,55 @@ import (
 
 // SleepComputer suspends the computer through systemd (systemctl suspend),
 // which the background service may do as root and the user at the computer
-// usually may too. A wake alarm for the next backup still wakes it.
+// usually may too. A wake alarm for the next backup still wakes it. Without
+// systemd: through elogind (loginctl suspend), as Devuan and Slackware have
+// it, else the kernel's own /sys/power/state.
 func SleepComputer() error {
-	return runSystemctl(exec.Command("systemctl", "suspend"))
+	return suspendTo("suspend", "mem")
 }
 
 // HibernateComputer hibernates the computer through systemd (systemctl
-// hibernate). It needs a swap area large enough to hold the memory.
+// hibernate), elogind or /sys/power/state, as SleepComputer. It needs a swap
+// area large enough to hold the memory.
 func HibernateComputer() error {
-	return runSystemctl(exec.Command("systemctl", "hibernate"))
+	return suspendTo("hibernate", "disk")
+}
+
+// powerStateFile is the kernel's switch for sleep and hibernate. A variable
+// for the tests.
+var powerStateFile = "/sys/power/state"
+
+// systemdBooted reports whether systemd started this computer. A variable
+// for the tests.
+var systemdBooted = func() bool {
+	fi, err := os.Stat("/run/systemd/system")
+	return err == nil && fi.IsDir()
+}
+
+// suspendTo puts the computer to sleep (verb suspend, kernel state mem) or
+// into hibernate (hibernate, disk) with whatever this computer has.
+func suspendTo(verb, kernelState string) error {
+	if systemdBooted() {
+		return runSystemctl(exec.Command(SystemTool("systemctl"), verb))
+	}
+	if loginctl := SystemTool("loginctl"); loginctl != "loginctl" {
+		if err := runSystemctl(exec.Command(loginctl, verb)); err == nil {
+			return nil
+		}
+	}
+	// The kernel's own switch, root only: what is written there must be one
+	// the kernel offers, as /sys/power/state lists them.
+	offered, err := os.ReadFile(powerStateFile)
+	if err != nil {
+		return fmt.Errorf("this computer has neither systemd nor elogind, and %s cannot be read: %v", powerStateFile, err)
+	}
+	if !strings.Contains(" "+strings.TrimSpace(string(offered))+" ", " "+kernelState+" ") {
+		return fmt.Errorf("this computer's kernel does not offer %q (it offers %q)", kernelState, strings.TrimSpace(string(offered)))
+	}
+	if err := os.WriteFile(powerStateFile, []byte(kernelState), 0o644); err != nil {
+		return fmt.Errorf("writing %q to %s: %v", kernelState, powerStateFile, err)
+	}
+	return nil
 }
 
 func runSystemctl(cmd *exec.Cmd) error {

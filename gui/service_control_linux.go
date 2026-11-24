@@ -157,8 +157,13 @@ func showUnit() (systemdUnit, error) {
 // and enabled, running or not (resolveMode: an app started before the
 // service answers must not run the computer's Backup Sets itself).
 func serviceInstalled() bool {
-	if _, err := exec.LookPath("systemctl"); err != nil {
+	switch kind := detectInit(); kind {
+	case initSystemd:
+	case "":
 		return false
+	default:
+		s := newInitService(kind)
+		return s.installed() && s.enabled()
 	}
 	u, err := showUnit()
 	return err == nil && u.LoadState == "loaded" && u.UnitFileState == "enabled"
@@ -171,13 +176,18 @@ func (a *App) GetServiceStatus() ServiceStatus {
 	st := ServiceStatus{Supported: true, Platform: "linux", Name: linuxServiceUnit + ".service",
 		ExpectedExe: expected, IsAdmin: os.Geteuid() == 0, ServiceMode: a.mode == api.ModeService,
 		SettingsDir: sharedConfigDir}
-	if _, err := exec.LookPath("systemctl"); err != nil {
+	kind := detectInit()
+	if kind == "" {
 		st.Supported = false
-		st.Message = "This computer does not use systemd, which the background service needs."
+		st.Message = noInitMessage
 		return st
 	}
 	if _, err := os.Stat(expected); err == nil {
 		st.ExeAvailable = true
+	}
+	if kind != initSystemd {
+		newInitService(kind).status(&st)
+		return st
 	}
 	u, err := showUnit()
 	if err != nil {
@@ -249,7 +259,14 @@ func (a *App) InstallService() (ServiceStatus, error) {
 	}
 	exe := linuxServiceExe()
 	if _, err := os.Stat(exe); err != nil {
-		return a.GetServiceStatus(), fmt.Errorf("the service program %s is not here; it comes with the .deb and .rpm packages", exe)
+		return a.GetServiceStatus(), fmt.Errorf("the service program %s is not here; it comes with the .deb, .rpm and Arch packages and the service archive", exe)
+	}
+	switch kind := detectInit(); kind {
+	case initSystemd:
+	case "":
+		return a.GetServiceStatus(), errNoInit
+	default:
+		return a.installInitService(newInitService(kind), exe)
 	}
 	u, err := showUnit()
 	if err != nil {
@@ -375,6 +392,12 @@ func (a *App) StartBackgroundService() (ServiceStatus, error) {
 // root, or its elevated copy, service_start.go) and waits until systemd
 // reports it running.
 func startInstalledService() error {
+	if kind := detectInit(); kind != initSystemd {
+		if kind == "" {
+			return errNoInit
+		}
+		return newInitService(kind).start()
+	}
 	if _, err := systemctl("start", linuxServiceUnit+".service"); err != nil {
 		return err
 	}
@@ -387,6 +410,12 @@ func (a *App) stopLinuxService() error {
 		if busy, label := a.serviceBusy(); busy {
 			return fmt.Errorf("the service is running %s; stop it when that has finished", label)
 		}
+	}
+	if kind := detectInit(); kind != initSystemd {
+		if kind == "" {
+			return errNoInit
+		}
+		return newInitService(kind).stop()
 	}
 	if _, err := systemctl("stop", linuxServiceUnit+".service"); err != nil {
 		return err
@@ -413,6 +442,14 @@ func (a *App) RemoveService() (ServiceStatus, error) {
 	if err := needAdmin(); err != nil {
 		return a.GetServiceStatus(), err
 	}
+	switch kind := detectInit(); kind {
+	case initSystemd:
+	case "":
+		a.switchToStandalone()
+		return a.GetServiceStatus(), nil
+	default:
+		return a.removeInitService(newInitService(kind))
+	}
 	u, err := showUnit()
 	if err != nil {
 		return a.GetServiceStatus(), err
@@ -435,6 +472,47 @@ func (a *App) RemoveService() (ServiceStatus, error) {
 		_, _ = systemctl("daemon-reload")
 	}
 	LogMessage("Service", "info", "Removed the background service "+linuxServiceUnit, "", "", nil)
+	a.switchToStandalone()
+	return a.GetServiceStatus(), nil
+}
+
+// installInitService installs the background service under a service manager
+// other than systemd (service_init_linux.go): settings to the shared folder,
+// the init script written and turned on at boot, the service started, and
+// this app's backups and schedules handed to it.
+func (a *App) installInitService(s initService, exe string) (ServiceStatus, error) {
+	if err := moveSettingsToShared(); err != nil {
+		return a.GetServiceStatus(), err
+	}
+	if err := s.install(exe); err != nil {
+		return a.GetServiceStatus(), err
+	}
+	LogMessage("Service", "info", "Wrote the service's init script "+s.scriptPath(), "", "", nil)
+	if err := s.start(); err != nil {
+		return a.GetServiceStatus(), fmt.Errorf("installed, but %v", err)
+	}
+	LogMessage("Service", "info", "Installed and started the background service "+s.name+" ("+s.kind+")", "", "", nil)
+	a.switchToServiceMode()
+	return a.GetServiceStatus(), nil
+}
+
+// removeInitService stops the service, turns it off at boot and deletes its
+// init script; this app runs the schedules again. Backup Sets, history and
+// settings stay in the shared folder.
+func (a *App) removeInitService(s initService) (ServiceStatus, error) {
+	if !s.installed() {
+		a.switchToStandalone()
+		return a.GetServiceStatus(), nil
+	}
+	if s.running() {
+		if err := a.stopLinuxService(); err != nil {
+			return a.GetServiceStatus(), err
+		}
+	}
+	if err := s.remove(); err != nil {
+		return a.GetServiceStatus(), err
+	}
+	LogMessage("Service", "info", "Removed the background service "+s.name+" ("+s.kind+")", "", "", nil)
 	a.switchToStandalone()
 	return a.GetServiceStatus(), nil
 }

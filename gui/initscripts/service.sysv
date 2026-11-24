@@ -1,0 +1,100 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          @NAME@
+# Required-Start:    $remote_fs $network $syslog
+# Required-Stop:     $remote_fs $network $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: @TITLE@ service (scheduled backups)
+# Description:       Runs scheduled backups to Proxmox Backup Server.
+### END INIT INFO
+#
+# @TITLE@ background service on a computer without systemd: SysV init
+# (Devuan, /etc/init.d/@NAME@) and Slackware (/etc/rc.d/rc.@NAME@). Written by
+# the app (Preferences > Advanced > Run as Service), the package or the
+# service archive's install.sh. Usage: start | stop | restart | status.
+#
+# The service writes its own pid file (-pidfile), so this works without
+# start-stop-daemon, which Slackware does not have.
+
+EXE="@EXE@"
+NAME="@NAME@"
+PIDFILE="/run/$NAME.pid"
+[ -d /run ] || PIDFILE="/var/run/$NAME.pid"
+
+# pid: the service's process, if it runs (the pid file names a live process
+# that runs this program).
+pid() {
+    [ -r "$PIDFILE" ] || return 1
+    p=$(cat "$PIDFILE" 2>/dev/null)
+    case "$p" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$p" 2>/dev/null || return 1
+    exe=$(readlink "/proc/$p/exe" 2>/dev/null)
+    case "$exe" in "$EXE"|"$EXE (deleted)") echo "$p"; return 0 ;; esac
+    return 1
+}
+
+start() {
+    if p=$(pid); then
+        echo "$NAME is running (pid $p)"
+        return 0
+    fi
+    if [ ! -x "$EXE" ]; then
+        echo "$NAME: $EXE is missing" >&2
+        return 1
+    fi
+    echo "Starting $NAME"
+    rm -f "$PIDFILE"
+    if command -v setsid >/dev/null 2>&1; then
+        setsid "$EXE" -pidfile "$PIDFILE" </dev/null >/dev/null 2>&1 &
+    else
+        nohup "$EXE" -pidfile "$PIDFILE" </dev/null >/dev/null 2>&1 &
+    fi
+    i=0
+    while [ $i -lt 30 ]; do
+        pid >/dev/null && return 0
+        sleep 1
+        i=$((i + 1))
+    done
+    echo "$NAME did not start (see /var/log/$NAME)" >&2
+    return 1
+}
+
+stop() {
+    if ! p=$(pid); then
+        echo "$NAME is not running"
+        rm -f "$PIDFILE"
+        return 0
+    fi
+    echo "Stopping $NAME"
+    kill -TERM "$p" 2>/dev/null
+    # A backup that is running is given up to 90 seconds to stop cleanly.
+    i=0
+    while [ $i -lt 90 ] && kill -0 "$p" 2>/dev/null; do
+        sleep 1
+        i=$((i + 1))
+    done
+    if kill -0 "$p" 2>/dev/null; then
+        kill -KILL "$p" 2>/dev/null
+    fi
+    rm -f "$PIDFILE"
+    return 0
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    status)
+        if p=$(pid); then
+            echo "$NAME is running (pid $p)"
+            exit 0
+        fi
+        echo "$NAME is stopped"
+        exit 3
+        ;;
+    *)
+        echo "Usage: $0 start|stop|restart|status" >&2
+        exit 2
+        ;;
+esac

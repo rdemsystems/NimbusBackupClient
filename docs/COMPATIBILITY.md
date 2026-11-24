@@ -15,12 +15,18 @@ system.
 | Debian, Ubuntu, Linux Mint (amd64, arm64) | .deb | Tested |
 | Fedora (x86_64, aarch64) | .rpm | Tested |
 | Arch Linux (x86_64) | .pkg.tar.zst | Tested |
+| Devuan 5 (sysvinit, amd64) | .deb | The service tested; the app expected to work |
+| Alpine 3.23 (OpenRC), Slackware 15 (x86_64) | Service archive | The service and the command line tested; no app package |
 | Windows 7, 8 and 8.1, Server 2008 and 2012, XP and 2003 | | Not supported: Go, which the client is built with, no longer runs there, and the app needs WebView2 |
 | Windows on ARM | | No build |
 
 On Linux the app needs WebKitGTK, and polkit to connect to the service. The
-background service is a systemd unit: without systemd (Slackware, Alpine...) the
-app still runs its Backup Sets itself while it is open.
+background service runs under systemd, SysV init, Slackware's rc.d or OpenRC.
+For a computer with no Salvanza package, the service archive
+(`salvanza-service-<version>-linux-<arch>.tar.gz`) installs the service and the
+command line with `install.sh`; see "Without systemd" in the
+[GUI manual](manual/GUI.md#linux-service). Without any service, the app still
+runs its Backup Sets itself while it is open.
 
 The text-mode window (`salvanza-cli tui`) works through the background service,
 so it runs where the service does: on the Windows and Linux systems above, over

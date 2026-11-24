@@ -19,6 +19,7 @@
 #   /usr/lib/salvanza/salvanza-gui
 #   /usr/libexec/salvanza/salvanza-svc  the background service
 #   /usr/lib/systemd/system/salvanza.service  (enabled on a fresh install)
+#   /etc/init.d/salvanza           the same service without systemd (Devuan)
 #   /usr/share/applications/salvanza.desktop
 #   /usr/share/icons/hicolor/256x256/apps/salvanza.png
 #   /usr/share/doc/salvanza/{copyright,README.md,CHANGELOG.md.gz,manual/}
@@ -101,6 +102,15 @@ install -m 0755 "$LIN/salvanza-gui-root" "$STAGE/usr/bin/salvanza-gui-root"
 install -m 0644 "$LIN/salvanza.desktop" "$STAGE/usr/share/applications/"
 mkdir -p "$STAGE/usr/lib/systemd/system"
 install -m 0644 "$LIN/salvanza.service" "$STAGE/usr/lib/systemd/system/"
+# The init script for a computer without systemd (Devuan, sysvinit): the one
+# the app writes (gui/initscripts/service.sysv). On a systemd computer the
+# unit above is used and systemd leaves the script alone.
+mkdir -p "$STAGE/etc/init.d"
+sed -e "s|@NAME@|$PKG|g" -e "s|@EXE@|/usr/libexec/$PKG/salvanza-svc|g" \
+    -e "s|@TITLE@|Salvanza for Proxmox Backup Server|g" \
+    "$ROOT/gui/initscripts/service.sysv" > "$STAGE/etc/init.d/$PKG"
+chmod 0755 "$STAGE/etc/init.d/$PKG"
+echo "/etc/init.d/$PKG" > "$STAGE/DEBIAN/conffiles"
 # gui/Icon.png is the 256 px icon (gui/build/appicon.png is the same at 1024 px).
 install -m 0644 "$ROOT/gui/Icon.png" "$STAGE/usr/share/icons/hicolor/256x256/apps/$PKG.png"
 install -m 0644 "$ROOT/README.md" "$DOC/README.md"
@@ -263,6 +273,20 @@ if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
     else
         systemctl try-restart salvanza.service || true
     fi
+elif [ "$1" = configure ] && [ -x /etc/init.d/salvanza ]; then
+    # No systemd (Devuan, sysvinit): the init script, started at boot.
+    if [ -e "$fresh" ]; then
+        if earlier_install && [ ! -d /var/lib/salvanza ]; then
+            echo "salvanza: an earlier install is here; the service stays off (Preferences > Advanced > Run as Service)"
+        else
+            if command -v update-rc.d >/dev/null 2>&1; then
+                update-rc.d salvanza defaults >/dev/null || true
+            fi
+            /etc/init.d/salvanza start || true
+        fi
+    elif /etc/init.d/salvanza status >/dev/null 2>&1; then
+        /etc/init.d/salvanza restart || true
+    fi
 fi
 rm -f "$fresh"
 exit 0
@@ -272,6 +296,8 @@ cat > "$STAGE/DEBIAN/prerm" <<'EOF'
 set -e
 if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
     systemctl disable --now salvanza.service >/dev/null 2>&1 || true
+elif [ "$1" = remove ] && [ -x /etc/init.d/salvanza ]; then
+    /etc/init.d/salvanza stop >/dev/null 2>&1 || true
 fi
 exit 0
 EOF
@@ -280,6 +306,9 @@ cat > "$STAGE/DEBIAN/postrm" <<'EOF'
 set -e
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
+fi
+if [ "$1" = purge ] && command -v update-rc.d >/dev/null 2>&1; then
+    update-rc.d salvanza remove >/dev/null || true
 fi
 exit 0
 EOF

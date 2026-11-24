@@ -1,0 +1,18 @@
+#!/sbin/openrc-run
+# @TITLE@ background service on a computer with OpenRC (Alpine, Gentoo,
+# Devuan with OpenRC). Written by the app (Preferences > Advanced > Run as
+# Service) or the service archive's install.sh.
+
+name="@TITLE@ service"
+description="Runs scheduled backups to Proxmox Backup Server"
+command="@EXE@"
+command_background=true
+pidfile="/run/@NAME@.pid"
+# A backup that is running is given up to 90 seconds to stop cleanly.
+retry="TERM/90/KILL/5"
+
+depend() {
+    need net
+    use dns logger
+    after firewall
+}

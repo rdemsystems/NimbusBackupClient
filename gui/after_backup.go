@@ -213,7 +213,7 @@ func (p *pendingAfterBackup) waitAwake(d, poll time.Duration, slept *bool) bool 
 var keepAwakeForAfterBackup = func(set, action string) func() {
 	end, err := preventSleep(product().Title + ": waiting to " + afterBackupInfinitive(action) + " after a backup")
 	if err != nil {
-		writeDebugLog(fmt.Sprintf("[After backup] %s: %v: Windows may put the computer to sleep before it %s", set, err, afterBackupVerb(action)))
+		writeDebugLog(fmt.Sprintf("[After backup] %s: %v: the computer may go to sleep on its own before it %s", set, err, afterBackupVerb(action)))
 		return func() {}
 	}
 	return end

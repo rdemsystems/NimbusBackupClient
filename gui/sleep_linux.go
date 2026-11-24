@@ -5,16 +5,26 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"time"
+
+	"pbscommon"
 )
 
 // systemd-logind keeps a block lock for as long as the program it starts runs.
 // That program is cat on a pipe we hold: closing the pipe ends it, and so does
-// the service dying, so a lock cannot outlive the service.
+// the service dying, so a lock cannot outlive the service. Without systemd,
+// elogind (Devuan, Slackware) has the same tool as elogind-inhibit.
 func platformAcquireSleepLock(reason string) (func(), error) {
-	inhibit, err := exec.LookPath("systemd-inhibit")
-	if err != nil {
-		return nil, fmt.Errorf("systemd-inhibit is not installed")
+	inhibit := ""
+	for _, name := range []string{"systemd-inhibit", "elogind-inhibit"} {
+		if p := pbscommon.SystemTool(name); p != name {
+			inhibit = p
+			break
+		}
+	}
+	if inhibit == "" {
+		return nil, fmt.Errorf("neither systemd-inhibit nor elogind-inhibit is installed")
 	}
 	cat, err := exec.LookPath("cat")
 	if err != nil {
@@ -25,8 +35,9 @@ func platformAcquireSleepLock(reason string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	tool := filepath.Base(inhibit)
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("systemd-inhibit: %w", err)
+		return nil, fmt.Errorf("%s: %w", tool, err)
 	}
 	done := make(chan struct{})
 	go func() {
@@ -36,7 +47,7 @@ func platformAcquireSleepLock(reason string) (func(), error) {
 	// If logind refuses (no systemd, no permission) systemd-inhibit exits at once.
 	select {
 	case <-done:
-		return nil, fmt.Errorf("systemd-inhibit exited: logind did not grant the lock")
+		return nil, fmt.Errorf("%s exited: logind did not grant the lock", tool)
 	case <-time.After(300 * time.Millisecond):
 	}
 	return func() {

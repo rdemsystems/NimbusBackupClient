@@ -30,7 +30,16 @@ func main() {
 
 	// Command-line flags for service control
 	svcFlag := flag.String("service", "", "Control the system service: install, uninstall, start, stop, restart")
+	// -pidfile: started by an init script on a computer without systemd
+	// (SysV, Slackware), which finds the service by the process it names.
+	pidFile := flag.String("pidfile", "", "Write the service's process ID to this file (init scripts without systemd)")
 	flag.Parse()
+	if *pidFile != "" {
+		if err := writePIDFile(*pidFile); err != nil {
+			log.Fatal(err)
+		}
+		defer os.Remove(*pidFile)
+	}
 
 	// Service configuration. The name matches what the installers and
 	// Preferences > Run as Service use (on Windows the service program's own

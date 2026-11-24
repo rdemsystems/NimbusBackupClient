@@ -1,7 +1,7 @@
 # Salvanza for Proxmox Backup Server - build system
 # Builds the command line (salvanza-cli), the app (salvanza-gui) and the service (salvanza-svc)
 
-.PHONY: all cli gui deb pkgarch pkgfedora stage-source msi clonezilla clean test help install-deps
+.PHONY: all cli gui deb pkgarch pkgfedora service-archive stage-source msi clonezilla clean test help install-deps
 
 # Version from git tag (exact match) or git short SHA
 # Falls back to wails.json if not in a git repo
@@ -59,6 +59,7 @@ help:
 	@echo "  deb          - Build the Debian package (salvanza, Linux)"
 	@echo "  pkgarch      - Build the Arch package (salvanza, on Arch)"
 	@echo "  pkgfedora    - Build the Fedora RPM (docker fedora:44)"
+	@echo "  service-archive - Service + command line for Linux without a package (Slackware, Alpine)"
 	@echo "  stage-source - Stage the source tarball used by pkgarch"
 	@echo "  msi          - Build the Windows MSI installers on Linux (docker + wine)"
 	@echo "  clonezilla   - Download + patch the Clonezilla live ISO (not in 'all')"
@@ -120,6 +121,13 @@ pkgarch:
 	 sed -i "s/^pkgver=.*/pkgver=$${VERSION}/" packaging/arch/PKGBUILD && \
 	 PBS_VERSION=$${VERSION} sh packaging/stage-source.sh packaging/arch && \
 	 cd packaging/arch && makepkg -f -d
+
+# The service and the command line for Linux computers without a Salvanza
+# package (Slackware, Alpine...): salvanza-service-<version>-linux-<arch>.tar.gz
+# with install.sh and the init scripts. SERVICE_ARCH=arm64 for 64-bit ARM.
+SERVICE_ARCH ?= amd64
+service-archive:
+	@sh packaging/linux/service/build-service-archive.sh $(BUILD_DIR) $(SERVICE_ARCH)
 
 # Source tarball the distro packages are built from (uncommitted changes incl.)
 stage-source:
