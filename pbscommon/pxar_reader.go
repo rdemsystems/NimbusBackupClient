@@ -549,6 +549,12 @@ func (pr *PXARReader) walkRange(cb walkCallback, startOffset, endOffset int64, i
 	// and this never triggers.
 	spanMode := rootSeen && startOffset > 0
 	topLevelNames := 0
+	// A whole-archive walk must end with the root folder's GOODBYE. Without
+	// it the archive was cut short (a backup that stopped part way, such as
+	// one made by 1.1.3 that met a link to a folder), and ending quietly would
+	// report a restore of part of the backup as complete.
+	wholeArchive := startOffset == 0 && endOffset == pr.size && !rootSeen
+	rootClosed := false
 
 walkLoop:
 	for {
@@ -573,7 +579,7 @@ walkLoop:
 		// without a recover(), so an unbounded value here can crash or hang the GUI.
 		remaining := uint64(pr.size - pr.offset)
 		if header.Size > remaining {
-			return fmt.Errorf("header size %d exceeds %d remaining bytes at offset %d", header.Size, remaining, pr.offset)
+			return fmt.Errorf("%w (an entry of %d bytes at offset %d, %d bytes left)", ErrArchiveIncomplete, header.Size, pr.offset, remaining)
 		}
 		contentSize := int64(header.Size) - 16
 
@@ -757,6 +763,7 @@ walkLoop:
 				pathStack = pathStack[:len(pathStack)-1]
 			} else {
 				currentPath = ""
+				rootClosed = true
 			}
 
 		default:
@@ -766,8 +773,15 @@ walkLoop:
 			pr.skip(int64(header.Size))
 		}
 	}
+	if wholeArchive && rootSeen && !rootClosed {
+		return fmt.Errorf("%w (it stops at offset %d of %d, before its last folder is closed)", ErrArchiveIncomplete, pr.offset, pr.size)
+	}
 	return nil
 }
+
+// ErrArchiveIncomplete: the archive ends before it should, so the backup is
+// incomplete or damaged. Everything read before that point is still valid.
+var ErrArchiveIncomplete = errors.New("the archive ends early, so this backup is incomplete or damaged")
 
 // errBSTNotFound is returned internally when the GOODBYE binary-search-tree
 // lookup can't find a requested child — either it genuinely doesn't exist,

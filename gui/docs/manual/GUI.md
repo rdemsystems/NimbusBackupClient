@@ -1300,4 +1300,6 @@ On Linux the official client keeps POSIX ACLs, extended attributes and file capa
 
 **Hard links.** When a file has two names (a hard link), only one name is restored.
 
+**A restore says "the archive ends early, so this backup is incomplete or damaged".** The backup stopped part way when it was made, so the files after that point were never stored. The files before it are restored. A known cause: the Linux client of version 1.1.3 followed a symbolic link to a folder as if it were a file, and the backup ended there without an error; the official client cannot restore such a backup either. Back that folder up again with a current version. Later versions store such a link as a link.
+
 **A restore of many small files is slow (Windows).** Restoring many small files takes longer than a few large ones of the same total size. Most of the time per file goes on Windows Defender (or another virus scanner) checking each new file, and then on putting back its permissions; writing several files at once was measured and gave no gain. Restoring without **Restore permissions/ACLs**, when you do not need them, saves part of it.
