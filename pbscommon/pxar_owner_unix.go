@@ -4,6 +4,7 @@ package pbscommon
 
 import (
 	"os"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -67,14 +68,54 @@ func ApplyDirMetadata(path string, mode, uid, gid uint32) {
 // ApplyDirMode applies a folder's recorded permission bits for a restore that
 // does not run as root: the bits the archive removed are removed, none is
 // added (so the folder is never more open than at its creation, 0755 under
-// the usual umask), and setuid, setgid and sticky are left out, as for files.
+// the usual umask), and setuid, setgid and sticky are not applied, as for
+// files (the folder keeps the ones it has).
 func ApplyDirMode(path string, mode uint32) {
+	applyDirMode(path, mode, 0, false)
+}
+
+// applyDirMode is ApplyDirMode for a folder the restore opened
+// (openDirForRestore) when unlocked is true: the recorded bits are then taken
+// from prev, its mode before the restore, not from its opened mode.
+func applyDirMode(path string, mode uint32, prev os.FileMode, unlocked bool) {
 	fi, err := os.Lstat(path)
 	if err != nil || !fi.IsDir() {
 		return
 	}
 	cur := fi.Mode().Perm()
-	if want := cur & os.FileMode(mode&0o777); want != cur {
-		_ = os.Chmod(path, want)
+	base := cur
+	if unlocked {
+		base = prev.Perm()
 	}
+	if want := base & os.FileMode(mode&0o777); want != cur {
+		_ = os.Chmod(path, want|fi.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky))
+	}
+}
+
+// dirUnlockApplies: only a restore that does not run as root can be stopped
+// by a folder's permissions.
+func dirUnlockApplies() bool { return os.Geteuid() != 0 }
+
+// openDirForRestore gives the owner write and search permission (u+wx) on a
+// folder the restoring user owns and lacks them on, and returns its mode
+// before, special bits included. It does nothing to a folder of another
+// account, which the user could not change anyway.
+func openDirForRestore(dir string) (os.FileMode, bool) {
+	euid := os.Geteuid()
+	if euid == 0 {
+		return 0, false
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil || !fi.IsDir() || fi.Mode().Perm()&0o300 == 0o300 {
+		return 0, false
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || uint64(st.Uid) != uint64(euid) {
+		return 0, false
+	}
+	prev := fi.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+	if os.Chmod(dir, prev|0o300) != nil {
+		return 0, false
+	}
+	return prev, true
 }

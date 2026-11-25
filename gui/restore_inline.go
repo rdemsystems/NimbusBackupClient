@@ -1519,6 +1519,16 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	displayNames, metaByArchive := resolveArchiveDisplayNames(opts, archiveNames, nil)
 
 	var extracted []pbscommon.PXARExtractedFile
+	// The folders an extraction had to open to write into (a read-only
+	// folder of an earlier restore) get their recorded mode back in
+	// finishExtraction (FinishDirs). If the restore stops before it, they
+	// get their earlier mode back here.
+	dirsFinished := false
+	defer func() {
+		if !dirsFinished {
+			pbscommon.RelockDirs(extracted)
+		}
+	}()
 	type aclJob struct {
 		name  string
 		meta  *BackupFileMeta
@@ -1791,6 +1801,7 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		extracted = append(extracted, extractedHere...)
 	}
 
+	dirsFinished = true
 	errorSkipCount, verifyFailures, err := finishExtraction(opts, extracted, extractEnd, progress, stage)
 	if err != nil {
 		return err

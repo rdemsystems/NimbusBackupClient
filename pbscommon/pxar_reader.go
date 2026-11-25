@@ -32,6 +32,10 @@ type PXARReader struct {
 	size   int64
 	offset int64
 
+	// unlocks: the folders an extraction opened to write into them
+	// (restore_unlock.go).
+	unlocks dirUnlocks
+
 	// Split (pxar format version 2) archives: ra/size are the metadata
 	// stream (.mpxar) and payloadRA/payloadSize the payload stream (.ppxar)
 	// that each file's PXAR_PAYLOAD_REF points into. Both nil/zero for a
@@ -163,7 +167,7 @@ func (pr *PXARReader) extractSymlink(e PXARTreeEntry, fullPath string, overwrite
 	if runtime.GOOS == "windows" {
 		return skip("symbolic link not restored on Windows", true)
 	}
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+	if err := pr.writableDir(filepath.Dir(fullPath)); err != nil {
 		return skip(fmt.Sprintf("mkdir parent: %v", err), false)
 	}
 	if fi, err := os.Lstat(fullPath); err == nil {
@@ -326,6 +330,12 @@ type PXARExtractedFile struct {
 	// created it; FinishDirs leaves the mode and owner of such a folder alone
 	// when it also keeps its own time.
 	Existed bool
+	// Unlocked marks a folder that was already there and that a restore not
+	// run as root had to open (u+wx) to write into; PrevMode is its mode
+	// before. FinishDirs applies the recorded mode from PrevMode, so the
+	// folder is never left more open than it was.
+	Unlocked bool
+	PrevMode os.FileMode
 	// SHA256 is the hash of the payload as written, set only for files when
 	// the reader was told to hash (SetHashFiles).
 	SHA256 []byte
@@ -1104,6 +1114,12 @@ func (pr *PXARReader) ExtractFiltered(destDir string, includePaths []string, ove
 // All filesystem decisions (mkdir parent, overwrite, mode bits, mtime) are
 // centralized here so each restore mode only has to express its path policy.
 func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []string, overwrite bool) ([]PXARExtractedFile, error) {
+	res, err := pr.extractWithRewriter(rewriter, includePaths, overwrite)
+	pr.settleUnlocks(res, err)
+	return res, err
+}
+
+func (pr *PXARReader) extractWithRewriter(rewriter PathRewriter, includePaths []string, overwrite bool) ([]PXARExtractedFile, error) {
 	if rewriter == nil {
 		return nil, fmt.Errorf("path rewriter required")
 	}
@@ -1155,7 +1171,7 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 			keepTime := folderKeepsOwnTime(e.Path, fullPath, includes, overwrite)
 			_, statErr := os.Lstat(osp)
 			existed := statErr == nil
-			if err := os.MkdirAll(osp, 0755); err != nil {
+			if err := pr.writableDir(osp); err != nil {
 				extracted = append(extracted, PXARExtractedFile{
 					Path: fullPath, IsDir: true,
 					Skipped: true, SkipReason: fmt.Sprintf("mkdir: %v", err),
@@ -1172,7 +1188,7 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 
 		// File: ensure parent dir exists (a parent might not have been
 		// emitted yet if the user selected a deep path directly).
-		if err := os.MkdirAll(filepath.Dir(osp), 0755); err != nil {
+		if err := pr.writableDir(filepath.Dir(osp)); err != nil {
 			extracted = append(extracted, PXARExtractedFile{
 				Path: fullPath, Size: e.Size,
 				Skipped: true, SkipReason: fmt.Sprintf("mkdir parent: %v", err),
@@ -1337,6 +1353,12 @@ func (pr *PXARReader) ExtractWithRewriter(rewriter PathRewriter, includePaths []
 // directory must exist before a worker can write into it) — only the slow
 // per-file work is handed to workers. workers <= 0 defaults to 4.
 func (pr *PXARReader) ExtractWithRewriterParallel(rewriter PathRewriter, includePaths []string, overwrite bool, workers int) ([]PXARExtractedFile, error) {
+	res, err := pr.extractWithRewriterParallel(rewriter, includePaths, overwrite, workers)
+	pr.settleUnlocks(res, err)
+	return res, err
+}
+
+func (pr *PXARReader) extractWithRewriterParallel(rewriter PathRewriter, includePaths []string, overwrite bool, workers int) ([]PXARExtractedFile, error) {
 	if rewriter == nil {
 		return nil, fmt.Errorf("path rewriter required")
 	}
@@ -1416,7 +1438,7 @@ func (pr *PXARReader) ExtractWithRewriterParallel(rewriter PathRewriter, include
 			keepTime := folderKeepsOwnTime(e.Path, fullPath, includes, overwrite)
 			_, statErr := os.Lstat(osp)
 			existed := statErr == nil
-			if err := os.MkdirAll(osp, 0755); err != nil {
+			if err := pr.writableDir(osp); err != nil {
 				appendResult(PXARExtractedFile{
 					Path: fullPath, IsDir: true,
 					Skipped: true, SkipReason: fmt.Sprintf("mkdir: %v", err),
@@ -1430,7 +1452,7 @@ func (pr *PXARReader) ExtractWithRewriterParallel(rewriter PathRewriter, include
 			})
 			return nil
 		}
-		if err := os.MkdirAll(filepath.Dir(osp), 0755); err != nil {
+		if err := pr.writableDir(filepath.Dir(osp)); err != nil {
 			appendResult(PXARExtractedFile{
 				Path: fullPath, Size: e.Size,
 				Skipped: true, SkipReason: fmt.Sprintf("mkdir parent: %v", err),

@@ -18,3 +18,9 @@ func setLinkTime(path string, secs int64, nanos uint32) {}
 func ApplyDirMetadata(path string, mode, uid, gid uint32) {}
 
 func ApplyDirMode(path string, mode uint32) {}
+
+func applyDirMode(path string, mode uint32, prev os.FileMode, unlocked bool) {}
+
+func dirUnlockApplies() bool { return false }
+
+func openDirForRestore(dir string) (os.FileMode, bool) { return 0, false }

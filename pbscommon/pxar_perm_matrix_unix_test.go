@@ -412,20 +412,42 @@ func verifyPermRestore(t *testing.T, pxar []byte, m permManifest) permTally {
 	root := os.Geteuid() == 0
 	dest := t.TempDir()
 	unlockOnCleanup(t, dest)
-	pr := NewPXARReader(pxar)
-	pr.SetRestoreOwnership(root)
-	res, err := pr.ExtractAll(dest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range res {
-		if f.Skipped {
-			t.Errorf("%s skipped: %s", f.Path, f.SkipReason)
-			tally.fail++
+	// Restore into an empty folder, then again over that restore with
+	// overwrite, as a second restore or a Roll back does: the folders the
+	// first one made read-only (0555, 0500) must not stop the second.
+	var r permTally
+	firstLen := 0
+	for _, pass := range []struct {
+		name      string
+		overwrite bool
+	}{{"into an empty folder", false}, {"over the first restore", true}} {
+		pr := NewPXARReader(pxar)
+		pr.SetRestoreOwnership(root)
+		res, err := pr.ExtractFiltered(dest, nil, pass.overwrite)
+		if err != nil {
+			t.Fatalf("restore %s: %v", pass.name, err)
+		}
+		for _, f := range res {
+			if f.Skipped {
+				t.Errorf("restore %s: %s skipped: %s", pass.name, f.Path, f.SkipReason)
+				tally.fail++
+			}
+		}
+		FinishDirs(res, root)
+		t.Logf("restore %s:", pass.name)
+		c := comparePermTree(t, dest, m, os.Geteuid())
+		if !pass.overwrite {
+			r = c
+			firstLen = len(res)
+		} else {
+			if len(res) != firstLen {
+				t.Errorf("restore %s: %d entries, the first restore had %d", pass.name, len(res), firstLen)
+				r.fail++
+			}
+			// Count the entries once; the second pass adds only failures.
+			r.fail += c.fail
 		}
 	}
-	FinishDirs(res, root)
-	r := comparePermTree(t, dest, m, os.Geteuid())
 	return permTally{tally.ok + r.ok, tally.design + r.design, tally.fail + r.fail}
 }
 
