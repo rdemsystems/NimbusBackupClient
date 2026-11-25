@@ -94,6 +94,11 @@ type PXARReader struct {
 	// instead of the archive's modification time.
 	keepNewTimes bool
 
+	// fixedFileMode, when set, is the mode every restored file gets instead of
+	// the recorded one, and no recorded owner is applied: for an archive whose
+	// permissions and owners are not real (RecordsNoPermissions).
+	fixedFileMode os.FileMode
+
 	// createdLinks holds every symlink this extraction created. Entries whose
 	// path runs through one are refused, so a hostile archive cannot plant a
 	// link to /etc and then write "through" it. Touched only by the walking
@@ -136,6 +141,53 @@ func (pr *PXARReader) progressWeight(e PXARTreeEntry, matched bool) int64 {
 // bits. Off by default: archives written on Windows carry a fixed 1000:1000
 // and 0777, which must not be applied to a Linux restore unless asked for.
 func (pr *PXARReader) SetRestoreOwnership(on bool) { pr.restoreOwner = on }
+
+// SetFixedPermissions makes extraction give every file recorded as 0777
+// fileMode instead, and leave every owner as the restoring account; folders
+// keep the mode they are created with. For an archive that records no real
+// permissions (RecordsNoPermissions). 0 turns it off. Call before Extract*.
+func (pr *PXARReader) SetFixedPermissions(fileMode os.FileMode) { pr.fixedFileMode = fileMode.Perm() }
+
+// fileModeFor is the mode a restored file of recorded mode gets. With fixed
+// permissions only the placeholder 0777 is replaced: a mode the writer did
+// record (the backup's own read-only meta file, 0444) is kept.
+func (pr *PXARReader) fileModeFor(mode uint32) os.FileMode {
+	if pr.fixedFileMode != 0 && mode&0o777 == 0o777 {
+		return pr.fixedFileMode
+	}
+	return os.FileMode(mode & 0o777)
+}
+
+// RecordsNoPermissions reports whether the archive's permissions and owners
+// are placeholders rather than real ones. Archives written on Windows, and
+// on Linux by clients before 2.0 (such as 1.1.3), record every entry as 0777
+// owned by uid and gid 1000 with a whole-second time; a restore that applied
+// them made every file writable by everyone and, as root, gave it to
+// whoever is uid 1000 on the computer. The archive's top folder says which:
+// no real folder is 0777, owned by 1000:1000 and timed to the exact second
+// by a client that records nanoseconds.
+func (pr *PXARReader) RecordsNoPermissions() bool {
+	root, ok := pr.rootEntry()
+	return ok && root.Mode&0o7777 == 0o777 && root.UID == 1000 && root.GID == 1000 && root.ModNanos == 0
+}
+
+// PlaceholderFileMode is the mode files get when a Unix restore reads an
+// archive that records no real permissions or owners (RecordsNoPermissions):
+// 0644 for one made on Windows (meta, when the caller has it, says so),
+// whose files have no execute bit to keep, and 0755 otherwise, so the
+// scripts and programs of an old Linux backup still run. Neither is writable
+// by others, unlike the 0777 the archive records. 0 means the archive's own
+// modes apply, and always on Windows, where they are not used. Pass it to
+// SetFixedPermissions.
+func (pr *PXARReader) PlaceholderFileMode(meta *BackupMeta) os.FileMode {
+	if runtime.GOOS == "windows" || !pr.RecordsNoPermissions() {
+		return 0
+	}
+	if meta != nil && meta.OS == "windows" {
+		return 0o644
+	}
+	return 0o755
+}
 
 // SetRestoreTimes switches setting each file's recorded modification time
 // on (the default) or off. Off, files keep the time they were written.
@@ -336,6 +388,10 @@ type PXARExtractedFile struct {
 	// folder is never left more open than it was.
 	Unlocked bool
 	PrevMode os.FileMode
+	// FixedPerms marks a folder from an archive that records no real
+	// permissions or owner (SetFixedPermissions): FinishDirs leaves its mode
+	// and owner as the restore created them.
+	FixedPerms bool
 	// SHA256 is the hash of the payload as written, set only for files when
 	// the reader was told to hash (SetHashFiles).
 	SHA256 []byte
@@ -604,22 +660,7 @@ walkLoop:
 			if err != nil {
 				return fmt.Errorf("read entry: %w", err)
 			}
-			// Parse PXARFileEntry payload by byte offset. We avoid binary.Read
-			// on struct pointers because PXARFileEntry/MTime have unexported
-			// fields that reflect.Value cannot Set, which silently zeroes mtime.
-			// Layout: mode(u64) | flags(u64) | uid(u32) | gid(u32) | mtime.secs(u64) | mtime.nanos(u32) | mtime.padding(u32) = 40 bytes
-			var mode uint64
-			var mtimeSecs uint64
-			var uid, gid, nanos uint32
-			if len(data) >= 32 {
-				mode = binary.LittleEndian.Uint64(data[0:8])
-				mtimeSecs = binary.LittleEndian.Uint64(data[24:32])
-			}
-			if len(data) >= 36 {
-				uid = binary.LittleEndian.Uint32(data[16:20])
-				gid = binary.LittleEndian.Uint32(data[20:24])
-				nanos = binary.LittleEndian.Uint32(data[32:36])
-			}
+			mode, uid, gid, mtimeSecs, nanos := parseEntryFields(data)
 
 			if mode&IFMT == IFDIR {
 				// Directory entry. The first ENTRY in the archive is the root
@@ -904,11 +945,92 @@ func (pr *PXARReader) ResolveArchivePathBST(path string) (targetStart, targetEnd
 	return 0, 0, "", errBSTNotFound
 }
 
+// parseEntryFields reads a PXAR_ENTRY payload by byte offset. binary.Read on
+// struct pointers is avoided because PXARFileEntry/MTime have unexported
+// fields that reflect.Value cannot Set, which silently zeroes mtime.
+// Layout: mode(u64) | flags(u64) | uid(u32) | gid(u32) | mtime.secs(u64) |
+// mtime.nanos(u32) | mtime.padding(u32) = 40 bytes.
+func parseEntryFields(data []byte) (mode uint64, uid, gid uint32, mtimeSecs uint64, nanos uint32) {
+	if len(data) >= 32 {
+		mode = binary.LittleEndian.Uint64(data[0:8])
+		mtimeSecs = binary.LittleEndian.Uint64(data[24:32])
+	}
+	if len(data) >= 36 {
+		uid = binary.LittleEndian.Uint32(data[16:20])
+		gid = binary.LittleEndian.Uint32(data[20:24])
+		nanos = binary.LittleEndian.Uint32(data[32:36])
+	}
+	return mode, uid, gid, mtimeSecs, nanos
+}
+
+// folderEntryAt reads the folder whose span starts at start (its FILENAME
+// record, then its ENTRY) as the walk would emit it, with path as its archive
+// path. It does not move the walk cursor.
+func (pr *PXARReader) folderEntryAt(start int64, path string) (PXARTreeEntry, error) {
+	var raw [16]byte
+	off := start
+	for _, want := range []uint64{PXAR_FILENAME, PXAR_ENTRY} {
+		if off+16 > pr.size {
+			return PXARTreeEntry{}, fmt.Errorf("%w: %s: record past the end", errBSTNotFound, path)
+		}
+		if _, err := pr.ra.ReadAt(raw[:], off); err != nil {
+			return PXARTreeEntry{}, err
+		}
+		typ := binary.LittleEndian.Uint64(raw[0:8])
+		size := binary.LittleEndian.Uint64(raw[8:16])
+		if size < 16 || size > uint64(pr.size-off) {
+			return PXARTreeEntry{}, fmt.Errorf("%w: %s: bad record size", errBSTNotFound, path)
+		}
+		if typ != want && !(want == PXAR_ENTRY && typ == PXAR_ENTRY_V1) {
+			return PXARTreeEntry{}, fmt.Errorf("%w: %s: unexpected record", errBSTNotFound, path)
+		}
+		if want == PXAR_ENTRY {
+			data := make([]byte, size-16)
+			if _, err := pr.ra.ReadAt(data, off+16); err != nil {
+				return PXARTreeEntry{}, err
+			}
+			mode, uid, gid, secs, nanos := parseEntryFields(data)
+			if mode&IFMT != IFDIR {
+				return PXARTreeEntry{}, fmt.Errorf("%w: %s is not a folder", errBSTNotFound, path)
+			}
+			return PXARTreeEntry{
+				Path: path, IsDir: true, Mode: uint32(mode),
+				ModTime: int64(secs), ModTimeSet: true, ModNanos: nanos, UID: uid, GID: gid,
+			}, nil
+		}
+		off += int64(size)
+	}
+	return PXARTreeEntry{}, errBSTNotFound // unreachable
+}
+
 // includeSpan is one selected path resolved to its byte span in the (metadata)
-// stream, plus the archive path of its parent, ready for walkRange.
+// stream, plus the archive path of its parent, ready for walkRange, and the
+// folders on the way to it, shallowest first.
 type includeSpan struct {
 	start, end int64
 	parent     string
+	ancestors  []PXARTreeEntry
+}
+
+// selectionAncestors reads the recorded folders on the way to path (not path
+// itself), shallowest first, through the GOODBYE BST.
+func (pr *PXARReader) selectionAncestors(path string) ([]PXARTreeEntry, error) {
+	components := strings.Split(strings.Trim(path, "/"), "/")
+	var out []PXARTreeEntry
+	spanEnd := pr.size
+	for idx := 0; idx < len(components)-1; idx++ {
+		start, end, err := pr.findChildSpan(spanEnd, components[idx])
+		if err != nil {
+			return nil, err
+		}
+		e, err := pr.folderEntryAt(start, strings.Join(components[:idx+1], "/"))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+		spanEnd = end
+	}
+	return out, nil
 }
 
 // resolveIncludeSpans resolves every include through the GOODBYE BST, after
@@ -944,7 +1066,11 @@ func (pr *PXARReader) resolveIncludeSpans(includes []string) (spans []includeSpa
 		if err != nil {
 			return nil, false
 		}
-		spans = append(spans, includeSpan{start: start, end: end, parent: parent})
+		ancestors, err := pr.selectionAncestors(inc)
+		if err != nil {
+			return nil, false
+		}
+		spans = append(spans, includeSpan{start: start, end: end, parent: parent, ancestors: ancestors})
 	}
 	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
 	return spans, true
@@ -957,7 +1083,29 @@ func (pr *PXARReader) resolveIncludeSpans(includes []string) (spans []includeSpa
 func (pr *PXARReader) walkIncludes(cb walkCallback, includes []string, reset func()) error {
 	if spans, ok := pr.resolveIncludeSpans(includes); ok {
 		var werr error
+		// The folders on the way to each selection come first, as the full
+		// walk hands them over, so a folder the restore has to create gets its
+		// recorded permissions too (not 0755: restoring ~/.ssh/id_ed25519 alone
+		// left ~/.ssh open to every account). Each once, shallowest first.
+		seen := map[string]bool{}
 		for _, s := range spans {
+			for _, a := range s.ancestors {
+				if seen[a.Path] {
+					continue
+				}
+				seen[a.Path] = true
+				if werr = cb(a, nil); werr != nil {
+					break
+				}
+			}
+			if werr != nil {
+				break
+			}
+		}
+		for _, s := range spans {
+			if werr != nil {
+				break
+			}
 			if werr = pr.walkRange(cb, s.start, s.end, s.parent, true); werr != nil {
 				break
 			}
@@ -1195,7 +1343,7 @@ func (pr *PXARReader) extractWithRewriter(rewriter PathRewriter, includePaths []
 			extracted = append(extracted, PXARExtractedFile{
 				Path: fullPath, ArchivePath: e.Path, IsDir: true,
 				Mode: os.FileMode(e.Mode & 0777), ModTime: e.ModTime, ModNanos: e.ModNanos, ModTimeSet: e.ModTimeSet,
-				RawMode: e.Mode, UID: e.UID, GID: e.GID, KeepOwnTime: keepTime, Existed: existed,
+				RawMode: e.Mode, UID: e.UID, GID: e.GID, KeepOwnTime: keepTime, Existed: existed, FixedPerms: pr.fixedFileMode != 0,
 			})
 			return nil
 		}
@@ -1243,7 +1391,7 @@ func (pr *PXARReader) extractWithRewriter(rewriter PathRewriter, includePaths []
 			return nil
 		}
 		tmpPath := out.Name()
-		_ = out.Chmod(os.FileMode(e.Mode & 0777))
+		_ = out.Chmod(pr.fileModeFor(e.Mode))
 		copyStart := time.Now()
 		sum, copyErr := pr.copyPayload(out, payload)
 		pr.copyNanos.Add(int64(time.Since(copyStart)))
@@ -1277,7 +1425,7 @@ func (pr *PXARReader) extractWithRewriter(rewriter PathRewriter, includePaths []
 			})
 			return nil
 		}
-		if pr.restoreOwner {
+		if pr.restoreOwner && pr.fixedFileMode == 0 {
 			applyModeOwner(osp, e.Mode, e.UID, e.GID, true)
 		}
 		if !pr.keepNewTimes && (e.ModTimeSet || e.ModTime != 0) { // 0 from the archive = 1970-01-01; negative = pre-1970
@@ -1325,11 +1473,90 @@ func (pr *PXARReader) extractWithRewriter(rewriter PathRewriter, includePaths []
 	// optimization, never the only way a restore can succeed. A span walk
 	// that fails partway restarts clean rather than return a partial,
 	// possibly-confusing result.
+	top := pr.noteTopFolder(rewriter, includes, overwrite)
 	err := pr.walkIncludes(cb, includes, func() {
 		extracted = extracted[:0]
 		pr.doneBytes.Store(0)
 	})
+	if err == nil {
+		extracted = top.append(pr, extracted)
+	}
 	return extracted, err
+}
+
+// topFolder is the restore's top folder (where the archive's own root goes),
+// as it was before the restore.
+type topFolder struct {
+	path     string
+	existed  bool
+	keepTime bool
+}
+
+// noteTopFolder records, before anything is written, where the archive's
+// root goes and whether that folder was already there.
+func (pr *PXARReader) noteTopFolder(rewriter PathRewriter, includes []string, overwrite bool) topFolder {
+	top := rewriter("")
+	if top == "" {
+		return topFolder{}
+	}
+	_, err := os.Lstat(OSPath(top))
+	return topFolder{path: top, existed: err == nil, keepTime: folderKeepsOwnTime("", top, includes, overwrite)}
+}
+
+// append adds the top folder to extracted with the archive root's recorded
+// mode, owner and time, so the restore finishes it like any other folder
+// (FinishDirs, the folder times pass). Only a top folder the restore
+// created: one that was there before (the original folder of an in-place
+// restore, the destination someone chose) is never touched. Before this, a
+// restore into a new folder left it 0755, owned by the restoring account
+// and timed now, whatever the backup recorded.
+func (t topFolder) append(pr *PXARReader, extracted []PXARExtractedFile) []PXARExtractedFile {
+	if t.path == "" || t.existed {
+		return extracted
+	}
+	if fi, err := os.Lstat(OSPath(t.path)); err != nil || !fi.IsDir() {
+		return extracted
+	}
+	root, ok := pr.rootEntry()
+	if !ok {
+		return extracted
+	}
+	return append(extracted, PXARExtractedFile{
+		Path: t.path, IsDir: true,
+		Mode: os.FileMode(root.Mode & 0o777), ModTime: root.ModTime, ModNanos: root.ModNanos, ModTimeSet: root.ModTimeSet,
+		RawMode: root.Mode, UID: root.UID, GID: root.GID, KeepOwnTime: t.keepTime, FixedPerms: pr.fixedFileMode != 0,
+	})
+}
+
+// rootEntry reads the archive's own top folder entry (the first ENTRY, after
+// any format records).
+func (pr *PXARReader) rootEntry() (PXARTreeEntry, bool) {
+	var raw [16]byte
+	off := int64(0)
+	for i := 0; i < 8 && off+16 <= pr.size; i++ {
+		if _, err := pr.ra.ReadAt(raw[:], off); err != nil {
+			return PXARTreeEntry{}, false
+		}
+		typ := binary.LittleEndian.Uint64(raw[0:8])
+		size := binary.LittleEndian.Uint64(raw[8:16])
+		if size < 16 || size > uint64(pr.size-off) {
+			return PXARTreeEntry{}, false
+		}
+		if typ == PXAR_ENTRY || typ == PXAR_ENTRY_V1 {
+			data := make([]byte, size-16)
+			if _, err := pr.ra.ReadAt(data, off+16); err != nil {
+				return PXARTreeEntry{}, false
+			}
+			mode, uid, gid, secs, nanos := parseEntryFields(data)
+			if mode&IFMT != IFDIR {
+				return PXARTreeEntry{}, false
+			}
+			return PXARTreeEntry{IsDir: true, Mode: uint32(mode), UID: uid, GID: gid,
+				ModTime: int64(secs), ModTimeSet: true, ModNanos: nanos}, true
+		}
+		off += int64(size)
+	}
+	return PXARTreeEntry{}, false
 }
 
 // ExtractWithRewriterParallel is ExtractWithRewriter's opt-in, experimental
@@ -1462,7 +1689,7 @@ func (pr *PXARReader) extractWithRewriterParallel(rewriter PathRewriter, include
 			appendResult(PXARExtractedFile{
 				Path: fullPath, ArchivePath: e.Path, IsDir: true,
 				Mode: os.FileMode(e.Mode & 0777), ModTime: e.ModTime, ModNanos: e.ModNanos, ModTimeSet: e.ModTimeSet,
-				RawMode: e.Mode, UID: e.UID, GID: e.GID, KeepOwnTime: keepTime, Existed: existed,
+				RawMode: e.Mode, UID: e.UID, GID: e.GID, KeepOwnTime: keepTime, Existed: existed, FixedPerms: pr.fixedFileMode != 0,
 			})
 			return nil
 		}
@@ -1510,6 +1737,7 @@ func (pr *PXARReader) extractWithRewriterParallel(rewriter PathRewriter, include
 	// with parallel extraction scanned the ENTIRE archive after the selection
 	// (found live 2026-10-01: 129,662-chunk walk of a 458GB snapshot for a
 	// 1,698-chunk folder). Any failure falls back to the full walk.
+	top := pr.noteTopFolder(rewriter, includes, overwrite)
 	walkErr := pr.walkIncludes(cb, includes, func() {
 		stopPool()
 		mu.Lock()
@@ -1521,6 +1749,9 @@ func (pr *PXARReader) extractWithRewriterParallel(rewriter PathRewriter, include
 
 	stopPool()
 
+	if walkErr == nil {
+		extracted = top.append(pr, extracted)
+	}
 	return extracted, walkErr
 }
 
@@ -1542,7 +1773,7 @@ func (pr *PXARReader) extractOneFileParallel(e PXARTreeEntry, fullPath string, p
 		}
 	}
 	tmpPath := out.Name()
-	_ = out.Chmod(os.FileMode(e.Mode & 0777))
+	_ = out.Chmod(pr.fileModeFor(e.Mode))
 
 	copyStart := time.Now()
 	sum, copyErr := pr.copyPayload(out, payload)
@@ -1577,7 +1808,7 @@ func (pr *PXARReader) extractOneFileParallel(e PXARTreeEntry, fullPath string, p
 			Skipped: true, SkipReason: fmt.Sprintf("rename: %v", renErr),
 		}
 	}
-	if pr.restoreOwner {
+	if pr.restoreOwner && pr.fixedFileMode == 0 {
 		applyModeOwner(osp, e.Mode, e.UID, e.GID, true)
 	}
 	if !pr.keepNewTimes && (e.ModTimeSet || e.ModTime != 0) { // 0 from the archive = 1970-01-01; negative = pre-1970

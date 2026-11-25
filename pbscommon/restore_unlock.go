@@ -75,7 +75,9 @@ func (pr *PXARReader) unlockDir(dir string) {
 // PrevMode, for FinishDirs to apply the recorded mode from (or RelockDirs to
 // put it back). Every other one (a folder on the way to the selection, or
 // one that was already there and keeps its own time), and every one after a
-// failed extraction, gets its earlier mode back now, deepest first.
+// failed extraction, gets its earlier mode back now, deepest first. So does
+// one from an archive that records no real permissions (FixedPerms), which
+// FinishDirs leaves alone.
 //
 // Known limit: a folder its owner may not even enter (no u+x, which nothing
 // makes by itself) that is on the way to a folder handed to FinishDirs is
@@ -94,7 +96,7 @@ func (pr *PXARReader) settleUnlocks(res []PXARExtractedFile, err error) {
 			f := &res[i]
 			p := filepath.Clean(OSPath(f.Path))
 			m, ok := prev[p]
-			if !ok || !f.IsDir || f.Skipped || (f.Existed && f.KeepOwnTime) {
+			if !ok || !f.IsDir || f.Skipped || (f.Existed && f.KeepOwnTime) || f.FixedPerms {
 				continue
 			}
 			f.Unlocked, f.PrevMode = true, m

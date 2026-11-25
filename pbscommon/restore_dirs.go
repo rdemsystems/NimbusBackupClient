@@ -1,6 +1,34 @@
 package pbscommon
 
-import "sort"
+import (
+	"os"
+	"sort"
+	"time"
+)
+
+// ApplyDirTimes sets each restored folder's recorded modification time once
+// its contents are written (writing into a folder changes its time), deepest
+// first. A folder that keeps its own time (KeepOwnTime) is left as it is.
+// For restores that have no progress to show (the text-mode window); the
+// app's own pass (gui/restore_dirtimes.go) also reports progress and logs.
+func ApplyDirTimes(extracted []PXARExtractedFile) (applied, failed int) {
+	var dirs []PXARExtractedFile
+	for _, f := range extracted {
+		if f.IsDir && !f.Skipped && !f.KeepOwnTime && (f.ModTimeSet || f.ModTime != 0) {
+			dirs = append(dirs, f)
+		}
+	}
+	sort.SliceStable(dirs, func(i, j int) bool { return len(dirs[i].Path) > len(dirs[j].Path) })
+	for _, d := range dirs {
+		t := time.Unix(d.ModTime, int64(d.ModNanos))
+		if err := os.Chtimes(OSPath(d.Path), t, t); err != nil {
+			failed++
+		} else {
+			applied++
+		}
+	}
+	return applied, failed
+}
 
 // FinishDirs applies the restored folders' recorded mode (and, with owner,
 // their owner) once their contents are written, deepest first, so that a
@@ -18,11 +46,12 @@ import "sort"
 //
 // A folder that was already there and keeps its own time (an ancestor of
 // the selection, or a folder the restore may not overwrite) is left as it
-// is. Failures are ignored: the content is already on disk.
+// is, and so is one from an archive that records no real permissions
+// (FixedPerms). Failures are ignored: the content is already on disk.
 func FinishDirs(extracted []PXARExtractedFile, owner bool) {
 	var dirs []PXARExtractedFile
 	for _, f := range extracted {
-		if f.IsDir && !f.Skipped && !(f.Existed && f.KeepOwnTime) {
+		if f.IsDir && !f.Skipped && !(f.Existed && f.KeepOwnTime) && !f.FixedPerms {
 			dirs = append(dirs, f)
 		}
 	}

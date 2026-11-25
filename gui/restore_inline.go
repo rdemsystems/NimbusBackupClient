@@ -1714,6 +1714,10 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 			reader.SetHashFiles(opts.VerifyAfterRestore)
 			reader.SetRestoreOwnership(restoreOwnershipEnabled())
 			reader.SetRestoreTimes(!opts.KeepNewTimes)
+			if fm := reader.PlaceholderFileMode(metaByArchive[archiveName]); fm != 0 {
+				reader.SetFixedPermissions(fm)
+				writeBackupLog(fmt.Sprintf("%s records no real permissions or owners (made on Windows, or by a client before 2.0): files restored as %04o, folders as created, owned by the restoring account", archiveName, fm))
+			}
 			if opts.OnFile != nil {
 				reader.SetFileCallback(opts.OnFile)
 			}

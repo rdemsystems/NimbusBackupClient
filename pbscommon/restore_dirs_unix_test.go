@@ -9,10 +9,9 @@ import (
 )
 
 // Restoring one file from ~/.ssh into a home folder that is already there:
-// that folder keeps its own mode and owner, for root too. (The ~/.ssh the
-// restore creates on the way is made 0755: a selective restore walks only
-// the selection, so it never reads the ancestors' metadata. Known gap,
-// testing/restore-matrix/README.md.)
+// that folder keeps its own mode and owner, for root too, and the ~/.ssh the
+// restore creates on the way gets its recorded 0700 (the selection's folders
+// are read from the archive index on the way to it).
 func TestFinishDirsSelectedFile(t *testing.T) {
 	src := t.TempDir()
 	must := func(err error) {
@@ -45,6 +44,8 @@ func TestFinishDirsSelectedFile(t *testing.T) {
 	}{
 		// Already there: left alone.
 		{"home", 0o711},
+		// Created on the way: its recorded mode.
+		{"home/.ssh", 0o700},
 		{"home/.ssh/id_ed25519", 0o600},
 	} {
 		fi, err := os.Stat(filepath.Join(dest, filepath.FromSlash(c.path)))
