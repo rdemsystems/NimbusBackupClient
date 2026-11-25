@@ -1519,6 +1519,16 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 	displayNames, metaByArchive := resolveArchiveDisplayNames(opts, archiveNames, nil)
 
 	var extracted []pbscommon.PXARExtractedFile
+	// The folders an extraction had to open to write into (a read-only
+	// folder of an earlier restore) get their recorded mode back in
+	// finishExtraction (FinishDirs). If the restore stops before it, they
+	// get their earlier mode back here.
+	dirsFinished := false
+	defer func() {
+		if !dirsFinished {
+			pbscommon.RelockDirs(extracted)
+		}
+	}()
 	type aclJob struct {
 		name  string
 		meta  *BackupFileMeta
@@ -1791,6 +1801,7 @@ func RestoreSnapshotInline(opts RestoreOptions) error {
 		extracted = append(extracted, extractedHere...)
 	}
 
+	dirsFinished = true
 	errorSkipCount, verifyFailures, err := finishExtraction(opts, extracted, extractEnd, progress, stage)
 	if err != nil {
 		return err
@@ -1980,9 +1991,9 @@ func finishExtraction(opts RestoreOptions, extracted []pbscommon.PXARExtractedFi
 				})
 			writeBackupLog(fmt.Sprintf("Folder timestamps: applied %d, failed %d", dApplied, dFailed))
 		}
-		if restoreOwnershipEnabled() {
-			applyDirectoryOwnership(extracted)
-		}
+		// Folder modes (and owners for a root restore), now that their
+		// contents are written.
+		pbscommon.FinishDirs(extracted, restoreOwnershipEnabled())
 		if opts.Ctx != nil && opts.Ctx.Err() != nil {
 			return errorSkipCount, nil, fmt.Errorf("restore cancelled while setting folder timestamps")
 		}

@@ -305,6 +305,9 @@ func restoreFiles(a Access, s SnapshotInfo, includes []string, dest string, over
 			reader.SetFileCallback(progress)
 		}
 		files, err := reader.ExtractFiltered(target, pbscommon.NormalizeIncludes(mine), overwrite)
+		// This restore does not apply folder modes (FinishDirs): a folder
+		// the extraction opened to write into gets its earlier mode back.
+		pbscommon.RelockDirs(files)
 		if err != nil {
 			return total, err
 		}
