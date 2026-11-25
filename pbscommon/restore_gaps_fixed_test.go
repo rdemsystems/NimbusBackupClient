@@ -101,6 +101,45 @@ func TestFixedPermissionsRestore(t *testing.T) {
 	}
 }
 
+// A restore not run as root opens a read-only folder of its own to write
+// into (dirUnlocks), and FinishDirs closes it again. FinishDirs leaves a
+// folder of an archive with no real permissions (FixedPerms) alone, so such a
+// folder must be closed again when the extraction ends, not left opened.
+func TestFixedPermissionsRestoreOverReadOnlyFolder(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("only a restore that does not run as root opens folders")
+	}
+	dest := t.TempDir()
+	docs := filepath.Join(dest, "docs")
+	if err := os.Mkdir(docs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(docs, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(docs, 0o755) })
+	pr := NewPXARReader(placeholderArchive(t, 0))
+	pr.SetFixedPermissions(0o644)
+	// With overwrite, as a restore over an earlier one: the folder that was
+	// there is the archive's own, not one that keeps its own time (which
+	// settleUnlocks closes anyway).
+	res, err := pr.ExtractFiltered(dest, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	FinishDirs(res, false)
+	if b, err := os.ReadFile(filepath.Join(docs, "report.txt")); err != nil || string(b) != "from a Windows backup\n" {
+		t.Fatalf("report.txt not written into the read-only folder: %q, %v", b, err)
+	}
+	fi, err := os.Stat(docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o555 {
+		t.Errorf("docs is %04o after the restore, want 0555 again", fi.Mode().Perm())
+	}
+}
+
 // Restoring one file creates the folders on the way to it with their
 // recorded permissions, through the archive index (no full walk), and
 // leaves a folder that was already there as it is.
