@@ -22,11 +22,16 @@ What a backup records and what a restore puts back, for every kind of file, owne
 | root | 0 | a full restore |
 | daemon | 1 | a system account |
 | richard | 1000 | the user who owns the home, on the same computer |
-| other user | 1512 | richard on another computer, where his uid is 1512: restoring his home from his laptop onto his desktop |
+| other user | 1512 | richard on another computer, where their uid is 1512: restoring their home from a laptop onto a desktop |
 
 Each user also backs up and restores its own files.
 
 **What is compared**, for every entry: the content (files), the target (links), the mode, the owner and the modification time (files and links; a folder's time is set by the app, `gui/restore_dirtimes.go`). The archive itself must record exactly what the file system had.
+
+**How it is restored**, by each user:
+1. Into an empty folder.
+2. Again over that restore, with overwrite, as a second restore or a Roll back does. Folders the first restore made read-only (0555, 0500) must not stop it, and they end as recorded again.
+3. One file alone, `home/.ssh/id_ed25519`, into an empty folder. The folders on the way to it (`home`, `home/.ssh`) must come back with their recorded modes and owners, not just be created.
 
 ## Expected results
 
@@ -39,7 +44,7 @@ Each user also backs up and restores its own files.
 | Link target and own time | as recorded | as recorded |
 | File time | as recorded, to the nanosecond where the file system keeps it | the same |
 
-So richard restoring his home as uid 1512 gets every file owned by uid 1512, with `~/.ssh` still 0700 and his keys still 0600.
+So richard restoring their home as uid 1512 gets every file owned by uid 1512, with `~/.ssh` still 0700 and the keys still 0600.
 
 A result that differs from the recorded value for one of these reasons is counted as **ok by design** in the summary, with the reason in the log. Anything else fails the job.
 
@@ -65,11 +70,16 @@ What a backup or a restore does not keep yet. Each gap that can be shown in a un
 
 | | Gap | What happens | Shown by |
 |---|---|---|---|
-| GAP-1 | Restoring onto a computer where the user's uid differs | richard is uid 1000 on his laptop and 1512 on his desktop. A root restore of his home on the desktop gives it to uid 1000, the archive's: he cannot read his own `~/.ssh`, and uid 1000 may be someone else there. There is no option to restore as a chosen owner, or to map one uid to another. (Restoring as uid 1512 works: that user owns all it restores.) | `TestRestoreGaps` (root) |
-| GAP-2 | Parent folders of a selective restore | Restoring one file creates the folders on the way to it as 0755, not with their recorded modes: a selective restore walks only the selection and never reads the ancestors' metadata. Restoring `~/.ssh/id_ed25519` alone leaves `~/.ssh` 0755. | `TestRestoreGaps` |
+| GAP-1 | Restoring onto a computer where the user's uid differs | richard is uid 1000 on a laptop and 1512 on a desktop. A root restore of their home on the desktop gives it to uid 1000, the archive's: they cannot read their own `~/.ssh`, and uid 1000 may be someone else there. There is no option to restore as a chosen owner, or to map one uid to another. (Restoring as uid 1512 works: that user owns all it restores.) | `TestRestoreGaps` (root) |
 | GAP-3 | Hard links | Two names of one file are backed up as two files and restored as two files: the link is lost, and the data is stored twice. pxar has a hard link entry; the writer does not use it. | `TestRestoreGaps` |
 | GAP-4 | FIFOs, sockets, device nodes | Skipped by the backup, because reading them would hang it. The official client records them as entries without data and restores them. | `TestRestoreGaps` |
-| GAP-5 | The text-mode window's restore | `tui/restore.go` extracts in its own process and never puts back owners, setuid, setgid or sticky, folder permissions or folder times, even as root. The app's Restore, Undelete and Roll back do. | code (needs a PBS to test) |
-| GAP-6 | A Windows backup restored on Unix | A Windows backup records every entry as 0777 and uid/gid 1000. A root restore on Unix gives every file to uid 1000, writable by everyone; a user's restore makes files 0777 (folders stay 0755). | code; a Windows producer in the matrix would show it |
 | GAP-7 | A Unix backup restored on Windows | Symbolic links are not restored, and modes and owners are not applied. | code |
 | GAP-8 | Extended attributes, ACLs, file capabilities | Not recorded on the BSDs, macOS and Solaris. On Linux, extended attributes and POSIX ACLs are in Salvanza's sidecar file (`proxmox-client-acls.json.gz.blob`), which the official client does not read. Planned for 2.2: write them into the pxar as the official client does, keep the sidecar for the rest (NFSv4 ACLs). | plan in #167 |
+
+### Closed gaps
+
+| | Gap | Closed by | Checked by |
+|---|---|---|---|
+| GAP-2 | Parent folders of a selective restore came back 0755 | 0e80a6a7: the selection's ancestors are read from the index and restored | the matrix (restore of one file alone), `restore_dirs_unix_test.go` |
+| GAP-5 | The text-mode window's restore put back no owners, special bits, folder permissions or folder times | 6c42a038: it finishes a restore as the app does | `tui/restore_live_test.go` (needs a PBS) |
+| GAP-6 | A Windows backup restored on Unix gave every file 0777 and, as root, uid 1000 | 0e80a6a7: an archive without real permissions restores files 0644 (0755 from a Linux client before 2.0), folders as created, owned by whoever restores | `restore_gaps_fixed_test.go`; a Windows producer in the matrix would check it with real archives |

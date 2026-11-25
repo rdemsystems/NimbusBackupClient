@@ -38,9 +38,9 @@ func reportGap(t *testing.T, id, title string, present bool, detail string) {
 }
 
 func TestRestoreGaps(t *testing.T) {
-	// GAP-1: richard is uid 1000 on his laptop and 1512 on his desktop. A
-	// root restore of his home puts back uid 1000, the archive's: on the
-	// desktop he cannot read his own ~/.ssh, and uid 1000 may be someone
+	// GAP-1: richard is uid 1000 on a laptop and 1512 on a desktop. A
+	// root restore of their home puts back uid 1000, the archive's: on the
+	// desktop they cannot read their own ~/.ssh, and uid 1000 may be someone
 	// else there. There is no way to restore as another owner or to map one
 	// uid to another. (A restore run as uid 1512 is fine: it owns all it
 	// restores; the matrix checks that.)
@@ -77,41 +77,7 @@ func TestRestoreGaps(t *testing.T) {
 		}
 		uid := fi.Sys().(*syscall.Stat_t).Uid
 		reportGap(t, "GAP-1", "Restore onto a computer where the user's uid differs", uid == 1000,
-			fmt.Sprintf("a root restore gives richard's home to uid %d (the archive's), not to his uid on this computer (1512); no option to choose the owner or map uids", uid))
-	})
-
-	// GAP-2: restoring one file creates the folders on the way to it with
-	// the default 0755, not their recorded modes: a selective restore walks
-	// only the selection (GOODBYE BST) and never reads the ancestors'
-	// metadata. Restoring ~/.ssh/id_ed25519 alone leaves ~/.ssh 0755.
-	t.Run("GAP-2 parent folders of a selection", func(t *testing.T) {
-		src := t.TempDir()
-		ssh := filepath.Join(src, "home", ".ssh")
-		if err := os.MkdirAll(ssh, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(ssh, "id_ed25519"), []byte("key"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chmod(ssh, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		pxar, _, _ := writePosixArchive(t, src)
-		dest := t.TempDir()
-		root := os.Geteuid() == 0
-		pr := NewPXARReader(pxar)
-		pr.SetRestoreOwnership(root)
-		res, err := pr.ExtractFiltered(dest, []string{"home/.ssh/id_ed25519"}, false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		FinishDirs(res, root)
-		fi, err := os.Stat(filepath.Join(dest, "home", ".ssh"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		reportGap(t, "GAP-2", "Parent folders of a selective restore", fi.Mode().Perm() != 0o700,
-			fmt.Sprintf("restoring ~/.ssh/id_ed25519 alone creates ~/.ssh %04o, recorded 0700 (the selection's ancestors are created, not restored)", fi.Mode().Perm()))
+			fmt.Sprintf("a root restore gives richard's home to uid %d (the archive's), not to their uid on this computer (1512); no option to choose the owner or map uids", uid))
 	})
 
 	// GAP-3: two names of one file (a hard link) are backed up as two

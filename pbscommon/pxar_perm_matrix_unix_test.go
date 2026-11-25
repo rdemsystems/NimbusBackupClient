@@ -26,7 +26,7 @@ import (
 //     (~/.ssh and the like), owned by root, a system account (uid 1) and a
 //     user (uid 1000, "richard") when root makes the backup;
 //   - who restores: root, uid 1, uid 1000 (the same user) and uid 1512
-//     (richard on another computer, where his uid is not the same);
+//     (richard on another computer, where their uid is not the same);
 //   - where: on the system that made the backup, and on every other one
 //     (an archive made on FreeBSD restored on Linux, and so on), with our
 //     reader and, on Linux, with the official pxar tool.
@@ -448,6 +448,39 @@ func verifyPermRestore(t *testing.T, pxar []byte, m permManifest) permTally {
 			r.fail += c.fail
 		}
 	}
+
+	// One file selected, into an empty folder: the folders on the way to it
+	// are restored with their recorded modes and owners, not just created
+	// (it was GAP-2: ~/.ssh came back 0755).
+	const sel = "home/.ssh/id_ed25519"
+	selDest := t.TempDir()
+	unlockOnCleanup(t, selDest)
+	pr := NewPXARReader(pxar)
+	pr.SetRestoreOwnership(root)
+	res, err := pr.ExtractFiltered(selDest, []string{sel}, false)
+	if err != nil {
+		t.Fatalf("restore of %s alone: %v", sel, err)
+	}
+	for _, f := range res {
+		if f.Skipped {
+			t.Errorf("restore of %s alone: %s skipped: %s", sel, f.Path, f.SkipReason)
+			r.fail++
+		}
+	}
+	FinishDirs(res, root)
+	sub := m
+	sub.Entries = nil
+	for _, e := range m.Entries {
+		if e.Path == sel || strings.HasPrefix(sel, e.Path+"/") {
+			sub.Entries = append(sub.Entries, e)
+		}
+	}
+	if len(sub.Entries) != 3 {
+		t.Errorf("restore of %s alone: %d entries in the manifest, want 3 (home, home/.ssh, the file)", sel, len(sub.Entries))
+		r.fail++
+	}
+	t.Logf("restore of %s alone:", sel)
+	r.fail += comparePermTree(t, selDest, sub, os.Geteuid()).fail
 	return permTally{tally.ok + r.ok, tally.design + r.design, tally.fail + r.fail}
 }
 
