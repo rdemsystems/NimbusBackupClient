@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,7 @@ func TestRestoreLive(t *testing.T) {
 		"pictures/one.bin":     bytes.Repeat([]byte{1, 2, 3, 4}, 70000),
 		"pictures/two.bin":     bytes.Repeat([]byte{9, 8, 7}, 50000),
 		"empty-dir-sibling.md": []byte("x"),
+		"private/secret.txt":   []byte("only mine"),
 	}
 	for name, data := range files {
 		p := filepath.Join(src, filepath.FromSlash(name))
@@ -63,6 +65,11 @@ func TestRestoreLive(t *testing.T) {
 		if err := os.WriteFile(p, data, 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// A private folder (Unix): the restore must give it back 0700, also when
+	// only a file inside it is restored.
+	if err := os.Chmod(filepath.Join(src, "private"), 0o700); err != nil {
+		t.Fatal(err)
 	}
 	id := fmt.Sprintf("tui-restore-%d", time.Now().Unix())
 	cmd := exec.Command(cli, "backup-folder", "-baseurl", base, "-certfingerprint", cfg.Fingerprint, "-authid", cfg.Backup.AuthID,
@@ -144,6 +151,23 @@ func TestRestoreLive(t *testing.T) {
 		if err != nil || !bytes.Equal(got, data) {
 			t.Errorf("full restore: %s wrong (%v)", name, err)
 		}
+	}
+	if runtime.GOOS != "windows" {
+		privateMode := func(what, dir string) {
+			t.Helper()
+			fi, err := os.Stat(filepath.Join(dir, "private"))
+			if err != nil {
+				t.Errorf("%s: %v", what, err)
+			} else if fi.Mode().Perm() != 0o700 {
+				t.Errorf("%s: private folder %04o, want 0700", what, fi.Mode().Perm())
+			}
+		}
+		privateMode("full restore", all)
+		one := t.TempDir()
+		if n, err := restoreFiles(acc, s, []string{arch + "/private/secret.txt"}, one, false, "", nil); err != nil || n != 1 {
+			t.Fatalf("restoring one file: %d, %v", n, err)
+		}
+		privateMode("one file restored", one)
 	}
 	t.Logf("restored %d of %d files selectively; %d progress calls", n, len(files), len(seen))
 }

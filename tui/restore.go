@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -235,7 +236,8 @@ func readCatalog(a Access, s SnapshotInfo, passphrase string) ([]CatalogItem, er
 // restoreFiles extracts the ticked paths (catalog paths, archive name first;
 // none means everything) below dest. Several archives each get a folder of
 // their own below dest; one archive goes straight into it. It returns how many
-// files were written.
+// files were written; when some could not be, the error says how many and
+// gives one of them with its reason.
 func restoreFiles(a Access, s SnapshotInfo, includes []string, dest string, overwrite bool, passphrase string, progress func(file string)) (int, error) {
 	if dest == "" {
 		return 0, fmt.Errorf("choose a folder to restore into")
@@ -253,7 +255,7 @@ func restoreFiles(a Access, s SnapshotInfo, includes []string, dest string, over
 	c.Connect(true, s.Type)
 	defer c.Close()
 
-	total := 0
+	total, failed, firstFail := 0, 0, ""
 	for _, arch := range s.Archives {
 		var mine []string
 		if len(includes) == 0 {
@@ -304,14 +306,41 @@ func restoreFiles(a Access, s SnapshotInfo, includes []string, dest string, over
 		if progress != nil {
 			reader.SetFileCallback(progress)
 		}
+		// Finish as the app's restore does (gui/restore_inline.go): owners and
+		// special bits for a root restore on Unix, placeholder permissions of
+		// a Windows or pre-2.0 archive never applied (the app also knows from
+		// the backup's meta that it is a Windows one and uses 0644; here 0755),
+		// folder times, then folder permissions once the contents are written.
+		owner := runtime.GOOS != "windows" && os.Geteuid() == 0
+		reader.SetRestoreOwnership(owner)
+		if fm := reader.PlaceholderFileMode(nil); fm != 0 {
+			reader.SetFixedPermissions(fm)
+		}
 		files, err := reader.ExtractFiltered(target, pbscommon.NormalizeIncludes(mine), overwrite)
-		// This restore does not apply folder modes (FinishDirs): a folder
-		// the extraction opened to write into gets its earlier mode back.
-		pbscommon.RelockDirs(files)
 		if err != nil {
+			// Stopped before FinishDirs: a folder the extraction opened to
+			// write into gets its earlier mode back, as in the app.
+			pbscommon.RelockDirs(files)
 			return total, err
 		}
-		total += len(files)
+		pbscommon.ApplyDirTimes(files)
+		// FinishDirs also closes again a folder the extraction opened
+		// (Unlocked), from its earlier mode, so no RelockDirs here.
+		pbscommon.FinishDirs(files, owner)
+		for _, f := range files {
+			switch {
+			case f.Skipped && !f.Expected:
+				failed++
+				if firstFail == "" {
+					firstFail = f.Path + ": " + f.SkipReason
+				}
+			case !f.Skipped && !f.IsDir:
+				total++
+			}
+		}
+	}
+	if failed > 0 {
+		return total, fmt.Errorf("%d files restored, %d could not be, for example %s", total, failed, firstFail)
 	}
 	return total, nil
 }
