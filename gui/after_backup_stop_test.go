@@ -88,8 +88,15 @@ func TestAfterBackupNotWhenSomeoneUsesTheComputer(t *testing.T) {
 	if got := at.actedWithin(300 * time.Millisecond); got != "" {
 		t.Fatalf("with someone at the computer it did %q, want it left as it is", got)
 	}
-	if !messageLogHas(t, a, MsgLogAfterBackupInUse) {
-		t.Error("the Message Log does not say why the computer stayed as it is")
+	// The decision is logged by the after-backup step's own goroutine, which
+	// under a loaded test machine may come after the 300 ms above: wait for
+	// the line rather than look once (failed once in a full local CI run with
+	// every lane busy, 25/11/2026; 20 runs on their own all passed).
+	for deadline := time.Now().Add(5 * time.Second); !messageLogHas(t, a, MsgLogAfterBackupInUse); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Error("the Message Log does not say why the computer stayed as it is")
+			break
+		}
 	}
 
 	job.AfterBackupEvenIfInUse = true
