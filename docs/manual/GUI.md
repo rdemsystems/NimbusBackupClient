@@ -754,7 +754,32 @@ One login is kept per server and used for all its shares; Windows allows one use
 
 A drive letter you map (`Z:`) exists only in your own session, and the service does not see it, so a folder on one is kept in the Backup Set as the share's own path: choose `Z:\Photos` and the set says `\\server\share\Photos`. A set saved by an earlier version with a mapped letter fails with "the background service has no drive Z:"; edit it and save it again.
 
-Without the background service the app runs the backups itself, as you, and reads shares with your own access: no login is needed, and the Network Shares tab says so. Restores, Undelete and Roll back always run in the app, as you. On Linux, mount the share (with its own credentials, in `/etc/fstab` or by the desktop) and back up the folder it is mounted at.
+Without the background service the app runs the backups itself, as you, and reads shares with your own access: no login is needed, and the Network Shares tab says so. Restores, Undelete and Roll back always run in the app, as you. On Linux, see below.
+
+#### Backing up network shares on Linux
+
+A share you open in the file manager (Files, Nemo, Dolphin: `smb://`, `sftp://`, `nfs://`) is mounted by the desktop for you alone, under `/run/user/<your uid>/gvfs/`. Linux lets no other account into such a mount, root included, and the mount is only there while you are logged in. The background service runs as root, so it cannot back up a folder there: when you save a Backup Set or start a backup with one, the app says so, and a run reports "is on a share or drive that the desktop mounted for ... only". The same applies to a share you mounted yourself with `sshfs` or `rclone` without `allow_other`. (Without the background service, the app backs such a folder up as you, while you are logged in.)
+
+Mount the share for the whole computer instead, and back up the folder it is mounted at. For a Windows or Samba share (SMB):
+
+1. Install the share tools: `sudo apt install cifs-utils` (Debian, Ubuntu, Mint), `sudo dnf install cifs-utils` (Fedora) or `sudo pacman -S cifs-utils` (Arch).
+2. Make the folder to mount it at: `sudo mkdir -p /mnt/nas-data`
+3. Keep the share's user name and password in a file only root can read: `sudo install -m 600 /dev/null /etc/nas-data.cred`, then put these lines in it (`sudo nano /etc/nas-data.cred`):
+   ```
+   username=alice
+   password=the share's password
+   ```
+   Add `domain=OFFICE` when the share needs a domain.
+4. Add one line to `/etc/fstab` (`sudo nano /etc/fstab`), with your own user and group number from `id` in place of 1000:
+   ```
+   //nas/data  /mnt/nas-data  cifs  credentials=/etc/nas-data.cred,uid=1000,gid=1000,_netdev,nofail,x-systemd.automount  0  0
+   ```
+   `_netdev` and `nofail` keep the computer starting normally when the server is away, and `x-systemd.automount` mounts the share the first time something reads it. Without systemd, leave `x-systemd.automount` out.
+5. `sudo systemctl daemon-reload`, then `ls /mnt/nas-data` should list the share.
+
+For an NFS export, install `nfs-common` (Debian, Ubuntu, Mint) or `nfs-utils` (Fedora, Arch), and use a line such as `nas:/export/data  /mnt/nas-data  nfs  _netdev,nofail,x-systemd.automount  0  0`; NFS needs no password file.
+
+Then choose `/mnt/nas-data` (or a folder in it) in the Backup Set. The share is now there for the service whoever is logged in, also at night, and it still appears in the file manager.
 
 ## 7. Incremental folder backups (change detection)
 

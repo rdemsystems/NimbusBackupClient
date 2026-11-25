@@ -2390,6 +2390,9 @@ func backupReal(ctx context.Context, client *pbscommon.PBSClient, newchunk, reus
 	// length" on the manifest). Failing here leaves the other folders to be
 	// kept as a partial backup.
 	if err := openableDir(backupdir); err != nil {
+		if note := pbscommon.PrivateMountNote(backupdir); note != "" {
+			return 0, nil, nil, nil, nil, fmt.Errorf("cannot open %s: %w. %s", originalPath, err, note)
+		}
 		return 0, nil, nil, nil, nil, fmt.Errorf("cannot open %s: %w", originalPath, err)
 	}
 

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"pbscommon"
 )
 
 // Logins for network shares (Preferences > Network Shares).
@@ -31,10 +33,11 @@ import (
 // takes one per server and logon session). A variable, as are the two
 // functions below, so tests can stand in for Windows.
 var (
-	useShareLogins  = serviceBuild
-	shareConnect    = connectShare
-	shareDisconnect = disconnectShare
-	shareOpenable   = openableDir
+	useShareLogins   = serviceBuild
+	shareConnect     = connectShare
+	shareDisconnect  = disconnectShare
+	shareOpenable    = openableDir
+	privateMountNote = pbscommon.PrivateMountNote
 )
 
 // ShareLogin is the user name and password for one file server's shares.
@@ -234,6 +237,11 @@ func (a *App) CheckShareAccess(paths []string) ([]ShareAccess, error) {
 	for _, p := range paths {
 		server, _, ok := splitShare(p)
 		if !ok {
+			// A folder on a share the Linux desktop mounted for one user
+			// (gvfs), which the program running the backups cannot enter.
+			if note := privateMountNote(p); note != "" && shareOpenable(p) != nil {
+				out = append(out, ShareAccess{Path: p, Error: note})
+			}
 			continue
 		}
 		r := ShareAccess{Path: p, Server: server}

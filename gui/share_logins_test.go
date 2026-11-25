@@ -202,6 +202,36 @@ func TestCheckShareAccess(t *testing.T) {
 	}
 }
 
+// A folder on a Linux desktop share that the backups cannot enter is
+// reported with the explanation; one they can open, and an ordinary folder,
+// are left out.
+func TestCheckShareAccessPrivateMount(t *testing.T) {
+	strictHome(t)
+	f := useFakeShares(t, "right")
+	saved := privateMountNote
+	t.Cleanup(func() { privateMountNote = saved })
+	privateMountNote = func(p string) string {
+		if strings.HasPrefix(p, "/run/user/1000/gvfs/") {
+			return "on a share the desktop mounted for mick only"
+		}
+		return ""
+	}
+	a := &App{config: &Config{PBSServers: map[string]*PBSServer{}}}
+
+	res, err := a.CheckShareAccess([]string{"/home/mick/Documents", "/run/user/1000/gvfs/smb-share:server=nas,share=data"})
+	if err != nil || len(res) != 1 {
+		t.Fatalf("CheckShareAccess = %+v, %v; want the desktop share only", res, err)
+	}
+	if r := res[0]; r.OK || r.NeedLogin || !strings.Contains(r.Error, "desktop mounted") {
+		t.Errorf("desktop share: %+v", r)
+	}
+
+	f.open = true // the program running the backups can enter it after all
+	if res, _ = a.CheckShareAccess([]string{"/run/user/1000/gvfs/smb-share:server=nas,share=data"}); len(res) != 0 {
+		t.Errorf("an openable desktop share was reported: %+v", res)
+	}
+}
+
 // Two runs on one share connect once and let go when the last one ends; a
 // share whose login fails is reported, and the other shares still connect.
 func TestConnectShares(t *testing.T) {

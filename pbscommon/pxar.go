@@ -1115,6 +1115,9 @@ func (a *PXARArchive) WriteDir(path string, dirname string, toplevel bool) (Cata
 	if err != nil {
 		if toplevel {
 			// Toplevel directory MUST be accessible — this is a fatal error
+			if note := PrivateMountNote(path); note != "" {
+				return CatalogDir{}, fmt.Errorf("cannot stat backup root directory: %s: %w. %s", path, err, note)
+			}
 			return CatalogDir{}, fmt.Errorf("cannot stat backup root directory: %s: %w", path, err)
 		}
 		// Sub-directories: skip and continue backup
